@@ -5,7 +5,7 @@
 #if NET8_0_OR_GREATER
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -17,8 +17,8 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         var completion = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
         server.SendCompletion = (_, token) => completion.Task.WaitAsync(token);
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         using var cancellation = new CancellationTokenSource();
         var waiting = session.SendAndWaitAsync("unresolved work", Timeout.InfiniteTimeSpan, cancellation.Token);
         Exception? failure = null;
@@ -72,8 +72,8 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         var completion = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
         server.SendCompletion = (_, token) => completion.Task.WaitAsync(token);
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var boundaryId = Guid.NewGuid();
         var responseId = Guid.NewGuid();
         var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -162,8 +162,8 @@ public sealed partial class ClientSessionLifetimeTests
             }
             return Task.CompletedTask;
         };
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         using var release = new ManualResetEventSlim();
         var handlerEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var handled = new System.Collections.Concurrent.ConcurrentQueue<string>();

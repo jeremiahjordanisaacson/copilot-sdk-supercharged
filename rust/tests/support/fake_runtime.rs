@@ -3,9 +3,10 @@
 //! A fake runtime on the other end of an external transport, for tests of
 //! connection-level callbacks registered during `Client::start`.
 
+use copilot_sdk::{RuntimeConnection, TcpRuntimeOptions};
 use std::time::Duration;
 
-use github_copilot_sdk::{CliProgram, Client, ClientOptions, Result, Transport};
+use copilot_sdk::{Client, ClientOptions, Result};
 use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -84,7 +85,7 @@ pub async fn start(options: ClientOptions, replies: Vec<Value>) -> (Result<Clien
             &mut writer,
             json!({
                 "jsonrpc": "2.0", "id": connect["id"],
-                "result": { "ok": true, "protocolVersion": 3, "version": "test" }
+                "result": { "ok": true, "protocolVersion": 4, "version": "test" }
             }),
         )
         .await;
@@ -105,13 +106,11 @@ pub async fn start(options: ClientOptions, replies: Vec<Value>) -> (Result<Clien
             writer,
         }
     });
-    let options = options
-        .with_program(CliProgram::Path("unused-external-transport".into()))
-        .with_transport(Transport::External {
-            host: "127.0.0.1".to_string(),
-            port,
-            connection_token: None,
-        });
+    let options = options.with_runtime(RuntimeConnection::Tcp(TcpRuntimeOptions {
+        host: "127.0.0.1".to_string(),
+        port,
+        connection_token: None,
+    }));
     let client = timeout(WAIT, Client::start(options))
         .await
         .expect("client startup completed before timeout");

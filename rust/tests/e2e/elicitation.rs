@@ -2,9 +2,10 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::{ElicitationHandler, PermissionHandler, PermissionResult};
-use github_copilot_sdk::{
-    ElicitationRequest, ElicitationResult, RequestId, SessionConfig, SessionId, UiInputOptions,
+use copilot_sdk::handler::{ElicitationHandler, PermissionHandler, PermissionResult};
+use copilot_sdk::{
+    CreateSessionOptions, ElicitationRequest, ElicitationResult, RequestId, SessionId,
+    UiInputOptions,
 };
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -68,8 +69,8 @@ async fn should_report_elicitation_capability_based_on_handler_presence() {
                 let client = ctx.start_client().await;
                 let with_handler = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
                             .pipe_handler(QueuedElicitationHandler::new([accept(json!({}))])),
                     )
                     .await
@@ -115,8 +116,8 @@ async fn confirm_returns_true_when_handler_accepts() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
                             .pipe_handler(QueuedElicitationHandler::new([accept(
                                 json!({ "confirmed": true }),
                             )])),
@@ -146,8 +147,8 @@ async fn confirm_returns_false_when_handler_declines() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
                             .pipe_handler(QueuedElicitationHandler::new([decline()])),
                     )
                     .await
@@ -175,8 +176,8 @@ async fn select_returns_selected_option() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
                             .pipe_handler(QueuedElicitationHandler::new([accept(
                                 json!({ "selection": "beta" }),
                             )])),
@@ -214,8 +215,8 @@ async fn input_returns_freeform_value() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
                             .pipe_handler(QueuedElicitationHandler::new([accept(
                                 json!({ "value": "typed value" }),
                             )])),
@@ -261,8 +262,8 @@ async fn elicitation_returns_all_action_shapes() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
                             .pipe_handler(QueuedElicitationHandler::new([
                                 accept(json!({ "name": "Mona" })),
                                 decline(),
@@ -329,7 +330,7 @@ impl PermissionHandler for QueuedElicitationHandler {
         &self,
         _session_id: SessionId,
         _request_id: RequestId,
-        _data: github_copilot_sdk::PermissionRequestData,
+        _data: copilot_sdk::PermissionRequestData,
     ) -> PermissionResult {
         PermissionResult::approve_once()
     }
@@ -352,21 +353,25 @@ impl ElicitationHandler for QueuedElicitationHandler {
 }
 
 /// Test helper: install a single struct that implements both
-/// [`PermissionHandler`] and [`ElicitationHandler`] on a [`SessionConfig`].
+/// [`PermissionHandler`] and [`ElicitationHandler`] on a [`CreateSessionOptions`].
 trait PipeHandler {
     fn pipe_handler<H>(self, handler: H) -> Self
     where
         H: PermissionHandler + ElicitationHandler + 'static;
 }
 
-impl PipeHandler for SessionConfig {
+impl PipeHandler for CreateSessionOptions {
     fn pipe_handler<H>(self, handler: H) -> Self
     where
         H: PermissionHandler + ElicitationHandler + 'static,
     {
         let handler = Arc::new(handler);
-        self.with_permission_handler(handler.clone() as Arc<dyn PermissionHandler>)
-            .with_elicitation_handler(handler as Arc<dyn ElicitationHandler>)
+        self.with_permissions(|group| {
+            group.with_on_request(handler.clone() as Arc<dyn PermissionHandler>)
+        })
+        .with_interaction(|group| {
+            group.with_on_elicitation_request(handler as Arc<dyn ElicitationHandler>)
+        })
     }
 }
 

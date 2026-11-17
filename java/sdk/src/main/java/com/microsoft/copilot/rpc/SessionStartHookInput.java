@@ -1,0 +1,57 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+package com.microsoft.copilot.rpc;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+/**
+ * Input for a session-start hook.
+ * <p>
+ * This hook is invoked when a session starts, allowing you to perform
+ * initialization or modify the session configuration.
+ *
+ * @param sessionId
+ *            the runtime session ID of the session that triggered the hook
+ * @param timestamp
+ *            the timestamp in milliseconds since epoch when the session started
+ * @param cwd
+ *            the current working directory
+ * @param source
+ *            the source: "startup", "resume", or "new"
+ * @param initialPrompt
+ *            the initial prompt, or {@code null}
+ * @since 1.0.7
+ * @param agentId
+ *            optional subagent identity, absent for root hooks and older
+ *            runtimes
+ * @param agentType
+ *            optional subagent identity, absent for root hooks and older
+ *            runtimes
+ * @param parentAgentId
+ *            optional subagent identity, absent for root hooks and older
+ *            runtimes
+ * @param traceparent
+ *            existing W3C trace context, or {@code null} when unavailable
+ * @param tracestate
+ *            existing W3C vendor trace state, or {@code null} when unavailable
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+public record SessionStartHookInput(@JsonProperty("sessionId") String sessionId,
+        @JsonProperty("timestamp") long timestamp, @JsonProperty("cwd") String cwd,
+        @JsonProperty("source") String source, @JsonProperty("initialPrompt") String initialPrompt,
+        @JsonProperty("agentId") String agentId, @JsonProperty("agentType") String agentType,
+        @JsonProperty("parentAgentId") String parentAgentId, @JsonProperty("traceparent") String traceparent,
+        @JsonProperty("tracestate") String tracestate) {
+    /** Creates an input without tracing metadata. */
+    public SessionStartHookInput(String sessionId, long timestamp, String cwd, String source, String initialPrompt,
+            String agentId, String agentType, String parentAgentId) {
+        this(sessionId, timestamp, cwd, source, initialPrompt, agentId, agentType, parentAgentId, null, null);
+    }
+
+    public SessionStartHookInput(String sessionId, long timestamp, String cwd, String source, String initialPrompt) {
+        this(sessionId, timestamp, cwd, source, initialPrompt, null, null, null);
+    }
+}

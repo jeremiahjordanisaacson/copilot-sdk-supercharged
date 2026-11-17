@@ -36,7 +36,7 @@ class TestPermissions:
             assert invocation["session_id"] == session.session_id
             return PermissionDecisionApproveOnce()
 
-        session = await ctx.client.create_session(on_permission_request=on_permission_request)
+        session = await ctx.client.create_session(permissions={"on_request": on_permission_request})
 
         write_file(ctx.work_dir, "test.txt", "original content")
 
@@ -59,7 +59,7 @@ class TestPermissions:
         ) -> PermissionRequestResult:
             return PermissionDecisionReject()
 
-        session = await ctx.client.create_session(on_permission_request=on_permission_request)
+        session = await ctx.client.create_session(permissions={"on_request": on_permission_request})
 
         # Regression check for https://github.com/github/copilot-sdk/issues/1194:
         # the reject decision must round-trip through the CLI with its discriminator
@@ -104,7 +104,7 @@ class TestPermissions:
         def deny_all(request, invocation):
             return PermissionDecisionUserNotAvailable()
 
-        session = await ctx.client.create_session(on_permission_request=deny_all)
+        session = await ctx.client.create_session(permissions={"on_request": deny_all})
 
         denied_events = []
         done_event = asyncio.Event()
@@ -137,7 +137,7 @@ class TestPermissions:
     ):
         """Test that tool operations are denied after resume when handler explicitly denies"""
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session1.session_id
         await session1.send_and_wait("What is 1+1?")
@@ -146,7 +146,7 @@ class TestPermissions:
         def deny_all(request, invocation):
             return PermissionDecisionUserNotAvailable()
 
-        session2 = await ctx.client.resume_session(session_id, on_permission_request=deny_all)
+        session2 = await ctx.client.resume_session(session_id, permissions={"on_request": deny_all})
 
         denied_events = []
         done_event = asyncio.Event()
@@ -177,7 +177,7 @@ class TestPermissions:
     async def test_should_work_with_approve_all_permission_handler(self, ctx: E2ETestContext):
         """Test that sessions work with approve-all permission handler"""
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         message = await session.send_and_wait("What is 2+2?")
@@ -198,7 +198,7 @@ class TestPermissions:
             await asyncio.sleep(0)
             return PermissionDecisionApproveOnce()
 
-        session = await ctx.client.create_session(on_permission_request=on_permission_request)
+        session = await ctx.client.create_session(permissions={"on_request": on_permission_request})
 
         await session.send_and_wait("Run 'echo test' and tell me what happens")
 
@@ -211,7 +211,7 @@ class TestPermissions:
         permission_requests = []
 
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session1.session_id
         await session1.send_and_wait("What is 1+1?")
@@ -225,7 +225,7 @@ class TestPermissions:
             return PermissionDecisionApproveOnce()
 
         session2 = await ctx.client.resume_session(
-            session_id, on_permission_request=on_permission_request
+            session_id, permissions={"on_request": on_permission_request}
         )
 
         await session2.send_and_wait("Run 'echo resumed' for me")
@@ -246,7 +246,7 @@ class TestPermissions:
                 permission_request_received.set_result(request)
             raise RuntimeError("Handler error")
 
-        session = await ctx.client.create_session(on_permission_request=on_permission_request)
+        session = await ctx.client.create_session(permissions={"on_request": on_permission_request})
         try:
             await session.send("Run 'echo test'. If you can't, say 'failed'.")
 
@@ -284,7 +284,7 @@ class TestPermissions:
                 assert len(request.tool_call_id) > 0
             return PermissionDecisionApproveOnce()
 
-        session = await ctx.client.create_session(on_permission_request=on_permission_request)
+        session = await ctx.client.create_session(permissions={"on_request": on_permission_request})
 
         await session.send_and_wait("Run 'echo test'")
 
@@ -313,7 +313,7 @@ class TestPermissions:
             add_event("permission-complete", tool_call_id)
             return PermissionDecisionApproveOnce()
 
-        session = await ctx.client.create_session(on_permission_request=slow_permission)
+        session = await ctx.client.create_session(permissions={"on_request": slow_permission})
 
         def on_event(event):
             if event.type.value == "tool.execution_start":
@@ -401,7 +401,7 @@ class TestPermissions:
                 permission_called.set_result(True)
             return PermissionNoResult()
 
-        session = await ctx.client.create_session(on_permission_request=deny_noresult)
+        session = await ctx.client.create_session(permissions={"on_request": deny_noresult})
         try:
             asyncio.ensure_future(session.send("Run 'node --version'"))
             await asyncio.wait_for(permission_called, timeout=30.0)
@@ -424,7 +424,7 @@ class TestPermissions:
             handler_call_count += 1
             return PermissionDecisionApproveOnce()
 
-        session = await ctx.client.create_session(on_permission_request=counting_handler)
+        session = await ctx.client.create_session(permissions={"on_request": counting_handler})
         try:
             set_result = await session.rpc.permissions.set_approve_all(
                 PermissionsSetApproveAllRequest(enabled=True)
@@ -500,21 +500,23 @@ class TestPermissions:
             )
 
         session = await ctx.client.create_session(
-            on_permission_request=concurrent_permission,
-            tools=[
-                Tool(
-                    name="first_permission_tool",
-                    description="First concurrent permission test tool",
-                    parameters={"type": "object", "properties": {}},
-                    handler=first_tool_handler,
-                ),
-                Tool(
-                    name="second_permission_tool",
-                    description="Second concurrent permission test tool",
-                    parameters={"type": "object", "properties": {}},
-                    handler=second_tool_handler,
-                ),
-            ],
+            permissions={"on_request": concurrent_permission},
+            tools={
+                "definitions": [
+                    Tool(
+                        name="first_permission_tool",
+                        description="First concurrent permission test tool",
+                        parameters={"type": "object", "properties": {}},
+                        handler=first_tool_handler,
+                    ),
+                    Tool(
+                        name="second_permission_tool",
+                        description="Second concurrent permission test tool",
+                        parameters={"type": "object", "properties": {}},
+                        handler=second_tool_handler,
+                    ),
+                ]
+            },
         )
         try:
             idle_future: asyncio.Future = asyncio.get_event_loop().create_future()

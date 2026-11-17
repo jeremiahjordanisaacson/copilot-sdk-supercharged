@@ -2,8 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.Collections.Concurrent;
 using System.ComponentModel;
@@ -11,7 +11,7 @@ using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 /// <summary>
 /// End-to-end coverage for representative representative SDK workflows.
@@ -26,7 +26,7 @@ public class ScenarioTestingCompositionE2ETests(E2ETestFixture fixture, ITestOut
     public async Task Should_Send_Scenario_Message_With_Metadata_And_Extension_Context()
     {
         using var payload = JsonDocument.Parse("""{"selection":"TRACE_SENTINEL","line":42}""");
-        await using var session = await CreateSessionAsync(new SessionConfig { Streaming = true });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions { Events = new SessionEventOptions { Streaming = true } });
         var idle = TestHelper.GetNextEventOfTypeAsync<SessionIdleEvent>(session, EventTimeout);
 
         var messageId = await session.SendAsync(new MessageOptions
@@ -79,10 +79,8 @@ public class ScenarioTestingCompositionE2ETests(E2ETestFixture fixture, ITestOut
         var toolStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseTool = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(WaitForReleaseAsync, "wait_for_scenario_release")],
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(WaitForReleaseAsync, "wait_for_scenario_release")] } });
         var userMessages = new List<UserMessageEvent>();
         var userMessagesLock = new object();
         var userMessagesChanged = new AsyncTestSignal();
@@ -248,13 +246,17 @@ public class ScenarioTestingCompositionE2ETests(E2ETestFixture fixture, ITestOut
         var initialRequestHandler = new RecordingRequestHandler();
         var client1 = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(),
-            RequestHandler = initialRequestHandler,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(),
+            Models = new ClientModelOptions { RequestHandler = initialRequestHandler }
         });
-        var createConfig = new SessionConfig
+        var createConfig = new CreateSessionOptions
         {
             Model = "scenario-resume-provider/scenario-model",
-            OnPermissionRequest = PermissionHandler.ApproveAll,
+            Permissions = new SessionPermissionOptions
+            {
+                OnRequest = PermissionHandler.ApproveAll
+            }
         };
         ConfigureScenarioProvider(
             createConfig,
@@ -291,13 +293,17 @@ public class ScenarioTestingCompositionE2ETests(E2ETestFixture fixture, ITestOut
         var resumedRequestHandler = new RecordingRequestHandler();
         var client2 = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(),
-            RequestHandler = resumedRequestHandler,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(),
+            Models = new ClientModelOptions { RequestHandler = resumedRequestHandler }
         });
-        var resumeConfig = new ResumeSessionConfig
+        var resumeConfig = new ResumeSessionOptions
         {
             Model = "scenario-resume-provider/scenario-model",
-            OnPermissionRequest = PermissionHandler.ApproveAll,
+            Permissions = new SessionPermissionOptions
+            {
+                OnRequest = PermissionHandler.ApproveAll
+            }
         };
         ConfigureScenarioProvider(
             resumeConfig,
@@ -357,7 +363,7 @@ public class ScenarioTestingCompositionE2ETests(E2ETestFixture fixture, ITestOut
 
         var failingClient = Ctx.CreateClient();
         var failingConfig = CreateScenarioResumeConfig(new ScenarioCanvasHandler(), openCanvases);
-        failingConfig.Tools =
+        failingConfig.Tools.Definitions =
         [
             AIFunctionFactory.Create(() => "first", "duplicate_scenario_tool"),
             AIFunctionFactory.Create(() => "second", "duplicate_scenario_tool"),
@@ -386,9 +392,9 @@ public class ScenarioTestingCompositionE2ETests(E2ETestFixture fixture, ITestOut
     public async Task Should_Not_Emit_Redundant_Model_Change_When_Resuming_Same_Model()
     {
         var client1 = Ctx.CreateClient();
-        var session1 = await Ctx.CreateSessionAsync(client1, new SessionConfig
+        var session1 = await Ctx.CreateSessionAsync(client1, new CreateSessionOptions
         {
-            Model = "claude-sonnet-5",
+            Model = "claude-sonnet-5"
         });
         var sessionId = session1.SessionId;
         Assert.Equal("claude-sonnet-5", (await session1.Rpc.Model.GetCurrentAsync()).ModelId);
@@ -404,11 +410,8 @@ public class ScenarioTestingCompositionE2ETests(E2ETestFixture fixture, ITestOut
 
         var earlyEvents = new ConcurrentQueue<SessionEvent>();
         var client2 = Ctx.CreateClient();
-        await using var resumed = await Ctx.ResumeSessionAsync(client2, sessionId, new ResumeSessionConfig
-        {
-            Model = "claude-sonnet-5",
-            OnEvent = earlyEvents.Enqueue,
-        });
+        await using var resumed = await Ctx.ResumeSessionAsync(client2, sessionId, new ResumeSessionOptions
+        { Model = "claude-sonnet-5", Events = new SessionEventOptions { OnEvent = earlyEvents.Enqueue } });
 
         Assert.Equal("claude-sonnet-5", (await resumed.Rpc.Model.GetCurrentAsync()).ModelId);
         var persistedEvents = await resumed.GetEventsAsync();
@@ -467,98 +470,107 @@ public class ScenarioTestingCompositionE2ETests(E2ETestFixture fixture, ITestOut
         Assert.Contains("The scenario canvas could not increment.", exception.ToString(), StringComparison.Ordinal);
     }
 
-    private static SessionConfig CreateScenarioSessionConfig(
+    private static CreateSessionOptions CreateScenarioSessionConfig(
         ScenarioCanvasHandler canvasHandler,
         bool includeTool = true,
         bool includeMcp = false)
     {
-        var config = new SessionConfig
+        var config = new CreateSessionOptions
         {
-            Streaming = true,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            RequestCanvasRenderer = true,
-            CanvasProvider = new CanvasProviderIdentity
+            Events = new SessionEventOptions
             {
-                Id = "scenario:builtin:test-window",
-                Name = "scenario client",
+                Streaming = true
             },
-            Canvases =
-            [
-                new CanvasDeclaration
+            Permissions = new SessionPermissionOptions
+            {
+                OnRequest = PermissionHandler.ApproveAll
+            },
+            Canvases = new SessionCanvasOptions
+            {
+                RequestRenderer = true,
+                Provider = new CanvasProviderIdentity
                 {
-                    Id = "scenario-counter",
-                    DisplayName = "Scenario Counter",
-                    Description = "Represents a scenario-hosted canvas.",
-                    Actions =
-                    [
-                        new CanvasAction
-                        {
-                            Name = "increment",
-                            Description = "Increments the counter.",
-                        },
-                    ],
+                    Id = "scenario:builtin:test-window",
+                    Name = "scenario client",
                 },
-            ],
-            CanvasHandler = canvasHandler,
+                Definitions = [new CanvasDeclaration
+        {
+            Id = "scenario-counter",
+            DisplayName = "Scenario Counter",
+            Description = "Represents a scenario-hosted canvas.",
+            Actions = [new CanvasAction
+            {
+                Name = "increment",
+                Description = "Increments the counter.",
+            }, ],
+        }, ],
+                Handler = canvasHandler
+            }
         };
         if (includeTool)
         {
-            config.Tools = [AIFunctionFactory.Create(ScenarioHostLookup, "scenario_host_lookup")];
+            config.Tools.Definitions = [AIFunctionFactory.Create(ScenarioHostLookup, "scenario_host_lookup")];
         }
         if (includeMcp)
         {
-            config.McpServers = CreateTestMcpServers("scenario-resume-mcp");
+            config.Mcp.Servers = CreateTestMcpServers("scenario-resume-mcp");
         }
 
         return config;
     }
 
-    private static ResumeSessionConfig CreateScenarioResumeConfig(
+    private static ResumeSessionOptions CreateScenarioResumeConfig(
         ScenarioCanvasHandler canvasHandler,
         IList<OpenCanvasInstance> openCanvases,
         bool includeMcp = false)
     {
-        var config = new ResumeSessionConfig
+        var config = new ResumeSessionOptions
         {
-            Streaming = true,
             ContinuePendingWork = false,
-            Tools = [AIFunctionFactory.Create(ScenarioHostLookup, "scenario_host_lookup")],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            RequestCanvasRenderer = true,
-            CanvasProvider = new CanvasProviderIdentity
+            Events = new SessionEventOptions
             {
-                Id = "scenario:builtin:test-window",
-                Name = "scenario client",
+                Streaming = true
             },
-            Canvases =
-            [
-                new CanvasDeclaration
+            Tools = new SessionToolOptions
+            {
+                Definitions = [AIFunctionFactory.Create(ScenarioHostLookup, "scenario_host_lookup")]
+            },
+            Permissions = new SessionPermissionOptions
+            {
+                OnRequest = PermissionHandler.ApproveAll
+            },
+            Canvases = new ResumeSessionCanvasOptions
+            {
+                RequestRenderer = true,
+                Provider = new CanvasProviderIdentity
                 {
-                    Id = "scenario-counter",
-                    DisplayName = "Scenario Counter",
-                    Description = "Represents a scenario-hosted canvas.",
-                    Actions =
-                    [
-                        new CanvasAction
-                        {
-                            Name = "increment",
-                            Description = "Increments the counter.",
-                        },
-                    ],
+                    Id = "scenario:builtin:test-window",
+                    Name = "scenario client",
                 },
-            ],
-            CanvasHandler = canvasHandler,
-            OpenCanvases = openCanvases,
+                Definitions = [new CanvasDeclaration
+        {
+            Id = "scenario-counter",
+            DisplayName = "Scenario Counter",
+            Description = "Represents a scenario-hosted canvas.",
+            Actions = [new CanvasAction
+            {
+                Name = "increment",
+                Description = "Increments the counter.",
+            }, ],
+        }, ],
+                Handler = canvasHandler,
+                Open = openCanvases
+            }
         };
         if (includeMcp)
         {
-            config.McpServers = CreateTestMcpServers("scenario-resume-mcp");
+            config.Mcp.Servers = CreateTestMcpServers("scenario-resume-mcp");
         }
         return config;
     }
 
     private static void ConfigureScenarioProvider(
-        SessionConfigBase config,
+        SessionOptionsBase config,
         Func<ProviderTokenArgs, Task<string>>? providerTokenProvider)
     {
         if (providerTokenProvider is null)
@@ -566,7 +578,7 @@ public class ScenarioTestingCompositionE2ETests(E2ETestFixture fixture, ITestOut
             return;
         }
 
-        config.Providers =
+        config.Inference.Providers =
         [
             new NamedProviderConfig
             {
@@ -577,7 +589,7 @@ public class ScenarioTestingCompositionE2ETests(E2ETestFixture fixture, ITestOut
                 BearerTokenProvider = providerTokenProvider,
             },
         ];
-        config.Models =
+        config.Inference.Models =
         [
             new ProviderModelConfig
             {

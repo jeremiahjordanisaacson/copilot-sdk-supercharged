@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
-from .generated.rpc import (
+from ._generated.rpc import (
     CanvasAction,
     CanvasHostContext,
     CanvasHostContextCapabilities,
@@ -163,7 +163,7 @@ class CanvasError(Exception):
         return cls(
             "canvas_handler_unset",
             "No CanvasHandler installed on this session; "
-            "install one via SessionConfig.canvas_handler before creating the session.",
+            "install one via canvases.handler before creating the session.",
         )
 
 

@@ -2,18 +2,18 @@
 
 #![allow(clippy::unwrap_used)]
 
-use github_copilot_sdk::AutoTier;
-use github_copilot_sdk::rpc::{
+use copilot_sdk::AutoTier;
+use copilot_sdk::rpc::{
     AcceptedEnqueueCommandResult, ConnectorConnectResult, EnqueueCommandResult,
     ModelSwitchAutoTierRequest, ProtocolExternalToolDefinition, ProviderModelConfig,
     SavedProviderConfigurationReadResult, SessionsOpenCreate, SessionsOpenCreateKind,
     SessionsOpenResume, SessionsOpenResumeKind, UnsupportedEnqueueCommandResult,
 };
-use github_copilot_sdk::session_events::RecommendedAutoTier;
+use copilot_sdk::session_events::RecommendedAutoTier;
 
 #[test]
 fn shell_environment_debug_redacts_values_without_changing_wire() {
-    use github_copilot_sdk::rpc::{
+    use copilot_sdk::rpc::{
         ShellBuildInteractiveEnvironmentRequest, ShellBuildInteractiveEnvironmentResult,
     };
 
@@ -46,7 +46,7 @@ fn shell_environment_debug_redacts_values_without_changing_wire() {
 
 #[test]
 fn fetch_response_defaults_preserve_each_variant_mode() {
-    use github_copilot_sdk::rpc::{
+    use copilot_sdk::rpc::{
         FetchSendResult, FetchSendResultFile, FetchSendResultStream, FetchSendResultText,
     };
 
@@ -72,7 +72,7 @@ fn fetch_response_defaults_preserve_each_variant_mode() {
 
 #[test]
 fn fetch_response_modes_match_request_modes_and_round_trip() {
-    use github_copilot_sdk::rpc::{FetchResponseMode, FetchSendResult};
+    use copilot_sdk::rpc::{FetchResponseMode, FetchSendResult};
 
     for (mode, extra) in [
         (FetchResponseMode::Stream, serde_json::json!({})),
@@ -127,27 +127,27 @@ macro_rules! filesystem_callback_result {
 
 filesystem_callback_result!(
     filesystem_write_file_result_accepts_null_success,
-    github_copilot_sdk::rpc::SessionFsWriteFileResult
+    copilot_sdk::rpc::SessionFsWriteFileResult
 );
 filesystem_callback_result!(
     filesystem_write_file_bytes_result_accepts_null_success,
-    github_copilot_sdk::rpc::SessionFsWriteFileBytesResult
+    copilot_sdk::rpc::SessionFsWriteFileBytesResult
 );
 filesystem_callback_result!(
     filesystem_append_file_result_accepts_null_success,
-    github_copilot_sdk::rpc::SessionFsAppendFileResult
+    copilot_sdk::rpc::SessionFsAppendFileResult
 );
 filesystem_callback_result!(
     filesystem_mkdir_result_accepts_null_success,
-    github_copilot_sdk::rpc::SessionFsMkdirResult
+    copilot_sdk::rpc::SessionFsMkdirResult
 );
 filesystem_callback_result!(
     filesystem_rm_result_accepts_null_success,
-    github_copilot_sdk::rpc::SessionFsRmResult
+    copilot_sdk::rpc::SessionFsRmResult
 );
 filesystem_callback_result!(
     filesystem_rename_result_accepts_null_success,
-    github_copilot_sdk::rpc::SessionFsRenameResult
+    copilot_sdk::rpc::SessionFsRenameResult
 );
 
 #[test]
@@ -239,21 +239,18 @@ fn provider_model_token_limits_preserve_integer_bounds_without_rounding() {
 
 #[test]
 fn classify_trajectory_request_accepts_recorded_session_events() {
-    let event: github_copilot_sdk::types::SessionEvent =
-        serde_json::from_value(serde_json::json!({
-            "id": "event-1",
-            "parentId": null,
-            "timestamp": "2026-01-01T00:00:00Z",
-            "type": "user.message",
-            "data": { "content": "Fix the build" }
-        }))
-        .unwrap();
+    let event: copilot_sdk::types::SessionEvent = serde_json::from_value(serde_json::json!({
+        "id": "event-1",
+        "parentId": null,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "type": "user.message",
+        "data": { "content": "Fix the build" }
+    }))
+    .unwrap();
 
     let request =
-        github_copilot_sdk::rpc::TaskAnalyticsClassifyTrajectoryRequest::from_session_events(&[
-            event,
-        ])
-        .unwrap();
+        copilot_sdk::rpc::TaskAnalyticsClassifyTrajectoryRequest::from_session_events(&[event])
+            .unwrap();
 
     assert_eq!(
         serde_json::to_value(&request).unwrap()["events"],
@@ -452,7 +449,7 @@ fn switch_auto_tier_request_serializes_explicit_null_tier() {
 /// Released structs and enums that are unrelated to the MCP installation payloads keep
 /// distinct types, so downstream trait impls, variant imports and literals still compile.
 mod released_type_shapes {
-    use github_copilot_sdk::rpc::{
+    use copilot_sdk::rpc::{
         DiagnosticsReadResultEntriesItem, DiagnosticsReadResultEntriesItemSource,
         MetadataContextAttributionResultContextAttribution, MetadataContextInfoResultContextInfo,
         SendMessagesRequestResponseFormat, SendMessagesRequestResponseFormatType,

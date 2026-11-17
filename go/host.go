@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
 	"github.com/google/uuid"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 // AhpHostExit reports termination of a connection-owned listener.
@@ -57,7 +57,7 @@ type AhpHostAuthentication struct {
 // Experimental: AHP hosting may change or be removed.
 type AhpSessionCreateRequest struct {
 	Authentication AhpSessionAuthentication
-	Config         *SessionConfig
+	Config         *CreateSessionOptions
 }
 
 // AhpSessionResumeRequest identifies a durable application session to resume.
@@ -66,7 +66,7 @@ type AhpSessionCreateRequest struct {
 type AhpSessionResumeRequest struct {
 	Authentication AhpSessionAuthentication
 	SessionID      string
-	Config         *ResumeSessionConfig
+	Config         *ResumeSessionOptions
 }
 
 // AhpHostOptions configures an experimental, in-process AHP listener.
@@ -384,15 +384,12 @@ func decodeAhpConfig(config map[string]any, target any) error {
 			}
 			continue
 		}
-		if key == "configDir" {
-			key = "configDirectory"
-		}
 		copy[key] = value
 	}
-	if _, resume := target.(*ResumeSessionConfig); resume {
+	if _, resume := target.(*ResumeSessionOptions); resume {
 		delete(copy, "sessionId")
 	}
-	data, err := json.Marshal(copy)
+	data, err := groupSessionJSON(copy)
 	if err != nil {
 		return err
 	}
@@ -403,15 +400,19 @@ func decodeAhpConfig(config map[string]any, target any) error {
 	}
 	// Per-session credentials are intentionally excluded from ordinary config JSON.
 	switch options := target.(type) {
-	case *SessionConfig:
-		options.GitHubToken = token
-	case *ResumeSessionConfig:
-		options.GitHubToken = token
+	case *CreateSessionOptions:
+		options.GitHub.Token = token
+	case *ResumeSessionOptions:
+		options.GitHub.Token = token
 	}
 	return nil
 }
 
 func containsAhpConfig(actual, expected any, root bool) bool {
+	return containsAhpConfigAt(actual, expected, "")
+}
+
+func containsAhpConfigAt(actual, expected any, path string) bool {
 	if required, ok := expected.(map[string]any); ok {
 		value, ok := actual.(map[string]any)
 		if !ok {
@@ -420,10 +421,10 @@ func containsAhpConfig(actual, expected any, root bool) bool {
 		for key, expectedValue := range required {
 			actualValue, exists := value[key]
 			// These default-false flags are omitted by the session request builder.
-			if !exists && root && expectedValue == false && (key == "requestMcpApps" || key == "disableResume") {
+			if !exists && expectedValue == false && ((path == "" && key == "suppressResumeEvent") || (path == "mcp" && key == "enableApps")) {
 				continue
 			}
-			if !exists || !containsAhpConfig(actualValue, expectedValue, false) {
+			if !exists || !containsAhpConfigAt(actualValue, expectedValue, key) {
 				return false
 			}
 		}
@@ -471,6 +472,14 @@ func (c *Client) materializeAhpSession(params *rpc.HostSessionCreateCallback) (*
 	}
 	resume := params.Resume != nil && *params.Resume
 	sessionID, _ := params.Config["sessionId"].(string)
+	expectedJSON, err := groupSessionJSON(params.Config)
+	if err != nil {
+		return fail(err)
+	}
+	var expected map[string]any
+	if err := json.Unmarshal(expectedJSON, &expected); err != nil {
+		return fail(err)
+	}
 	c.ahp.mu.Lock()
 	options, exists := c.ahp.hosts[params.HostID]
 	if !exists || c.ahp.handoffs[params.HandoffID] != nil ||
@@ -500,18 +509,6 @@ func (c *Client) materializeAhpSession(params *rpc.HostSessionCreateCallback) (*
 			if !owned {
 				err = errors.New("AHP callback must return the requested session from this client")
 			}
-		}
-		expected := make(map[string]any, len(params.Config))
-		for key, value := range params.Config {
-			switch key {
-			case "suppressResumeEvent":
-				key = "disableResume"
-			case "enableExperimentalMode":
-				key = "isExperimentalMode"
-			case "enableMcpApps":
-				key = "requestMcpApps"
-			}
-			expected[key] = value
 		}
 		c.ahp.mu.Lock()
 		entry.session = session
@@ -568,13 +565,13 @@ func invokeAhpFactory(entry *ahpHandoff, config map[string]any, authentication A
 		}
 	}()
 	if resume {
-		var options ResumeSessionConfig
+		var options ResumeSessionOptions
 		if err := decodeAhpConfig(config, &options); err != nil {
 			return nil, err
 		}
 		return entry.options.ResumeSession(entry.ctx, AhpSessionResumeRequest{Authentication: authentication, SessionID: entry.sessionID, Config: &options})
 	}
-	var options SessionConfig
+	var options CreateSessionOptions
 	if err := decodeAhpConfig(config, &options); err != nil {
 		return nil, err
 	}

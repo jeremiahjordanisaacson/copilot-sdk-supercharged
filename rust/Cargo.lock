@@ -265,6 +265,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "copilot-sdk"
+version = "0.0.0-dev"
+dependencies = [
+ "ahp",
+ "ahp-types",
+ "ahp-ws",
+ "async-trait",
+ "base64",
+ "bytes",
+ "flate2",
+ "futures-util",
+ "getrandom 0.4.3",
+ "hpke",
+ "http",
+ "indexmap",
+ "libloading",
+ "native-tls",
+ "openssl",
+ "openssl-sys",
+ "parking_lot",
+ "rand_chacha 0.10.0",
+ "rand_core 0.6.4",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "rustls",
+ "rustls-platform-verifier",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tokio-rustls",
+ "tokio-stream",
+ "tokio-tungstenite 0.30.0",
+ "tokio-util",
+ "tracing",
+ "ureq",
+ "uuid",
+ "windows-sys 0.61.2",
+ "zip",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -671,53 +718,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2eecf2d5dc9b66b732b97707a0210906b1d30523eb773193ab777c0c84b3e8d5"
 dependencies = [
  "polyval",
-]
-
-[[package]]
-name = "github-copilot-sdk"
-version = "0.0.0-dev"
-dependencies = [
- "ahp",
- "ahp-types",
- "ahp-ws",
- "async-trait",
- "base64",
- "bytes",
- "flate2",
- "futures-util",
- "getrandom 0.4.3",
- "hpke",
- "http",
- "indexmap",
- "libloading",
- "native-tls",
- "openssl",
- "openssl-sys",
- "parking_lot",
- "rand_chacha 0.10.0",
- "rand_core 0.6.4",
- "regex",
- "reqwest",
- "rusqlite",
- "rustls",
- "rustls-platform-verifier",
- "schemars",
- "serde",
- "serde_json",
- "serial_test",
- "sha2",
- "tar",
- "tempfile",
- "tokio",
- "tokio-rustls",
- "tokio-stream",
- "tokio-tungstenite 0.30.0",
- "tokio-util",
- "tracing",
- "ureq",
- "uuid",
- "windows-sys 0.61.2",
- "zip",
 ]
 
 [[package]]

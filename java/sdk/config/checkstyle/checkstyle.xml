@@ -3,7 +3,7 @@
     "https://checkstyle.org/dtds/configuration_1_3.dtd">
 
 <!--
-    Checkstyle configuration for GitHub Copilot SDK for Java.
+    Checkstyle configuration for Microsoft Copilot SDK for Java.
     Focuses on ensuring core public API classes have proper Javadoc documentation.
     Excludes JSON DTOs and event data classes which are self-documenting.
 -->

@@ -5,7 +5,7 @@
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 /// <summary>
 /// Verifies the SDK's behavior at the edges of the session lifecycle: sending or

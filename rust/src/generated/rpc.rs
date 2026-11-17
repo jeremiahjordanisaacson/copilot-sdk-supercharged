@@ -913,37 +913,6 @@ impl<'a> ClientRpcAgents<'a> {
             .await
     }
 
-    /// Discovers custom agents across user, project, plugin, and remote sources.
-    ///
-    /// Wire method: `agents.discover`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Optional project paths to include in agent discovery.
-    ///
-    /// # Returns
-    ///
-    /// Agents discovered across user, project, plugin, and remote sources.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`AgentsDiscoverOptions`], including inputs added after [`AgentsDiscoverRequest`].
-    pub async fn discover_with_options(
-        &self,
-        params: AgentsDiscoverOptions,
-    ) -> Result<ServerAgentList, Error> {
-        let wire_params = serde_json::to_value(params)?;
-        self.client
-            .call_typed(rpc_methods::AGENTS_DISCOVER, Some(wire_params))
-            .await
-    }
-
     /// Returns the canonical directories where a client may create custom agents that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.
     ///
     /// Wire method: `agents.getDiscoveryPaths`.
@@ -966,37 +935,6 @@ impl<'a> ClientRpcAgents<'a> {
     pub async fn get_discovery_paths(
         &self,
         params: AgentsGetDiscoveryPathsRequest,
-    ) -> Result<AgentDiscoveryPathList, Error> {
-        let wire_params = serde_json::to_value(params)?;
-        self.client
-            .call_typed(rpc_methods::AGENTS_GETDISCOVERYPATHS, Some(wire_params))
-            .await
-    }
-
-    /// Returns the canonical directories where a client may create custom agents that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.
-    ///
-    /// Wire method: `agents.getDiscoveryPaths`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Optional project paths to include when enumerating agent discovery directories.
-    ///
-    /// # Returns
-    ///
-    /// Canonical locations where custom agents can be created so the runtime will recognize them.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`AgentsGetDiscoveryPathsOptions`], including inputs added after [`AgentsGetDiscoveryPathsRequest`].
-    pub async fn get_discovery_paths_with_options(
-        &self,
-        params: AgentsGetDiscoveryPathsOptions,
     ) -> Result<AgentDiscoveryPathList, Error> {
         let wire_params = serde_json::to_value(params)?;
         self.client
@@ -1633,37 +1571,6 @@ impl<'a> ClientRpcCatalog<'a> {
     ///
     /// </div>
     pub async fn search(&self, params: CatalogSearchRequest) -> Result<CatalogSearchResult, Error> {
-        let wire_params = serde_json::to_value(params)?;
-        self.client
-            .call_typed(rpc_methods::CATALOG_SEARCH, Some(wire_params))
-            .await
-    }
-
-    /// Requests a bounded catalog search. This host-implemented server method is available through SDK/TUI hosts; standalone and C-ABI runtimes whose host does not implement server-method dispatch return JSON-RPC MethodNotFound. A runtime with search available returns inert candidate summaries, each with an opaque single-use handle scoped to this runtime instance; a runtime without it returns the typed search-unavailable result. Public authorities may be searched anonymously, while an authority that requires credentials yields the typed authentication-required result. All returned text, URLs, and package metadata are untrusted external data and can never trigger instructions, tools, or installation. Read-only: nothing is installed, configured, or persisted.
-    ///
-    /// Wire method: `catalog.search`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - A bounded catalog search. Both the query length and the result count are capped by the schema so a caller cannot request an unbounded scan.
-    ///
-    /// # Returns
-    ///
-    /// Outcome of catalog.search or catalog.recommend: either bounded inert candidates, or one typed refusal. Never a partial success.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`CatalogSearchOptions`], including inputs added after [`CatalogSearchRequest`].
-    pub async fn search_with_options(
-        &self,
-        params: CatalogSearchOptions,
-    ) -> Result<CatalogSearchResult, Error> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::CATALOG_SEARCH, Some(wire_params))
@@ -3374,37 +3281,6 @@ impl<'a> ClientRpcHooks<'a> {
             .call_typed(rpc_methods::HOOKS_DISCOVER, Some(wire_params))
             .await
     }
-
-    /// Discovers hook actions enabled under server-side discovery settings from user, repository, plugin, and managed-policy sources.
-    ///
-    /// Wire method: `hooks.discover`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Optional project paths and host-exclusion behavior for server-scoped hook discovery.
-    ///
-    /// # Returns
-    ///
-    /// Server-discovered hook actions and partial-load diagnostics from user, repository, plugin, and managed-policy sources. Concrete sessions may include additional session-specific hook sources.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`HooksDiscoverOptions`], including inputs added after [`HooksDiscoverRequest`].
-    pub async fn discover_with_options(
-        &self,
-        params: HooksDiscoverOptions,
-    ) -> Result<HooksDiscoverResult, Error> {
-        let wire_params = serde_json::to_value(params)?;
-        self.client
-            .call_typed(rpc_methods::HOOKS_DISCOVER, Some(wire_params))
-            .await
-    }
 }
 
 /// `host.*` RPCs.
@@ -3579,37 +3455,6 @@ impl<'a> ClientRpcHost<'a> {
     ///
     /// </div>
     pub async fn start(&self, params: HostStartRequest) -> Result<HostStartResult, Error> {
-        let wire_params = serde_json::to_value(params)?;
-        self.client
-            .call_typed(rpc_methods::HOST_START, Some(wire_params))
-            .await
-    }
-
-    /// Starts a connection-owned AHP host with explicit localServer and/or githubEnvironment transports as a supervised SDK participant.
-    ///
-    /// Wire method: `host.start`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Starts a supervised AHP host with at least one explicitly selected transport.
-    ///
-    /// # Returns
-    ///
-    /// Listener readiness, returned only after binding and the supervised participant's SDK handshake.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`HostStartOptions`], including inputs added after [`HostStartRequest`].
-    pub async fn start_with_options(
-        &self,
-        params: HostStartOptions,
-    ) -> Result<HostStartResult, Error> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::HOST_START, Some(wire_params))
@@ -3893,37 +3738,6 @@ impl<'a> ClientRpcInstructions<'a> {
             .await
     }
 
-    /// Discovers instruction sources across user, repository, and plugin sources.
-    ///
-    /// Wire method: `instructions.discover`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Optional project paths to include in instruction discovery.
-    ///
-    /// # Returns
-    ///
-    /// Instruction sources discovered across user, repository, and plugin sources.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`InstructionsDiscoverOptions`], including inputs added after [`InstructionsDiscoverRequest`].
-    pub async fn discover_with_options(
-        &self,
-        params: InstructionsDiscoverOptions,
-    ) -> Result<ServerInstructionSourceList, Error> {
-        let wire_params = serde_json::to_value(params)?;
-        self.client
-            .call_typed(rpc_methods::INSTRUCTIONS_DISCOVER, Some(wire_params))
-            .await
-    }
-
     /// Discovers the instruction sources for one caller-named location and returns them in the order the runtime applies them. `discover` answers for a set of project paths and derives the rest of its scope itself; this one instead takes every argument from the caller — the extra directories to scan and whether to descend into nested instruction files — and honors them as given. It also includes instruction directories from trusted repository settings, matching native repository discovery. Use it when the caller knows its own scope and no session exists to derive that scope from, such as a host reporting how many instruction files a directory contributes before any session starts. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on.
     ///
     /// Wire method: `instructions.discoverRepoSources`.
@@ -3978,40 +3792,6 @@ impl<'a> ClientRpcInstructions<'a> {
     pub async fn get_discovery_paths(
         &self,
         params: InstructionsGetDiscoveryPathsRequest,
-    ) -> Result<InstructionDiscoveryPathList, Error> {
-        let wire_params = serde_json::to_value(params)?;
-        self.client
-            .call_typed(
-                rpc_methods::INSTRUCTIONS_GETDISCOVERYPATHS,
-                Some(wire_params),
-            )
-            .await
-    }
-
-    /// Returns the canonical files and directories where a client may create custom instructions that the runtime will recognize, including ones that do not exist yet. Repository targets become active once created.
-    ///
-    /// Wire method: `instructions.getDiscoveryPaths`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Optional project paths to include when enumerating instruction discovery targets.
-    ///
-    /// # Returns
-    ///
-    /// Canonical files and directories where custom instructions can be created so the runtime will recognize them.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`InstructionsGetDiscoveryPathsOptions`], including inputs added after [`InstructionsGetDiscoveryPathsRequest`].
-    pub async fn get_discovery_paths_with_options(
-        &self,
-        params: InstructionsGetDiscoveryPathsOptions,
     ) -> Result<InstructionDiscoveryPathList, Error> {
         let wire_params = serde_json::to_value(params)?;
         self.client
@@ -5124,37 +4904,6 @@ impl<'a> ClientRpcMcp<'a> {
             .await
     }
 
-    /// Requests a side-effect-free MCP install plan from a catalog candidate handle or a caller-supplied card. This host-implemented server method is available through SDK/TUI hosts; standalone and C-ABI runtimes whose host does not implement server-method dispatch return JSON-RPC MethodNotFound. A runtime with planning available returns a normalised plan and opaque single-use plan handle; a runtime without it returns the typed planning-unavailable result. A completed plan reports resource identity, provenance, eligible transport choices, the user-scope target, required typed values and secret placeholders, the policy result, the configuration changes installing would make, and whether a reload would be needed. Planning never writes configuration, stores a secret, or reloads MCP servers, so abandoning a plan needs no call and leaves nothing behind.
-    ///
-    /// Wire method: `mcp.planInstall`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - A side-effect-free request for an MCP install plan. Computing a plan never writes configuration, stores a secret, or reloads MCP servers.
-    ///
-    /// # Returns
-    ///
-    /// Outcome of an mcp.planInstall call: either a normalised plan, or one typed refusal. Nothing is written in either case.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`McpPlanInstallOptions`], including inputs added after [`McpPlanInstallRequest`].
-    pub async fn plan_install_with_options(
-        &self,
-        params: McpPlanInstallOptions,
-    ) -> Result<McpPlanInstallResult, Error> {
-        let wire_params = serde_json::to_value(params)?;
-        self.client
-            .call_typed(rpc_methods::MCP_PLANINSTALL, Some(wire_params))
-            .await
-    }
-
     /// Consumes a bound catalogue plan and retains one exact fully resolved personal remote MCP operation requiring no supplied values or configured secrets. Returns its runtime operation ID and original expiry before any confirmation, activation, writer initialisation or installation effect. Register the original connection, operation and selected-session binding before calling applyInstall. Missing lower owned admission is unavailable, never a raw-config fallback.
     ///
     /// Wire method: `mcp.prepareInstall`.
@@ -5939,35 +5688,6 @@ impl<'a> ClientRpcNetwork<'a> {
     ///
     /// </div>
     pub async fn set_provider(&self, params: NetworkSetProviderRequest) -> Result<(), Error> {
-        let wire_params = serde_json::to_value(params)?;
-        let _: serde::de::IgnoredAny = self
-            .client
-            .call_typed(rpc_methods::NETWORK_SETPROVIDER, Some(wire_params))
-            .await?;
-        Ok(())
-    }
-
-    /// Registers the calling SDK client's network callbacks, replacing any previous registration. With `resolveProxy`, the client decides the proxies for every request the runtime would otherwise route by ambient proxy settings (proxy environment variables, `NO_PROXY` and operating-system settings), or leaves a request to that routing; requests with an explicitly configured proxy and loopback targets never consult it. With `authenticateNegotiate`, the client supplies the Kerberos tokens for Negotiate proxy challenges instead of native credential lookup. With `authenticateBasic`, the client supplies the credentials for Basic proxy challenges; the runtime prefers Negotiate when a proxy offers both. The callbacks serve requests made for the client's sessions and, with `runtime` scope, the runtime's shared traffic, which includes background requests and remote MCP server connections; only one connection may hold `runtime` scope. The registration ends when the connection closes.
-    ///
-    /// Wire method: `network.setProvider`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Registers the calling SDK connection's network callbacks, replacing any previous registration.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`NetworkSetProviderOptions`], including inputs added after [`NetworkSetProviderRequest`].
-    pub async fn set_provider_with_options(
-        &self,
-        params: NetworkSetProviderOptions,
-    ) -> Result<(), Error> {
         let wire_params = serde_json::to_value(params)?;
         let _: serde::de::IgnoredAny = self
             .client
@@ -8109,37 +7829,6 @@ impl<'a> ClientRpcSessions<'a> {
             .await
     }
 
-    /// Resolves a UUID prefix to a unique session ID, if exactly one session matches.
-    ///
-    /// Wire method: `sessions.findByPrefix`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - UUID prefix to resolve to a unique session ID.
-    ///
-    /// # Returns
-    ///
-    /// Session ID matching the prefix, omitted when no unique match exists.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`SessionsFindByPrefixOptions`], including inputs added after [`SessionsFindByPrefixRequest`].
-    pub async fn find_by_prefix_with_options(
-        &self,
-        params: SessionsFindByPrefixOptions,
-    ) -> Result<SessionsFindByPrefixResult, Error> {
-        let wire_params = serde_json::to_value(params)?;
-        self.client
-            .call_typed(rpc_methods::SESSIONS_FINDBYPREFIX, Some(wire_params))
-            .await
-    }
-
     /// Returns the most-relevant prior session for a given working-directory context.
     ///
     /// Wire method: `sessions.getLastForContext`.
@@ -8330,37 +8019,6 @@ impl<'a> ClientRpcSessions<'a> {
     ///
     /// </div>
     pub async fn close(&self, params: SessionsCloseRequest) -> Result<SessionsCloseResult, Error> {
-        let wire_params = serde_json::to_value(params)?;
-        self.client
-            .call_typed(rpc_methods::SESSIONS_CLOSE, Some(wire_params))
-            .await
-    }
-
-    /// Closes a session: emits shutdown, flushes pending events, releases the in-use lock, and disposes the active session.
-    ///
-    /// Wire method: `sessions.close`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Session ID to close.
-    ///
-    /// # Returns
-    ///
-    /// Closes a session: emits shutdown, flushes pending events to disk, releases the in-use lock, disposes the active session. Idempotent: succeeds even if the session is not currently active.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`SessionsCloseOptions`], including inputs added after [`SessionsCloseRequest`].
-    pub async fn close_with_options(
-        &self,
-        params: SessionsCloseOptions,
-    ) -> Result<SessionsCloseResult, Error> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::SESSIONS_CLOSE, Some(wire_params))
@@ -9239,37 +8897,6 @@ impl<'a> ClientRpcSkills<'a> {
     pub async fn get_discovery_paths(
         &self,
         params: SkillsGetDiscoveryPathsRequest,
-    ) -> Result<SkillDiscoveryPathList, Error> {
-        let wire_params = serde_json::to_value(params)?;
-        self.client
-            .call_typed(rpc_methods::SKILLS_GETDISCOVERYPATHS, Some(wire_params))
-            .await
-    }
-
-    /// Returns the canonical directories where a client may create skills that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.
-    ///
-    /// Wire method: `skills.getDiscoveryPaths`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Optional project paths to enumerate.
-    ///
-    /// # Returns
-    ///
-    /// Canonical locations where skills can be created so the runtime will recognize them.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`SkillsGetDiscoveryPathsOptions`], including inputs added after [`SkillsGetDiscoveryPathsRequest`].
-    pub async fn get_discovery_paths_with_options(
-        &self,
-        params: SkillsGetDiscoveryPathsOptions,
     ) -> Result<SkillDiscoveryPathList, Error> {
         let wire_params = serde_json::to_value(params)?;
         self.client
@@ -10892,36 +10519,6 @@ impl<'a> SessionRpc<'a> {
             .await
     }
 
-    /// Sends a user message to the session and returns its message ID.
-    ///
-    /// Wire method: `session.send`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Parameters for sending a user message to the session
-    ///
-    /// # Returns
-    ///
-    /// Result of sending a user message
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`SendOptions`], including inputs added after [`SendRequest`].
-    pub async fn send_with_options(&self, params: SendOptions) -> Result<SendResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_SEND, Some(wire_params))
-            .await
-    }
-
     /// Submits one message through normal admission and waits for its request-owned completion. Returns the exact root assistant event, or an explicit aborted/no-response outcome. Cancelling or timing out the wait does not abort agent work. Unsupported execution hosts reject the method before admitting the message.
     ///
     /// Wire method: `session.sendAndWait`.
@@ -10953,39 +10550,6 @@ impl<'a> SessionRpc<'a> {
             .await
     }
 
-    /// Submits one message through normal admission and waits for its request-owned completion. Returns the exact root assistant event, or an explicit aborted/no-response outcome. Cancelling or timing out the wait does not abort agent work. Unsupported execution hosts reject the method before admitting the message.
-    ///
-    /// Wire method: `session.sendAndWait`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Parameters for sending a user message to the session
-    ///
-    /// # Returns
-    ///
-    /// Internal request-correlated completion of one submitted message.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`SendOptions`], including inputs added after [`SendRequest`].
-    pub(crate) async fn send_and_wait_with_options(
-        &self,
-        params: SendOptions,
-    ) -> Result<SendAndWaitResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_SENDANDWAIT, Some(wire_params))
-            .await
-    }
-
     /// Sends zero or more user messages to the session in a single turn and returns their message IDs. All provided messages are appended to the conversation in order, then exactly one agent turn runs over the resulting history. When the list is empty, one turn runs over the existing history with no new user message. Remote-backed (Mission Control) sessions do not support this method and will return an error.
     ///
     /// Wire method: `session.sendMessages`.
@@ -11008,39 +10572,6 @@ impl<'a> SessionRpc<'a> {
     pub async fn send_messages(
         &self,
         params: SendMessagesRequest,
-    ) -> Result<SendMessagesResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_SENDMESSAGES, Some(wire_params))
-            .await
-    }
-
-    /// Sends zero or more user messages to the session in a single turn and returns their message IDs. All provided messages are appended to the conversation in order, then exactly one agent turn runs over the resulting history. When the list is empty, one turn runs over the existing history with no new user message. Remote-backed (Mission Control) sessions do not support this method and will return an error.
-    ///
-    /// Wire method: `session.sendMessages`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Parameters for sending zero or more user messages to the session in a single turn. Remote-backed (Mission Control) sessions do not support this method and will return an error.
-    ///
-    /// # Returns
-    ///
-    /// Result of sending zero or more user messages
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`SendMessagesOptions`], including inputs added after [`SendMessagesRequest`].
-    pub async fn send_messages_with_options(
-        &self,
-        params: SendMessagesOptions,
     ) -> Result<SendMessagesResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
@@ -11353,39 +10884,6 @@ impl<'a> SessionRpcAccountsLogin<'a> {
     ///
     /// </div>
     pub async fn begin(&self, params: AuthLoginBeginRequest) -> Result<AuthLoginBegun, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_ACCOUNTS_LOGIN_BEGIN, Some(wire_params))
-            .await
-    }
-
-    /// Begin an interactive login flow for a provider kind, optionally selecting how to authorize (`method`: `web` by default, or `device-code`), and return its opaque flow id and first step.
-    ///
-    /// Wire method: `session.accounts.login.begin`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Begin an interactive login flow for a provider kind, optionally reusing a cached base identity or explicitly requesting provider account selection.
-    ///
-    /// # Returns
-    ///
-    /// A started login flow: its opaque id and first step.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`AuthLoginBeginOptions`], including inputs added after [`AuthLoginBeginRequest`].
-    pub async fn begin_with_options(
-        &self,
-        params: AuthLoginBeginOptions,
-    ) -> Result<AuthLoginBegun, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
         self.session
@@ -12717,39 +12215,6 @@ impl<'a> SessionRpcConnectors<'a> {
             .await
     }
 
-    /// Reconciles the authoritative cached or freshly requested Connector catalog into the session Connector MCP projection and returns live status.
-    ///
-    /// Wire method: `session.connectors.reconcile`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Requests authoritative Connector-to-MCP reconciliation for the pinned account.
-    ///
-    /// # Returns
-    ///
-    /// Authoritative session connector state. Account IDs are opaque routing identifiers and credentials are never included.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`ConnectorReconcileOptions`], including inputs added after [`ConnectorReconcileRequest`].
-    pub async fn reconcile_with_options(
-        &self,
-        params: ConnectorReconcileOptions,
-    ) -> Result<ConnectorStatus, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_CONNECTORS_RECONCILE, Some(wire_params))
-            .await
-    }
-
     /// Reconciles the authoritative Connector catalog into the session MCP projection during startup with a bounded deadline and fail-closed cleanup.
     ///
     /// Wire method: `session.connectors.reconcileForStartup`.
@@ -13140,39 +12605,9 @@ impl<'a> SessionRpcEventLog<'a> {
     /// SDK and CLI versions if your code depends on it.
     ///
     /// </div>
-    pub async fn read(&self, params: EventLogReadRequest) -> Result<EventsReadResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_EVENTLOG_READ, Some(wire_params))
-            .await
-    }
-
-    /// Reads a batch of session events from a cursor, optionally waiting for new events. Supports tail-first reads via `direction: backward`.
-    ///
-    /// Wire method: `session.eventLog.read`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Cursor, batch size, and optional long-poll/filter parameters for reading session events.
-    ///
-    /// # Returns
-    ///
-    /// Batch of session events returned by a read, with cursor and continuation metadata.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`EventLogReadOptions`], including inputs added after [`EventLogReadRequest`].
-    pub async fn read_with_options(
+    pub async fn read(
         &self,
-        params: EventLogReadOptions,
+        params: EventLogReadRequest,
     ) -> Result<crate::types::EventsReadResultWithMetadata, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
@@ -13520,39 +12955,6 @@ impl<'a> SessionRpcFeatureFlags<'a> {
         &self,
         params: SessionFeatureFlagsReadParams,
     ) -> Result<SessionFeatureFlagsReadResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_FEATUREFLAGS_READ, Some(wire_params))
-            .await
-    }
-
-    /// Reads the bound session's feature service and requested runtime evaluations. Omission of readiness options returns the current snapshot without waiting for online assignments. A revision barrier uses the original service notification and ends when this attachment closes. The opt-in displayOnly mode returns a redacted UI projection without assignment data or requested evaluations. Only the trusted runtime host can read that generation-bound projection.
-    ///
-    /// Wire method: `session.featureFlags.read`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Optional evaluations and readiness barriers for one feature snapshot.
-    ///
-    /// # Returns
-    ///
-    /// One authoritative snapshot and the requested evaluations.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`SessionFeatureFlagsReadOptions`], including inputs added after [`SessionFeatureFlagsReadParams`].
-    pub async fn read_with_options(
-        &self,
-        params: SessionFeatureFlagsReadOptions,
-    ) -> Result<crate::types::SessionFeatureFlagsReadResultWithDisplayState, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
         self.session
@@ -15050,34 +14452,6 @@ impl<'a> SessionRpcMcp<'a> {
         Ok(())
     }
 
-    /// Enables an MCP server for the session.
-    ///
-    /// Wire method: `session.mcp.enable`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Name of the MCP server to enable for the session.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`McpEnableOptions`], including inputs added after [`McpEnableRequest`].
-    pub async fn enable_with_options(&self, params: McpEnableOptions) -> Result<(), Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        let _: serde::de::IgnoredAny = self
-            .session
-            .client()
-            .call_typed(rpc_methods::SESSION_MCP_ENABLE, Some(wire_params))
-            .await?;
-        Ok(())
-    }
-
     /// Disables an MCP server for the session.
     ///
     /// Wire method: `session.mcp.disable`.
@@ -15094,34 +14468,6 @@ impl<'a> SessionRpcMcp<'a> {
     ///
     /// </div>
     pub async fn disable(&self, params: McpDisableRequest) -> Result<(), Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        let _: serde::de::IgnoredAny = self
-            .session
-            .client()
-            .call_typed(rpc_methods::SESSION_MCP_DISABLE, Some(wire_params))
-            .await?;
-        Ok(())
-    }
-
-    /// Disables an MCP server for the session.
-    ///
-    /// Wire method: `session.mcp.disable`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Name of the MCP server to disable for the session.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`McpDisableOptions`], including inputs added after [`McpDisableRequest`].
-    pub async fn disable_with_options(&self, params: McpDisableOptions) -> Result<(), Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
         let _: serde::de::IgnoredAny = self
@@ -15388,37 +14734,6 @@ impl<'a> SessionRpcMcp<'a> {
         Ok(())
     }
 
-    /// Starts an individual MCP server on the live session. Omit `config` for a config-free start-by-name of an already-configured server (reuses the server's already-registered configuration); supply `config` to start from a caller-supplied configuration. Session-scoped and ephemeral: the server is added to this session's running set only and is reaped when the session ends. Does NOT modify persistent user configuration (`mcp.config.*`), so it does not affect future sessions. The server surfaces through `session.mcp.list` and the `session.mcp_servers_loaded` / `session.mcp_server_status_changed` events like any other server. A local configuration connects the existing IDE endpoint under serverName `ide`. Runtime host admission controls the CLI policy exemption; request fields cannot grant it.
-    ///
-    /// Wire method: `session.mcp.startServer`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Server name and optional configuration for an individual MCP server start. Omit `config` for a config-free start-by-name of an already-configured server.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`McpStartServerOptions`], including inputs added after [`McpStartServerRequest`].
-    pub async fn start_server_with_options(
-        &self,
-        params: McpStartServerOptions,
-    ) -> Result<(), Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        let _: serde::de::IgnoredAny = self
-            .session
-            .client()
-            .call_typed(rpc_methods::SESSION_MCP_STARTSERVER, Some(wire_params))
-            .await?;
-        Ok(())
-    }
-
     /// Restarts an individual MCP server on the live session (stops then starts). Omit `config` for a config-free restart-by-name of an already-configured server; supply `config` to restart with a replacement configuration. Session-scoped and ephemeral: does NOT modify persistent user configuration (`mcp.config.*`).
     ///
     /// Wire method: `session.mcp.restartServer`.
@@ -15445,37 +14760,6 @@ impl<'a> SessionRpcMcp<'a> {
         Ok(())
     }
 
-    /// Restarts an individual MCP server on the live session (stops then starts). Omit `config` for a config-free restart-by-name of an already-configured server; supply `config` to restart with a replacement configuration. Session-scoped and ephemeral: does NOT modify persistent user configuration (`mcp.config.*`).
-    ///
-    /// Wire method: `session.mcp.restartServer`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Server name and optional replacement configuration for an individual MCP server restart. Omit `config` for a config-free restart-by-name of an already-configured server.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`McpRestartServerOptions`], including inputs added after [`McpRestartServerRequest`].
-    pub async fn restart_server_with_options(
-        &self,
-        params: McpRestartServerOptions,
-    ) -> Result<(), Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        let _: serde::de::IgnoredAny = self
-            .session
-            .client()
-            .call_typed(rpc_methods::SESSION_MCP_RESTARTSERVER, Some(wire_params))
-            .await?;
-        Ok(())
-    }
-
     /// Stops one MCP server on the session's host. Omit transport for a generic stop by name. Set transport to local-http with serverName ide for endpoint-only cleanup. This cancels pending IDE initialization and removes the local IDE session, retained tools, identity, and selection. It preserves any ordinary server named ide.
     ///
     /// Wire method: `session.mcp.stopServer`.
@@ -15492,37 +14776,6 @@ impl<'a> SessionRpcMcp<'a> {
     ///
     /// </div>
     pub async fn stop_server(&self, params: McpStopServerRequest) -> Result<(), Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        let _: serde::de::IgnoredAny = self
-            .session
-            .client()
-            .call_typed(rpc_methods::SESSION_MCP_STOPSERVER, Some(wire_params))
-            .await?;
-        Ok(())
-    }
-
-    /// Stops one MCP server on the session's host. Omit transport for a generic stop by name. Set transport to local-http with serverName ide for endpoint-only cleanup. This cancels pending IDE initialization and removes the local IDE session, retained tools, identity, and selection. It preserves any ordinary server named ide.
-    ///
-    /// Wire method: `session.mcp.stopServer`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Server name and optional transport selector for an individual MCP server stop. Omit transport to stop the server by name.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`McpStopServerOptions`], including inputs added after [`McpStopServerRequest`].
-    pub async fn stop_server_with_options(
-        &self,
-        params: McpStopServerOptions,
-    ) -> Result<(), Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
         let _: serde::de::IgnoredAny = self
@@ -15749,39 +15002,6 @@ impl<'a> SessionRpcMcpApps<'a> {
     pub async fn call_tool(
         &self,
         params: McpAppsCallToolRequest,
-    ) -> Result<SessionMcpAppsCallToolResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_MCP_APPS_CALLTOOL, Some(wire_params))
-            .await
-    }
-
-    /// Call an MCP tool from an MCP App view (SEP-1865). Enforces the visibility check that prevents an app iframe from invoking model-only tools. Returns the standard MCP `CallToolResult`.
-    ///
-    /// Wire method: `session.mcp.apps.callTool`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - MCP server, tool name, and arguments to invoke from an MCP App view.
-    ///
-    /// # Returns
-    ///
-    /// Standard MCP CallToolResult
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`McpAppsCallToolOptions`], including inputs added after [`McpAppsCallToolRequest`].
-    pub async fn call_tool_with_options(
-        &self,
-        params: McpAppsCallToolOptions,
     ) -> Result<SessionMcpAppsCallToolResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
@@ -16381,39 +15601,6 @@ impl<'a> SessionRpcMcpOauth<'a> {
             .await
     }
 
-    /// Starts OAuth authentication for a remote MCP server. Owned servers require the original one-use prepareLogin handle and exact installation ID; manual servers retain the existing direct login behaviour.
-    ///
-    /// Wire method: `session.mcp.oauth.login`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Remote MCP server name and optional overrides controlling reauthentication, OAuth client display name, callback handling, and static OAuth client selection.
-    ///
-    /// # Returns
-    ///
-    /// OAuth authorization URL the caller should open, or empty when cached tokens already authenticated the server.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`McpOauthLoginOptions`], including inputs added after [`McpOauthLoginRequest`].
-    pub async fn login_with_options(
-        &self,
-        params: McpOauthLoginOptions,
-    ) -> Result<McpOauthLoginResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_MCP_OAUTH_LOGIN, Some(wire_params))
-            .await
-    }
-
     /// Completes a runtime-managed MCP OAuth login after the authorization server redirects to a host-managed callback URL.
     ///
     /// Wire method: `session.mcp.oauth.complete`.
@@ -16460,39 +15647,6 @@ impl<'a> SessionRpcMcpOauth<'a> {
     ///
     /// </div>
     pub async fn probe(&self, params: McpOauthProbeRequest) -> Result<McpOauthProbeResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_MCP_OAUTH_PROBE, Some(wire_params))
-            .await
-    }
-
-    /// Passively probes a configured remote MCP server to classify whether OAuth is required or a cached/override token is accepted. Does not start OAuth, emit pending OAuth requests, or mutate MCP connection state.
-    ///
-    /// Wire method: `session.mcp.oauth.probe`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Remote MCP server name for a passive OAuth status probe.
-    ///
-    /// # Returns
-    ///
-    /// Passive MCP OAuth probe result. `authenticated` means the server accepted the probe request while an OAuth-origin access token was attached; it does not prove the server required or independently validated that token. The probe does not make a second unauthenticated request. Failed is an expected probe-domain outcome; JSON-RPC errors are reserved for API-call failures.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`McpOauthProbeOptions`], including inputs added after [`McpOauthProbeRequest`].
-    pub async fn probe_with_options(
-        &self,
-        params: McpOauthProbeOptions,
-    ) -> Result<McpOauthProbeResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
         self.session
@@ -16939,39 +16093,6 @@ impl<'a> SessionRpcMetadata<'a> {
             .await
     }
 
-    /// Returns the token breakdown for the session's current context window for a given model.
-    ///
-    /// Wire method: `session.metadata.contextInfo`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Model identifier and token limits used to compute the context-info breakdown.
-    ///
-    /// # Returns
-    ///
-    /// Token breakdown for the session's current context window, or null if uninitialized.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`MetadataContextInfoOptions`], including inputs added after [`MetadataContextInfoRequest`].
-    pub async fn context_info_with_options(
-        &self,
-        params: MetadataContextInfoOptions,
-    ) -> Result<MetadataContextInfoResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_METADATA_CONTEXTINFO, Some(wire_params))
-            .await
-    }
-
     /// Returns the experimental per-source attribution breakdown of the session's current context window as a flat list of entries (skills, subagents, MCP servers, built-in tools, plugin rollups, system/tool-definition costs, with nesting via parentId), plus the successful compaction count. The heaviest individual messages are available separately via `metadata.getContextHeaviestMessages`. Returns null until the session has initialized its system prompt and tool metadata.
     ///
     /// Wire method: `session.metadata.getContextAttribution`.
@@ -17280,39 +16401,6 @@ impl<'a> SessionRpcModel<'a> {
     pub async fn switch_to(
         &self,
         params: ModelSwitchToRequest,
-    ) -> Result<ModelSwitchToResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_MODEL_SWITCHTO, Some(wire_params))
-            .await
-    }
-
-    /// Switches the session to a model and optional reasoning configuration.
-    ///
-    /// Wire method: `session.model.switchTo`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Target model identifier and optional reasoning effort, summary, capability overrides, and context tier.
-    ///
-    /// # Returns
-    ///
-    /// The model identifier active on the session after the switch.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`ModelSwitchToOptions`], including inputs added after [`ModelSwitchToRequest`].
-    pub async fn switch_to_with_options(
-        &self,
-        params: ModelSwitchToOptions,
     ) -> Result<ModelSwitchToResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
@@ -17726,39 +16814,6 @@ impl<'a> SessionRpcOptions<'a> {
             .call_typed(rpc_methods::SESSION_OPTIONS_UPDATE, Some(wire_params))
             .await
     }
-
-    /// Patches the genuinely-mutable subset of session options.
-    ///
-    /// Wire method: `session.options.update`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Patch of mutable session options to apply to the running session.
-    ///
-    /// # Returns
-    ///
-    /// Indicates whether the session options patch was applied successfully.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`SessionUpdateOptionsWithSettings`], including inputs added after [`SessionUpdateOptionsParams`].
-    pub async fn update_with_options(
-        &self,
-        params: SessionUpdateOptionsWithSettings,
-    ) -> Result<SessionUpdateOptionsResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_OPTIONS_UPDATE, Some(wire_params))
-            .await
-    }
 }
 
 /// `session.permissions.*` RPCs.
@@ -17825,42 +16880,6 @@ impl<'a> SessionRpcPermissions<'a> {
     pub async fn configure(
         &self,
         params: PermissionsConfigureParams,
-    ) -> Result<PermissionsConfigureResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(
-                rpc_methods::SESSION_PERMISSIONS_CONFIGURE,
-                Some(wire_params),
-            )
-            .await
-    }
-
-    /// Replaces selected session permission fields, including rules, paths, URLs, exclusions, allow-all flags, user-authored judge instructions, bounded host-supplied advisory judge context, owner-authenticated session authority, and the owner's host-policy declaration for its own tools.
-    ///
-    /// Wire method: `session.permissions.configure`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Patch of permission policy fields to apply (omit a field to leave it unchanged).
-    ///
-    /// # Returns
-    ///
-    /// Indicates whether the operation succeeded.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`PermissionsConfigureOptions`], including inputs added after [`PermissionsConfigureParams`].
-    pub async fn configure_with_options(
-        &self,
-        params: PermissionsConfigureOptions,
     ) -> Result<PermissionsConfigureResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
@@ -18189,42 +17208,6 @@ impl<'a> SessionRpcPermissions<'a> {
     pub async fn set_required(
         &self,
         params: PermissionsSetRequiredRequest,
-    ) -> Result<PermissionsSetRequiredResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(
-                rpc_methods::SESSION_PERMISSIONS_SETREQUIRED,
-                Some(wire_params),
-            )
-            .await
-    }
-
-    /// Sets a direct host requirement for permission events, or registers and releases a connection-scoped provider without overriding later host controls.
-    ///
-    /// Wire method: `session.permissions.setRequired`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Toggles whether permission prompts should be bridged into session events for this client.
-    ///
-    /// # Returns
-    ///
-    /// Indicates whether the operation succeeded.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`PermissionsSetRequiredOptions`], including inputs added after [`PermissionsSetRequiredRequest`].
-    pub async fn set_required_with_options(
-        &self,
-        params: PermissionsSetRequiredOptions,
     ) -> Result<PermissionsSetRequiredResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
@@ -22286,42 +21269,6 @@ impl<'a> SessionRpcUi<'a> {
             .await
     }
 
-    /// Provides the user response for a pending elicitation request.
-    ///
-    /// Wire method: `session.ui.handlePendingElicitation`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Pending elicitation request ID and the user's response (accept/decline/cancel + form values).
-    ///
-    /// # Returns
-    ///
-    /// Indicates whether the elicitation response was accepted; false if it was already resolved by another client.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`UIHandlePendingElicitationOptions`], including inputs added after [`UIHandlePendingElicitationRequest`].
-    pub async fn handle_pending_elicitation_with_options(
-        &self,
-        params: UIHandlePendingElicitationOptions,
-    ) -> Result<UIElicitationResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(
-                rpc_methods::SESSION_UI_HANDLEPENDINGELICITATION,
-                Some(wire_params),
-            )
-            .await
-    }
-
     /// Resolves a pending elicitation request after direct interaction in the trusted in-process client or authenticated owning host. Only a response to the built-in ask_user tool becomes trusted human evidence; a decline or dismissal records the person's refusal, which grants nothing.
     ///
     /// Wire method: `session.ui.handleHumanAskUser`.
@@ -22344,42 +21291,6 @@ impl<'a> SessionRpcUi<'a> {
     pub(crate) async fn handle_human_ask_user(
         &self,
         params: UIHandlePendingElicitationRequest,
-    ) -> Result<UIElicitationResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(
-                rpc_methods::SESSION_UI_HANDLEHUMANASKUSER,
-                Some(wire_params),
-            )
-            .await
-    }
-
-    /// Resolves a pending elicitation request after direct interaction in the trusted in-process client or authenticated owning host. Only a response to the built-in ask_user tool becomes trusted human evidence; a decline or dismissal records the person's refusal, which grants nothing.
-    ///
-    /// Wire method: `session.ui.handleHumanAskUser`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Pending elicitation request ID and the user's response (accept/decline/cancel + form values).
-    ///
-    /// # Returns
-    ///
-    /// Indicates whether the elicitation response was accepted; false if it was already resolved by another client.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`UIHandlePendingElicitationOptions`], including inputs added after [`UIHandlePendingElicitationRequest`].
-    pub(crate) async fn handle_human_ask_user_with_options(
-        &self,
-        params: UIHandlePendingElicitationOptions,
     ) -> Result<UIElicitationResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
@@ -22426,42 +21337,6 @@ impl<'a> SessionRpcUi<'a> {
             .await
     }
 
-    /// Resolves a pending `user_input.requested` event with the user's response.
-    ///
-    /// Wire method: `session.ui.handlePendingUserInput`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Request ID of a pending `user_input.requested` event and the user's response.
-    ///
-    /// # Returns
-    ///
-    /// Indicates whether the pending UI request was resolved by this call.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`UIHandlePendingUserInputOptions`], including inputs added after [`UIHandlePendingUserInputRequest`].
-    pub async fn handle_pending_user_input_with_options(
-        &self,
-        params: UIHandlePendingUserInputOptions,
-    ) -> Result<UIHandlePendingResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(
-                rpc_methods::SESSION_UI_HANDLEPENDINGUSERINPUT,
-                Some(wire_params),
-            )
-            .await
-    }
-
     /// Resolves a pending `user_input.requested` event after direct interaction in the trusted in-process client or authenticated owning host.
     ///
     /// Wire method: `session.ui.handleHumanUserInput`.
@@ -22484,42 +21359,6 @@ impl<'a> SessionRpcUi<'a> {
     pub(crate) async fn handle_human_user_input(
         &self,
         params: UIHandlePendingUserInputRequest,
-    ) -> Result<UIHandlePendingResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(
-                rpc_methods::SESSION_UI_HANDLEHUMANUSERINPUT,
-                Some(wire_params),
-            )
-            .await
-    }
-
-    /// Resolves a pending `user_input.requested` event after direct interaction in the trusted in-process client or authenticated owning host.
-    ///
-    /// Wire method: `session.ui.handleHumanUserInput`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Request ID of a pending `user_input.requested` event and the user's response.
-    ///
-    /// # Returns
-    ///
-    /// Indicates whether the pending UI request was resolved by this call.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`UIHandlePendingUserInputOptions`], including inputs added after [`UIHandlePendingUserInputRequest`].
-    pub(crate) async fn handle_human_user_input_with_options(
-        &self,
-        params: UIHandlePendingUserInputOptions,
     ) -> Result<UIHandlePendingResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
@@ -22668,42 +21507,6 @@ impl<'a> SessionRpcUi<'a> {
             .await
     }
 
-    /// Resolves a pending `exit_plan_mode.requested` event with the user's response.
-    ///
-    /// Wire method: `session.ui.handlePendingExitPlanMode`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Request ID of a pending `exit_plan_mode.requested` event and the user's response.
-    ///
-    /// # Returns
-    ///
-    /// Indicates whether the pending UI request was resolved by this call.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`UIHandlePendingExitPlanModeOptions`], including inputs added after [`UIHandlePendingExitPlanModeRequest`].
-    pub async fn handle_pending_exit_plan_mode_with_options(
-        &self,
-        params: UIHandlePendingExitPlanModeOptions,
-    ) -> Result<UIHandlePendingResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(
-                rpc_methods::SESSION_UI_HANDLEPENDINGEXITPLANMODE,
-                Some(wire_params),
-            )
-            .await
-    }
-
     /// Resolves a pending `exit_plan_mode.requested` event after direct interaction in the trusted in-process client or authenticated owning host.
     ///
     /// Wire method: `session.ui.handleHumanExitPlanMode`.
@@ -22726,42 +21529,6 @@ impl<'a> SessionRpcUi<'a> {
     pub(crate) async fn handle_human_exit_plan_mode(
         &self,
         params: UIHandlePendingExitPlanModeRequest,
-    ) -> Result<UIHandlePendingResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(
-                rpc_methods::SESSION_UI_HANDLEHUMANEXITPLANMODE,
-                Some(wire_params),
-            )
-            .await
-    }
-
-    /// Resolves a pending `exit_plan_mode.requested` event after direct interaction in the trusted in-process client or authenticated owning host.
-    ///
-    /// Wire method: `session.ui.handleHumanExitPlanMode`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Request ID of a pending `exit_plan_mode.requested` event and the user's response.
-    ///
-    /// # Returns
-    ///
-    /// Indicates whether the pending UI request was resolved by this call.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`UIHandlePendingExitPlanModeOptions`], including inputs added after [`UIHandlePendingExitPlanModeRequest`].
-    pub(crate) async fn handle_human_exit_plan_mode_with_options(
-        &self,
-        params: UIHandlePendingExitPlanModeOptions,
     ) -> Result<UIHandlePendingResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
@@ -22824,23 +21591,7 @@ impl<'a> SessionRpcUi<'a> {
     pub async fn register_direct_auto_mode_switch_handler_with_params(
         &self,
         params: UIRegisterDirectAutoModeSwitchHandlerRequest,
-    ) -> Result<UIRegisterDirectAutoModeSwitchHandlerResultWithAutoModeRecovery, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(
-                rpc_methods::SESSION_UI_REGISTERDIRECTAUTOMODESWITCHHANDLER,
-                Some(wire_params),
-            )
-            .await
-    }
-
-    /// Registers the handler and returns the recovery enrollment acknowledgment.
-    pub async fn register_direct_auto_mode_switch_handler_with_auto_mode_recovery(
-        &self,
-        params: UIRegisterDirectAutoModeSwitchHandlerRequest,
-    ) -> Result<SessionUiRegisterDirectAutoModeSwitchHandlerResultWithAutoModeRecovery, Error> {
+    ) -> Result<UIRegisterDirectAutoModeSwitchHandlerResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
         self.session
@@ -24083,39 +22834,6 @@ impl<'a> SessionRpcWorkspaces<'a> {
     ///
     /// </div>
     pub async fn diff(&self, params: WorkspacesDiffRequest) -> Result<WorkspaceDiffResult, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
-        self.session
-            .client()
-            .call_typed(rpc_methods::SESSION_WORKSPACES_DIFF, Some(wire_params))
-            .await
-    }
-
-    /// Computes a diff for the session workspace. Never rejects for a busy session: a `session`-mode diff that cannot read the session's file-change captures falls back to an unstaged git diff with `isFallback: true` and reports why in `unavailableReason`.
-    ///
-    /// Wire method: `session.workspaces.diff`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Parameters for computing a workspace diff.
-    ///
-    /// # Returns
-    ///
-    /// Workspace diff result for the requested mode.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This API is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases. Pin both the
-    /// SDK and CLI versions if your code depends on it.
-    ///
-    /// </div>
-    ///
-    /// Accepts [`WorkspacesDiffOptions`], including inputs added after [`WorkspacesDiffRequest`].
-    pub async fn diff_with_options(
-        &self,
-        params: WorkspacesDiffOptions,
-    ) -> Result<WorkspaceDiffResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
         self.session

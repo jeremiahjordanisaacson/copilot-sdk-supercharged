@@ -7,9 +7,9 @@ bundle is materialized directly into the SDK's existing cache layout. ``download
 preserves the historical CLI filename by creating a compatibility alias from the
 runtime wrapper inside the complete materialized bundle:
 
-- Linux:   ~/.cache/github-copilot-sdk/cli/{version}/prebuilds/{platform}/copilot
-- macOS:   ~/Library/Caches/github-copilot-sdk/cli/{version}/prebuilds/{platform}/copilot
-- Windows: %LOCALAPPDATA%/github-copilot-sdk/cli/{version}/prebuilds/{platform}/copilot.exe
+- Linux:   ~/.cache/copilot-sdk/cli/{version}/prebuilds/{platform}/copilot
+- macOS:   ~/Library/Caches/copilot-sdk/cli/{version}/prebuilds/{platform}/copilot
+- Windows: %LOCALAPPDATA%/copilot-sdk/cli/{version}/prebuilds/{platform}/copilot.exe
 
 Environment variables:
 - COPILOT_CLI_EXTRACT_DIR: Override the runtime bundle cache root.
@@ -45,7 +45,7 @@ from ._cli_version import (
     get_runtime_platform,
 )
 
-_CACHE_DIR_NAME = "github-copilot-sdk"
+_CACHE_DIR_NAME = "copilot-sdk"
 _MAX_RETRIES = 3
 _RETRIABLE_DOWNLOAD_ERRORS = (HTTPError, URLError, IncompleteRead)
 _HOSTLESS_ASSETS_MARKER = ".hostless-runtime-assets-v2"
@@ -475,9 +475,9 @@ def ensure_runtime_library(cli_path: str, version: str | None = None) -> str | N
     under its natural platform name (``libcopilot_runtime.so`` / ``.dylib`` /
     ``copilot_runtime.dll``).
 
-    Explicit provisioning via ``python -m copilot download-runtime --in-process``
-    uses this helper. In-process startup with an explicit CLI only looks for an
-    existing library in the selected installation; it does not call this helper.
+    The default in-process transport invokes this lazily; it also runs via
+    ``python -m copilot download-runtime --in-process`` (explicit). An explicit stdio
+    path leaves the library in the canonical staged bundle.
 
     Returns the absolute path to the library, or None if it could not be provisioned
     (e.g. download disabled or unsupported platform). Raises RuntimeError on
@@ -601,7 +601,7 @@ def main() -> None:
         help=(
             "Also download the native in-process (FFI) runtime library "
             "(prebuilds/<platform>/runtime.node) and place it next to the CLI. "
-            "Only needed for the experimental in-process transport."
+            "Required by the default in-process transport."
         ),
     )
 

@@ -643,62 +643,17 @@ pub struct AuthLoginAdvanceRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthLoginBeginRequest {
+    /// Opaque cached base identity id returned by accounts.enumerate loginAccounts. Valid only with default mode; consumers must not parse it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
     /// The provider kind to sign in with.
     pub kind: LoginProviderKind,
-}
-
-/// Extensible [`AuthLoginBeginRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`AuthLoginBeginOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthLoginBeginOptions {
-    #[serde(flatten)]
-    legacy: AuthLoginBeginRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    method: Option<AuthLoginMethod>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mode: Option<AuthLoginMode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    account_id: Option<String>,
-}
-
-impl AuthLoginBeginOptions {
-    /// Creates options with the required inputs.
-    pub fn new(kind: LoginProviderKind) -> Self {
-        Self {
-            legacy: AuthLoginBeginRequest { kind },
-            method: None,
-            mode: None,
-            account_id: None,
-        }
-    }
-
     /// How to authorize: `web` (default) or `device-code`. Device code is offered for `githubDotCom` and `proxima`; `proxima` still asks for its host through `input-required` first.
-    pub fn method(mut self, value: AuthLoginMethod) -> Self {
-        self.method = Some(value);
-        self
-    }
-
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method: Option<AuthLoginMethod>,
     /// Neutral identity-selection intent. Omitted is equivalent to default.
-    pub fn mode(mut self, value: AuthLoginMode) -> Self {
-        self.mode = Some(value);
-        self
-    }
-
-    /// Opaque cached base identity id returned by accounts.enumerate loginAccounts. Valid only with default mode; consumers must not parse it.
-    pub fn account_id(mut self, value: impl Into<String>) -> Self {
-        self.account_id = Some(value.into());
-        self
-    }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<AuthLoginMode>,
 }
 
 /// A started login flow: its opaque id and first step.
@@ -2574,53 +2529,11 @@ pub struct WorkspacesDiffRequest {
     /// When true, ignore whitespace-only changes (git `--ignore-all-space`). Defaults to false.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ignore_whitespace: Option<bool>,
+    /// Include the full before/after text used to compute each session diff. Defaults to false; true is accepted only for session mode. Existing capture/read limits still apply, and binary or unavailable contents are not returned. This can substantially increase response size.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_contents: Option<bool>,
     /// Diff mode requested by the client.
     pub mode: WorkspaceDiffMode,
-}
-
-/// Extensible [`WorkspacesDiffRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`WorkspacesDiffOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspacesDiffOptions {
-    #[serde(flatten)]
-    legacy: WorkspacesDiffRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    include_contents: Option<bool>,
-}
-
-impl WorkspacesDiffOptions {
-    /// Creates options with the required inputs.
-    pub fn new(mode: WorkspaceDiffMode) -> Self {
-        Self {
-            legacy: WorkspacesDiffRequest {
-                mode,
-                ignore_whitespace: None,
-            },
-            include_contents: None,
-        }
-    }
-
-    /// When true, ignore whitespace-only changes (git `--ignore-all-space`). Defaults to false.
-    pub fn ignore_whitespace(mut self, value: bool) -> Self {
-        self.legacy.ignore_whitespace = Some(value);
-        self
-    }
-
-    /// Include the full before/after text used to compute each session diff. Defaults to false; true is accepted only for session mode. Existing capture/read limits still apply, and binary or unavailable contents are not returned. This can substantially increase response size.
-    pub fn include_contents(mut self, value: bool) -> Self {
-        self.include_contents = Some(value);
-        self
-    }
 }
 
 /// Optional session context used when creating a local workspace.

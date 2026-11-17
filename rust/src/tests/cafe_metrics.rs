@@ -49,8 +49,13 @@ async fn typed_admission_preserves_each_required_union_payload() {
         let (client_stream, server_stream) = tokio::io::duplex(8192);
         let (client_read, client_write) = tokio::io::split(client_stream);
         let (server_read, server_write) = tokio::io::split(server_stream);
-        let client =
-            Client::from_streams(client_read, client_write, home.path().to_owned()).unwrap();
+        let client = Client::from_streams(
+            crate::ClientMode::CodingAgent,
+            client_read,
+            client_write,
+            home.path().to_owned(),
+        )
+        .unwrap();
         let (notifications, _) = tokio::sync::mpsc::unbounded_channel();
         let (requests, _) = tokio::sync::mpsc::unbounded_channel();
         let server =
@@ -90,10 +95,12 @@ async fn ordinary_local_runtime_denies_cafe_without_disabling_standard_calls() {
 
     let home = tempfile::tempdir().unwrap();
     let client = Client::start(
-        ClientOptions::new()
-            .with_transport(Transport::InProcess)
-            .with_base_directory(home.path())
-            .with_use_logged_in_user(false),
+        ClientOptions::new(crate::ClientMode::CodingAgent)
+            .with_runtime(RuntimeConnection::for_in_process(
+                InProcessRuntimeOptions::new()
+                    .with_owned(|owned| owned.with_base_directory(home.path())),
+            ))
+            .with_github(|group| group.with_use_logged_in_user(false)),
     )
     .await
     .unwrap();

@@ -49,8 +49,8 @@ class TestPerSessionAuth:
         self, auth_ctx: E2ETestContext
     ):
         session = await auth_ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            github_token="token-alice",
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"token": "token-alice"},
         )
 
         auth_status = await session.rpc.git_hub_auth.get_status()
@@ -64,12 +64,11 @@ class TestPerSessionAuth:
         self, auth_ctx: E2ETestContext
     ):
         session_a = await auth_ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            github_token="token-alice",
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"token": "token-alice"},
         )
         session_b = await auth_ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            github_token="token-bob",
+            permissions={"on_request": PermissionHandler.approve_all}, github={"token": "token-bob"}
         )
 
         status_a = await session_a.rpc.git_hub_auth.get_status()
@@ -92,15 +91,16 @@ class TestPerSessionAuth:
         env = without_auth_env(auth_ctx.get_env())
         env["COPILOT_DEBUG_GITHUB_API_URL"] = auth_ctx.proxy_url
         no_token_client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=auth_ctx.cli_path),
-            working_directory=auth_ctx.work_dir,
-            env=env,
-            use_logged_in_user=False,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=auth_ctx.cli_path, working_directory=auth_ctx.work_dir, env=env
+            ),
+            github={"use_logged_in_user": False},
         )
 
         try:
             session = await no_token_client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all}
             )
 
             auth_status = await session.rpc.git_hub_auth.get_status()
@@ -119,8 +119,8 @@ class TestPerSessionAuth:
     ):
         with pytest.raises(Exception):
             await auth_ctx.client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                github_token="invalid-token-12345",
+                permissions={"on_request": PermissionHandler.approve_all},
+                github={"token": "invalid-token-12345"},
             )
 
 

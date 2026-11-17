@@ -107,9 +107,12 @@ class TestTelemetryConfig:
     @pytest.mark.parametrize("capture,mode", [(True, "SPAN_ONLY"), (False, "NO_CONTENT")])
     async def test_explicit_capture_overrides_inherited_mode(self, capture: bool, mode: str):
         client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=sys.executable),
-            env={"OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT": "SPAN_AND_EVENT"},
-            telemetry={"capture_content": capture},
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=sys.executable,
+                env={"OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT": "SPAN_AND_EVENT"},
+            ),
+            observability={"telemetry": {"capture_content": capture}},
         )
         with patch(
             "copilot.client.subprocess.Popen", side_effect=OSError("spawn stopped")

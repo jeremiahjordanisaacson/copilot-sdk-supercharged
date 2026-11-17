@@ -29,7 +29,7 @@ func TestSession_RetirementClearsCallbackRoots(t *testing.T) {
 	})
 	session.registerAutoModeSwitchHandler(func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
 		return AutoModeSwitchResponseNo, nil
-	})
+	}, false)
 	hooks := &SessionHooks{OnSessionEnd: func(SessionEndHookInput, HookInvocation) (*SessionEndHookOutput, error) {
 		return nil, nil
 	}}
@@ -140,9 +140,7 @@ func TestSession_RetirementRejectsModeRequestDefaults(t *testing.T) {
 		session, cleanup := newTestSession()
 		t.Cleanup(cleanup)
 		session.stopEventProcessing()
-		response, err := session.handleAutoModeSwitchRequest(AutoModeSwitchRequestWithAutoModeRecovery{
-			AutoModeSwitchRequest: AutoModeSwitchRequest{},
-		})
+		response, err := session.handleAutoModeSwitchRequest(AutoModeSwitchRequest{})
 		if err == nil || !strings.Contains(err.Error(), "session closed") {
 			t.Fatalf("retired auto-mode-switch response = %+v, %v; want closed error", response, err)
 		}

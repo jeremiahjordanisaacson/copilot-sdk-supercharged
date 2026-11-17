@@ -158,14 +158,14 @@ function handleRequest(message) {
     case "connect":
       writeResponse(message.id, {
         ok: true,
-        protocolVersion: 3,
+        protocolVersion: 4,
         version: "scenario-fake",
       });
       return;
     case "ping":
       writeResponse(message.id, {
         message: message.params?.message ?? "pong",
-        protocolVersion: 3,
+        protocolVersion: 4,
         timestamp: "2026-01-02T03:04:05Z",
       });
       return;
@@ -349,14 +349,14 @@ def create_scenario_client(
     capture_path = Path(ctx.work_dir, f"scenario-fake-{scenario}.json")
     cli_path.write_text(SCENARIO_FAKE_CLI_SCRIPT, encoding="utf-8")
     client = CopilotClient(
-        connection=RuntimeConnection.for_stdio(
+        mode="coding-agent",
+        runtime=RuntimeConnection.for_spawned_stdio(
             path=str(cli_path),
             args=("--scenario", scenario, "--capture-file", str(capture_path)),
+            working_directory=ctx.work_dir,
+            env=ctx.get_env(),
         ),
-        working_directory=ctx.work_dir,
-        env=ctx.get_env(),
-        github_token=DEFAULT_GITHUB_TOKEN,
-        use_logged_in_user=False,
+        github={"token": DEFAULT_GITHUB_TOKEN, "use_logged_in_user": False},
     )
     return client, capture_path
 

@@ -17,7 +17,7 @@ use tracing::{Instrument, error, warn};
 use crate::canvas::CanvasHandler;
 use crate::generated::api_types::{
     LogRequest, ModelSwitchAutoTierRequest, ModelSwitchAutoTierResult,
-    ModelSwitchFusionTierRequest, ModelSwitchToOptions, OpenCanvasInstance,
+    ModelSwitchFusionTierRequest, ModelSwitchToRequest, OpenCanvasInstance,
     PermissionDecisionRequest, RegisterEventInterestParams, ToolsGetCurrentMetadataResult,
     rpc_methods,
 };
@@ -43,12 +43,12 @@ use crate::trace_context::inject_trace_context;
 use crate::transforms::SystemMessageTransform;
 use crate::types::{
     AutoTier, AutoTierPreference, CommandContext, CommandDefinition, CommandHandler,
-    CreateSessionResult, ElicitationRequest, ElicitationResult, ExitPlanModeData, FusionTier,
-    GetMessagesResponse, MessageOptions, PermissionRequestData, PermissionsSetModeResult,
-    RequestId, ResumeSessionConfig, ResumeSessionResult, SectionOverride, SessionCapabilities,
-    SessionConfig, SessionEvent, SessionId, SetModelOptions, SystemMessageConfig, Tool,
-    ToolHandlerMap, ToolInvocation, TraceContext, TranscriptRecovery, UiInputOptions,
-    collect_tool_handlers, ensure_attachment_display_names,
+    CreateSessionOptions, CreateSessionResult, ElicitationRequest, ElicitationResult,
+    ExitPlanModeData, FusionTier, GetMessagesResponse, MessageOptions, PermissionRequestData,
+    PermissionsSetModeResult, RequestId, ResumeSessionOptions, ResumeSessionResult,
+    SectionOverride, SessionCapabilities, SessionEvent, SessionId, SetModelOptions,
+    SystemMessageConfig, Tool, ToolHandlerMap, ToolInvocation, TraceContext, TranscriptRecovery,
+    UiInputOptions, collect_tool_handlers, ensure_attachment_display_names,
 };
 use crate::{
     Client, Error, ErrorKind, JsonRpcResponse, ProtocolErrorKind, SessionErrorKind,
@@ -74,9 +74,9 @@ struct SessionCapabilityState {
 /// [`Session::subscribe`] and [`PreparedSession::subscribe`].
 ///
 /// Override per session with
-/// [`SessionConfig::event_buffer_capacity`](crate::types::SessionConfig::event_buffer_capacity)
+/// [`SessionEventOptions::buffer_capacity`](crate::types::SessionEventOptions::buffer_capacity)
 /// or
-/// [`ResumeSessionConfig::event_buffer_capacity`](crate::types::ResumeSessionConfig::event_buffer_capacity).
+/// [`SessionEventOptions::buffer_capacity`](crate::types::SessionEventOptions::buffer_capacity).
 pub const DEFAULT_EVENT_BUFFER_CAPACITY: usize = 512;
 
 /// Validate a caller-supplied event buffer capacity and resolve the default.
@@ -96,7 +96,7 @@ fn resolve_event_buffer_capacity(capacity: Option<usize>) -> Result<usize, Error
 }
 
 /// Bundle of the per-session callbacks the SDK dispatches to. Built from a
-/// [`SessionConfig`] / [`ResumeSessionConfig`] at
+/// [`CreateSessionOptions`] / [`ResumeSessionOptions`] at
 /// [`Client::create_session`] / [`Client::resume_session`] time. Each
 /// field is `None` (or an empty map for tools) when the caller didn't
 /// install a handler -- in that case the SDK skips dispatch for that
@@ -1049,8 +1049,8 @@ impl CreateEventLoop {
 /// Protocol methods (`send`, `get_events`, `abort`, etc.) automatically
 /// inject the session ID into RPC params.
 ///
-/// Call [`destroy`](Self::destroy) for graceful cleanup (RPC + local). If dropped
-/// without calling `destroy`, the `Drop` impl aborts the event loop and
+/// Call [`disconnect`](Self::disconnect) for graceful cleanup (RPC + local). If dropped
+/// without calling `disconnect`, the `Drop` impl aborts the event loop and
 /// unregisters from the router as a best-effort safety net.
 pub struct Session {
     ahp_creation_config: ParkingLotMutex<Option<serde_json::Value>>,
@@ -1217,7 +1217,7 @@ impl Session {
     }
 
     /// Returns a [`CancellationToken`] that fires when this session shuts
-    /// down (via [`Session::stop_event_loop`], [`Session::destroy`], or
+    /// down (via [`Session::stop_event_loop`], [`Session::disconnect`], or
     /// [`Drop`]), loses its router registration, or its owner connection closes.
     ///
     /// Use this to bind an external task's lifetime to the session — when
@@ -1232,7 +1232,7 @@ impl Session {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(session: github_copilot_sdk::session::Session) {
+    /// # async fn example(session: copilot_sdk::session::Session) {
     /// let token = session.cancellation_token();
     /// tokio::select! {
     ///     _ = token.cancelled() => println!("session shut down"),
@@ -1257,7 +1257,7 @@ impl Session {
     /// [`SessionEvent`] but cannot influence permission decisions, tool
     /// results, or anything else that requires returning a value. Those
     /// remain the responsibility of the per-callback handlers passed via
-    /// [`SessionConfig`]'s `with_*_handler`
+    /// [`CreateSessionOptions`]'s `with_*_handler`
     /// builder methods.
     ///
     /// The returned handle implements both an inherent
@@ -1297,7 +1297,7 @@ impl Session {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(session: github_copilot_sdk::session::Session) {
+    /// # async fn example(session: copilot_sdk::session::Session) {
     /// let mut events = session.subscribe();
     /// tokio::spawn(async move {
     ///     while let Ok(event) = events.recv().await {
@@ -1380,7 +1380,7 @@ impl Session {
         result
     }
 
-    /// Stop the internal event loop. Called automatically on [`destroy`](Self::destroy).
+    /// Stop the internal event loop. Called automatically on [`disconnect`](Self::disconnect).
     ///
     /// Cooperative: signals shutdown via the session's [`CancellationToken`]
     /// and awaits the loop's natural exit rather than aborting the task, so
@@ -1890,12 +1890,6 @@ impl Session {
         Ok(response.events)
     }
 
-    /// Deprecated alias for [`get_events`](Self::get_events).
-    #[deprecated(since = "0.1.0", note = "Use `get_events()` instead")]
-    pub async fn get_messages(&self) -> Result<Vec<SessionEvent>, Error> {
-        self.get_events().await
-    }
-
     /// Abort the current agent turn.
     ///
     /// # Cancel safety
@@ -1918,28 +1912,25 @@ impl Session {
     /// Pass `None` for `opts` if no extra configuration is needed.
     pub async fn set_model(&self, model: &str, opts: Option<SetModelOptions>) -> Result<(), Error> {
         let opts = opts.unwrap_or_default();
-        let mut request = ModelSwitchToOptions::new(model);
+        let mut auto_tier = None;
+        let mut fusion_tier = None;
         let mut reset_auto_tier = false;
         match opts.auto_tier {
-            Some(AutoTierPreference::Tier(tier)) => request = request.auto_tier(tier),
-            Some(AutoTierPreference::Fusion(fusion_tier)) => {
-                request = request.fusion_tier(fusion_tier);
-            }
+            Some(AutoTierPreference::Tier(tier)) => auto_tier = Some(tier),
+            Some(AutoTierPreference::Fusion(tier)) => fusion_tier = Some(tier),
             Some(AutoTierPreference::Reset) => reset_auto_tier = true,
             None => {}
         }
-        if let Some(effort) = opts.reasoning_effort {
-            request = request.reasoning_effort(effort);
-        }
-        if let Some(summary) = opts.reasoning_summary {
-            request = request.reasoning_summary(summary);
-        }
-        if let Some(context_tier) = opts.context_tier {
-            request = request.context_tier(context_tier);
-        }
-        if let Some(capabilities) = opts.model_capabilities {
-            request = request.model_capabilities(capabilities);
-        }
+        let request = ModelSwitchToRequest {
+            model_id: model.to_owned(),
+            auto_tier,
+            fusion_tier,
+            reasoning_effort: opts.reasoning_effort,
+            reasoning_summary: opts.reasoning_summary,
+            context_tier: opts.context_tier,
+            model_capabilities: opts.model_capabilities,
+            ..Default::default()
+        };
 
         if reset_auto_tier {
             // The generated request skips a `None` tier, which the runtime reads
@@ -1954,7 +1945,7 @@ impl Session {
             return Ok(());
         }
 
-        self.rpc().model().switch_to_with_options(request).await?;
+        self.rpc().model().switch_to(request).await?;
         Ok(())
     }
 
@@ -2036,8 +2027,8 @@ impl Session {
     /// Replace the tools this client supplies to the session.
     ///
     /// `tools` becomes the complete set of externally implemented tools this
-    /// client supplies, replacing the set from [`SessionConfig::with_tools`],
-    /// [`ResumeSessionConfig::with_tools`], or a previous call. Built-in, MCP,
+    /// client supplies, replacing the set from [`crate::SessionToolOptions::with_definitions`],
+    /// or a previous call. Built-in, MCP,
     /// plugin, and extension tools, and tools that other clients connected to
     /// the session supply, are unaffected. Pass an empty collection to remove
     /// all of this client's tools.
@@ -2086,12 +2077,12 @@ impl Session {
     ///
     /// ```no_run
     /// # use std::sync::Arc;
-    /// # use github_copilot_sdk::Tool;
-    /// # use github_copilot_sdk::tool::ToolHandler;
+    /// # use copilot_sdk::Tool;
+    /// # use copilot_sdk::tool::ToolHandler;
     /// # async fn example(
-    /// #     session: github_copilot_sdk::session::Session,
+    /// #     session: copilot_sdk::session::Session,
     /// #     search_issues: Arc<dyn ToolHandler>,
-    /// # ) -> Result<(), github_copilot_sdk::Error> {
+    /// # ) -> Result<(), copilot_sdk::Error> {
     /// session
     ///     .set_tools([Tool::new("search_issues")
     ///         .with_description("Search the issues shown on the current page")
@@ -2199,13 +2190,6 @@ impl Session {
         self.client
             .unregister_session_owned(&self.id, self.registration_token);
         Ok(())
-    }
-
-    /// Deprecated alias for [`disconnect`](Self::disconnect).
-    /// Prefer `disconnect` in new code.
-    #[deprecated(since = "0.1.0", note = "Use `disconnect()` instead")]
-    pub async fn destroy(&self) -> Result<(), Error> {
-        self.disconnect().await
     }
 
     /// Write a log message to the session.
@@ -2427,7 +2411,7 @@ impl Client {
     /// every *routed* event a session emits, including events the CLI emits
     /// while `session.create` is still in flight and ephemeral events (such
     /// as `session.idle`) that cannot be recovered from
-    /// [`Session::get_messages`]. [`create_session`](Self::create_session)
+    /// [`Session::get_events`]. [`create_session`](Self::create_session)
     /// is a thin wrapper over `prepare_session(...)?.start()` and cannot
     /// offer the same guarantee, because the subscription can only be
     /// installed after the returned `Session` exists.
@@ -2442,7 +2426,7 @@ impl Client {
     ///
     /// `prepare_session` performs no router registration, spawns no task,
     /// and writes nothing to the wire. It only validates
-    /// [`event_buffer_capacity`](SessionConfig::event_buffer_capacity),
+    /// [`buffer_capacity`](crate::SessionEventOptions::buffer_capacity),
     /// allocates a local broadcast channel and cancellation token, and
     /// stores the config. Dropping the returned handle without starting it
     /// leaves no client-side or server-side state behind and closes every
@@ -2451,7 +2435,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns [`ErrorKind::InvalidConfig`] if
-    /// [`event_buffer_capacity`](SessionConfig::event_buffer_capacity) is
+    /// [`buffer_capacity`](crate::SessionEventOptions::buffer_capacity) is
     /// `Some(0)`. All other configuration and protocol errors surface from
     /// [`PreparedSession::start`], with the same
     /// [`ErrorKind`]s [`create_session`](Self::create_session) has always
@@ -2460,9 +2444,9 @@ impl Client {
     /// # Example
     ///
     /// ```no_run
-    /// # use github_copilot_sdk::{Client, SessionConfig};
-    /// # async fn example(client: Client) -> Result<(), github_copilot_sdk::Error> {
-    /// let prepared = client.prepare_session(SessionConfig::default())?;
+    /// # use copilot_sdk::{Client, CreateSessionOptions};
+    /// # async fn example(client: Client) -> Result<(), copilot_sdk::Error> {
+    /// let prepared = client.prepare_session(CreateSessionOptions::default())?;
     /// let mut events = prepared.subscribe();
     /// let drain = tokio::spawn(async move {
     ///     while let Ok(event) = events.recv().await {
@@ -2474,8 +2458,8 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn prepare_session(&self, config: SessionConfig) -> Result<PreparedSession, Error> {
-        let capacity = resolve_event_buffer_capacity(config.event_buffer_capacity)?;
+    pub fn prepare_session(&self, config: CreateSessionOptions) -> Result<PreparedSession, Error> {
+        let capacity = resolve_event_buffer_capacity(config.events.buffer_capacity)?;
         Ok(PreparedSession::new(
             self.clone(),
             PreparedKind::Create(Box::new(config)),
@@ -2488,20 +2472,20 @@ impl Client {
     /// The resume counterpart of [`prepare_session`](Self::prepare_session);
     /// see that method for the inertness guarantee, error semantics, and
     /// rationale. Particularly relevant on resume with
-    /// [`continue_pending_work`](ResumeSessionConfig::continue_pending_work),
+    /// [`continue_pending_work`](ResumeSessionOptions::continue_pending_work),
     /// where the runtime can start emitting events (and reach
     /// `session.idle`) while `session.resume` is still in flight.
     ///
     /// # Errors
     ///
     /// Returns [`ErrorKind::InvalidConfig`] if
-    /// [`event_buffer_capacity`](ResumeSessionConfig::event_buffer_capacity)
+    /// [`buffer_capacity`](crate::SessionEventOptions::buffer_capacity)
     /// is `Some(0)`.
     pub fn prepare_resume_session(
         &self,
-        config: ResumeSessionConfig,
+        config: ResumeSessionOptions,
     ) -> Result<PreparedSession, Error> {
-        let capacity = resolve_event_buffer_capacity(config.event_buffer_capacity)?;
+        let capacity = resolve_event_buffer_capacity(config.events.buffer_capacity)?;
         Ok(PreparedSession::new(
             self.clone(),
             PreparedKind::Resume(Box::new(config)),
@@ -2515,14 +2499,14 @@ impl Client {
     /// and spawns an internal event loop that dispatches to the handler.
     ///
     /// All callbacks (per-event handlers, tool handlers, hooks, transform)
-    /// are configured via [`SessionConfig`] using its `with_*_handler` /
+    /// are configured via [`CreateSessionOptions`] using its `with_*_handler` /
     /// `with_tools` / `with_hooks` / `with_system_message_transform` builder
     /// methods.
     ///
-    /// If [`hooks_handler`](SessionConfig::hooks_handler) is set, the
+    /// If [`handlers`](crate::SessionHookOptions::handlers) is set, the
     /// wire-level `hooks` flag is automatically enabled.
     ///
-    /// If [`system_message_transform`](SessionConfig::system_message_transform) is set, the SDK injects
+    /// If [`system_message_transform`](CreateSessionOptions::system_message_transform) is set, the SDK injects
     /// `action: "transform"` sections into the [`SystemMessageConfig`] wire
     /// format and handles `systemMessage.transform` RPC callbacks during
     /// the session.
@@ -2540,7 +2524,7 @@ impl Client {
     /// [`Session::subscribe`]. Use
     /// [`prepare_session`](Self::prepare_session) when startup events
     /// matter.
-    pub async fn create_session(&self, config: SessionConfig) -> Result<Session, Error> {
+    pub async fn create_session(&self, config: CreateSessionOptions) -> Result<Session, Error> {
         self.prepare_session(config)?.start().await
     }
 
@@ -2550,7 +2534,7 @@ impl Client {
     /// session on the router, and spawns the event loop.
     ///
     /// All callbacks (event handler, hooks, transform) are configured
-    /// via [`ResumeSessionConfig`] using its `with_*` builder methods.
+    /// via [`ResumeSessionOptions`] using its `with_*` builder methods.
     ///
     /// See [`Self::create_session`] for the defaults applied when callback
     /// fields are unset.
@@ -2567,24 +2551,24 @@ impl Client {
     /// Use [`prepare_resume_session`](Self::prepare_resume_session) when the
     /// consumer must be installed before protocol activity begins or when
     /// multiple startup observers are required.
-    pub async fn resume_session(&self, config: ResumeSessionConfig) -> Result<Session, Error> {
+    pub async fn resume_session(&self, config: ResumeSessionOptions) -> Result<Session, Error> {
         self.prepare_resume_session(config)?.start().await
     }
 
     async fn start_prepared_create(
         &self,
-        mut config: SessionConfig,
+        mut config: CreateSessionOptions,
         event_tx: tokio::sync::broadcast::Sender<SessionEvent>,
         shutdown: CancellationToken,
     ) -> Result<Session, Error> {
         let total_start = Instant::now();
-        if config.cloud.is_some() && config.skill_provider.is_some() {
+        if config.cloud.is_some() && config.skills.provider.is_some() {
             return Err(Error::with_message(
                 ErrorKind::InvalidConfig,
                 "Skill providers are not supported for cloud sessions.",
             ));
         }
-        if config.cloud.is_some() && config.memory_store.is_some() {
+        if config.cloud.is_some() && config.state.memory_store.is_some() {
             return Err(Error::with_message(
                 ErrorKind::InvalidConfig,
                 "Memory stores are not supported for cloud sessions.",
@@ -2615,14 +2599,14 @@ impl Client {
                     .unwrap_or_else(|| SessionId::new(uuid::Uuid::new_v4().to_string())),
             )
         };
-        if config.hooks_handler.is_some() && config.hooks.is_none() {
-            config.hooks = Some(true);
+        if config.hooks.handlers.is_some() && config.hooks.has_handlers.is_none() {
+            config.hooks.has_handlers = Some(true);
         }
         if let Some(transforms) = config.system_message_transform.clone() {
             inject_transform_sections(&mut config, transforms.as_ref());
         }
         let mode = self.inner.mode;
-        if mode == crate::ClientMode::Empty && config.available_tools.is_none() {
+        if mode == crate::ClientMode::Empty && config.tools.available_tools.is_none() {
             return Err(Error::with_message(
                 ErrorKind::InvalidConfig,
                 "ClientMode::Empty requires available_tools to be set on the session config. \
@@ -2632,54 +2616,61 @@ impl Client {
         }
         crate::mode::validate_tool_filter_list(
             "available_tools",
-            config.available_tools.as_deref(),
+            config.tools.available_tools.as_deref(),
         )?;
-        crate::mode::validate_tool_filter_list("excluded_tools", config.excluded_tools.as_deref())?;
+        crate::mode::validate_tool_filter_list(
+            "excluded_tools",
+            config.tools.excluded_tools.as_deref(),
+        )?;
         config.system_message =
             crate::mode::system_message_for_mode(mode, config.system_message.take());
-        config.memory = crate::mode::memory_for_mode(mode, config.memory.take());
-        validate_memory_store(config.memory_store.is_some(), config.memory.as_ref())?;
-        config.enable_experimental_mode =
-            crate::mode::experimental_mode_for_mode(mode, config.enable_experimental_mode);
+        config.state.memory = crate::mode::memory_for_mode(mode, config.state.memory.take());
+        validate_memory_store(
+            config.state.memory_store.is_some(),
+            config.state.memory.as_ref(),
+        )?;
+        config.experiments.enable_experimental_mode = crate::mode::experimental_mode_for_mode(
+            mode,
+            config.experiments.enable_experimental_mode,
+        );
         if mode == crate::ClientMode::Empty {
-            if config.enable_session_telemetry.is_none() {
-                config.enable_session_telemetry = Some(false);
+            if config.github.telemetry_enabled.is_none() {
+                config.github.telemetry_enabled = Some(false);
             }
-            if config.skip_embedding_retrieval.is_none() {
-                config.skip_embedding_retrieval = Some(true);
+            if config.state.skip_embedding_retrieval.is_none() {
+                config.state.skip_embedding_retrieval = Some(true);
             }
-            if config.enable_on_demand_instruction_discovery.is_none() {
-                config.enable_on_demand_instruction_discovery = Some(false);
+            if config.instructions.on_demand_discovery.is_none() {
+                config.instructions.on_demand_discovery = Some(false);
             }
-            if config.enable_file_hooks.is_none() {
-                config.enable_file_hooks = Some(false);
+            if config.hooks.enable_repository_hooks.is_none() {
+                config.hooks.enable_repository_hooks = Some(false);
             }
-            if config.enable_host_git_operations.is_none() {
-                config.enable_host_git_operations = Some(false);
+            if config.git.enable_host_git_operations.is_none() {
+                config.git.enable_host_git_operations = Some(false);
             }
-            if config.enable_session_store.is_none() {
-                config.enable_session_store = Some(false);
+            if config.state.enable_cross_session_store.is_none() {
+                config.state.enable_cross_session_store = Some(false);
             }
-            if config.enable_skills.is_none() {
-                config.enable_skills = Some(false);
+            if config.skills.enabled.is_none() {
+                config.skills.enabled = Some(false);
             }
         }
-        if mode == crate::ClientMode::Empty && config.mcp_oauth_token_storage.is_none() {
-            config.mcp_oauth_token_storage = Some("in-memory".into());
+        if mode == crate::ClientMode::Empty && config.mcp.oauth_token_storage.is_none() {
+            config.mcp.oauth_token_storage = Some("in-memory".into());
         }
-        if mode == crate::ClientMode::Empty && config.embedding_cache_storage.is_none() {
-            config.embedding_cache_storage = Some("in-memory".into());
+        if mode == crate::ClientMode::Empty && config.state.embedding_cache_storage.is_none() {
+            config.state.embedding_cache_storage = Some("in-memory".into());
         }
-        config.custom_agents_local_only =
-            crate::mode::resolve_custom_agents_local_only(mode, config.custom_agents_local_only);
-        let opt_skip_custom_instructions = config.skip_custom_instructions;
-        let opt_custom_agents_local_only = config.custom_agents_local_only;
-        let opt_coauthor_enabled = config.coauthor_enabled;
-        let opt_manage_schedule_enabled = config.manage_schedule_enabled;
-        let opt_included_builtin_skills = config.included_builtin_skills.take();
+        config.agents.local_discovery_only =
+            crate::mode::resolve_custom_agents_local_only(mode, config.agents.local_discovery_only);
+        let opt_skip_custom_instructions = config.instructions.skip_custom_instructions;
+        let opt_custom_agents_local_only = config.agents.local_discovery_only;
+        let opt_coauthor_enabled = config.git.coauthor_enabled;
+        let opt_manage_schedule_enabled = config.tools.manage_schedule_enabled;
+        let opt_included_builtin_skills = config.skills.included_builtin_skills.take();
         let (mut wire, mut runtime) = config.into_wire(local_session_id.clone())?;
-        wire.enable_github_telemetry_forwarding =
-            self.inner.on_github_telemetry.is_some().then_some(true);
+        wire.github.telemetry_forwarding = self.inner.on_github_telemetry.is_some().then_some(true);
 
         let permission_handler = crate::permission::resolve_handler(
             runtime.permission_handler.take(),
@@ -2691,8 +2682,8 @@ impl Client {
         let handlers = SessionHandlers {
             permission: permission_handler,
             managed_settings_enabled: has_managed_settings(
-                wire.enable_managed_settings,
-                wire.managed_settings.as_ref(),
+                wire.github.fetch_managed_settings,
+                wire.policy.managed_settings.as_ref(),
             ),
             elicitation: runtime.elicitation_handler.take(),
             mcp_auth: runtime.mcp_auth_handler.take(),
@@ -2708,7 +2699,7 @@ impl Client {
         let session_creation = handlers.session_creation.clone();
         let hooks = runtime.hooks_handler.take();
         let transforms = runtime.system_message_transform.take();
-        let tools_count = wire.tools.as_ref().map_or(0, Vec::len);
+        let tools_count = wire.tools.definitions.as_ref().map_or(0, Vec::len);
         let commands_count = runtime.commands.as_ref().map_or(0, Vec::len);
         let has_hooks = hooks.is_some();
         let command_handlers = build_command_handler_map(runtime.commands.as_deref());
@@ -2719,7 +2710,7 @@ impl Client {
             .github_token_provider
             .take()
             .map(|provider| self.register_github_token_provider(provider));
-        wire.github_token_provider_registration_id = github_token_registration
+        wire.github.token_provider_registration_id = github_token_registration
             .as_ref()
             .map(|registration| registration.id().to_string());
         let has_mcp_auth_handler = handlers.mcp_auth.is_some();
@@ -2812,7 +2803,7 @@ impl Client {
                 acquire_session_initialization(
                     self,
                     sid,
-                    wire.request_auto_mode_recovery == Some(true),
+                    wire.interaction.request_auto_mode_recovery == Some(true),
                 )
                 .await?,
             )
@@ -2849,7 +2840,7 @@ impl Client {
                     inline_stash.clone(),
                     shutdown.clone(),
                     external_tools_shutdown.clone(),
-                    wire.request_auto_mode_recovery == Some(true),
+                    wire.interaction.request_auto_mode_recovery == Some(true),
                 );
                 (
                     Some(callback),
@@ -2936,7 +2927,7 @@ impl Client {
             snapshot: create_result.capabilities.unwrap_or_default(),
             auto_mode_recovery,
         };
-        if wire.request_auto_mode_recovery == Some(true)
+        if wire.interaction.request_auto_mode_recovery == Some(true)
             && capabilities.read().auto_mode_recovery != Some(true)
         {
             return Err(pending_registration
@@ -3003,33 +2994,31 @@ impl Client {
     /// session on the router, and spawns the event loop.
     ///
     /// All callbacks (event handler, hooks, transform) are configured
-    /// via [`ResumeSessionConfig`] using its `with_*` builder methods.
+    /// via [`ResumeSessionOptions`] using its `with_*` builder methods.
     ///
     /// See [`Self::create_session`] for the defaults applied when callback
     /// fields are unset.
     async fn start_prepared_resume(
         &self,
-        mut config: ResumeSessionConfig,
+        mut config: ResumeSessionOptions,
         event_tx: tokio::sync::broadcast::Sender<SessionEvent>,
         shutdown: CancellationToken,
     ) -> Result<Session, Error> {
         let total_start = Instant::now();
         let mode = self.inner.mode;
         config.validate_auto_mode_recovery()?;
-        if config.auto_mode_recovery
+        if config.interaction.auto_mode_recovery
             && !self.inner.session_fs_configured
             && is_abbreviated_uuid_prefix(config.session_id.as_str())
         {
-            let mut lookup =
-                crate::rpc::SessionsFindByPrefixOptions::new(config.session_id.to_string());
-            if let Some(dir) = &config.config_directory {
-                lookup = lookup.config_dir(dir.to_string_lossy());
-            }
-            let resolved = self
-                .rpc()
-                .sessions()
-                .find_by_prefix_with_options(lookup)
-                .await?;
+            let lookup = crate::rpc::SessionsFindByPrefixRequest {
+                prefix: config.session_id.to_string(),
+                config_dir: config
+                    .config_directory
+                    .as_ref()
+                    .map(|dir| dir.to_string_lossy().into_owned()),
+            };
+            let resolved = self.rpc().sessions().find_by_prefix(lookup).await?;
             let canonical = resolved.session_id.ok_or_else(|| {
                 Error::from(SessionErrorKind::NotFound(config.session_id.clone()))
             })?;
@@ -3057,13 +3046,13 @@ impl Client {
             None
         };
         let session_id = config.session_id.clone();
-        if config.hooks_handler.is_some() && config.hooks.is_none() {
-            config.hooks = Some(true);
+        if config.hooks.handlers.is_some() && config.hooks.has_handlers.is_none() {
+            config.hooks.has_handlers = Some(true);
         }
         if let Some(transforms) = config.system_message_transform.clone() {
             inject_transform_sections_resume(&mut config, transforms.as_ref());
         }
-        if mode == crate::ClientMode::Empty && config.available_tools.is_none() {
+        if mode == crate::ClientMode::Empty && config.tools.available_tools.is_none() {
             return Err(Error::with_message(
                 ErrorKind::InvalidConfig,
                 "ClientMode::Empty requires available_tools to be set on the session config. \
@@ -3073,54 +3062,61 @@ impl Client {
         }
         crate::mode::validate_tool_filter_list(
             "available_tools",
-            config.available_tools.as_deref(),
+            config.tools.available_tools.as_deref(),
         )?;
-        crate::mode::validate_tool_filter_list("excluded_tools", config.excluded_tools.as_deref())?;
+        crate::mode::validate_tool_filter_list(
+            "excluded_tools",
+            config.tools.excluded_tools.as_deref(),
+        )?;
         config.system_message =
             crate::mode::system_message_for_mode(mode, config.system_message.take());
-        config.memory = crate::mode::memory_for_mode(mode, config.memory.take());
-        validate_memory_store(config.memory_store.is_some(), config.memory.as_ref())?;
-        config.enable_experimental_mode =
-            crate::mode::experimental_mode_for_mode(mode, config.enable_experimental_mode);
+        config.state.memory = crate::mode::memory_for_mode(mode, config.state.memory.take());
+        validate_memory_store(
+            config.state.memory_store.is_some(),
+            config.state.memory.as_ref(),
+        )?;
+        config.experiments.enable_experimental_mode = crate::mode::experimental_mode_for_mode(
+            mode,
+            config.experiments.enable_experimental_mode,
+        );
         if mode == crate::ClientMode::Empty {
-            if config.enable_session_telemetry.is_none() {
-                config.enable_session_telemetry = Some(false);
+            if config.github.telemetry_enabled.is_none() {
+                config.github.telemetry_enabled = Some(false);
             }
-            if config.skip_embedding_retrieval.is_none() {
-                config.skip_embedding_retrieval = Some(true);
+            if config.state.skip_embedding_retrieval.is_none() {
+                config.state.skip_embedding_retrieval = Some(true);
             }
-            if config.enable_on_demand_instruction_discovery.is_none() {
-                config.enable_on_demand_instruction_discovery = Some(false);
+            if config.instructions.on_demand_discovery.is_none() {
+                config.instructions.on_demand_discovery = Some(false);
             }
-            if config.enable_file_hooks.is_none() {
-                config.enable_file_hooks = Some(false);
+            if config.hooks.enable_repository_hooks.is_none() {
+                config.hooks.enable_repository_hooks = Some(false);
             }
-            if config.enable_host_git_operations.is_none() {
-                config.enable_host_git_operations = Some(false);
+            if config.git.enable_host_git_operations.is_none() {
+                config.git.enable_host_git_operations = Some(false);
             }
-            if config.enable_session_store.is_none() {
-                config.enable_session_store = Some(false);
+            if config.state.enable_cross_session_store.is_none() {
+                config.state.enable_cross_session_store = Some(false);
             }
-            if config.enable_skills.is_none() {
-                config.enable_skills = Some(false);
+            if config.skills.enabled.is_none() {
+                config.skills.enabled = Some(false);
             }
         }
-        if mode == crate::ClientMode::Empty && config.mcp_oauth_token_storage.is_none() {
-            config.mcp_oauth_token_storage = Some("in-memory".into());
+        if mode == crate::ClientMode::Empty && config.mcp.oauth_token_storage.is_none() {
+            config.mcp.oauth_token_storage = Some("in-memory".into());
         }
-        if mode == crate::ClientMode::Empty && config.embedding_cache_storage.is_none() {
-            config.embedding_cache_storage = Some("in-memory".into());
+        if mode == crate::ClientMode::Empty && config.state.embedding_cache_storage.is_none() {
+            config.state.embedding_cache_storage = Some("in-memory".into());
         }
-        config.custom_agents_local_only =
-            crate::mode::resolve_custom_agents_local_only(mode, config.custom_agents_local_only);
-        let opt_skip_custom_instructions = config.skip_custom_instructions;
-        let opt_custom_agents_local_only = config.custom_agents_local_only;
-        let opt_coauthor_enabled = config.coauthor_enabled;
-        let opt_manage_schedule_enabled = config.manage_schedule_enabled;
-        let opt_included_builtin_skills = config.included_builtin_skills.take();
+        config.agents.local_discovery_only =
+            crate::mode::resolve_custom_agents_local_only(mode, config.agents.local_discovery_only);
+        let opt_skip_custom_instructions = config.instructions.skip_custom_instructions;
+        let opt_custom_agents_local_only = config.agents.local_discovery_only;
+        let opt_coauthor_enabled = config.git.coauthor_enabled;
+        let opt_manage_schedule_enabled = config.tools.manage_schedule_enabled;
+        let opt_included_builtin_skills = config.skills.included_builtin_skills.take();
         let (mut wire, mut runtime) = config.into_wire()?;
-        wire.enable_github_telemetry_forwarding =
-            self.inner.on_github_telemetry.is_some().then_some(true);
+        wire.github.telemetry_forwarding = self.inner.on_github_telemetry.is_some().then_some(true);
 
         let permission_handler = crate::permission::resolve_handler(
             runtime.permission_handler.take(),
@@ -3132,8 +3128,8 @@ impl Client {
         let handlers = SessionHandlers {
             permission: permission_handler,
             managed_settings_enabled: has_managed_settings(
-                wire.enable_managed_settings,
-                wire.managed_settings.as_ref(),
+                wire.github.fetch_managed_settings,
+                wire.policy.managed_settings.as_ref(),
             ),
             elicitation: runtime.elicitation_handler.take(),
             mcp_auth: runtime.mcp_auth_handler.take(),
@@ -3149,7 +3145,7 @@ impl Client {
         let session_creation = handlers.session_creation.clone();
         let hooks = runtime.hooks_handler.take();
         let transforms = runtime.system_message_transform.take();
-        let tools_count = wire.tools.as_ref().map_or(0, Vec::len);
+        let tools_count = wire.tools.definitions.as_ref().map_or(0, Vec::len);
         let commands_count = runtime.commands.as_ref().map_or(0, Vec::len);
         let has_hooks = hooks.is_some();
         let command_handlers = build_command_handler_map(runtime.commands.as_deref());
@@ -3160,7 +3156,7 @@ impl Client {
             .github_token_provider
             .take()
             .map(|provider| self.register_github_token_provider(provider));
-        wire.github_token_provider_registration_id = github_token_registration
+        wire.github.token_provider_registration_id = github_token_registration
             .as_ref()
             .map(|registration| registration.id().to_string());
         let has_mcp_auth_handler = handlers.mcp_auth.is_some();
@@ -3210,7 +3206,7 @@ impl Client {
             acquire_session_initialization(
                 self,
                 &session_id,
-                wire.request_auto_mode_recovery == Some(true),
+                wire.interaction.request_auto_mode_recovery == Some(true),
             )
             .await?,
         );
@@ -3296,7 +3292,9 @@ impl Client {
             })
             .into());
         }
-        if wire.request_auto_mode_recovery == Some(true) && auto_mode_recovery != Some(true) {
+        if wire.interaction.request_auto_mode_recovery == Some(true)
+            && auto_mode_recovery != Some(true)
+        {
             return Err(registration
                 .reject_auto_mode_recovery(event_loop, initialization)
                 .await);
@@ -3428,8 +3426,7 @@ impl Client {
 ///
 /// Subscriptions taken directly from this prepared handle use the finite
 /// broadcast buffer — [`DEFAULT_EVENT_BUFFER_CAPACITY`] unless
-/// [`SessionConfig::event_buffer_capacity`] /
-/// [`ResumeSessionConfig::event_buffer_capacity`] overrides it. Subscribers
+/// [`crate::SessionEventOptions::buffer_capacity`] overrides it. Subscribers
 /// that fall behind observe
 /// [`Lagged`](crate::subscription::Lagged) instead of applying backpressure
 /// to the event loop. Consumers that need a lossless view of a large
@@ -3450,7 +3447,7 @@ impl Client {
 /// request whose completion was held too (another client answered it) reaches
 /// subscribers but not this session's handlers. Routed events are never
 /// dropped for lack of an installed receiver. Pin
-/// [`SessionConfig::session_id`](crate::types::SessionConfig::session_id)
+/// [`CreateSessionOptions::session_id`](crate::types::CreateSessionOptions::session_id)
 /// to register the session before the RPC is sent.
 #[must_use = "a PreparedSession does nothing until started"]
 pub struct PreparedSession {
@@ -3463,8 +3460,8 @@ pub struct PreparedSession {
 /// Which startup path a [`PreparedSession`] runs when started. Boxed
 /// because the two config types are large and differently sized.
 enum PreparedKind {
-    Create(Box<SessionConfig>),
-    Resume(Box<ResumeSessionConfig>),
+    Create(Box<CreateSessionOptions>),
+    Resume(Box<ResumeSessionOptions>),
 }
 
 impl PreparedSession {
@@ -3486,7 +3483,7 @@ impl PreparedSession {
     /// succeeds, so a subscription taken here observes the full event
     /// stream from the session's first routed event onward — including
     /// ephemeral events such as `session.idle` that
-    /// [`Session::get_messages`] cannot recover.
+    /// [`Session::get_events`] cannot recover.
     ///
     /// May be called any number of times, and each subscriber receives its
     /// own copy of the stream — subject to the buffering contract above. A
@@ -3598,7 +3595,7 @@ async fn finish_session_setup(
 ///
 /// Under [`ClientMode::Empty`](crate::ClientMode::Empty) the overridable feature
 /// flags fall back to safe defaults (caller values win), while
-/// `installed_plugins` is unconditionally empty. `included_builtin_skills`
+/// `plugins.installed` is unconditionally empty. `skills.included_builtin_skills`
 /// defaults to an empty list, but callers can explicitly allow selected
 /// runtime-bundled skills. Under other modes only explicitly-set fields are
 /// forwarded.
@@ -3613,33 +3610,43 @@ fn build_mode_post_create_patch(
     use crate::generated::api_types::SessionUpdateOptionsParams;
     let mut patch = SessionUpdateOptionsParams::default();
     let should_send = if mode == crate::ClientMode::Empty {
-        patch.skip_custom_instructions = Some(opt_skip_custom_instructions.unwrap_or(true));
-        patch.custom_agents_local_only = Some(opt_custom_agents_local_only.unwrap_or(true));
-        patch.coauthor_enabled = Some(opt_coauthor_enabled.unwrap_or(false));
-        patch.manage_schedule_enabled = Some(opt_manage_schedule_enabled.unwrap_or(false));
-        patch.installed_plugins = Some(Vec::new());
-        patch.included_builtin_skills = Some(opt_included_builtin_skills.unwrap_or_default());
+        patch
+            .instructions
+            .get_or_insert_default()
+            .skip_custom_instructions = Some(opt_skip_custom_instructions.unwrap_or(true));
+        patch.agents.get_or_insert_default().local_discovery_only =
+            Some(opt_custom_agents_local_only.unwrap_or(true));
+        patch.git.get_or_insert_default().coauthor_enabled =
+            Some(opt_coauthor_enabled.unwrap_or(false));
+        patch.tools.get_or_insert_default().manage_schedule_enabled =
+            Some(opt_manage_schedule_enabled.unwrap_or(false));
+        patch.plugins.get_or_insert_default().installed = Some(Vec::new());
+        patch.skills.get_or_insert_default().included_builtin_skills =
+            Some(opt_included_builtin_skills.unwrap_or_default());
         true
     } else {
         let mut any = false;
         if let Some(v) = opt_skip_custom_instructions {
-            patch.skip_custom_instructions = Some(v);
+            patch
+                .instructions
+                .get_or_insert_default()
+                .skip_custom_instructions = Some(v);
             any = true;
         }
         if let Some(v) = opt_custom_agents_local_only {
-            patch.custom_agents_local_only = Some(v);
+            patch.agents.get_or_insert_default().local_discovery_only = Some(v);
             any = true;
         }
         if let Some(v) = opt_coauthor_enabled {
-            patch.coauthor_enabled = Some(v);
+            patch.git.get_or_insert_default().coauthor_enabled = Some(v);
             any = true;
         }
         if let Some(v) = opt_manage_schedule_enabled {
-            patch.manage_schedule_enabled = Some(v);
+            patch.tools.get_or_insert_default().manage_schedule_enabled = Some(v);
             any = true;
         }
         if let Some(v) = opt_included_builtin_skills {
-            patch.included_builtin_skills = Some(v);
+            patch.skills.get_or_insert_default().included_builtin_skills = Some(v);
             any = true;
         }
         any
@@ -5369,13 +5376,16 @@ fn apply_transform_sections(
     }
 }
 
-fn inject_transform_sections(config: &mut SessionConfig, transforms: &dyn SystemMessageTransform) {
+fn inject_transform_sections(
+    config: &mut CreateSessionOptions,
+    transforms: &dyn SystemMessageTransform,
+) {
     let sys_msg = config.system_message.get_or_insert_with(Default::default);
     apply_transform_sections(sys_msg, transforms);
 }
 
 fn inject_transform_sections_resume(
-    config: &mut ResumeSessionConfig,
+    config: &mut ResumeSessionOptions,
     transforms: &dyn SystemMessageTransform,
 ) {
     let sys_msg = config.system_message.get_or_insert_with(Default::default);

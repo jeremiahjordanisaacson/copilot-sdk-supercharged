@@ -2,11 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class ScenarioTestingEmptyRuntimeE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : ScenarioTestingE2ETestBase(fixture, "scenario_testing_empty_runtime", output)
@@ -17,18 +17,10 @@ public class ScenarioTestingEmptyRuntimeE2ETests(E2ETestFixture fixture, ITestOu
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
             Mode = CopilotClientMode.Empty,
-            BaseDirectory = Ctx.HomeDir,
+            Runtime = RuntimeConnection.ForDefault(baseDirectory: Ctx.HomeDir)
         });
-        await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            AvailableTools = new ToolSet(),
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            SystemMessage = new SystemMessageConfig
-            {
-                Mode = SystemMessageMode.Replace,
-                Content = "Reply to every request with exactly EMPTY_SCENARIO_READY.",
-            },
-        });
+        await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { SystemMessage = new SystemMessageConfig { Mode = SystemMessageMode.Replace, Content = "Reply to every request with exactly EMPTY_SCENARIO_READY.", }, Tools = new SessionToolOptions { AvailableTools = new ToolSet() }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var response = await session.SendAndWaitAsync(new MessageOptions { Prompt = "Start." });
         Assert.Contains("EMPTY_SCENARIO_READY", response?.Data.Content ?? string.Empty, StringComparison.Ordinal);

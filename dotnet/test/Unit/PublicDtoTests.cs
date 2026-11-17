@@ -7,7 +7,7 @@ using System.Reflection;
 using System.Text.Json;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 /// <summary>
 /// Reflection-based safety net that exercises the get/set surface of every public DTO in
@@ -63,7 +63,7 @@ public class PublicDtoTests
             .GetTypes()
             .Where(type =>
                 type is { IsClass: true, IsAbstract: false, IsPublic: true } &&
-                type.Namespace?.StartsWith("GitHub.Copilot", StringComparison.Ordinal) == true &&
+                type.Namespace?.StartsWith("Microsoft.Copilot", StringComparison.Ordinal) == true &&
                 type.GetConstructor(Type.EmptyTypes) is not null)
             .OrderBy(type => type.FullName, StringComparer.Ordinal);
 

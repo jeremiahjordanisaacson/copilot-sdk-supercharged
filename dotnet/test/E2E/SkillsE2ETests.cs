@@ -5,7 +5,7 @@
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class SkillsE2ETests : E2ETestBase
 {
@@ -69,10 +69,8 @@ IMPORTANT: You MUST include the exact text ""{SkillMarker}"" somewhere in EVERY 
     public async Task Should_Load_And_Apply_Skill_From_SkillDirectories()
     {
         var skillsDir = CreateSkillDir();
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            SkillDirectories = [skillsDir]
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Skills = new SessionSkillOptions { Directories = [skillsDir] } });
 
         Assert.Matches(@"^[a-f0-9-]+$", session.SessionId);
 
@@ -88,11 +86,8 @@ IMPORTANT: You MUST include the exact text ""{SkillMarker}"" somewhere in EVERY 
     public async Task Should_Not_Apply_Skill_When_Disabled_Via_DisabledSkills()
     {
         var skillsDir = CreateSkillDir();
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            SkillDirectories = [skillsDir],
-            DisabledSkills = ["test-skill"]
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Skills = new SessionSkillOptions { Directories = [skillsDir], DisabledSkills = ["test-skill"] } });
 
         Assert.Matches(@"^[a-f0-9-]+$", session.SessionId);
 
@@ -117,20 +112,14 @@ IMPORTANT: You MUST include the exact text ""{SkillMarker}"" somewhere in EVERY 
             "A project skill discovered from .github/skills",
             "Use the exact phrase AMBIENT_DISCOVERY_SKILL when this skill is active.");
 
-        var disabledSession = await CreateSessionAsync(new SessionConfig
-        {
-            WorkingDirectory = projectDir,
-            EnableConfigDiscovery = false,
-        });
+        var disabledSession = await CreateSessionAsync(new CreateSessionOptions
+        { WorkingDirectory = projectDir, EnableConfigDiscovery = false });
         var disabledSkills = await disabledSession.Rpc.Skills.ListAsync();
         Assert.DoesNotContain(disabledSkills.Skills, skill => string.Equals(skill.Name, skillName, StringComparison.Ordinal));
         await disabledSession.DisposeAsync();
 
-        var enabledSession = await CreateSessionAsync(new SessionConfig
-        {
-            WorkingDirectory = projectDir,
-            EnableConfigDiscovery = true,
-        });
+        var enabledSession = await CreateSessionAsync(new CreateSessionOptions
+        { WorkingDirectory = projectDir, EnableConfigDiscovery = true });
         var enabledSkills = await enabledSession.Rpc.Skills.ListAsync();
         var discoveredSkill = Assert.Single(enabledSkills.Skills, skill => string.Equals(skill.Name, skillName, StringComparison.Ordinal));
         Assert.True(discoveredSkill.Enabled);
@@ -154,12 +143,8 @@ IMPORTANT: You MUST include the exact text ""{SkillMarker}"" somewhere in EVERY 
             }
         };
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            SkillDirectories = [skillsDir],
-            CustomAgents = customAgents,
-            Agent = "skill-agent"
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Skills = new SessionSkillOptions { Directories = [skillsDir] }, Agents = new SessionAgentOptions { Definitions = customAgents, Selected = "skill-agent" } });
 
         Assert.Matches(@"^[a-f0-9-]+$", session.SessionId);
 
@@ -185,12 +170,8 @@ IMPORTANT: You MUST include the exact text ""{SkillMarker}"" somewhere in EVERY 
             }
         };
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            SkillDirectories = [skillsDir],
-            CustomAgents = customAgents,
-            Agent = "no-skill-agent"
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Skills = new SessionSkillOptions { Directories = [skillsDir] }, Agents = new SessionAgentOptions { Definitions = customAgents, Selected = "no-skill-agent" } });
 
         Assert.Matches(@"^[a-f0-9-]+$", session.SessionId);
 
@@ -218,10 +199,8 @@ IMPORTANT: You MUST include the exact text ""{SkillMarker}"" somewhere in EVERY 
         await SuspendAndUntrackSessionForResumeAsync(session1);
 
         // Resume with skillDirectories - skill should now be active
-        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
-        {
-            SkillDirectories = [skillsDir]
-        });
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionOptions
+        { Skills = new SessionSkillOptions { Directories = [skillsDir] } });
 
         Assert.Equal(sessionId, session2.SessionId);
 

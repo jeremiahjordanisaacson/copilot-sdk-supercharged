@@ -1,6 +1,6 @@
 package fixture;
 
-import com.github.copilot.generated.rpc.CompatibilityCallParams;
+import com.microsoft.copilot.generated.rpc.CompatibilityCallParams;
 
 public final class PositionalRpcCaller {
     public static void main(String[] args) {

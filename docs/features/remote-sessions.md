@@ -21,9 +21,13 @@ Use the experimental raw `session.rpc.remote.enable()` API with export mode to s
 <!-- docs-validate: strict -->
 <!-- docs-validate: hidden -->
 ```typescript
-import { approveAll } from "@github/copilot-sdk";
+import { approveAll } from "@microsoft/copilot-sdk";
 
-const session = await client.createSession({ onPermissionRequest: approveAll });
+const session = await client.createSession({
+    permissions: {
+        onRequest: approveAll,
+    },
+});
 
 const result = await session.rpc.remote.enable({ mode: "export" });
 console.log("Remote URL:", result.url);
@@ -45,7 +49,7 @@ await session.rpc.remote.disable();
 
 <!-- docs-validate: hidden -->
 ```python
-from copilot.generated.rpc import RemoteEnableRequest, RemoteSessionMode
+from copilot.rpc import RemoteEnableRequest, RemoteSessionMode
 from copilot.session import CopilotSession
 
 async def main(session: CopilotSession):
@@ -58,7 +62,7 @@ async def main(session: CopilotSession):
 <!-- /docs-validate: hidden -->
 
 ```python
-from copilot.generated.rpc import RemoteEnableRequest, RemoteSessionMode
+from copilot.rpc import RemoteEnableRequest, RemoteSessionMode
 
 result = await session.rpc.remote.enable(RemoteEnableRequest(mode=RemoteSessionMode.EXPORT))
 print(f"Remote URL: {result.url}")
@@ -78,16 +82,18 @@ import (
 	"fmt"
 	"log"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func main() {
 	ctx := context.Background()
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: copilot.PermissionHandler.ApproveAll,
+		},
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -125,7 +131,7 @@ _, err = session.RPC.Remote.Disable(ctx)
 #### C#
 
 ```csharp
-#pragma warning disable GHCP001 // The remote RPC API is experimental.
+#pragma warning disable MCPSDK001 // The remote RPC API is experimental.
 var result = await session.Rpc.Remote.EnableAsync(mode: RemoteSessionMode.Export);
 Console.WriteLine($"Remote URL: {result.Url}");
 
@@ -136,7 +142,7 @@ await session.Rpc.Remote.DisableAsync();
 #### Rust
 
 ```rust
-use github_copilot_sdk::rpc::{RemoteEnableRequest, RemoteSessionMode};
+use copilot_sdk::rpc::{RemoteEnableRequest, RemoteSessionMode};
 
 let result = session
     .rpc()

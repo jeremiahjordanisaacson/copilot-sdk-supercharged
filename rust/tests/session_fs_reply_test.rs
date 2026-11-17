@@ -19,13 +19,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use github_copilot_sdk::Client;
-use github_copilot_sdk::session::Session;
-use github_copilot_sdk::session_fs::{
+use copilot_sdk::Client;
+use copilot_sdk::session::Session;
+use copilot_sdk::session_fs::{
     DirEntry, DirEntryKind, FileInfo, FsError, FsErrorKind, SessionFsProvider,
     SessionFsSqliteProvider, SessionFsSqliteQueryResult, SessionFsSqliteQueryType,
 };
-use github_copilot_sdk::types::SessionConfig;
+use copilot_sdk::types::CreateSessionOptions;
 use serde_json::{Value, json};
 use serial_test::{parallel, serial};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream, duplex};
@@ -263,8 +263,13 @@ impl Server {
 async fn start(provider: Arc<dyn SessionFsProvider>) -> (Session, Server) {
     let (client_write, server_read) = duplex(64 * 1024);
     let (server_write, client_read) = duplex(64 * 1024);
-    let client = Client::from_streams(client_read, client_write, std::env::temp_dir())
-        .expect("a client over the streams");
+    let client = Client::from_streams(
+        copilot_sdk::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        std::env::temp_dir(),
+    )
+    .expect("a client over the streams");
     let mut server = Server {
         read: server_read,
         write: server_write,
@@ -272,7 +277,10 @@ async fn start(provider: Arc<dyn SessionFsProvider>) -> (Session, Server) {
     };
     let create = tokio::spawn(async move {
         client
-            .create_session(SessionConfig::default().with_session_fs_provider(provider))
+            .create_session(
+                CreateSessionOptions::default()
+                    .with_state(|group| group.with_session_fs_provider(provider)),
+            )
             .await
             .expect("the session starts")
     });
@@ -353,9 +361,8 @@ async fn write_file_stat_and_readdir_replies_are_written_as_published() {
     )
     .await;
     assert_eq!(written, Value::Null);
-    let typed: github_copilot_sdk::rpc::SessionFsWriteFileResult =
-        serde_json::from_value(written.clone())
-            .expect("the public result alias accepts null success");
+    let typed: copilot_sdk::rpc::SessionFsWriteFileResult = serde_json::from_value(written.clone())
+        .expect("the public result alias accepts null success");
     assert_eq!(
         serde_json::to_value(typed).expect("the public result alias preserves null success"),
         written

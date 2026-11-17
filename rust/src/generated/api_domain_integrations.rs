@@ -1239,6 +1239,9 @@ pub struct McpApplyUninstallRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpAppsCallToolRequest {
+    /// MCP tools/call request metadata, forwarded separately from tool arguments. Host-owned progress tokens and protocol metadata take precedence.
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<HashMap<String, serde_json::Value>>,
     /// Tool arguments
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arguments: Option<HashMap<String, serde_json::Value>>,
@@ -1248,57 +1251,6 @@ pub struct McpAppsCallToolRequest {
     pub server_name: String,
     /// MCP tool name
     pub tool_name: String,
-}
-
-/// Extensible [`McpAppsCallToolRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`McpAppsCallToolOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpAppsCallToolOptions {
-    #[serde(flatten)]
-    legacy: McpAppsCallToolRequest,
-    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
-    meta: Option<HashMap<String, serde_json::Value>>,
-}
-
-impl McpAppsCallToolOptions {
-    /// Creates options with the required inputs.
-    pub fn new(
-        server_name: impl Into<String>,
-        tool_name: impl Into<String>,
-        origin_server_name: impl Into<String>,
-    ) -> Self {
-        Self {
-            legacy: McpAppsCallToolRequest {
-                server_name: server_name.into(),
-                tool_name: tool_name.into(),
-                origin_server_name: origin_server_name.into(),
-                arguments: None,
-            },
-            meta: None,
-        }
-    }
-
-    /// Tool arguments
-    pub fn arguments(mut self, value: HashMap<String, serde_json::Value>) -> Self {
-        self.legacy.arguments = Some(value);
-        self
-    }
-
-    /// MCP tools/call request metadata, forwarded separately from tool arguments. Host-owned progress tokens and protocol metadata take precedence.
-    pub fn meta(mut self, value: HashMap<String, serde_json::Value>) -> Self {
-        self.meta = Some(value);
-        self
-    }
 }
 
 /// MCP server to diagnose MCP Apps wiring for.
@@ -1664,46 +1616,11 @@ pub struct McpConfigureGitHubResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpDisableRequest {
+    /// Required for an owned installation; omission preserves only manual-server behaviour.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_installation_id: Option<String>,
     /// Name of the MCP server to disable
     pub server_name: String,
-}
-
-/// Extensible [`McpDisableRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`McpDisableOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpDisableOptions {
-    #[serde(flatten)]
-    legacy: McpDisableRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expected_installation_id: Option<String>,
-}
-
-impl McpDisableOptions {
-    /// Creates options with the required inputs.
-    pub fn new(server_name: impl Into<String>) -> Self {
-        Self {
-            legacy: McpDisableRequest {
-                server_name: server_name.into(),
-            },
-            expected_installation_id: None,
-        }
-    }
-
-    /// Required for an owned installation; omission preserves only manual-server behaviour.
-    pub fn expected_installation_id(mut self, value: impl Into<String>) -> Self {
-        self.expected_installation_id = Some(value.into());
-        self
-    }
 }
 
 /// Optional working directory used as context for MCP server discovery.
@@ -1751,46 +1668,11 @@ pub struct McpDiscoverResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpEnableRequest {
+    /// Exact receipt identity for explicit owned activation in this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_installation_id: Option<String>,
     /// Name of the MCP server to enable
     pub server_name: String,
-}
-
-/// Extensible [`McpEnableRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`McpEnableOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpEnableOptions {
-    #[serde(flatten)]
-    legacy: McpEnableRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expected_installation_id: Option<String>,
-}
-
-impl McpEnableOptions {
-    /// Creates options with the required inputs.
-    pub fn new(server_name: impl Into<String>) -> Self {
-        Self {
-            legacy: McpEnableRequest {
-                server_name: server_name.into(),
-            },
-            expected_installation_id: None,
-        }
-    }
-
-    /// Exact receipt identity for explicit owned activation in this session.
-    pub fn expected_installation_id(mut self, value: impl Into<String>) -> Self {
-        self.expected_installation_id = Some(value.into());
-        self
-    }
 }
 
 /// Raw MCP CreateMessageRequest params, as received in the `sampling.requested` event. Treated as opaque at the schema layer; the runtime converts the embedded MCP messages into the OpenAI chat-completion shape internally.
@@ -2769,123 +2651,27 @@ pub struct McpOauthLoginRequest {
     /// Optional OAuth client secret override for this login. The runtime treats this as an ephemeral host-owned secret, uses it for this authentication attempt and does not persist it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_secret: Option<String>,
+    /// Exact owned receipt identity. Owned login never uses an implicit helper session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_installation_id: Option<String>,
     /// When true, clears any cached OAuth token for the server and runs a full new authorization. Use when the user explicitly wants to switch accounts or believes their session is stuck.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub force_reauth: Option<bool>,
     /// Optional OAuth grant type override for this login. Defaults to the server configuration, or authorization_code when no grant type is specified.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grant_type: Option<McpOauthLoginGrantType>,
+    /// Required for owned login. Consumes the exact prepareLogin handle once.
+    /// Set forceReauth and display options during preparation, not consumption.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub login_id: Option<String>,
     /// Optional override indicating whether the static OAuth client is public. When false, the runtime treats it as confidential and uses the per-login clientSecret if provided, otherwise retrieving the client secret from the MCP OAuth secret store.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_client: Option<bool>,
+    /// Optional externally visible HTTPS redirect URI for a host-managed callback endpoint. When supplied, the runtime still owns discovery, PKCE, token exchange, persistence, and reconnect, but does not bind a loopback listener or terminate HTTPS. The URI must not contain query parameters or a fragment and must be registered for the selected CIMD, DCR, or static OAuth client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_uri: Option<String>,
     /// Name of the remote MCP server to authenticate
     pub server_name: String,
-}
-
-/// Extensible [`McpOauthLoginRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`McpOauthLoginOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpOauthLoginOptions {
-    #[serde(flatten)]
-    legacy: McpOauthLoginRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    redirect_uri: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    login_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expected_installation_id: Option<String>,
-}
-
-impl McpOauthLoginOptions {
-    /// Creates options with the required inputs.
-    pub fn new(server_name: impl Into<String>) -> Self {
-        Self {
-            legacy: McpOauthLoginRequest {
-                server_name: server_name.into(),
-                force_reauth: None,
-                client_name: None,
-                callback_success_message: None,
-                client_id: None,
-                client_secret: None,
-                public_client: None,
-                grant_type: None,
-            },
-            redirect_uri: None,
-            login_id: None,
-            expected_installation_id: None,
-        }
-    }
-
-    /// When true, clears any cached OAuth token for the server and runs a full new authorization. Use when the user explicitly wants to switch accounts or believes their session is stuck.
-    pub fn force_reauth(mut self, value: bool) -> Self {
-        self.legacy.force_reauth = Some(value);
-        self
-    }
-
-    /// Optional override for the OAuth client display name shown on the consent screen. Applies to newly registered dynamic clients only — existing registrations keep the name they were created with. When omitted, the runtime applies a neutral fallback; callers driving interactive auth should pass their own surface-specific label so the consent screen matches the product the user sees.
-    pub fn client_name(mut self, value: impl Into<String>) -> Self {
-        self.legacy.client_name = Some(value.into());
-        self
-    }
-
-    /// Optional override for the body text shown on the OAuth loopback callback success page. When omitted, the runtime applies a neutral fallback; callers driving interactive auth should pass surface-specific copy telling the user where to return.
-    pub fn callback_success_message(mut self, value: impl Into<String>) -> Self {
-        self.legacy.callback_success_message = Some(value.into());
-        self
-    }
-
-    /// Optional OAuth client ID override for this login. When set, the runtime uses this pre-registered static client instead of dynamic client registration.
-    pub fn client_id(mut self, value: impl Into<String>) -> Self {
-        self.legacy.client_id = Some(value.into());
-        self
-    }
-
-    /// Optional OAuth client secret override for this login. The runtime treats this as an ephemeral host-owned secret, uses it for this authentication attempt and does not persist it.
-    pub fn client_secret(mut self, value: impl Into<String>) -> Self {
-        self.legacy.client_secret = Some(value.into());
-        self
-    }
-
-    /// Optional override indicating whether the static OAuth client is public. When false, the runtime treats it as confidential and uses the per-login clientSecret if provided, otherwise retrieving the client secret from the MCP OAuth secret store.
-    pub fn public_client(mut self, value: bool) -> Self {
-        self.legacy.public_client = Some(value);
-        self
-    }
-
-    /// Optional OAuth grant type override for this login. Defaults to the server configuration, or authorization_code when no grant type is specified.
-    pub fn grant_type(mut self, value: McpOauthLoginGrantType) -> Self {
-        self.legacy.grant_type = Some(value);
-        self
-    }
-
-    /// Optional externally visible HTTPS redirect URI for a host-managed callback endpoint. When supplied, the runtime still owns discovery, PKCE, token exchange, persistence, and reconnect, but does not bind a loopback listener or terminate HTTPS. The URI must not contain query parameters or a fragment and must be registered for the selected CIMD, DCR, or static OAuth client.
-    pub fn redirect_uri(mut self, value: impl Into<String>) -> Self {
-        self.redirect_uri = Some(value.into());
-        self
-    }
-
-    /// Required for owned login. Consumes the exact prepareLogin handle once.
-    /// Set forceReauth and display options during preparation, not consumption.
-    pub fn login_id(mut self, value: impl Into<String>) -> Self {
-        self.login_id = Some(value.into());
-        self
-    }
-
-    /// Exact owned receipt identity. Owned login never uses an implicit helper session.
-    pub fn expected_installation_id(mut self, value: impl Into<String>) -> Self {
-        self.expected_installation_id = Some(value.into());
-        self
-    }
 }
 
 /// OAuth authorization URL the caller should open, or empty when cached tokens already authenticated the server.
@@ -2967,46 +2753,11 @@ pub struct McpOauthPrepareLoginResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpOauthProbeRequest {
+    /// Exact owned receipt identity; probing never activates a dormant installation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_installation_id: Option<String>,
     /// Name of the configured remote MCP server to probe.
     pub server_name: String,
-}
-
-/// Extensible [`McpOauthProbeRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`McpOauthProbeOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpOauthProbeOptions {
-    #[serde(flatten)]
-    legacy: McpOauthProbeRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expected_installation_id: Option<String>,
-}
-
-impl McpOauthProbeOptions {
-    /// Creates options with the required inputs.
-    pub fn new(server_name: impl Into<String>) -> Self {
-        Self {
-            legacy: McpOauthProbeRequest {
-                server_name: server_name.into(),
-            },
-            expected_installation_id: None,
-        }
-    }
-
-    /// Exact owned receipt identity; probing never activates a dormant installation.
-    pub fn expected_installation_id(mut self, value: impl Into<String>) -> Self {
-        self.expected_installation_id = Some(value.into());
-        self
-    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3427,57 +3178,14 @@ impl McpPlanInstallSourceCard {
 pub struct McpPlanInstallRequest {
     /// Protocol version and capabilities the caller requires.
     pub contract: CatalogClientContract,
+    /// The same existing attached session that owns the original catalogue candidate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_session_id: Option<String>,
     /// Configuration scope the plan targets. Defaults to user scope when omitted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<McpPlanScope>,
     /// What to plan: either a candidate handle from a previous search, or a card supplied directly.
     pub source: McpPlanInstallSource,
-}
-
-/// Extensible [`McpPlanInstallRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`McpPlanInstallOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpPlanInstallOptions {
-    #[serde(flatten)]
-    legacy: McpPlanInstallRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    policy_session_id: Option<String>,
-}
-
-impl McpPlanInstallOptions {
-    /// Creates options with the required inputs.
-    pub fn new(contract: CatalogClientContract, source: McpPlanInstallSource) -> Self {
-        Self {
-            legacy: McpPlanInstallRequest {
-                contract,
-                source,
-                scope: None,
-            },
-            policy_session_id: None,
-        }
-    }
-
-    /// Configuration scope the plan targets. Defaults to user scope when omitted.
-    pub fn scope(mut self, value: McpPlanScope) -> Self {
-        self.legacy.scope = Some(value);
-        self
-    }
-
-    /// The same existing attached session that owns the original catalogue candidate.
-    pub fn policy_session_id(mut self, value: impl Into<String>) -> Self {
-        self.policy_session_id = Some(value.into());
-        self
-    }
 }
 
 /// Read-only preparation of one owned removal under fresh selected-session authority.
@@ -3916,53 +3624,11 @@ pub struct McpRestartServerRequest {
     /// Replacement MCP server configuration (stdio process or remote HTTP/SSE). Omit to restart the server with its already-registered configuration (config-free restart-by-name).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<serde_json::Value>,
+    /// Exact receipt identity for an explicit owned restart; configuration overrides are refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_installation_id: Option<String>,
     /// Name of the MCP server to restart
     pub server_name: String,
-}
-
-/// Extensible [`McpRestartServerRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`McpRestartServerOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpRestartServerOptions {
-    #[serde(flatten)]
-    legacy: McpRestartServerRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expected_installation_id: Option<String>,
-}
-
-impl McpRestartServerOptions {
-    /// Creates options with the required inputs.
-    pub fn new(server_name: impl Into<String>) -> Self {
-        Self {
-            legacy: McpRestartServerRequest {
-                server_name: server_name.into(),
-                config: None,
-            },
-            expected_installation_id: None,
-        }
-    }
-
-    /// Replacement MCP server configuration (stdio process or remote HTTP/SSE). Omit to restart the server with its already-registered configuration (config-free restart-by-name).
-    pub fn config(mut self, value: serde_json::Value) -> Self {
-        self.legacy.config = Some(value);
-        self
-    }
-
-    /// Exact receipt identity for an explicit owned restart; configuration overrides are refused.
-    pub fn expected_installation_id(mut self, value: impl Into<String>) -> Self {
-        self.expected_installation_id = Some(value.into());
-        self
-    }
 }
 
 /// Per-field MCP telemetry-obfuscation policy.
@@ -4407,53 +4073,11 @@ pub struct McpStartServerRequest {
     /// MCP server configuration (stdio, remote HTTP/SSE, or session-only local IDE endpoint). Local IDE endpoints never write persistent configuration. Omit to start with the already-registered configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<serde_json::Value>,
+    /// Exact receipt identity for explicit owned activation in this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_installation_id: Option<String>,
     /// Name of the MCP server to start
     pub server_name: String,
-}
-
-/// Extensible [`McpStartServerRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`McpStartServerOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpStartServerOptions {
-    #[serde(flatten)]
-    legacy: McpStartServerRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expected_installation_id: Option<String>,
-}
-
-impl McpStartServerOptions {
-    /// Creates options with the required inputs.
-    pub fn new(server_name: impl Into<String>) -> Self {
-        Self {
-            legacy: McpStartServerRequest {
-                server_name: server_name.into(),
-                config: None,
-            },
-            expected_installation_id: None,
-        }
-    }
-
-    /// MCP server configuration (stdio, remote HTTP/SSE, or session-only local IDE endpoint). Local IDE endpoints never write persistent configuration. Omit to start with the already-registered configuration.
-    pub fn config(mut self, value: serde_json::Value) -> Self {
-        self.legacy.config = Some(value);
-        self
-    }
-
-    /// Exact receipt identity for explicit owned activation in this session.
-    pub fn expected_installation_id(mut self, value: impl Into<String>) -> Self {
-        self.expected_installation_id = Some(value.into());
-        self
-    }
 }
 
 /// MCP server startup filtering result.
@@ -4488,55 +4112,14 @@ pub struct McpStartServersResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpStopServerRequest {
+    /// Exact owned receipt identity. Stop also forgets this session's durable activation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_installation_id: Option<String>,
     /// Name of the MCP server to stop
     pub server_name: String,
-}
-
-/// Extensible [`McpStopServerRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`McpStopServerOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpStopServerOptions {
-    #[serde(flatten)]
-    legacy: McpStopServerRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expected_installation_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    transport: Option<McpServerConfigLocalType>,
-}
-
-impl McpStopServerOptions {
-    /// Creates options with the required inputs.
-    pub fn new(server_name: impl Into<String>) -> Self {
-        Self {
-            legacy: McpStopServerRequest {
-                server_name: server_name.into(),
-            },
-            expected_installation_id: None,
-            transport: None,
-        }
-    }
-
-    /// Exact owned receipt identity. Stop also forgets this session's durable activation.
-    pub fn expected_installation_id(mut self, value: impl Into<String>) -> Self {
-        self.expected_installation_id = Some(value.into());
-        self
-    }
-
     /// Optional transport selector. The only supported value, local-http, requires serverName ide and cannot accompany expectedInstallationId. It cancels pending IDE initialization and removes local IDE state without stopping an ordinary server with the same name. Omit this field for a generic stop by name.
-    pub fn transport(mut self, value: McpServerConfigLocalType) -> Self {
-        self.transport = Some(value);
-        self
-    }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport: Option<McpServerConfigLocalType>,
 }
 
 /// Per-server MCP tool definition token costs.
@@ -5766,70 +5349,9 @@ pub struct SkillsGetDiscoveryPathsRequest {
     /// Optional list of project directory paths. When omitted or empty, only personal and custom directories are returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_paths: Option<Vec<String>>,
-}
-
-/// Extensible [`SkillsGetDiscoveryPathsRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`SkillsGetDiscoveryPathsOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SkillsGetDiscoveryPathsOptions {
-    #[serde(flatten)]
-    legacy: SkillsGetDiscoveryPathsRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    skill_directories: Option<Vec<String>>,
-}
-
-impl SkillsGetDiscoveryPathsOptions {
-    /// Creates options with the required inputs.
-    pub fn new() -> Self {
-        Self {
-            legacy: SkillsGetDiscoveryPathsRequest {
-                project_paths: None,
-                ignored_skills_locations: None,
-                exclude_host_skills: None,
-            },
-            skill_directories: None,
-        }
-    }
-
-    /// Optional list of project directory paths. When omitted or empty, only personal and custom directories are returned.
-    pub fn project_paths(mut self, value: Vec<String>) -> Self {
-        self.legacy.project_paths = Some(value);
-        self
-    }
-
-    /// Optional skill scan paths to exclude from discovery.
-    pub fn ignored_skills_locations(mut self, value: Vec<String>) -> Self {
-        self.legacy.ignored_skills_locations = Some(value);
-        self
-    }
-
-    /// When true, omit the host's personal and custom skill directories, leaving only project directories. For multitenant deployments.
-    pub fn exclude_host_skills(mut self, value: bool) -> Self {
-        self.legacy.exclude_host_skills = Some(value);
-        self
-    }
-
     /// Explicit discovery-only skill roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.
-    pub fn skill_directories(mut self, value: Vec<String>) -> Self {
-        self.skill_directories = Some(value);
-        self
-    }
-}
-
-impl Default for SkillsGetDiscoveryPathsOptions {
-    fn default() -> Self {
-        Self::new()
-    }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_directories: Option<Vec<String>>,
 }
 
 /// Skills invoked during this session, ordered by invocation time (most recent last).

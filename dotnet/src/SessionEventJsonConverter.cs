@@ -11,7 +11,7 @@ using System.Text.Json.Serialization.Metadata;
 using System.Text.Unicode;
 #endif
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 internal sealed partial class SessionEventJsonConverter
 {

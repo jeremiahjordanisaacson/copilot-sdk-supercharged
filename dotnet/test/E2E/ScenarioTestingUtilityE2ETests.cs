@@ -2,11 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class ScenarioTestingUtilityE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : ScenarioTestingE2ETestBase(fixture, "scenario_testing_utility", output)
@@ -15,7 +15,7 @@ public class ScenarioTestingUtilityE2ETests(E2ETestFixture fixture, ITestOutputH
     public async Task Should_Send_Wait_Observe_Idle_Events_And_Delete_Suggestion_Session()
     {
         var sessionId = Guid.NewGuid().ToString();
-        var session = await CreateSessionAsync(new SessionConfig { SessionId = sessionId });
+        var session = await CreateSessionAsync(new CreateSessionOptions { SessionId = sessionId });
         var idle = TestHelper.GetNextEventOfTypeAsync<SessionIdleEvent>(
             session,
             TimeSpan.FromSeconds(60));

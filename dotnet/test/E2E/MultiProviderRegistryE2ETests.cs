@@ -2,17 +2,17 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 /// <summary>
 /// End-to-end coverage for the experimental multi-provider BYOK registry
-/// (<see cref="SessionConfig.Providers"/> / <see cref="SessionConfig.Models"/>).
+/// (<see cref="SessionInferenceOptions.Providers"/> / <see cref="SessionInferenceOptions.Models"/>).
 /// Validates that several named providers, several models per provider, and
 /// custom agents bound to those provider-qualified models can coexist in one
 /// session, be launched, and route inference to the configured provider with
@@ -67,12 +67,8 @@ public class MultiProviderRegistryE2ETests(E2ETestFixture fixture, ITestOutputHe
     [Fact]
     public async Task Should_Register_Multiple_Providers_With_Custom_Agents_Bound_To_Their_Models()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Providers = RegistryProviders(),
-            Models = RegistryModels(),
-            CustomAgents = RegistryAgents(),
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Inference = new SessionInferenceOptions { Providers = RegistryProviders(), Models = RegistryModels() }, Agents = new SessionAgentOptions { Definitions = RegistryAgents() } });
 
         var agents = (await session.Rpc.Agent.ListAsync()).Agents;
 
@@ -144,12 +140,8 @@ public class MultiProviderRegistryE2ETests(E2ETestFixture fixture, ITestOutputHe
             new() { Id = "turbo", Provider = "delta", WireModel = "byok-gpt-4-turbo" },
         };
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Model = selectionId,
-            Providers = providers,
-            Models = models,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Model = selectionId, Inference = new SessionInferenceOptions { Providers = providers, Models = models } });
 
         var exchanges = await SendAndWaitForExchangesAsync(
             session,

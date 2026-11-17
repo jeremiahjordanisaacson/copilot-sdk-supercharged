@@ -1,4 +1,4 @@
-//! Test-only binary that hosts a single [`github_copilot_sdk::Client`] and then
+//! Test-only binary that hosts a single [`copilot_sdk::Client`] and then
 //! blocks forever, so an external test can terminate *this* process abruptly
 //! (simulating an SDK-embedding app process crashing) without ever running any
 //! of this process's own cleanup code (`Client::stop`, `force_stop`, or
@@ -15,10 +15,11 @@
 //!   CLI child's OS process id to, once the client finishes starting.
 //! - `HOST_CRASH_FIXTURE_TRANSPORT`: optional `stdio` (default) or `tcp`.
 
+use copilot_sdk::{RuntimeConnection, SpawnedProcessOptions, SpawnedTcpRuntimeOptions};
 use std::io::Write;
 use std::path::PathBuf;
 
-use github_copilot_sdk::{CliProgram, Client, ClientOptions, Transport};
+use copilot_sdk::{CliProgram, Client, ClientOptions};
 
 mod pid_file;
 
@@ -39,21 +40,31 @@ async fn main() {
         std::env::var("HOST_CRASH_FIXTURE_PID_FILE").expect("HOST_CRASH_FIXTURE_PID_FILE"),
     );
 
+    let process = SpawnedProcessOptions::new()
+        .with_program(CliProgram::Path(PathBuf::from(program)))
+        .with_args(prefix_args)
+        .with_working_directory(PathBuf::from(cwd))
+        .with_env(
+            std::env::vars_os().chain(
+                env_pairs
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value.into())),
+            ),
+        );
     let transport = match std::env::var("HOST_CRASH_FIXTURE_TRANSPORT").as_deref() {
-        Ok("tcp") => Transport::Tcp {
+        Ok("tcp") => RuntimeConnection::SpawnedTcp(SpawnedTcpRuntimeOptions {
+            process,
             port: 0,
             connection_token: None,
-        },
-        Ok("stdio") | Err(std::env::VarError::NotPresent) => Transport::Stdio,
+        }),
+        Ok("stdio") | Err(std::env::VarError::NotPresent) => {
+            RuntimeConnection::SpawnedStdio(process)
+        }
         value => panic!("invalid HOST_CRASH_FIXTURE_TRANSPORT: {value:?}"),
     };
-    let options = ClientOptions::new()
-        .with_program(CliProgram::Path(PathBuf::from(program)))
-        .with_prefix_args(prefix_args)
-        .with_cwd(PathBuf::from(cwd))
-        .with_env(env_pairs)
-        .with_use_logged_in_user(false)
-        .with_transport(transport);
+    let options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+        .with_github(|group| group.with_use_logged_in_user(false))
+        .with_runtime(transport);
 
     let client = Client::start(options).await.expect("start CLI client");
     let pid = client.pid().expect("client reports spawned CLI pid");

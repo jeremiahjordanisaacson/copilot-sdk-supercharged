@@ -1,8 +1,9 @@
+use copilot_sdk::{RuntimeConnection, SpawnedTcpRuntimeOptions};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
-use github_copilot_sdk::{Client, Error, ListModelsHandler, Model, Transport};
+use copilot_sdk::{Client, Error, ListModelsHandler, Model};
 
 use super::support::{is_inprocess_default, with_e2e_context};
 
@@ -37,10 +38,13 @@ async fn should_start_ping_and_stop_stdio_client() {
 async fn should_start_ping_and_stop_tcp_client() {
     with_e2e_context("client", "should_start_ping_and_stop_tcp_client", |ctx| {
         Box::pin(async move {
-            let client = Client::start(ctx.client_options_with_transport(Transport::Tcp {
-                port: 0,
-                connection_token: Some("tcp-e2e-token".to_string()),
-            }))
+            let client = Client::start(ctx.client_options_with_transport(
+                RuntimeConnection::SpawnedTcp(SpawnedTcpRuntimeOptions {
+                    process: Default::default(),
+                    port: 0,
+                    connection_token: Some("tcp-e2e-token".to_string()),
+                }),
+            ))
             .await
             .expect("start TCP client");
             let timings = client.startup_timings().expect("startup timings");
@@ -110,13 +114,23 @@ async fn should_use_configured_github_host_for_authentication() {
             ] {
                 // This tests process-environment precedence, not embedded configuration.
                 let mut options = ctx
-                    .client_options_with_transport(Transport::Stdio)
-                    .with_env(ctx.environment())
-                    .with_github_token(super::support::DEFAULT_TEST_TOKEN);
-                options.env.extend([
-                    ("COPILOT_GH_HOST".into(), copilot_host.into()),
-                    ("GH_HOST".into(), gh_host.into()),
-                ]);
+                    .client_options_with_transport(RuntimeConnection::for_spawned_stdio(
+                        Default::default(),
+                    ))
+                    .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN));
+                options
+                    .runtime
+                    .as_mut()
+                    .unwrap()
+                    .child_process_options_mut()
+                    .unwrap()
+                    .env
+                    .as_mut()
+                    .expect("harness replacement environment")
+                    .extend([
+                        ("COPILOT_GH_HOST".into(), copilot_host.into()),
+                        ("GH_HOST".into(), gh_host.into()),
+                    ]);
                 let client = Client::start(options).await.expect("start client");
                 let status = client.get_auth_status().await.expect("auth status");
 
@@ -164,8 +178,8 @@ async fn listmodels_withcustomhandler_callshandler() {
                 let calls = Arc::clone(&handler.calls);
                 let client = Client::start(
                     ctx.client_options()
-                        .with_list_models_handler(handler)
-                        .with_use_logged_in_user(false),
+                        .with_models(|group| group.with_list_models_handler(handler))
+                        .with_github(|group| group.with_use_logged_in_user(false)),
                 )
                 .await
                 .expect("start client");
@@ -216,8 +230,8 @@ async fn listmodels_withcustomhandler_cachesresults() {
                 let calls = Arc::clone(&handler.calls);
                 let client = Client::start(
                     ctx.client_options()
-                        .with_list_models_handler(handler)
-                        .with_use_logged_in_user(false),
+                        .with_models(|group| group.with_list_models_handler(handler))
+                        .with_github(|group| group.with_use_logged_in_user(false)),
                 )
                 .await
                 .expect("start client");

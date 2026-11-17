@@ -29,7 +29,7 @@ class TestSystemMessageSections:
                     },
                 },
             },
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all},
         )
 
         response = await session.send_and_wait("Who are you?")
@@ -58,7 +58,7 @@ class TestSystemMessageSections:
                     },
                 },
             },
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all},
         )
 
         response = await session.send_and_wait("Who are you?")

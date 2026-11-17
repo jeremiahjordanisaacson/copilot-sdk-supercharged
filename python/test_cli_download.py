@@ -786,7 +786,7 @@ def test_inprocess_explicit_cli_does_not_provision_another_runtime(tmp_path, mon
         fetch_mock.reset_mock()
 
         with pytest.raises(RuntimeError, match="In-process runtime library not found next to"):
-            CopilotClient(connection=RuntimeConnection.for_inprocess())
+            CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_inprocess())
 
         fetch_mock.assert_not_called()
     assert list(cli_dir.iterdir()) == [cli_path]
@@ -809,7 +809,7 @@ async def test_inprocess_explicit_cli_uses_its_own_library(tmp_path, monkeypatch
         "create",
         side_effect=RuntimeError("native loading stopped"),
     ) as create_host:
-        client = CopilotClient(connection=RuntimeConnection.for_inprocess())
+        client = CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_inprocess())
         with pytest.raises(RuntimeError, match="native loading stopped"):
             await client.start()
 
@@ -828,7 +828,7 @@ def test_inprocess_explicit_cli_rejects_missing_or_empty_entrypoint(
     monkeypatch.setenv("COPILOT_CLI_PATH", str(cli_path))
 
     with pytest.raises(RuntimeError, match="COPILOT_CLI_PATH.*non-empty CLI file"):
-        CopilotClient(connection=RuntimeConnection.for_inprocess())
+        CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_inprocess())
 
 
 def test_download_runtime_can_provision_library_from_canonical_staged_bundle(tmp_path):

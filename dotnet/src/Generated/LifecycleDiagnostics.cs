@@ -12,10 +12,10 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>Base class for experimental runtime lifecycle diagnostic events.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(RuntimeLifecycleSystemStateDiagnosticEvent), "runtime.lifecycle.system_state")]
 [JsonDerivedType(typeof(RuntimeLifecycleProgressStateDiagnosticEvent), "runtime.lifecycle.progress_state")]
@@ -31,7 +31,7 @@ internal abstract partial class LifecycleDiagnosticEvent
 }
 
 /// <summary>Experimental runtime lifecycle diagnostic event.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleSystemStateDiagnosticEvent : LifecycleDiagnosticEvent
 {
     /// <inheritdoc />
@@ -44,7 +44,7 @@ internal sealed partial class RuntimeLifecycleSystemStateDiagnosticEvent : Lifec
 }
 
 /// <summary>Experimental runtime lifecycle diagnostic event.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleProgressStateDiagnosticEvent : LifecycleDiagnosticEvent
 {
     /// <inheritdoc />
@@ -57,7 +57,7 @@ internal sealed partial class RuntimeLifecycleProgressStateDiagnosticEvent : Lif
 }
 
 /// <summary>Event payload for <see cref="RuntimeLifecycleSystemStateData"/>.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleSystemStateData
 {
     /// <summary>Complete active operation set after applying the change.</summary>
@@ -91,7 +91,7 @@ internal sealed partial class RuntimeLifecycleSystemStateData
 }
 
 /// <summary>Event payload for <see cref="RuntimeLifecycleProgressStateData"/>.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleProgressStateData
 {
     /// <summary>Agent that owns this progress. Absent for the primary agent and progress without an agent owner.</summary>
@@ -144,7 +144,7 @@ internal sealed partial class RuntimeLifecycleProgressStateData
 
 /// <summary>Timing of one real dependency wait.</summary>
 /// <remarks>Nested data type for <c>RuntimeLifecycleBlockerTiming</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleBlockerTiming
 {
     /// <summary>ISO 8601 timestamp when this dependency began blocking its owner.</summary>
@@ -154,7 +154,7 @@ internal sealed partial class RuntimeLifecycleBlockerTiming
 
 /// <summary>Exact lifecycle operation awaited by a real dependency wait.</summary>
 /// <remarks>Nested data type for <c>RuntimeLifecycleBlocker</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleBlocker
 {
     /// <summary>Opaque blocker identifier, stable for one guard lifetime and scoped to its owner.</summary>
@@ -197,7 +197,7 @@ internal sealed partial class RuntimeLifecycleBlocker
 
 /// <summary>Fixed timestamps for one observed operation revision.</summary>
 /// <remarks>Nested data type for <c>RuntimeLifecycleOperationTiming</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleOperationTiming
 {
     /// <summary>ISO 8601 timestamp when the current phase began.</summary>
@@ -215,7 +215,7 @@ internal sealed partial class RuntimeLifecycleOperationTiming
 
 /// <summary>Observed state of one readiness or convergence operation.</summary>
 /// <remarks>Nested data type for <c>RuntimeLifecycleOperation</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleOperation
 {
     /// <summary>Complete dependency blocker set after this operation change.</summary>
@@ -254,7 +254,7 @@ internal sealed partial class RuntimeLifecycleOperation
 
 /// <summary>Immutable causal origin of a progress record with independent identity and settlement.</summary>
 /// <remarks>Nested data type for <c>RuntimeLifecycleProgressOrigin</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleProgressOrigin
 {
     /// <summary>Kind of the originating progress record.</summary>
@@ -268,7 +268,7 @@ internal sealed partial class RuntimeLifecycleProgressOrigin
 
 /// <summary>Fixed timestamps for one observed progress revision.</summary>
 /// <remarks>Nested data type for <c>RuntimeLifecycleProgressTiming</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleProgressTiming
 {
     /// <summary>ISO 8601 timestamp when the current phase began.</summary>
@@ -285,7 +285,7 @@ internal sealed partial class RuntimeLifecycleProgressTiming
 }
 
 /// <summary>How a settled lifecycle operation or progress record ended.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
 [DebuggerDisplay("{Value,nq}")]
 internal readonly struct RuntimeLifecycleDisposition : IEquatable<RuntimeLifecycleDisposition>

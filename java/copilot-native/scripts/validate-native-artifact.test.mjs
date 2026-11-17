@@ -21,7 +21,7 @@ import {
 import { validateLocalPublication } from "./validate-local-publication.mjs";
 
 const classifier = "win32-x64";
-const artifactName = "copilot-sdk-java-runtime-1.2.3-win32-x64.jar";
+const artifactName = "copilot-sdk-runtime-1.2.3-win32-x64.jar";
 const moduleRoot = fileURLToPath(new URL("../", import.meta.url));
 
 test("accepts a matching, complete Windows classifier", (t) => {
@@ -47,7 +47,7 @@ test("accepts a matching, complete Windows ARM64 classifier", (t) => {
   const fixture = createFixture(t);
   const windowsArm64Classifier = "win32-arm64";
   const windowsArm64ArtifactName =
-    "copilot-sdk-java-runtime-1.2.3-win32-arm64.jar";
+    "copilot-sdk-runtime-1.2.3-win32-arm64.jar";
   const windowsArm64JarPath = path.join(
     fixture.root,
     windowsArm64ArtifactName,
@@ -77,7 +77,7 @@ test("accepts a matching, complete Darwin classifier", (t) => {
   const fixture = createFixture(t);
   const darwinClassifier = "darwin-arm64";
   const darwinArtifactName =
-    "copilot-sdk-java-runtime-1.2.3-darwin-arm64.jar";
+    "copilot-sdk-runtime-1.2.3-darwin-arm64.jar";
   const darwinJarPath = path.join(fixture.root, darwinArtifactName);
   createNativeClassifierTestFixture({
     classifier: darwinClassifier,
@@ -104,7 +104,7 @@ test("accepts a matching, complete Darwin x64 classifier", (t) => {
   const fixture = createFixture(t);
   const darwinClassifier = "darwin-x64";
   const darwinArtifactName =
-    "copilot-sdk-java-runtime-1.2.3-darwin-x64.jar";
+    "copilot-sdk-runtime-1.2.3-darwin-x64.jar";
   const darwinJarPath = path.join(fixture.root, darwinArtifactName);
   createNativeClassifierTestFixture({
     classifier: darwinClassifier,
@@ -131,7 +131,7 @@ test("accepts a matching, complete Linux ARM64 classifier", (t) => {
   const fixture = createFixture(t);
   const linuxArm64Classifier = "linux-arm64";
   const linuxArm64ArtifactName =
-    "copilot-sdk-java-runtime-1.2.3-linux-arm64.jar";
+    "copilot-sdk-runtime-1.2.3-linux-arm64.jar";
   const linuxArm64JarPath = path.join(fixture.root, linuxArm64ArtifactName);
   createNativeClassifierTestFixture({
     classifier: linuxArm64Classifier,
@@ -268,7 +268,7 @@ test("rejects Windows resources in a Linux classifier", (t) => {
   const fixture = createFixture(t);
   const linuxClassifier = "linux-x64";
   const linuxArtifactName =
-    "copilot-sdk-java-runtime-1.2.3-linux-x64.jar";
+    "copilot-sdk-runtime-1.2.3-linux-x64.jar";
   const linuxJarPath = path.join(fixture.root, linuxArtifactName);
   writeStoredZip(linuxJarPath, [
     ["native/linux-x64/runtime.node", "runtime"],
@@ -368,7 +368,7 @@ test("accepts a matching SHA-256 manifest", (t) => {
   );
 });
 
-for (const artifactId of ["copilot-sdk-java-runtime", "copilot-sdk-java"]) {
+for (const artifactId of ["copilot-sdk-runtime", "copilot-sdk"]) {
   for (const version of ["0.0.0-ci", "1.2.3-SNAPSHOT"]) {
     test(`validates signed ${artifactId} publication at ${version}`, (t) => {
       const fixture = createPublicationFixture(t, { artifactId, version });
@@ -395,7 +395,7 @@ for (const artifactId of ["copilot-sdk-java-runtime", "copilot-sdk-java"]) {
     },
     {
       name: "an incorrect group",
-      from: "<groupId>com.github</groupId>",
+      from: "<groupId>com.microsoft</groupId>",
       to: "<groupId>org.example</groupId>",
       error: /Unexpected Maven coordinates/,
     },
@@ -422,8 +422,8 @@ for (const artifactId of ["copilot-sdk-java-runtime", "copilot-sdk-java"]) {
       from: "<modelVersion>4.0.0</modelVersion>",
       to: `<modelVersion>4.0.0</modelVersion>
   <parent>
-    <groupId>com.github</groupId>
-    <artifactId>copilot-sdk-java-parent</artifactId>
+    <groupId>com.microsoft</groupId>
+    <artifactId>copilot-sdk-parent</artifactId>
     <version>1.2.3</version>
   </parent>`,
       error: /must not depend on a parent/,
@@ -479,14 +479,14 @@ test("local publication validation rejects cross-classifier contamination", (t) 
 
 function createPublicationFixture(
   t,
-  { artifactId = "copilot-sdk-java-runtime", version = "1.2.3" } = {},
+  { artifactId = "copilot-sdk-runtime", version = "1.2.3" } = {},
 ) {
   const fixture = createFixture(t);
   const repositoryPath = path.join(fixture.root, "repository");
   const publicationDirectory = path.join(
     repositoryPath,
     "com",
-    "github",
+    "microsoft",
     artifactId,
     version,
   );
@@ -500,7 +500,7 @@ function createPublicationFixture(
     `<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>com.github</groupId>
+  <groupId>com.microsoft</groupId>
   <artifactId>${artifactId}</artifactId>
   <version>${version}</version>
 </project>`,
@@ -511,7 +511,7 @@ function createPublicationFixture(
       [["META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n"]],
     );
   }
-  if (artifactId === "copilot-sdk-java-runtime") {
+  if (artifactId === "copilot-sdk-runtime") {
     for (const nativeClassifier of [
       "linux-x64",
       "linux-arm64",

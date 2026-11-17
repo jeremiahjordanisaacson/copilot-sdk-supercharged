@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 var _ rpc.SessionEvent = SessionEvent{}

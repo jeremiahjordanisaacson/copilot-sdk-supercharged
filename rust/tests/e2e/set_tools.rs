@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::tool::ToolHandler;
-use github_copilot_sdk::{Error, ResumeSessionConfig, Tool, ToolInvocation, ToolResult};
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::tool::ToolHandler;
+use copilot_sdk::{Error, ResumeSessionOptions, Tool, ToolInvocation, ToolResult};
 use serde_json::json;
 
 use super::support::assistant_message_content;
@@ -145,7 +145,7 @@ async fn replaces_tools_on_a_created_session() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_tools(vec![original, retired]),
+                            .with_tools(|group| group.with_definitions(vec![original, retired])),
                     )
                     .await
                     .expect("create session");
@@ -218,7 +218,7 @@ async fn replaces_tools_on_a_resumed_session() {
                 let created = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_tools(vec![created_tool]),
+                            .with_tools(|group| group.with_definitions(vec![created_tool])),
                     )
                     .await
                     .expect("create session");
@@ -235,10 +235,14 @@ async fn replaces_tools_on_a_resumed_session() {
                 let (fruit, fruit_calls) = lookup_fruit("apple");
                 let resumed = client
                     .resume_session(
-                        ResumeSessionConfig::new(session_id)
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_tools(vec![fruit]),
+                        ResumeSessionOptions::new(session_id)
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_tools(|group| group.with_definitions(vec![fruit])),
                     )
                     .await
                     .expect("resume session");
@@ -284,7 +288,10 @@ async fn keeps_the_previous_tools_when_a_replacement_is_rejected() {
                 let client = ctx.start_client().await;
                 let (original, original_calls) = lookup_fruit("apple");
                 let session = client
-                    .create_session(ctx.approve_all_session_config().with_tools(vec![original]))
+                    .create_session(
+                        ctx.approve_all_session_config()
+                            .with_tools(|group| group.with_definitions(vec![original])),
+                    )
                     .await
                     .expect("create session");
 

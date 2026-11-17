@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -38,9 +38,10 @@ public sealed partial class ClientSessionLifetimeTests
         server.ResponseFactory = McpServerConfigResponse;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.ClearRequests();
         var (config, expected) = McpServerConfigShape(shape);
 
@@ -73,20 +74,24 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
 
-        await using var session = await client.CreateSessionAsync(new SessionConfig
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
         {
-            McpServers = new Dictionary<string, McpServerConfig>
+            Mcp = new SessionMcpOptions
             {
-                ["stdio"] = new McpStdioServerConfig { Command = "node", Args = ["server.js"] },
-                ["http"] = new McpHttpServerConfig { Url = "http://127.0.0.1:9/mcp" },
+                Servers = new Dictionary<string, McpServerConfig>
+                {
+                    ["stdio"] = new McpStdioServerConfig { Command = "node", Args = ["server.js"] },
+                    ["http"] = new McpHttpServerConfig { Url = "http://127.0.0.1:9/mcp" },
+                }
             },
         });
 
         var create = Assert.Single(server.Requests, request => request.Method == "session.create");
-        var servers = create.Params.GetProperty("mcpServers");
+        var servers = create.Params.GetProperty("mcp").GetProperty("servers");
         AssertJsonEqual("""{"type":"stdio","command":"node","args":["server.js"]}""", servers.GetProperty("stdio"));
         AssertJsonEqual("""{"type":"http","url":"http://127.0.0.1:9/mcp"}""", servers.GetProperty("http"));
     }

@@ -3,70 +3,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 #if NET8_0_OR_GREATER
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
-    [Fact]
-    public void Existing_Server_Mcp_Overload_Signatures_And_Defaults_Are_Preserved()
-    {
-        (Type Owner, string Name, Type[] Parameters, int Required)[] signatures =
-        [
-            (typeof(ServerMcpApi), "PlanInstallAsync",
-                [typeof(CatalogClientContract), typeof(McpPlanInstallSource), typeof(McpPlanScope?),
-                    typeof(CancellationToken)], 2),
-            (typeof(ServerCatalogApi), "SearchAsync",
-                [typeof(CatalogClientContract), typeof(string), typeof(int?), typeof(IList<CatalogCandidateKind>),
-                    typeof(CatalogSearchPage), typeof(CancellationToken)], 2),
-        ];
-        foreach (var (owner, name, types, required) in signatures)
-        {
-            var method = owner.GetMethod(name, types);
-            Assert.NotNull(method);
-            var parameters = method.GetParameters();
-            Assert.Equal("cancellationToken", parameters[^1].Name);
-            Assert.All(parameters.Take(required), parameter => Assert.False(parameter.IsOptional));
-            Assert.All(parameters.Skip(required), parameter =>
-            {
-                Assert.True(parameter.IsOptional);
-                Assert.True(parameter.HasDefaultValue);
-                Assert.Null(parameter.DefaultValue);
-            });
-        }
-    }
-
-    [Fact]
-    public void Request_Overloads_Share_The_Legacy_Method_Name_And_Require_Mandatory_Inputs()
-    {
-        var plan = typeof(ServerMcpApi).GetMethod("PlanInstallAsync", [typeof(McpPlanInstallRequest), typeof(CancellationToken)]);
-        var search = typeof(ServerCatalogApi).GetMethod("SearchAsync", [typeof(CatalogSearchRequest), typeof(CancellationToken)]);
-        Assert.NotNull(plan);
-        Assert.NotNull(search);
-        Assert.Null(typeof(ServerMcpApi).GetMethod("PlanInstallWithRequestAsync"));
-        Assert.Null(typeof(ServerCatalogApi).GetMethod("SearchWithRequestAsync"));
-        foreach (var (type, name) in new[]
-        {
-            (typeof(McpPlanInstallRequest), nameof(McpPlanInstallRequest.Contract)),
-            (typeof(McpPlanInstallRequest), nameof(McpPlanInstallRequest.Source)),
-            (typeof(CatalogSearchRequest), nameof(CatalogSearchRequest.Contract)),
-            (typeof(CatalogSearchRequest), nameof(CatalogSearchRequest.Query)),
-        })
-        {
-            var property = type.GetProperty(name);
-            Assert.NotNull(property);
-            Assert.Contains(property.CustomAttributes, attribute =>
-                attribute.AttributeType.FullName == "System.Runtime.CompilerServices.RequiredMemberAttribute");
-        }
-        foreach (var name in new[] { nameof(McpPlanInstallRequest.Scope), nameof(McpPlanInstallRequest.PolicySessionId) })
-        {
-            Assert.DoesNotContain(typeof(McpPlanInstallRequest).GetProperty(name)!.CustomAttributes, attribute =>
-                attribute.AttributeType.FullName == "System.Runtime.CompilerServices.RequiredMemberAttribute");
-        }
-    }
-
     [Fact]
     public async Task Request_Overload_Rejects_Missing_Required_Inputs()
     {
@@ -74,44 +17,39 @@ public sealed partial class ClientSessionLifetimeTests
         server.ResponseFactory = ServerMcpCompatibilityResponse;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         await client.StartAsync();
         server.ClearRequests();
-        await Assert.ThrowsAsync<ArgumentNullException>(() => client.Rpc.Mcp.PlanInstallAsync(new McpPlanInstallRequest
-        {
-            Contract = null!,
-            Source = new McpPlanInstallSourceCandidate { CandidateHandle = "candidate", SearchId = "search" },
-        }));
-        await Assert.ThrowsAsync<ArgumentNullException>(() => client.Rpc.Mcp.PlanInstallAsync((McpPlanInstallRequest)null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => client.Rpc.Mcp.PlanInstallAsync(contract: null!, source: new McpPlanInstallSourceCandidate { CandidateHandle = "candidate", SearchId = "search" }));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => client.Rpc.Mcp.PlanInstallAsync(
+            new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = [] }, null!));
         Assert.Empty(server.Requests);
     }
 
     [Fact]
-    public async Task Existing_Positional_Server_Mcp_Calls_Omit_The_Policy_Session()
+    public async Task Server_Mcp_Calls_Omit_Unspecified_Policy_Session()
     {
         await using var server = await FakeCopilotServer.StartAsync();
         server.ResponseFactory = ServerMcpCompatibilityResponse;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.ClearRequests();
         var cancellation = CancellationToken.None;
 
         await client.Rpc.Mcp.PlanInstallAsync(
             new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] },
             new McpPlanInstallSourceCandidate { CandidateHandle = "candidate", SearchId = "search" },
-            McpPlanScope.User,
-            cancellation);
+            McpPlanScope.User, cancellationToken: cancellation);
         await client.Rpc.Catalog.SearchAsync(
             new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] },
-            "catalogue query",
-            4,
-            null,
-            null,
-            cancellation);
+            query: "catalogue query",
+            limit: 4, cancellationToken: cancellation);
 
         var requests = server.Requests.ToArray();
         Assert.Equal(2, requests.Length);
@@ -124,31 +62,21 @@ public sealed partial class ClientSessionLifetimeTests
     }
 
     [Fact]
-    public async Task Same_Name_Request_Overloads_Keep_The_Selected_Policy_Session()
+    public async Task Server_Mcp_Calls_Keep_The_Selected_Policy_Session()
     {
         // This fixture checks SDK wire encoding, not runtime admission.
         await using var server = await FakeCopilotServer.StartAsync();
         server.ResponseFactory = ServerMcpCompatibilityResponse;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.ClearRequests();
 
-        await client.Rpc.Mcp.PlanInstallAsync(new McpPlanInstallRequest
-        {
-            Contract = new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] },
-            Source = new McpPlanInstallSourceCandidate { CandidateHandle = "candidate", SearchId = "search" },
-            Scope = McpPlanScope.User,
-            PolicySessionId = session.SessionId,
-        });
-        await client.Rpc.Catalog.SearchAsync(new CatalogSearchRequest
-        {
-            Contract = new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] },
-            Query = "catalogue query",
-            PolicySessionId = session.SessionId,
-        });
+        await client.Rpc.Mcp.PlanInstallAsync(contract: new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] }, source: new McpPlanInstallSourceCandidate { CandidateHandle = "candidate", SearchId = "search" }, scope: McpPlanScope.User, policySessionId: session.SessionId);
+        await client.Rpc.Catalog.SearchAsync(contract: new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] }, query: "catalogue query", policySessionId: session.SessionId);
 
         var requests = server.Requests.ToArray();
         Assert.Equal(2, requests.Length);

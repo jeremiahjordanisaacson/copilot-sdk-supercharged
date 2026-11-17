@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::tool::ToolHandler;
-use github_copilot_sdk::{Error, SessionConfig, Tool, ToolInvocation, ToolResult};
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::tool::ToolHandler;
+use copilot_sdk::{CreateSessionOptions, Error, Tool, ToolInvocation, ToolResult};
 use serde_json::json;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
@@ -30,26 +30,30 @@ async fn should_cancel_tool_handler_when_session_disconnects() {
 
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_tools(vec![
-                                Tool::new("slow_analysis")
-                                    .with_description(
-                                        "A slow analysis tool that blocks until released",
-                                    )
-                                    .with_parameters(json!({
-                                        "type": "object",
-                                        "properties": {
-                                            "value": {
-                                                "type": "string",
-                                                "description": "Value to analyze"
-                                            }
-                                        },
-                                        "required": ["value"]
-                                    }))
-                                    .with_handler(tool),
-                            ]),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_tools(|group| {
+                                group.with_definitions(vec![
+                                    Tool::new("slow_analysis")
+                                        .with_description(
+                                            "A slow analysis tool that blocks until released",
+                                        )
+                                        .with_parameters(json!({
+                                            "type": "object",
+                                            "properties": {
+                                                "value": {
+                                                    "type": "string",
+                                                    "description": "Value to analyze"
+                                                }
+                                            },
+                                            "required": ["value"]
+                                        }))
+                                        .with_handler(tool),
+                                ])
+                            }),
                     )
                     .await
                     .expect("create session");

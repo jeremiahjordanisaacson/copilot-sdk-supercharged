@@ -1,4 +1,4 @@
-use github_copilot_sdk::SessionId;
+use copilot_sdk::SessionId;
 
 use super::support::wait_for_condition;
 
@@ -49,10 +49,15 @@ async fn should_report_error_when_deleting_unknown_session_id() {
                 let client = ctx.start_client().await;
                 let unknown = SessionId::new("00000000-0000-0000-0000-000000000000");
 
-                client
+                let error = client
                     .delete_session(&unknown)
                     .await
-                    .expect("delete unknown session is idempotent");
+                    .expect_err("delete unknown session must fail");
+                assert_eq!(error.rpc_code(), Some(-32603), "{error}");
+                assert!(
+                    error.to_string().contains("Session file not found"),
+                    "{error}"
+                );
                 let metadata = client
                     .get_session_metadata(&unknown)
                     .await
@@ -142,10 +147,15 @@ async fn should_report_error_when_setting_foreground_session_in_headless_mode() 
                     .await
                     .expect("create session");
 
-                client
+                let error = client
                     .set_foreground_session_id(session.id())
                     .await
-                    .expect("set foreground is ignored in headless mode");
+                    .expect_err("set foreground must fail in headless mode");
+                assert_eq!(error.rpc_code(), Some(-32603), "{error}");
+                assert!(
+                    error.to_string().contains("Not running in TUI+server mode"),
+                    "{error}"
+                );
                 assert!(
                     client
                         .get_foreground_session_id()

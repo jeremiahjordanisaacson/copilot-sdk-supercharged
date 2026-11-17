@@ -1,6 +1,6 @@
-use github_copilot_sdk::SessionLifecycleEventType;
+use copilot_sdk::SessionLifecycleEventType;
 #[cfg(windows)]
-use github_copilot_sdk::{CliProgram, Transport};
+use copilot_sdk::{CliProgram, RuntimeConnection};
 use serde_json::json;
 
 use super::support::{wait_for_lifecycle_event, with_e2e_context};
@@ -86,8 +86,16 @@ async fn abrupt_host_termination_still_kills_cli_via_job_object() {
         "abrupt_host_termination_still_kills_cli_via_job_object",
         |ctx| {
             Box::pin(async move {
-                let options = ctx.client_options_with_transport(Transport::Stdio);
-                let program = match &options.program {
+                let mut options = ctx.client_options_with_transport(
+                    RuntimeConnection::for_spawned_stdio(Default::default()),
+                );
+                let process = options
+                    .runtime
+                    .as_mut()
+                    .unwrap()
+                    .child_process_options_mut()
+                    .unwrap();
+                let program = match &process.program {
                     CliProgram::Path(path) => path
                         .to_str()
                         .expect("CLI program path is valid UTF-8")
@@ -96,13 +104,15 @@ async fn abrupt_host_termination_still_kills_cli_via_job_object() {
                         panic!("E2E client options should resolve to an explicit CLI path")
                     }
                 };
-                let prefix_args: Vec<String> = options
-                    .prefix_args
+                let prefix_args: Vec<String> = process
+                    .args
                     .iter()
                     .map(|arg| arg.to_str().expect("prefix arg is valid UTF-8").to_owned())
                     .collect();
-                let env_pairs: Vec<(String, String)> = options
+                let env_pairs: Vec<(String, String)> = process
                     .env
+                    .as_ref()
+                    .expect("harness replacement environment")
                     .iter()
                     .map(|(k, v)| {
                         (
@@ -111,7 +121,7 @@ async fn abrupt_host_termination_still_kills_cli_via_job_object() {
                         )
                     })
                     .collect();
-                let cwd = options
+                let cwd = process
                     .working_directory
                     .to_str()
                     .expect("cwd is valid UTF-8")

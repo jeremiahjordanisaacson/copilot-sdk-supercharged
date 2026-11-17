@@ -5,7 +5,7 @@
 #if NET8_0_OR_GREATER
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -16,13 +16,9 @@ public sealed partial class ClientSessionLifetimeTests
     {
         var logger = new SkillProviderLogger();
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url), Logger = logger });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
-        {
-            Tools = [handlerFails
-                ? new ThrowingFunction(new InvalidOperationException("handler failed"))
-                : new ToolResultFunction(new ToolResultObject { TextResultForLlm = "ok", ResultType = "success" })],
-        });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port), Observability = new ClientObservabilityOptions { Logger = logger } });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [handlerFails ? new ThrowingFunction(new InvalidOperationException("handler failed")) : new ToolResultFunction(new ToolResultObject { TextResultForLlm = "ok", ResultType = "success" })] } });
         server.FailPendingToolCall();
 
         await server.SendSessionEventAsync(session.SessionId, "external_tool.requested", new()
@@ -54,10 +50,10 @@ public sealed partial class ClientSessionLifetimeTests
         }
         Assert.Equal("delivery-request", answers[1].GetProperty("requestId").GetString());
         Assert.False(answers[1].TryGetProperty("result", out _));
-        Assert.Equal("Communication error with Copilot CLI: tool result rejected", answers[1].GetProperty("error").GetString());
+        Assert.Equal("tool result rejected", answers[1].GetProperty("error").GetString());
         Assert.Contains(logger.Entries, entry =>
             entry.Message.StartsWith("External tool result delivery failed.", StringComparison.Ordinal) &&
-            entry.Exception is IOException { InnerException.Message: "tool result rejected" });
+            entry.Exception is RemoteRpcException { Message: "tool result rejected" });
     }
 }
 #endif

@@ -56,11 +56,12 @@ SESSION_FS_CONFIG: SessionFsConfig = {
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def session_fs_client(ctx: E2ETestContext):
     client = CopilotClient(
-        connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-        working_directory=ctx.work_dir,
-        env=ctx.get_env(),
-        github_token=DEFAULT_GITHUB_TOKEN,
+        mode="coding-agent",
         session_fs=SESSION_FS_CONFIG,
+        runtime=RuntimeConnection.for_spawned_stdio(
+            path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+        ),
+        github={"token": DEFAULT_GITHUB_TOKEN},
     )
     yield client
     try:
@@ -80,18 +81,21 @@ class TestSessionFs:
         provider_root = Path(ctx.work_dir) / "binary-provider"
         read_paths: list[str] = []
         client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=DEFAULT_GITHUB_TOKEN,
+            mode="coding-agent",
             session_fs={**SESSION_FS_CONFIG, "capabilities": {"binary": True}},
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+            ),
+            github={"token": DEFAULT_GITHUB_TOKEN},
         )
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                create_session_fs_handler=lambda session: _BinaryTestSessionFsProvider(
-                    provider_root, session.session_id, read_paths
-                ),
+                permissions={"on_request": PermissionHandler.approve_all},
+                state={
+                    "create_session_fs_provider": lambda session: _BinaryTestSessionFsProvider(
+                        provider_root, session.session_id, read_paths
+                    )
+                },
             )
             stored_path = provider_path(provider_root, session.session_id, image_path)
             stored_path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,8 +124,8 @@ class TestSessionFs:
     ):
         provider_root = Path(ctx.work_dir) / "provider"
         session = await session_fs_client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            create_session_fs_handler=create_test_session_fs_handler(provider_root),
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={"create_session_fs_provider": create_test_session_fs_handler(provider_root)},
         )
 
         msg = await session.send_and_wait("What is 100 + 200?")
@@ -142,8 +146,8 @@ class TestSessionFs:
         create_session_fs_handler = create_test_session_fs_handler(provider_root)
 
         session1 = await session_fs_client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            create_session_fs_handler=create_session_fs_handler,
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={"create_session_fs_provider": create_session_fs_handler},
         )
         session_id = session1.session_id
 
@@ -159,8 +163,8 @@ class TestSessionFs:
 
         session2 = await session_fs_client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            create_session_fs_handler=create_session_fs_handler,
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={"create_session_fs_provider": create_session_fs_handler},
         )
 
         msg2 = await session2.send_and_wait("What is that times 3?")
@@ -171,24 +175,26 @@ class TestSessionFs:
 
     async def test_should_reject_setprovider_when_sessions_already_exist(self, ctx: E2ETestContext):
         client1 = CopilotClient(
-            connection=RuntimeConnection.for_tcp(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=DEFAULT_GITHUB_TOKEN,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_tcp(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+            ),
+            github={"token": DEFAULT_GITHUB_TOKEN},
         )
         session = None
         client2 = None
 
         try:
             session = await client1.create_session(
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             actual_port = client1.runtime_port
             assert actual_port is not None
 
             client2 = CopilotClient(
-                connection=RuntimeConnection.for_uri(f"localhost:{actual_port}"),
+                mode="coding-agent",
                 session_fs=SESSION_FS_CONFIG,
+                runtime=RuntimeConnection.for_tcp("localhost", actual_port),
             )
 
             with pytest.raises(Exception):
@@ -211,9 +217,9 @@ class TestSessionFs:
             return supplied_file_content
 
         session = await session_fs_client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            create_session_fs_handler=create_test_session_fs_handler(provider_root),
-            tools=[get_big_string],
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={"create_session_fs_provider": create_test_session_fs_handler(provider_root)},
+            tools={"definitions": [get_big_string]},
         )
 
         await session.send_and_wait(
@@ -238,8 +244,8 @@ class TestSessionFs:
     ):
         provider_root = Path(ctx.work_dir) / "provider"
         session = await session_fs_client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            create_session_fs_handler=create_test_session_fs_handler(provider_root),
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={"create_session_fs_provider": create_test_session_fs_handler(provider_root)},
         )
 
         compaction_event = asyncio.Event()
@@ -274,8 +280,8 @@ class TestSessionFs:
     ):
         provider_root = Path(ctx.work_dir) / "provider"
         session = await session_fs_client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            create_session_fs_handler=create_test_session_fs_handler(provider_root),
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={"create_session_fs_provider": create_test_session_fs_handler(provider_root)},
         )
 
         msg = await session.send_and_wait("What is 7 * 8?")
@@ -304,8 +310,8 @@ class TestSessionFs:
 
         provider_root = Path(ctx.work_dir) / "provider"
         session = await session_fs_client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            create_session_fs_handler=create_test_session_fs_handler(provider_root),
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={"create_session_fs_provider": create_test_session_fs_handler(provider_root)},
         )
 
         # Write a plan via the session RPC

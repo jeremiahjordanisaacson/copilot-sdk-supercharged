@@ -31,17 +31,17 @@ The Copilot SDK communicates with the CLI via JSON-RPC protocol. Features must b
 | Get history | `getEvents()` | All session events |
 | Abort | `abort()` | Cancel in-flight request |
 | **Tools** | | |
-| Register custom tools | `tools` in session config | Full JSON Schema support |
+| Register custom tools | `tools.definitions` in session config | Full JSON Schema support |
 | Replace custom tools (mid-session) | `session.setTools()` | Experimental; see [Changing tools during a session](../features/changing-tools.md) |
 | Tool permission control | `onPreToolUse` hook | Allow/deny/ask |
 | Tool result modification | `onPostToolUse` hook | Transform results |
-| Available/excluded tools | `availableTools`, `excludedTools` config | Filter tools |
+| Available/excluded tools | `tools.availableTools`, `tools.excludedTools` config | Filter tools |
 | **Models** | | |
 | List models | `listModels()` | With capabilities, billing, policy |
 | Set model (at creation) | `model` in session config | Per-session |
 | Switch model (mid-session) | `session.setModel()` | Also via `session.rpc.model.switchTo()` |
 | Get current model | `session.rpc.model.getCurrent()` | Query active model |
-| Reasoning effort | `reasoningEffort` config | For supported models |
+| Reasoning effort | `inference.reasoningEffort` config | For supported models |
 | **Agent Mode** | | |
 | Get current mode | `session.rpc.mode.get()` | Returns current mode |
 | Set mode | `session.rpc.mode.set()` | Switch between modes |
@@ -55,13 +55,13 @@ The Copilot SDK communicates with the CLI via JSON-RPC protocol. Features must b
 | Create workspace file | `session.rpc.workspaces.createFile()` | Create file in workspace |
 | **Authentication** | | |
 | Get auth status | `getAuthStatus()` | Check login state |
-| Use token | `gitHubToken` option | Programmatic auth |
+| Use token | `github.token` option | Programmatic auth |
 | **Connectivity** | | |
 | Ping | `client.ping()` | Health check with server timestamp |
 | Get server status | `client.getStatus()` | Protocol version and server info |
 | **MCP Servers** | | |
-| Local/stdio servers | `mcpServers` config | Spawn processes |
-| Remote HTTP/SSE | `mcpServers` config | Connect to services |
+| Local/stdio servers | `mcp.servers` config | Spawn processes |
+| Remote HTTP/SSE | `mcp.servers` config | Connect to services |
 | **Hooks** | | |
 | Pre-tool use | `onPreToolUse` | Permission, modify args |
 | Pre-MCP tool call | `onPreMcpToolCall` | Attach or remove MCP request metadata |
@@ -75,21 +75,21 @@ The Copilot SDK communicates with the CLI via JSON-RPC protocol. Features must b
 | Sub-agent lifecycle | `onSubagentStart`, `onSubagentStop` | Prepend context to a sub-agent's prompt, request another turn or replace its response |
 | **Events** | | |
 | All session events | `on()` | 40+ event types |
-| Streaming | `streaming: true` | Delta events |
+| Streaming | `events.streaming: true` | Delta events |
 | **Session Config** | | |
-| Custom agents | `customAgents` config | Define specialized agents |
+| Custom agents | `agents.definitions` config | Define specialized agents |
 | System message | `systemMessage` config | Append or replace |
-| Custom provider | `provider` config | BYOK support |
-| Infinite sessions | `infiniteSessions` config | Auto-compaction |
-| Permission handler | `onPermissionRequest` | Approve/deny; `decisionContext.userFeedback` collects explanations only in restricted telemetry |
-| User input handler | `onUserInputRequest` | Handle ask_user |
-| Shell authentication handler | `onShellAuthenticationRequest` | Answer shell password prompts; see [Shell password prompts](../features/shell-password-prompts.md) |
-| Skills | `skillDirectories` config | Custom skills |
-| Disabled skills | `disabledSkills` config | Disable specific skills |
+| Named providers | `inference.providers` connections | BYOK support |
+| Infinite sessions | `state.infiniteSessions` config | Auto-compaction |
+| Permission handler | `permissions.onRequest` | Approve/deny; `decisionContext.userFeedback` collects explanations only in restricted telemetry |
+| User input handler | `interaction.onUserInputRequest` | Handle ask_user |
+| Shell authentication handler | `interaction.onShellAuthenticationRequest` | Answer shell password prompts; see [Shell password prompts](../features/shell-password-prompts.md) |
+| Skills | `skills.directories` config | Custom skills |
+| Disabled skills | `skills.disabledSkills` config | Disable specific skills |
 | Config directory | `configDirectory` config | Override default config location |
 | Client name | `clientName` config | Identify app in User-Agent |
 | Working directory | `workingDirectory` config | Set session cwd |
-| Additional directories | `additionalDirectories` config | Grant session access beyond the working directory; re-supply on resume |
+| Additional directories | `filesystem.additionalDirectories` config | Grant session access beyond the working directory; re-supply on resume |
 | **Experimental** | | |
 | Agent management | `session.rpc.agent.*` | List, select, deselect, get current agent |
 | Fleet mode | `session.rpc.fleet.start()` | Parallel sub-agent execution; see [Fleet mode](../features/fleet-mode.md) |
@@ -161,7 +161,7 @@ The Copilot SDK communicates with the CLI via JSON-RPC protocol. Features must b
 | Shell integration | `/terminal-setup` | Shell-specific |
 | **Development** | | |
 | Toggle experimental | `/experimental`, `--experimental` | Runtime flag |
-| Custom instructions control | `--no-custom-instructions` | CLI flag (use SDK `skipCustomInstructions` config instead) |
+| Custom instructions control | `--no-custom-instructions` | CLI flag (use SDK `instructions.skipCustomInstructions` config instead) |
 | Diagnose session | `/diagnose` | TUI command |
 | View/manage instructions | `/instructions` | TUI command (use SDK `session.rpc.instructions.getSources()` instead) |
 | Collect debug logs | `/collect-debug-logs` | Diagnostic tool (use SDK `session.rpc.debug.collectLogs()` instead) |
@@ -172,7 +172,7 @@ The Copilot SDK communicates with the CLI via JSON-RPC protocol. Features must b
 | Interactive prompt | `-i`, `--interactive` | Auto-execute then interactive |
 | Silent output | `-s`, `--silent` | Script-friendly |
 | Continue session | `--continue` | Resume most recent (use SDK `client.rpc.sessions.getLastForContext({ context })` with `resumeSession()` to prefer sessions from the working directory, or `getLastSessionId()` for the most recent session overall) |
-| Agent selection | `--agent <agent>` | CLI flag (use SDK `agent` config or `session.rpc.agent.select()` instead) |
+| Agent selection | `--agent <agent>` | CLI flag (use SDK `agents.selected` config or `session.rpc.agent.select()` instead) |
 
 ## Workarounds
 
@@ -186,7 +186,7 @@ The `--share` option is not available via SDK. Workarounds:
 
 1. **Collect events manually** - Subscribe to session events and build your own export:
    ```typescript
-   import type { SessionEvent } from "@github/copilot-sdk";
+   import type { SessionEvent } from "@microsoft/copilot-sdk";
 
    const events: SessionEvent[] = [];
    session.on((event) => events.push(event));
@@ -199,15 +199,17 @@ The `--share` option is not available via SDK. Workarounds:
 
 ### Permission control
 
-The SDK uses a **deny-by-default** permission model. All permission requests (file writes, shell commands, URL fetches, etc.) are denied unless your app provides an `onPermissionRequest` handler.
+The SDK uses a **deny-by-default** permission model. All permission requests (file writes, shell commands, URL fetches, etc.) are denied unless your app provides a `permissions.onRequest` handler.
 
 Instead of `--allow-all-paths` or `--yolo`, use the permission handler:
 
 ```typescript
-import { approveAll } from "@github/copilot-sdk";
+import { approveAll } from "@microsoft/copilot-sdk";
 
 const session = await client.createSession({
-  onPermissionRequest: approveAll,
+    permissions: {
+        onRequest: approveAll,
+    },
 });
 ```
 
@@ -231,11 +233,13 @@ Instead of `/compact`, configure automatic compaction or trigger it manually:
 ```typescript
 // Automatic compaction via config
 const session = await client.createSession({
-  infiniteSessions: {
-    enabled: true,
-    backgroundCompactionThreshold: 0.80,  // Start background compaction at 80% context utilization
-    bufferExhaustionThreshold: 0.95,      // Block and compact at 95% context utilization
-  },
+    state: {
+        infiniteSessions: {
+            enabled: true,
+            backgroundCompactionThreshold: 0.8, // Start background compaction at 80% context utilization
+            bufferExhaustionThreshold: 0.95, // Block and compact at 95% context utilization
+        },
+    },
 });
 
 // Manual compaction (experimental)
@@ -286,12 +290,11 @@ The SDK can only access features exposed through the CLI's JSON-RPC protocol. If
 
 ## Version compatibility
 
-| SDK | Supported CLI Protocol Versions | v2 CLI Server |
+| SDK | Supported CLI Protocol Versions | Earlier CLI Servers |
 |-----|---------------------------------|---------------|
-| Node.js, Python, Go, .NET, Rust | v3 | Not supported: startup fails with a protocol version mismatch error |
-| Java | v2–v3 | Supported with automatic v2 adapters |
+| Node.js, Python, Go, .NET, Rust, Java | v4 | Not supported: startup fails with a protocol version mismatch error |
 
-The SDK checks the CLI's protocol version at startup and fails to start with a protocol version mismatch error when the CLI reports a version outside the supported range. Only the Java SDK accepts a v2 CLI server: it adapts the server's `tool.call` and `permission.request` requests to the same tool and permission handlers used with v3, so no code changes are required.
+Grouped options require protocol v4. Old SDKs reject a v4 runtime; new SDKs reject v3 or earlier before creating or resuming sessions. Neither flat option payloads nor legacy aliases are supported. This startup compatibility boundary does not change persisted-session compatibility: existing sessions and stored event formats remain supported.
 
 Check versions at runtime:
 

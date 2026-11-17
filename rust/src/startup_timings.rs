@@ -64,7 +64,7 @@ pub struct StartupTimings {
     pub session_fs_ms: Option<u64>,
     /// Time spent registering the LLM inference provider via
     /// `llmInference.setProvider`. `Some` only when
-    /// [`ClientOptions::request_handler`](crate::ClientOptions::request_handler)
+    /// [`ClientModelOptions::request_handler`](crate::ClientModelOptions::request_handler)
     /// is set.
     pub llm_handler_ms: Option<u64>,
     /// Total wall-clock time for [`Client::start`](crate::Client::start), from

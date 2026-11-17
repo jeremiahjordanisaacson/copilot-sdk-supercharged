@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"sync"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 // RepoPath resolves a path relative to the repository root, anchored to this

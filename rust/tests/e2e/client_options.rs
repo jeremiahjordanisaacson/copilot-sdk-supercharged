@@ -1,18 +1,19 @@
+use copilot_sdk::{RuntimeConnection, SpawnedProcessOptions, SpawnedTcpRuntimeOptions};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use github_copilot_sdk::canvas::CanvasDeclaration;
-use github_copilot_sdk::rpc::{ConnectRemoteSessionParams, OpenCanvasInstance, RemoteSessionMode};
-use github_copilot_sdk::session_events::{
+use copilot_sdk::canvas::CanvasDeclaration;
+use copilot_sdk::rpc::{ConnectRemoteSessionParams, OpenCanvasInstance};
+use copilot_sdk::session_events::{
     ReasoningSummary, SessionEventType, SessionLimitsConfig, SessionStartData,
 };
-use github_copilot_sdk::{
+use copilot_sdk::{
     AgentMode, Attachment, AttachmentLineRange, AttachmentSelectionPosition,
     AttachmentSelectionRange, CliProgram, Client, ClientMode, ClientOptions, CloudSessionOptions,
-    CloudSessionRepository, CopilotExpAssignmentResponse, DeliveryMode, ExtensionInfo,
-    GitHubReferenceType, MessageOptions, MessageSource, ResumeSessionConfig, SessionConfig,
-    SessionId, TranscriptRecovery, Transport,
+    CloudSessionRepository, CopilotExpAssignmentResponse, CreateSessionOptions, DeliveryMode,
+    ExtensionInfo, GitHubReferenceType, MessageOptions, MessageSource, ResumeSessionOptions,
+    SessionId, TranscriptRecovery,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -23,7 +24,229 @@ use tempfile::TempDir;
 mod windows_process_tree;
 
 #[tokio::test]
-#[allow(deprecated)]
+async fn spawned_connections_consume_process_cwd_environment_and_arguments() {
+    let host_cwd = std::env::current_dir().expect("host cwd");
+    let host_value = std::env::var_os("COPILOT_SDK_PROCESS_TEST");
+    for tcp in [false, true] {
+        let fake = FakeCli::new();
+        let mut options = fake
+            .client_options("typed-token")
+            .with_observability(|group| group.with_log_level(copilot_sdk::LogLevel::Debug));
+        let Some(RuntimeConnection::SpawnedStdio(mut process)) = options.runtime.take() else {
+            panic!("fake CLI must configure a spawned process");
+        };
+        process.args.push("--fixture-argument=hello world ☃".into());
+        process.env = Some(
+            std::env::vars_os()
+                .chain([
+                    ("COPILOT_SDK_PROCESS_TEST".into(), "first".into()),
+                    ("COPILOT_SDK_PROCESS_TEST".into(), "last".into()),
+                    ("COPILOT_SDK_AUTH_TOKEN".into(), "overlaid-token".into()),
+                ])
+                .collect(),
+        );
+        process.env_remove.push("COPILOT_SDK_AUTH_TOKEN".into());
+        let arguments: Vec<_> = process
+            .args
+            .iter()
+            .skip(1)
+            .map(|arg| arg.to_str().expect("fixture argument").to_owned())
+            .collect();
+        options.runtime = Some(if tcp {
+            RuntimeConnection::SpawnedTcp(SpawnedTcpRuntimeOptions {
+                process,
+                port: 0,
+                connection_token: None,
+            })
+        } else {
+            RuntimeConnection::SpawnedStdio(process)
+        });
+        let client = Client::start(options)
+            .await
+            .expect("start configured child");
+        let session_directory = fake.path("session-workspace");
+        let session = client
+            .create_session(
+                CreateSessionOptions::default().with_working_directory(&session_directory),
+            )
+            .await
+            .expect("create session");
+        session.disconnect().await.expect("disconnect session");
+        client.stop().await.expect("stop configured child");
+
+        let capture = fake.capture();
+        assert_eq!(
+            capture.cwd.canonicalize().unwrap(),
+            fake.work_dir.canonicalize().unwrap()
+        );
+        assert_eq!(
+            client.cwd().canonicalize().unwrap(),
+            fake.work_dir.canonicalize().unwrap()
+        );
+        assert!(capture.args.starts_with(&arguments), "{:?}", capture.args);
+        assert_eq!(capture.args[arguments.len()], "--server");
+        assert!(
+            capture
+                .args
+                .windows(2)
+                .any(|args| args == ["--log-level", "debug"])
+        );
+        assert_eq!(
+            capture
+                .env
+                .get("COPILOT_SDK_PROCESS_TEST")
+                .map(String::as_str),
+            Some("last")
+        );
+        assert_eq!(
+            capture
+                .env
+                .get("COPILOT_SDK_AUTH_TOKEN")
+                .map(String::as_str),
+            Some("typed-token"),
+        );
+        assert_eq!(
+            capture.env.get("PATH").map(std::ffi::OsStr::new),
+            std::env::var_os("PATH").as_deref()
+        );
+        let create = fake.captured_request("session.create");
+        assert_eq!(
+            PathBuf::from(
+                create.params["workingDirectory"]
+                    .as_str()
+                    .expect("session cwd")
+            )
+            .canonicalize()
+            .unwrap(),
+            session_directory.canonicalize().unwrap(),
+        );
+        assert_eq!(std::env::current_dir().unwrap(), host_cwd);
+        assert_eq!(std::env::var_os("COPILOT_SDK_PROCESS_TEST"), host_value);
+    }
+}
+
+#[tokio::test]
+async fn spawned_environment_replacement_controls_inheritance_and_runtime_selection() {
+    let node = std::process::Command::new("node")
+        .args(["-p", "process.execPath"])
+        .output()
+        .expect("locate the fake runtime's interpreter");
+    assert!(node.status.success(), "{:?}", node);
+    let node = PathBuf::from(String::from_utf8(node.stdout).unwrap().trim());
+    let inherited_path = std::env::var_os("PATH");
+    #[cfg(windows)]
+    let program = PathBuf::from(std::env::var_os("ComSpec").expect("Windows command processor"));
+    #[cfg(not(windows))]
+    let program = node.clone();
+    let relative_program = PathBuf::from(if cfg!(windows) { "cmd.exe" } else { "node" });
+
+    for environment in [
+        None,
+        Some(vec![]),
+        Some(vec![(
+            "COPILOT_CLI_PATH".into(),
+            program.as_os_str().to_owned(),
+        )]),
+        Some(vec![(
+            "COPILOT_CLI_PATH".into(),
+            relative_program.as_os_str().to_owned(),
+        )]),
+    ] {
+        let inherits = environment.is_none();
+        let resolves_from_environment = environment.as_ref().is_some_and(|env| !env.is_empty());
+        let relative_override = environment
+            .as_ref()
+            .and_then(|env| env.first())
+            .is_some_and(|(_, path)| std::path::Path::new(path).is_relative());
+        let fake = FakeCli::new();
+        if relative_override {
+            let copied = std::process::Command::new(&node)
+                .args([
+                    "-e",
+                    "require('node:fs').copyFileSync(process.argv[1], process.argv[2])",
+                ])
+                .arg(&program)
+                .arg(fake.work_dir.join(&relative_program))
+                .output()
+                .expect("copy the interpreter from an isolated process");
+            assert!(copied.status.success(), "{copied:?}");
+        }
+        let mut options = fake.client_options("typed-token");
+        let Some(RuntimeConnection::SpawnedStdio(process)) = &mut options.runtime else {
+            panic!("fake CLI must configure a spawned process");
+        };
+        process.program = if resolves_from_environment {
+            CliProgram::Resolve
+        } else {
+            CliProgram::Path(program.clone())
+        };
+        #[cfg(windows)]
+        {
+            // Node 24 needs SystemRoot for CSPRNG initialization. Set it inside
+            // the fixture, preserving a genuinely empty SDK environment map.
+            process.args.splice(
+                0..0,
+                [
+                    "/d".into(),
+                    "/c".into(),
+                    "set".into(),
+                    format!(
+                        "SystemRoot={}&&",
+                        std::env::var("SystemRoot").expect("Windows system directory")
+                    )
+                    .into(),
+                    node.as_os_str().to_owned(),
+                ],
+            );
+        }
+        process.env = environment;
+
+        let client = Client::start(options).await.unwrap_or_else(|error| {
+            let capture = std::fs::read_to_string(&fake.capture_path);
+            panic!(
+                "start configured child (inherits={inherits}, resolves_from_environment={resolves_from_environment}, relative_override={relative_override}, capture={capture:?}): {error:?}"
+            )
+        });
+        client.stop().await.expect("stop configured child");
+
+        let capture = fake.capture();
+        assert_eq!(
+            capture.env.get("PATH").map(std::ffi::OsStr::new),
+            if inherits {
+                inherited_path.as_deref()
+            } else {
+                None
+            },
+        );
+        assert_eq!(
+            capture
+                .env
+                .get("COPILOT_SDK_AUTH_TOKEN")
+                .map(String::as_str),
+            Some("typed-token"),
+        );
+    }
+}
+
+#[tokio::test]
+async fn spawned_process_empty_cwd_uses_host_directory() {
+    let fake = FakeCli::new();
+    let mut options = fake.client_options("cwd-fallback-token");
+    let Some(RuntimeConnection::SpawnedStdio(process)) = &mut options.runtime else {
+        panic!("fake CLI must configure a spawned process");
+    };
+    process.working_directory.clear();
+    let client = Client::start(options)
+        .await
+        .expect("start child in host cwd");
+    client.stop().await.expect("stop child");
+    assert_eq!(
+        fake.capture().cwd.canonicalize().unwrap(),
+        std::env::current_dir().unwrap().canonicalize().unwrap(),
+    );
+}
+
+#[tokio::test]
 async fn should_forward_advanced_session_creation_options_to_the_cli() {
     let fake = FakeCli::new();
     let client = Client::start(fake.client_options("advanced-create-client-token"))
@@ -35,59 +258,66 @@ async fn should_forward_advanced_session_creation_options_to_the_cli() {
     let extension_sdk_path = fake.path("extension-sdk");
     let session = client
         .create_session(
-            SessionConfig::default()
+            CreateSessionOptions::default()
                 .with_session_id("advanced-session-id")
                 .with_name("advanced session")
                 .with_client_name("rust-sdk-e2e-client")
                 .with_model("claude-sonnet-5")
-                .with_reasoning_effort("low")
-                .with_reasoning_summary(ReasoningSummary::None)
-                .with_context_tier("long_context")
+                .with_inference(|group| group.with_reasoning_effort("low"))
+                .with_inference(|group| group.with_reasoning_summary(ReasoningSummary::None))
+                .with_inference(|group| group.with_context_tier("long_context"))
                 .with_config_directory(config_dir.clone())
                 .with_enable_config_discovery(true)
-                .with_skip_embedding_retrieval(true)
-                .with_embedding_cache_storage("in-memory")
-                .with_organization_custom_instructions("organization guidance")
-                .with_enable_on_demand_instruction_discovery(true)
-                .with_enable_file_hooks(true)
-                .with_enable_host_git_operations(false)
-                .with_enable_session_store(false)
-                .with_enable_skills(false)
+                .with_state(|group| group.with_skip_embedding_retrieval(true))
+                .with_state(|group| group.with_embedding_cache_storage("in-memory"))
+                .with_instructions(|group| group.with_organization_text("organization guidance"))
+                .with_instructions(|group| group.with_on_demand_discovery(true))
+                .with_hooks(|group| group.with_enable_repository_hooks(true))
+                .with_git(|group| group.with_enable_host_git_operations(false))
+                .with_state(|group| group.with_enable_cross_session_store(false))
+                .with_skills(|group| group.with_enabled(false))
                 .with_working_directory(working_dir.clone())
-                .with_streaming(true)
-                .with_include_sub_agent_streaming_events(false)
-                .with_available_tools(["read_file"])
-                .with_excluded_tools(["bash"])
-                .with_excluded_builtin_agents(["legacy-agent"])
-                .with_enable_session_telemetry(false)
-                .with_enable_citations(true)
-                .with_session_limits(SessionLimitsConfig {
-                    max_ai_credits: Some(42.0),
+                .with_events(|group| group.with_streaming(true))
+                .with_events(|group| group.with_include_sub_agent_streaming_events(false))
+                .with_tools(|group| group.with_available_tools(["read_file"]))
+                .with_tools(|group| group.with_excluded_tools(["bash"]))
+                .with_agents(|group| group.with_excluded_builtin_agents(["legacy-agent"]))
+                .with_github(|group| group.with_telemetry_enabled(false))
+                .with_inference(|group| group.with_enable_citations(true))
+                .with_execution(|group| {
+                    group.with_limits(SessionLimitsConfig {
+                        max_ai_credits: Some(42.0),
+                    })
                 })
-                .with_skip_custom_instructions(true)
-                .with_custom_agents_local_only(true)
-                .with_coauthor_enabled(false)
-                .with_manage_schedule_enabled(false)
-                .with_github_token("advanced-create-session-token")
-                .with_remote_session(RemoteSessionMode::Export)
-                .with_skill_directories([PathBuf::from("skills")])
-                .with_plugin_directories([PathBuf::from("plugins")])
-                .with_instruction_directories([PathBuf::from("instructions")])
-                .with_disabled_skills(["disabled-skill"])
-                .with_enable_mcp_apps(true)
-                .with_canvases([CanvasDeclaration::new(
-                    "canvas",
-                    "Canvas",
-                    "Canvas description",
-                )])
-                .with_request_canvas_renderer(true)
-                .with_request_extensions(true)
-                .with_extension_sdk_path(path_string(&extension_sdk_path))
-                .with_extension_info(ExtensionInfo::new("github-app", "rust-e2e-extension"))
-                .with_exp_assignments(CopilotExpAssignmentResponse {
-                    flights: HashMap::from([("feature".to_string(), "enabled".to_string())]),
-                    assignment_context: "ctx".to_string(),
-                    ..Default::default()
+                .with_instructions(|group| group.with_skip_custom_instructions(true))
+                .with_agents(|group| group.with_local_discovery_only(true))
+                .with_git(|group| group.with_coauthor_enabled(false))
+                .with_tools(|group| group.with_manage_schedule_enabled(false))
+                .with_github(|group| group.with_token("advanced-create-session-token"))
+                .with_skills(|group| group.with_directories([PathBuf::from("skills")]))
+                .with_plugins(|group| group.with_directories([PathBuf::from("plugins")]))
+                .with_instructions(|group| group.with_directories([PathBuf::from("instructions")]))
+                .with_skills(|group| group.with_disabled_skills(["disabled-skill"]))
+                .with_mcp(|group| group.with_enable_apps(true))
+                .with_canvases(|group| {
+                    group.with_definitions([CanvasDeclaration::new(
+                        "canvas",
+                        "Canvas",
+                        "Canvas description",
+                    )])
+                })
+                .with_canvases(|group| group.with_request_renderer(true))
+                .with_extensions(|group| group.with_enabled(true))
+                .with_extensions(|group| group.with_sdk_path(path_string(&extension_sdk_path)))
+                .with_extensions(|group| {
+                    group.with_identity(ExtensionInfo::new("github-app", "rust-e2e-extension"))
+                })
+                .with_experiments(|group| {
+                    group.with_assignments(CopilotExpAssignmentResponse {
+                        flights: HashMap::from([("feature".to_string(), "enabled".to_string())]),
+                        assignment_context: "ctx".to_string(),
+                        ..Default::default()
+                    })
                 }),
         )
         .await
@@ -104,56 +334,71 @@ async fn should_forward_advanced_session_creation_options_to_the_cli() {
             ("name", json!("advanced session")),
             ("clientName", json!("rust-sdk-e2e-client")),
             ("model", json!("claude-sonnet-5")),
-            ("reasoningEffort", json!("low")),
-            ("reasoningSummary", json!("none")),
-            ("contextTier", json!("long_context")),
-            ("configDir", json!(path_string(&config_dir))),
+            ("inference.reasoningEffort", json!("low")),
+            ("inference.reasoningSummary", json!("none")),
+            ("inference.contextTier", json!("long_context")),
+            ("configDirectory", json!(path_string(&config_dir))),
             ("enableConfigDiscovery", json!(true)),
-            ("skipEmbeddingRetrieval", json!(true)),
-            ("embeddingCacheStorage", json!("in-memory")),
+            ("state.skipEmbeddingRetrieval", json!(true)),
+            ("state.embeddingCacheStorage", json!("in-memory")),
             (
-                "organizationCustomInstructions",
+                "instructions.organizationText",
                 json!("organization guidance"),
             ),
-            ("enableOnDemandInstructionDiscovery", json!(true)),
-            ("enableFileHooks", json!(true)),
-            ("enableHostGitOperations", json!(false)),
-            ("enableSessionStore", json!(false)),
-            ("enableSkills", json!(false)),
+            ("instructions.onDemandDiscovery", json!(true)),
+            ("hooks.enableRepositoryHooks", json!(true)),
+            ("git.enableHostGitOperations", json!(false)),
+            ("state.enableCrossSessionStore", json!(false)),
+            ("skills.enabled", json!(false)),
             ("workingDirectory", json!(path_string(&working_dir))),
-            ("streaming", json!(true)),
-            ("includeSubAgentStreamingEvents", json!(false)),
-            ("enableSessionTelemetry", json!(false)),
-            ("enableCitations", json!(true)),
-            ("gitHubToken", json!("advanced-create-session-token")),
-            ("remoteSession", json!("export")),
-            ("requestMcpApps", json!(true)),
-            ("requestCanvasRenderer", json!(true)),
-            ("requestExtensions", json!(true)),
-            ("extensionSdkPath", json!(path_string(&extension_sdk_path))),
-            ("envValueMode", json!("direct")),
+            ("events.streaming", json!(true)),
+            ("events.includeSubAgentStreamingEvents", json!(false)),
+            ("github.telemetryEnabled", json!(false)),
+            ("inference.enableCitations", json!(true)),
+            ("github.token", json!("advanced-create-session-token")),
+            ("mcp.enableApps", json!(true)),
+            ("canvases.requestRenderer", json!(true)),
+            ("extensions.enabled", json!(true)),
+            (
+                "extensions.sdkPath",
+                json!(path_string(&extension_sdk_path)),
+            ),
+            ("mcp.envValueMode", json!("direct")),
         ],
     );
-    assert_eq!(params["availableTools"], json!(["read_file"]));
-    assert_eq!(params["excludedTools"], json!(["bash"]));
-    assert_eq!(params["excludedBuiltinAgents"], json!(["legacy-agent"]));
-    assert_eq!(params["skillDirectories"], json!(["skills"]));
-    assert_eq!(params["pluginDirectories"], json!(["plugins"]));
-    assert_eq!(params["instructionDirectories"], json!(["instructions"]));
-    assert_eq!(params["disabledSkills"], json!(["disabled-skill"]));
-    assert_eq!(params["sessionLimits"]["maxAiCredits"], json!(42));
+    assert!(!params.contains_key("remoteSession"));
+    assert_eq!(params["tools"]["availableTools"], json!(["read_file"]));
+    assert_eq!(params["tools"]["excludedTools"], json!(["bash"]));
     assert_eq!(
-        params["extensionInfo"],
+        params["agents"]["excludedBuiltinAgents"],
+        json!(["legacy-agent"])
+    );
+    assert_eq!(params["skills"]["directories"], json!(["skills"]));
+    assert_eq!(params["plugins"]["directories"], json!(["plugins"]));
+    assert_eq!(
+        params["instructions"]["directories"],
+        json!(["instructions"])
+    );
+    assert_eq!(
+        params["skills"]["disabledSkills"],
+        json!(["disabled-skill"])
+    );
+    assert_eq!(params["execution"]["limits"]["maxAiCredits"], json!(42));
+    assert_eq!(
+        params["extensions"]["identity"],
         json!({ "source": "github-app", "name": "rust-e2e-extension" })
     );
-    assert_eq!(params["canvases"][0]["id"], json!("canvas"));
-    assert_eq!(params["canvases"][0]["displayName"], json!("Canvas"));
+    assert_eq!(params["canvases"]["definitions"][0]["id"], json!("canvas"));
     assert_eq!(
-        params["canvases"][0]["description"],
+        params["canvases"]["definitions"][0]["displayName"],
+        json!("Canvas")
+    );
+    assert_eq!(
+        params["canvases"]["definitions"][0]["description"],
         json!("Canvas description")
     );
     assert_eq!(
-        params["expAssignments"]["Flights"]["feature"],
+        params["experiments"]["assignments"]["Flights"]["feature"],
         json!("enabled")
     );
 
@@ -163,17 +408,17 @@ async fn should_forward_advanced_session_creation_options_to_the_cli() {
         update_params,
         [
             ("sessionId", json!("advanced-session-id")),
-            ("skipCustomInstructions", json!(true)),
-            ("customAgentsLocalOnly", json!(true)),
-            ("coauthorEnabled", json!(false)),
-            ("manageScheduleEnabled", json!(false)),
+            ("instructions.skipCustomInstructions", json!(true)),
+            ("agents.localDiscoveryOnly", json!(true)),
+            ("git.coauthorEnabled", json!(false)),
+            ("tools.manageScheduleEnabled", json!(false)),
         ],
     );
 }
 
 #[tokio::test]
 async fn resume_transcript_recovery_defaults_overrides_and_projection() {
-    for mode in [ClientMode::Empty, ClientMode::CopilotCli] {
+    for mode in [ClientMode::Empty, ClientMode::CodingAgent] {
         for choice in [None, Some(false), Some(true)] {
             let fake = FakeCli::new();
             let reports_recovery = choice.unwrap_or(true);
@@ -182,15 +427,19 @@ async fn resume_transcript_recovery_defaults_overrides_and_projection() {
             } else {
                 "normal"
             };
-            let client = Client::start(
-                fake.client_options_with_behavior("recovery-client-token", behavior)
-                    .with_mode(mode)
-                    .with_base_directory(fake.path("state")),
-            )
-            .await
-            .expect("start fake CLI client");
-            let mut config = ResumeSessionConfig::new("recovery-session".into())
-                .with_available_tools(Vec::<String>::new());
+            let mut options = fake
+                .client_options_with_behavior("recovery-client-token", behavior)
+                .with_mode(mode);
+            options
+                .runtime
+                .as_mut()
+                .unwrap()
+                .owned_options_mut()
+                .unwrap()
+                .base_directory = Some(fake.path("state"));
+            let client = Client::start(options).await.expect("start fake CLI client");
+            let mut config = ResumeSessionOptions::new("recovery-session".into())
+                .with_tools(|group| group.with_available_tools(Vec::<String>::new()));
             if let Some(allow) = choice {
                 config = config.with_allow_transcript_recovery(allow);
             }
@@ -227,48 +476,59 @@ async fn should_forward_advanced_session_resume_options_to_the_cli() {
     let extension_sdk_path = fake.path("resume-extension-sdk");
     let session = client
         .resume_session(
-            ResumeSessionConfig::new(SessionId::from("resume-session-id"))
+            ResumeSessionOptions::new(SessionId::from("resume-session-id"))
                 .with_model("gpt-5-mini")
-                .with_reasoning_effort("low")
-                .with_reasoning_summary(ReasoningSummary::None)
-                .with_context_tier("long_context")
+                .with_inference(|group| group.with_reasoning_effort("low"))
+                .with_inference(|group| group.with_reasoning_summary(ReasoningSummary::None))
+                .with_inference(|group| group.with_context_tier("long_context"))
                 .with_working_directory(working_dir.clone())
                 .with_config_directory(config_dir.clone())
                 .with_enable_config_discovery(false)
-                .with_enable_file_hooks(true)
+                .with_hooks(|group| group.with_enable_repository_hooks(true))
                 .with_suppress_resume_event(true)
                 .with_continue_pending_work(false)
-                .with_streaming(true)
-                .with_include_sub_agent_streaming_events(false)
-                .with_github_token("advanced-resume-session-token")
-                .with_canvases([CanvasDeclaration::new(
-                    "resume-canvas",
-                    "Resume Canvas",
-                    "Resume canvas description",
-                )])
-                .with_open_canvases([OpenCanvasInstance {
-                    canvas_id: "resume-canvas".to_string(),
-                    extension_id: "github-app/rust-e2e-extension".to_string(),
-                    extension_name: None,
-                    icon: None,
-                    input: Some(json!({ "value": "from-resume" })),
-                    instance_id: "resume-instance".to_string(),
-                    status: None,
-                    title: None,
-                    url: None,
-                }])
-                .with_request_canvas_renderer(true)
-                .with_request_extensions(true)
-                .with_extension_sdk_path(path_string(&extension_sdk_path))
-                .with_extension_info(ExtensionInfo::new("github-app", "rust-e2e-extension"))
-                .with_skip_custom_instructions(true)
-                .with_custom_agents_local_only(true)
-                .with_coauthor_enabled(false)
-                .with_manage_schedule_enabled(false)
-                .with_exp_assignments(CopilotExpAssignmentResponse {
-                    flights: HashMap::from([("resumeFeature".to_string(), "enabled".to_string())]),
-                    assignment_context: "ctx".to_string(),
-                    ..Default::default()
+                .with_events(|group| group.with_streaming(true))
+                .with_events(|group| group.with_include_sub_agent_streaming_events(false))
+                .with_github(|group| group.with_token("advanced-resume-session-token"))
+                .with_canvases(|group| {
+                    group.with_definitions([CanvasDeclaration::new(
+                        "resume-canvas",
+                        "Resume Canvas",
+                        "Resume canvas description",
+                    )])
+                })
+                .with_canvases(|group| {
+                    group.with_open([OpenCanvasInstance {
+                        canvas_id: "resume-canvas".to_string(),
+                        extension_id: "github-app/rust-e2e-extension".to_string(),
+                        extension_name: None,
+                        icon: None,
+                        input: Some(json!({ "value": "from-resume" })),
+                        instance_id: "resume-instance".to_string(),
+                        status: None,
+                        title: None,
+                        url: None,
+                    }])
+                })
+                .with_canvases(|group| group.with_request_renderer(true))
+                .with_extensions(|group| group.with_enabled(true))
+                .with_extensions(|group| group.with_sdk_path(path_string(&extension_sdk_path)))
+                .with_extensions(|group| {
+                    group.with_identity(ExtensionInfo::new("github-app", "rust-e2e-extension"))
+                })
+                .with_instructions(|group| group.with_skip_custom_instructions(true))
+                .with_agents(|group| group.with_local_discovery_only(true))
+                .with_git(|group| group.with_coauthor_enabled(false))
+                .with_tools(|group| group.with_manage_schedule_enabled(false))
+                .with_experiments(|group| {
+                    group.with_assignments(CopilotExpAssignmentResponse {
+                        flights: HashMap::from([(
+                            "resumeFeature".to_string(),
+                            "enabled".to_string(),
+                        )]),
+                        assignment_context: "ctx".to_string(),
+                        ..Default::default()
+                    })
                 }),
         )
         .await
@@ -283,42 +543,45 @@ async fn should_forward_advanced_session_resume_options_to_the_cli() {
         [
             ("sessionId", json!("resume-session-id")),
             ("model", json!("gpt-5-mini")),
-            ("reasoningEffort", json!("low")),
-            ("reasoningSummary", json!("none")),
-            ("contextTier", json!("long_context")),
+            ("inference.reasoningEffort", json!("low")),
+            ("inference.reasoningSummary", json!("none")),
+            ("inference.contextTier", json!("long_context")),
             ("workingDirectory", json!(path_string(&working_dir))),
-            ("configDir", json!(path_string(&config_dir))),
+            ("configDirectory", json!(path_string(&config_dir))),
             ("enableConfigDiscovery", json!(false)),
-            ("enableFileHooks", json!(true)),
-            ("disableResume", json!(true)),
+            ("hooks.enableRepositoryHooks", json!(true)),
+            ("suppressResumeEvent", json!(true)),
             ("continuePendingWork", json!(false)),
-            ("streaming", json!(true)),
-            ("includeSubAgentStreamingEvents", json!(false)),
-            ("gitHubToken", json!("advanced-resume-session-token")),
-            ("requestCanvasRenderer", json!(true)),
-            ("requestExtensions", json!(true)),
-            ("extensionSdkPath", json!(path_string(&extension_sdk_path))),
-            ("envValueMode", json!("direct")),
+            ("events.streaming", json!(true)),
+            ("events.includeSubAgentStreamingEvents", json!(false)),
+            ("github.token", json!("advanced-resume-session-token")),
+            ("canvases.requestRenderer", json!(true)),
+            ("extensions.enabled", json!(true)),
+            (
+                "extensions.sdkPath",
+                json!(path_string(&extension_sdk_path)),
+            ),
+            ("mcp.envValueMode", json!("direct")),
         ],
     );
     assert_eq!(
-        params["openCanvases"][0]["canvasId"],
+        params["canvases"]["open"][0]["canvasId"],
         json!("resume-canvas")
     );
     assert_eq!(
-        params["openCanvases"][0]["extensionId"],
+        params["canvases"]["open"][0]["extensionId"],
         json!("github-app/rust-e2e-extension")
     );
     assert_eq!(
-        params["openCanvases"][0]["instanceId"],
+        params["canvases"]["open"][0]["instanceId"],
         json!("resume-instance")
     );
     assert_eq!(
-        params["extensionInfo"],
+        params["extensions"]["identity"],
         json!({ "source": "github-app", "name": "rust-e2e-extension" })
     );
     assert_eq!(
-        params["expAssignments"]["Flights"]["resumeFeature"],
+        params["experiments"]["assignments"]["Flights"]["resumeFeature"],
         json!("enabled")
     );
 
@@ -328,10 +591,10 @@ async fn should_forward_advanced_session_resume_options_to_the_cli() {
         update_params,
         [
             ("sessionId", json!("resume-session-id")),
-            ("skipCustomInstructions", json!(true)),
-            ("customAgentsLocalOnly", json!(true)),
-            ("coauthorEnabled", json!(false)),
-            ("manageScheduleEnabled", json!(false)),
+            ("instructions.skipCustomInstructions", json!(true)),
+            ("agents.localDiscoveryOnly", json!(true)),
+            ("git.coauthorEnabled", json!(false)),
+            ("tools.manageScheduleEnabled", json!(false)),
         ],
     );
 }
@@ -343,7 +606,7 @@ async fn should_send_complete_message_wire_shape() {
         .await
         .expect("start fake CLI client");
     let session = client
-        .create_session(SessionConfig::default())
+        .create_session(CreateSessionOptions::default())
         .await
         .expect("create session");
     let file_path = fake.path("message-file").join("scenario.txt");
@@ -481,7 +744,7 @@ async fn transport_loss_never_replays_send_for_any_delivery_mode() {
         .await
         .expect("start fake CLI client");
         let session = client
-            .create_session(SessionConfig::default())
+            .create_session(CreateSessionOptions::default())
             .await
             .expect("create session");
         let mut message = MessageOptions::new("AMBIGUOUS_SCENARIO_SEND")
@@ -517,11 +780,11 @@ async fn cloud_create_routes_first_event_for_server_assigned_session_id() {
         .await
         .expect("start fake CLI client");
     let prepared = client
-        .prepare_session(
-            SessionConfig::default().with_cloud(CloudSessionOptions::with_repository(
+        .prepare_session(CreateSessionOptions::default().with_cloud(
+            CloudSessionOptions::with_repository(
                 CloudSessionRepository::new("github", "copilot-sdk").with_branch("main"),
-            )),
-        )
+            ),
+        ))
         .expect("prepare cloud session");
     let mut events = prepared.subscribe();
     let session = prepared.start().await.expect("start cloud session");
@@ -572,7 +835,7 @@ async fn remote_connect_runtime_id_is_used_for_resume() {
         Some("github/copilot-sdk#123")
     );
     let resumed = client
-        .resume_session(ResumeSessionConfig::new(connection.session_id.clone()))
+        .resume_session(ResumeSessionOptions::new(connection.session_id.clone()))
         .await
         .expect("resume connected runtime session");
     assert_eq!(resumed.id(), &connection.session_id);
@@ -793,17 +1056,19 @@ impl ShutdownCli {
             .join("../test/harness/stdio-shutdown-runtime.cjs")
             .canonicalize()
             .unwrap();
-        ClientOptions::new()
-            .with_program(CliProgram::Path("node".into()))
-            .with_prefix_args([
-                script.into_os_string(),
-                self.marker.clone().into_os_string(),
-                self.mode.into(),
-                self.pid_file.clone().into_os_string(),
-            ])
-            .with_cwd(self.dir.path())
-            .with_use_logged_in_user(false)
-            .with_transport(Transport::Stdio)
+        ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+            .with_runtime(RuntimeConnection::for_spawned_stdio(
+                SpawnedProcessOptions::new()
+                    .with_program(CliProgram::Path("node".into()))
+                    .with_args([
+                        script.into_os_string(),
+                        self.marker.clone().into_os_string(),
+                        self.mode.into(),
+                        self.pid_file.clone().into_os_string(),
+                    ])
+                    .with_working_directory(self.dir.path()),
+            ))
+            .with_github(|group| group.with_use_logged_in_user(false))
     }
 }
 
@@ -865,19 +1130,19 @@ impl FakeCli {
     }
 
     fn client_options_with_behavior(&self, token: &str, behavior: &str) -> ClientOptions {
-        ClientOptions::new()
+        let process = SpawnedProcessOptions::new()
             .with_program(CliProgram::Path(PathBuf::from("node")))
-            .with_prefix_args([self.script_path.as_os_str().to_owned()])
-            .with_cwd(&self.work_dir)
-            .with_extra_args([
-                "--capture-file".to_string(),
-                self.capture_path.to_string_lossy().into_owned(),
-                "--behavior".to_string(),
-                behavior.to_string(),
+            .with_args([
+                self.script_path.as_os_str().to_owned(),
+                "--capture-file".into(),
+                self.capture_path.as_os_str().to_owned(),
+                "--behavior".into(),
+                behavior.into(),
             ])
-            .with_github_token(token)
-            .with_use_logged_in_user(false)
-            .with_transport(Transport::Stdio)
+            .with_working_directory(&self.work_dir);
+        ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+            .with_github(|group| group.with_token(token).with_use_logged_in_user(false))
+            .with_runtime(RuntimeConnection::SpawnedStdio(process))
     }
 
     fn path(&self, name: &str) -> PathBuf {
@@ -905,6 +1170,9 @@ impl FakeCli {
 #[derive(Debug, Deserialize)]
 struct CapturedCli {
     requests: Vec<CapturedRequest>,
+    args: Vec<String>,
+    cwd: PathBuf,
+    env: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -914,13 +1182,19 @@ struct CapturedRequest {
     params: Value,
 }
 
+#[track_caller]
 fn assert_json_values<'a>(
     object: &serde_json::Map<String, Value>,
     expected: impl IntoIterator<Item = (&'a str, Value)>,
 ) {
     for (key, expected_value) in expected {
+        let mut path = key.split('.');
+        let mut actual = object.get(path.next().expect("field name"));
+        for field in path {
+            actual = actual.and_then(|value| value.get(field));
+        }
         assert_eq!(
-            object.get(key),
+            actual,
             Some(&expected_value),
             "unexpected value for key {key} in {object:?}"
         );
@@ -950,6 +1224,8 @@ function saveCapture() {
     cwd: process.cwd(),
     env: {
       COPILOT_SDK_AUTH_TOKEN: process.env.COPILOT_SDK_AUTH_TOKEN,
+      COPILOT_SDK_PROCESS_TEST: process.env.COPILOT_SDK_PROCESS_TEST,
+      PATH: process.env.PATH,
     },
   }));
 }
@@ -957,11 +1233,24 @@ function saveCapture() {
 saveCapture();
 
 let buffer = Buffer.alloc(0);
-process.stdin.on("data", chunk => {
+let output = process.stdout;
+function readChunk(chunk) {
   buffer = Buffer.concat([buffer, chunk]);
   processBuffer();
-});
-process.stdin.resume();
+}
+if (process.argv.includes("--stdio")) {
+  process.stdin.on("data", readChunk);
+  process.stdin.resume();
+} else {
+  const server = require("net").createServer(socket => {
+    output = socket;
+    socket.on("data", readChunk);
+    socket.on("end", () => { socket.end(); server.close(); });
+  });
+  server.listen(0, "127.0.0.1", () => {
+    console.log(`listening on port ${server.address().port}`);
+  });
+}
 if (["ignore-shutdown", "shutdown-error", "shutdown-output"].includes(behavior)) {
   const keepAlive = setInterval(() => {}, 1000);
   process.stdin.on("end", () => {
@@ -1010,7 +1299,7 @@ function handleMessage(message) {
   requests.push({ method: message.method, params: message.params });
   saveCapture();
   if (message.method === "connect") {
-    writeResponse(message.id, { ok: true, protocolVersion: 3, version: "fake" });
+    writeResponse(message.id, { ok: true, protocolVersion: 4, version: "fake" });
     return;
   }
   if (message.method === "runtime.shutdown" && behavior === "ignore-shutdown") return;
@@ -1019,7 +1308,7 @@ function handleMessage(message) {
     return;
   }
   if (message.method === "ping") {
-    writeResponse(message.id, { message: "pong", protocolVersion: 3, timestamp: Date.now() });
+    writeResponse(message.id, { message: "pong", protocolVersion: 4, timestamp: Date.now() });
     return;
   }
   if (message.method === "session.create") {
@@ -1106,6 +1395,6 @@ function writeResponse(id, result) {
 
 function writeMessage(message) {
   const body = JSON.stringify(message);
-  process.stdout.write("Content-Length: " + Buffer.byteLength(body, "utf8") + "\r\n\r\n" + body);
+  output.write("Content-Length: " + Buffer.byteLength(body, "utf8") + "\r\n\r\n" + body);
 }
 "#;

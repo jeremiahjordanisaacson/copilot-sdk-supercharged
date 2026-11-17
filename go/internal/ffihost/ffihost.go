@@ -1,4 +1,4 @@
-//go:build copilot_inprocess && (darwin || linux || windows)
+//go:build !copilot_no_inprocess && (darwin || linux || windows) && (amd64 || arm64)
 
 // Package ffihost hosts the Copilot runtime in-process by loading its native
 // library and driving JSON-RPC over the runtime's C ABI.

@@ -963,12 +963,6 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		e.Data = &d
-	case SessionEventTypeToolExecutionPartialResult:
-		var d ToolExecutionPartialResultData
-		if err := json.Unmarshal(raw.Data, &d); err != nil {
-			return err
-		}
-		e.Data = &d
 	case SessionEventTypeToolExecutionProgress:
 		var d ToolExecutionProgressData
 		if err := json.Unmarshal(raw.Data, &d); err != nil {
@@ -1044,24 +1038,6 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 	default:
 		e.Data = &RawSessionEventData{EventType: raw.Type, Raw: raw.Data}
 	}
-	return nil
-}
-
-func (e *SessionEventWithAutoModeRecovery) UnmarshalJSON(data []byte) error {
-	var event SessionEvent
-	if err := json.Unmarshal(data, &event); err != nil {
-		return err
-	}
-	if event.Type() == SessionEventTypeCapabilitiesChanged {
-		var raw struct {
-			Data CapabilitiesChangedDataWithAutoModeRecovery `json:"data"`
-		}
-		if err := json.Unmarshal(data, &raw); err != nil {
-			return err
-		}
-		event.Data = &raw.Data
-	}
-	e.SessionEvent = event
 	return nil
 }
 
@@ -1478,12 +1454,6 @@ func unmarshalToolExecutionCompleteContent(data []byte) (ToolExecutionCompleteCo
 			return nil, err
 		}
 		return &d, nil
-	case ToolExecutionCompleteContentTypeTerminal:
-		var d ToolExecutionCompleteContentTerminal
-		if err := json.Unmarshal(data, &d); err != nil {
-			return nil, err
-		}
-		return &d, nil
 	case ToolExecutionCompleteContentTypeText:
 		var d ToolExecutionCompleteContentText
 		if err := json.Unmarshal(data, &d); err != nil {
@@ -1614,17 +1584,6 @@ func (r ToolExecutionCompleteContentResourceLink) MarshalJSON() ([]byte, error) 
 
 func (r ToolExecutionCompleteContentShellExit) MarshalJSON() ([]byte, error) {
 	type alias ToolExecutionCompleteContentShellExit
-	return json.Marshal(struct {
-		Type ToolExecutionCompleteContentType `json:"type"`
-		alias
-	}{
-		Type:  r.Type(),
-		alias: alias(r),
-	})
-}
-
-func (r ToolExecutionCompleteContentTerminal) MarshalJSON() ([]byte, error) {
-	type alias ToolExecutionCompleteContentTerminal
 	return json.Marshal(struct {
 		Type ToolExecutionCompleteContentType `json:"type"`
 		alias

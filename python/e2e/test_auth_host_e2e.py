@@ -39,5 +39,5 @@ async def test_should_report_selected_github_auth_host(ctx, copilot_host, gh_hos
 
     await ctx.client.start()
     status = await ctx.client.get_auth_status()
-    assert status.isAuthenticated, status.statusMessage
+    assert status.is_authenticated, status.status_message
     assert status.host == expected_host

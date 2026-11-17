@@ -31,7 +31,7 @@ test('stages verified unstable runtime assets downloaded from the SDK release', 
   execFileSync('tar', ['-czf', 'runtime.tgz', 'package'], { cwd: fixture.root });
   const hash = createHash('sha256').update(fs.readFileSync(tarball)).digest('hex');
   const asset = `github-copilot-${unstableVersion}-${fixture.classifier}.tgz`;
-  const releaseUrl = `https://github.com/github/copilot-sdk/releases/download/runtime-${unstableVersion}`;
+  const releaseUrl = `https://github.com/microsoft/copilot-sdk/releases/download/runtime-${unstableVersion}`;
   const mockFetch = `data:text/javascript,${encodeURIComponent(`
     import fs from 'node:fs';
     globalThis.fetch = async (url) => {

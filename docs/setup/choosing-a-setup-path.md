@@ -4,7 +4,7 @@ These guides walk you through configuring the Copilot SDK for your specific use 
 
 ## Architecture at a glance
 
-Every Copilot SDK integration follows the same core pattern: your application talks to the SDK, which communicates with the Copilot CLI over JSON-RPC. What changes across setups is **where the CLI runs**, **how users authenticate**, and **how sessions are managed**.
+Every Copilot SDK integration uses JSON-RPC to reach the Copilot runtime. SDK v2 hosts it in-process by default; explicit subprocess and external-server connections are available. Setups differ in **where the runtime runs**, **how users authenticate**, and **how sessions are managed**.
 
 ```mermaid
 flowchart TB
@@ -12,7 +12,7 @@ flowchart TB
         SDK["SDK Client"]
     end
 
-    subgraph CLI["Copilot CLI"]
+    subgraph CLI["Copilot runtime (in-process by default)"]
         direction TB
         RPC["JSON-RPC Server"]
         Auth["Authentication"]
@@ -20,7 +20,7 @@ flowchart TB
         Models["Model Provider"]
     end
 
-    SDK -- "JSON-RPC<br/>(stdio or TCP)" --> RPC
+    SDK -- "JSON-RPC<br/>(C ABI, stdio, or TCP)" --> RPC
     RPC --> Auth
     RPC --> Sessions
     Auth --> Models
@@ -38,7 +38,7 @@ The setup guides below help you configure each layer for your scenario.
 You're building a personal assistant, side project, or experimental app. You want the simplest path to getting Copilot in your code.
 
 **Start with:**
-1. **[Default Setup](./bundled-cli.md)**—The SDK includes the CLI automatically—just install and go
+1. **[Default setup](./bundled-cli.md)**: provision the platform runtime and host it in-process
 1. **[Local CLI](./local-cli.md)**—Use your own CLI binary or running instance (advanced)
 
 ### 🏢 Internal app developer
@@ -85,13 +85,13 @@ Use this table to find the right guides based on what you need to do:
 
 | What you need | Guide |
 |---------------|-------|
-| Getting started quickly | [Default Setup (Bundled CLI)](./bundled-cli.md) |
+| Getting started quickly | [Default setup (bundled runtime)](./bundled-cli.md) |
 | Use your own CLI binary or server | [Local CLI](./local-cli.md) |
 | Users sign in with GitHub | [GitHub OAuth](./github-oauth.md) |
 | Use your own model keys (OpenAI, Azure, and more) | [BYOK](../auth/byok.md) |
 | Azure BYOK with Managed Identity (no API keys) | [Azure Managed Identity](./azure-managed-identity.md) |
 | Run the SDK on a server | [Backend Services](./backend-services.md) |
-| Host the runtime inside your application process (no separate CLI process) | [In-process runtime](./in-process-runtime.md) *(experimental)* |
+| Understand the in-process default or retain subprocess isolation | [In-process runtime](./in-process-runtime.md) |
 | Configure SDK options for concurrent users | [Multi-tenancy and server deployments](./multi-tenancy.md) |
 | Serve multiple users / scale horizontally | [Scaling & Multi-Tenancy](./scaling.md) |
 
@@ -107,7 +107,7 @@ flowchart LR
     end
 
     subgraph Deploy["Deployment"]
-        D1["Local Process<br/>(auto-managed)"]
+        D1["In-process runtime<br/>(default)"]
         D2["Bundled Binary<br/>(shipped with app)"]
         D3["External Server<br/>(headless CLI)"]
     end
@@ -134,13 +134,13 @@ flowchart LR
 
 All guides assume you have:
 
-* **One of the SDKs** installed (Node.js, Python, .NET, and Rust SDKs include the CLI automatically):
-  * Node.js: `npm install @github/copilot-sdk`
-  * Python: `pip install github-copilot-sdk`
-  * Go: `go get github.com/github/copilot-sdk/go` (embed the CLI with the [bundler tool](../../go/README.md#distributing-your-application-with-an-embedded-github-copilot-cli) or install it separately)
-  * .NET: `dotnet add package GitHub.Copilot.SDK`
-  * Rust: `cargo add github-copilot-sdk`
-  * Java: `com.github:copilot-sdk-java` with [Maven](../../java/README.md#maven) or [Gradle](../../java/README.md#gradle) (add `com.github:copilot-sdk-java-runtime` for the CLI, or install it separately)
+* **One of the SDKs** installed with its matching native runtime:
+  * Node.js: `npm install @microsoft/copilot-sdk`
+  * Python: `pip install microsoft-copilot-sdk`
+  * Go: `go get github.com/microsoft/copilot-sdk/go/v2`, then run the [application bundler](../../go/README.md#distributing-your-application-with-an-embedded-github-copilot-cli)
+  * .NET: `dotnet add package Microsoft.Copilot.SDK`
+  * Rust: `cargo add copilot-sdk`
+  * Java: `com.microsoft:copilot-sdk` with [Maven](../../java/README.md#maven) or [Gradle](../../java/README.md#gradle), plus the matching `com.microsoft:copilot-sdk-runtime` classifier
 
 If you're brand new, start with the **[Getting Started tutorial](../getting-started.md)** first, then come back here for production configuration.
 

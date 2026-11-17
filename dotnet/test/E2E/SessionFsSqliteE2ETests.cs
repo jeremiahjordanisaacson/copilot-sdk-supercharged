@@ -1,13 +1,13 @@
-﻿/*---------------------------------------------------------------------------------------------
+/*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class SessionFsSqliteE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "session_fs_sqlite", output)
@@ -17,7 +17,10 @@ public class SessionFsSqliteE2ETests(E2ETestFixture fixture, ITestOutputHelper o
         InitialWorkingDirectory = "/",
         SessionStatePath = "/session-state",
         Conventions = SessionFsSetProviderConventions.Posix,
-        Capabilities = new SessionFsSetProviderCapabilities { Sqlite = true },
+        Capabilities = new SessionFsSetProviderCapabilities
+        {
+            Sqlite = true
+        },
     };
 
     private readonly List<SqliteCall> _sqliteCalls = [];
@@ -31,11 +34,8 @@ public class SessionFsSqliteE2ETests(E2ETestFixture fixture, ITestOutputHelper o
     {
         await using var client = CreateSessionFsClient();
 
-        var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            CreateSessionFsProvider = s => new InMemorySessionFsSqliteHandler(s.SessionId, _sqliteCalls),
-        });
+        var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, State = new SessionStateOptions { CreateSessionFsProvider = s => new InMemorySessionFsSqliteHandler(s.SessionId, _sqliteCalls) } });
 
         var msg = await session.SendAndWaitAsync(new MessageOptions
         {
@@ -65,14 +65,17 @@ public class SessionFsSqliteE2ETests(E2ETestFixture fixture, ITestOutputHelper o
         await using var client = CreateSessionFsClient();
 
         var handler = (InMemorySessionFsSqliteHandler?)null;
-        var session = await Ctx.CreateSessionAsync(client, new SessionConfig
+        var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            CreateSessionFsProvider = s =>
+            Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll },
+            State = new SessionStateOptions
             {
-                handler = new InMemorySessionFsSqliteHandler(s.SessionId, _sqliteCalls);
-                return handler;
-            },
+                CreateSessionFsProvider = s =>
+        {
+            handler = new InMemorySessionFsSqliteHandler(s.SessionId, _sqliteCalls);
+            return handler;
+        }
+            }
         });
 
         var events = new List<SessionEvent>();
@@ -119,8 +122,9 @@ public class SessionFsSqliteE2ETests(E2ETestFixture fixture, ITestOutputHelper o
         return Ctx.CreateClient(
             options: new CopilotClientOptions
             {
-                Connection = RuntimeConnection.ForStdio(),
-                SessionFs = SessionFsConfig,
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = RuntimeConnection.ForSpawnedStdio(),
+                SessionFs = SessionFsConfig
             });
     }
 }

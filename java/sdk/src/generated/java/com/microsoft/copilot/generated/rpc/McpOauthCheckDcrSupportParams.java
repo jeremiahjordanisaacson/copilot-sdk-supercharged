@@ -1,0 +1,122 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: api.schema.json
+
+package com.microsoft.copilot.generated.rpc;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.microsoft.copilot.CopilotExperimental;
+import javax.annotation.processing.Generated;
+
+/**
+ * A remote MCP server whose authorization server should be asked about Dynamic Client Registration.
+ *
+ * @apiNote This method is experimental and may change in a future version.
+ * @since 1.0.0
+ */
+@CopilotExperimental
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+@JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonIgnoreProperties(ignoreUnknown = true)
+record McpOauthCheckDcrSupportParams(
+    /** URL of the remote MCP server that answered 401. */
+    @JsonProperty("serverUrl") String serverUrl,
+    /** Raw protected-resource metadata text from the server's `WWW-Authenticate` challenge. Omit to discover the authorization server from the server URL instead. */
+    @JsonProperty("resourceMetadataText") String resourceMetadataText,
+    /** Proxy the request must travel through. Omit to use the session's own egress settings. */
+    @JsonProperty("sandboxProxy") String sandboxProxy,
+    /** Locally owned session whose egress policy and sandbox proxy constrain the request. Omitted or nonlocal session IDs provide no local session egress state. */
+    @JsonProperty("sessionId") String sessionId
+) {
+
+    /**
+     * Creates a record positionally.
+     * Use {@link #builder()} for named construction.
+     */
+    McpOauthCheckDcrSupportParams {}
+
+    /**
+     * Returns a named builder.
+     * @return a new builder
+     * @since 2.0.0
+     */
+    @com.microsoft.copilot.CopilotExperimental
+    public static Builder builder() { return new Builder(); }
+
+    /**
+     * Named construction for this record.
+     * @since 2.0.0
+     */
+    @com.microsoft.copilot.CopilotExperimental
+    public static final class Builder {
+        private Builder() {}
+        private String serverUrl;
+        private String resourceMetadataText;
+        private String sandboxProxy;
+        private String sessionId;
+
+        /**
+         * Sets the {@code serverUrl} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder serverUrl(String value) {
+            this.serverUrl = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code resourceMetadataText} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder resourceMetadataText(String value) {
+            this.resourceMetadataText = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code sandboxProxy} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder sandboxProxy(String value) {
+            this.sandboxProxy = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code sessionId} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder sessionId(String value) {
+            this.sessionId = value;
+            return this;
+        }
+
+        /**
+         * Builds a record after checking required property presence.
+         * @return a new record
+         * @throws IllegalStateException if a required property is missing
+         * @since 2.0.0
+         */
+        public McpOauthCheckDcrSupportParams build() {
+            if (serverUrl == null) throw new IllegalStateException("Missing required property: serverUrl");
+            return new McpOauthCheckDcrSupportParams(serverUrl, resourceMetadataText, sandboxProxy, sessionId);
+        }
+    }
+}

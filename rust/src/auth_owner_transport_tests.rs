@@ -8,7 +8,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
 
-const OWNER_REJECTION: &str = "a live auth owner requires SDK-owned in-process startup";
 const ADMISSION_REJECTION: &str = "controlled auth owner declined native admission";
 const CHILD_CASE: &str = "COPILOT_SDK_AUTH_OWNER_TRANSPORT_TEST";
 
@@ -31,6 +30,7 @@ fn default_transport_reaches_native_auth_owner() {
                 "auth_owner_transport_tests::default_transport_reaches_native_auth_owner",
                 "--nocapture",
             ])
+            .current_dir(std::env::current_dir().unwrap())
             .env(CHILD_CASE, case)
             .env_remove(DEFAULT_CONNECTION_ENV_VAR);
         match case {
@@ -41,6 +41,11 @@ fn default_transport_reaches_native_auth_owner() {
                 command.env(DEFAULT_CONNECTION_ENV_VAR, "inprocess");
             }
             _ => {}
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
         }
         let output = command.output().expect("run isolated SDK test");
         assert!(
@@ -57,9 +62,17 @@ async fn check_default_transport(case: &str) {
     let home = tempfile::tempdir().unwrap();
     let admissions = Arc::new(AtomicUsize::new(0));
     let recorded = Arc::clone(&admissions);
-    let mut options = ClientOptions::new();
-    options.base_directory = Some(home.path().to_owned());
-    options.in_process_auth_owner = Some(Arc::new(move |server, connection| {
+    let runtime =
+        RuntimeConnection::for_default(OwnedRuntimeOptions::new().with_base_directory(home.path()))
+            .unwrap();
+    if case == "stdio" {
+        assert!(matches!(runtime, RuntimeConnection::SpawnedStdio(_)));
+        return;
+    }
+    let RuntimeConnection::InProcess(mut inprocess) = runtime else {
+        panic!("inprocess default")
+    };
+    inprocess.auth_owner = Some(Arc::new(move |server, connection| {
         assert_ne!(server, 0, "native startup must supply a server");
         assert_ne!(
             connection, 0,
@@ -71,83 +84,29 @@ async fn check_default_transport(case: &str) {
             ADMISSION_REJECTION,
         ))
     }));
-    let native_admission = case == "process-inprocess";
+    let native_admission = case != "stdio";
     if native_admission
         && let Some(library) = std::env::var_os("COPILOT_AUTH_OWNER_RUNTIME_LIBRARY")
     {
         let library = PathBuf::from(library);
         assert!(library.is_absolute(), "the runtime image must be explicit");
         assert!(library.is_file(), "runtime image: {}", library.display());
-        options.in_process_runtime_library_path = Some(library);
+        inprocess.runtime_library_path = Some(library);
     }
 
-    let error = Client::start(options).await.unwrap_err();
+    let error = Client::start(
+        ClientOptions::new(crate::ClientMode::CodingAgent)
+            .with_runtime(RuntimeConnection::InProcess(inprocess)),
+    )
+    .await
+    .unwrap_err();
     assert!(
         matches!(error.kind(), ErrorKind::InvalidConfig),
         "{error:?}"
     );
-    let expected = if native_admission {
-        ADMISSION_REJECTION
-    } else {
-        OWNER_REJECTION
-    };
-    assert_eq!(error.to_string(), expected, "{case}");
+    assert_eq!(error.to_string(), ADMISSION_REJECTION, "{case}");
     assert_eq!(
         admissions.load(Ordering::SeqCst),
         usize::from(native_admission)
     );
-}
-
-#[tokio::test]
-async fn auth_owner_rejects_non_owned_transports_after_normalization() {
-    for transport in [
-        Transport::Default,
-        Transport::Stdio,
-        Transport::Tcp {
-            port: 0,
-            connection_token: None,
-        },
-        Transport::External {
-            host: "127.0.0.1".into(),
-            port: 0,
-            connection_token: None,
-        },
-    ] {
-        let mut options = ClientOptions::new().with_transport(transport);
-        options
-            .env
-            .push((DEFAULT_CONNECTION_ENV_VAR.into(), "stdio".into()));
-        options.in_process_auth_owner = Some(Arc::new(|_, _| panic!("unexpected admission")));
-        let error = Client::start(options).await.unwrap_err();
-        assert!(
-            matches!(error.kind(), ErrorKind::InvalidConfig),
-            "{error:?}"
-        );
-        assert_eq!(error.to_string(), OWNER_REJECTION);
-    }
-
-    for borrowed_session in [false, true] {
-        for transport in [Transport::Default, Transport::InProcess] {
-            let mut options = ClientOptions::new().with_transport(transport);
-            options
-                .env
-                .push((DEFAULT_CONNECTION_ENV_VAR.into(), "inprocess".into()));
-            options.in_process_auth_owner = Some(Arc::new(|_, _| panic!("unexpected admission")));
-            if borrowed_session {
-                options.in_process_session_binding = Some(InProcessSessionBinding {
-                    parent_connection_id: 1,
-                    native_session_id: "borrowed".into(),
-                    registration_token: "registration".into(),
-                });
-            } else {
-                options.in_process_server_id = Some(1);
-            }
-            let error = Client::start(options).await.unwrap_err();
-            assert!(
-                matches!(error.kind(), ErrorKind::InvalidConfig),
-                "{error:?}"
-            );
-            assert_eq!(error.to_string(), OWNER_REJECTION);
-        }
-    }
 }

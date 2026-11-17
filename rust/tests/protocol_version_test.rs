@@ -1,22 +1,26 @@
 #![allow(clippy::unwrap_used)]
 
-use github_copilot_sdk::Client;
+use copilot_sdk::Client;
+#[cfg(feature = "runtime")]
+use copilot_sdk::{RuntimeConnection, TcpRuntimeOptions};
 use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, duplex};
 
 #[tokio::test]
 async fn custom_streams_forward_entra_and_reject_legacy_servers_without_ping() {
-    use github_copilot_sdk::EntraAuthConfig;
+    use copilot_sdk::EntraAuthConfig;
 
     for supported in [true, false] {
         let (client_write, mut server_read) = duplex(8192);
         let (mut server_write, client_read) = duplex(8192);
         let client = Client::from_streams_with_entra(
+            copilot_sdk::ClientMode::CodingAgent,
             client_read,
             client_write,
             std::env::temp_dir(),
             Some(EntraAuthConfig {
                 client_id: "custom-stream-client".to_owned(),
                 mats_app_name: Some("Custom Stream Host".to_owned()),
+                one_auth_application_id: None,
             }),
         )
         .unwrap();
@@ -32,7 +36,7 @@ async fn custom_streams_forward_entra_and_reject_legacy_servers_without_ping() {
                 "Custom Stream Host"
             );
             let response = if supported {
-                serde_json::json!({"jsonrpc":"2.0","id":request["id"],"result":{"ok":true,"protocolVersion":3,"version":"test"}})
+                serde_json::json!({"jsonrpc":"2.0","id":request["id"],"result":{"ok":true,"protocolVersion":4,"version":"test"}})
             } else {
                 serde_json::json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32601,"message":"Method not found"}})
             };
@@ -46,7 +50,7 @@ async fn custom_streams_forward_entra_and_reject_legacy_servers_without_ping() {
         .expect("handshake must settle without a legacy ping");
         if supported {
             result.unwrap();
-            assert_eq!(client.protocol_version(), Some(3));
+            assert_eq!(client.protocol_version(), Some(4));
         } else {
             assert!(
                 result
@@ -67,7 +71,7 @@ async fn custom_streams_forward_entra_and_reject_legacy_servers_without_ping() {
 #[cfg(feature = "runtime")]
 #[tokio::test]
 async fn legacy_ping_fallback_requires_no_entra_configuration() {
-    use github_copilot_sdk::{ClientOptions, EntraAuthConfig, Transport};
+    use copilot_sdk::{ClientOptions, EntraAuthConfig};
 
     for entra in [false, true] {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -92,7 +96,7 @@ async fn legacy_ping_fallback_requires_no_entra_configuration() {
                     &mut stream,
                     &serde_json::to_vec(&serde_json::json!({
                         "jsonrpc": "2.0", "id": ping["id"],
-                        "result": {"protocolVersion": 3}
+                        "result": {"protocolVersion": 4}
                     }))
                     .unwrap(),
                 )
@@ -105,19 +109,18 @@ async fn legacy_ping_fallback_requires_no_entra_configuration() {
                 "unexpected request after handshake"
             );
         });
-        let directory = tempfile::tempdir().unwrap();
-        let mut options = ClientOptions::default()
-            .with_base_directory(directory.path())
-            .with_program(std::env::current_exe().unwrap())
-            .with_transport(Transport::External {
+        let mut options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_runtime(
+            RuntimeConnection::Tcp(TcpRuntimeOptions {
                 host: address.ip().to_string(),
                 port: address.port(),
                 connection_token: None,
-            });
+            }),
+        );
         if entra {
             options = options.with_entra(EntraAuthConfig {
                 client_id: "host-entra-client".to_owned(),
                 mats_app_name: None,
+                one_auth_application_id: None,
             });
         }
         let result = Client::start(options).await;
@@ -131,7 +134,7 @@ async fn legacy_ping_fallback_requires_no_entra_configuration() {
             );
         } else {
             let client = result.unwrap();
-            assert_eq!(client.protocol_version(), Some(3));
+            assert_eq!(client.protocol_version(), Some(4));
             drop(client);
         }
         tokio::time::timeout(std::time::Duration::from_secs(5), server)
@@ -145,7 +148,13 @@ async fn legacy_ping_fallback_requires_no_entra_configuration() {
 async fn dropping_external_client_closes_its_streams() {
     let (client_write, mut server_read) = duplex(8192);
     let (_server_write, client_read) = duplex(8192);
-    let client = Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
+    let client = Client::from_streams(
+        copilot_sdk::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        std::env::temp_dir(),
+    )
+    .unwrap();
     client
         .register_request_handler("host.shutdown", |_, client| async move {
             client.call("ping", None).await
@@ -167,7 +176,13 @@ async fn dropping_external_client_closes_its_streams() {
 async fn connection_handler_can_await_sdk_replies_before_responding() {
     let (client_write, mut server_read) = duplex(8192);
     let (mut server_write, client_read) = duplex(8192);
-    let client = Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
+    let client = Client::from_streams(
+        copilot_sdk::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        std::env::temp_dir(),
+    )
+    .unwrap();
     client
         .register_request_handler("host.shutdown", |_, client| async move {
             client.call("ping", None).await
@@ -210,7 +225,13 @@ async fn connection_handler_can_await_sdk_replies_before_responding() {
 async fn synchronous_handler_setup_does_not_block_the_reader() {
     let (client_write, mut server_read) = duplex(8192);
     let (mut server_write, client_read) = duplex(8192);
-    let client = Client::from_streams(client_read, client_write, ".".into()).unwrap();
+    let client = Client::from_streams(
+        copilot_sdk::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        ".".into(),
+    )
+    .unwrap();
     let (started_tx, mut started) = tokio::sync::mpsc::unbounded_channel();
     let (unblock, gate) = std::sync::mpsc::channel();
     let gate = std::sync::Mutex::new(gate);
@@ -248,11 +269,17 @@ async fn synchronous_handler_setup_does_not_block_the_reader() {
 async fn connection_handlers_reject_duplicate_registration_and_report_errors() {
     let (client_write, mut server_read) = duplex(8192);
     let (mut server_write, client_read) = duplex(8192);
-    let client = Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
+    let client = Client::from_streams(
+        copilot_sdk::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        std::env::temp_dir(),
+    )
+    .unwrap();
     client
         .register_request_handler("host.shutdown", |_, _| async {
-            Err(github_copilot_sdk::Error::with_message(
-                github_copilot_sdk::ErrorKind::InvalidConfig,
+            Err(copilot_sdk::Error::with_message(
+                copilot_sdk::ErrorKind::InvalidConfig,
                 "drain failed",
             ))
         })
@@ -294,7 +321,13 @@ async fn connection_eof_cancels_inbound_handlers() {
     }
     let (client_write, _server_read) = duplex(8192);
     let (mut server_write, client_read) = duplex(8192);
-    let client = Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
+    let client = Client::from_streams(
+        copilot_sdk::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        std::env::temp_dir(),
+    )
+    .unwrap();
     let started = Arc::new(Notify::new());
     let cancelled = Arc::new(Notify::new());
     let callback_started = started.clone();
@@ -326,9 +359,11 @@ async fn connection_eof_cancels_inbound_handlers() {
 #[cfg(not(feature = "runtime"))]
 #[tokio::test]
 async fn external_stream_build_cannot_launch_or_discover_a_runtime() {
-    let error = Client::start(github_copilot_sdk::ClientOptions::default())
-        .await
-        .unwrap_err();
+    let error = Client::start(copilot_sdk::ClientOptions::new(
+        copilot_sdk::ClientMode::CodingAgent,
+    ))
+    .await
+    .unwrap_err();
     assert!(
         error
             .to_string()
@@ -370,10 +405,16 @@ async fn read_framed(reader: &mut (impl tokio::io::AsyncRead + Unpin)) -> serde_
 /// backward-compatibility path documented on `verify_protocol_version`.
 async fn verify_with_result(
     result: serde_json::Value,
-) -> (Result<(), github_copilot_sdk::Error>, Option<u32>) {
+) -> (Result<(), copilot_sdk::Error>, Option<u32>) {
     let (client_write, server_read) = duplex(8192);
     let (server_write, client_read) = duplex(8192);
-    let client = Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
+    let client = Client::from_streams(
+        copilot_sdk::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        std::env::temp_dir(),
+    )
+    .unwrap();
 
     let mut server_read = server_read;
     let mut server_write = server_write;
@@ -414,22 +455,68 @@ async fn verify_with_result(
 
 #[tokio::test]
 async fn accepted_when_version_in_range() {
-    let (res, version) = verify_with_result(serde_json::json!({ "protocolVersion": 3 })).await;
+    let (res, version) = verify_with_result(serde_json::json!({ "protocolVersion": 4 })).await;
     assert!(res.is_ok());
-    assert_eq!(version, Some(3));
+    assert_eq!(version, Some(4));
 }
 
 #[tokio::test]
 async fn rejected_when_version_out_of_range() {
-    let (res, version) = verify_with_result(serde_json::json!({ "protocolVersion": 1 })).await;
+    let (res, version) = verify_with_result(serde_json::json!({ "protocolVersion": 3 })).await;
     let err = res.unwrap_err();
     assert!(matches!(
         err.kind(),
-        github_copilot_sdk::ErrorKind::Protocol(
-            github_copilot_sdk::ProtocolErrorKind::VersionMismatch { server: 1, .. }
-        )
+        copilot_sdk::ErrorKind::Protocol(copilot_sdk::ProtocolErrorKind::VersionMismatch {
+            server: 3,
+            min: 4,
+            max: 4
+        })
     ));
     assert_eq!(version, None);
+}
+
+#[cfg(feature = "runtime")]
+#[tokio::test]
+async fn incompatible_runtime_is_rejected_before_session_operations() {
+    use copilot_sdk::{ClientOptions, ErrorKind, ProtocolErrorKind};
+
+    for version in [3, 5] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = async {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_framed(&mut stream).await;
+            assert_eq!(request["method"], "connect");
+            let response = serde_json::json!({
+                "jsonrpc": "2.0", "id": request["id"],
+                "result": {"ok": true, "version": "test", "protocolVersion": version}
+            });
+            write_framed(&mut stream, &serde_json::to_vec(&response).unwrap()).await;
+            assert_eq!(
+                stream.read(&mut [0]).await.unwrap(),
+                0,
+                "incompatible runtime received a request after negotiation"
+            );
+        };
+        let start = Client::start(
+            ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_runtime(
+                RuntimeConnection::for_tcp(address.ip().to_string(), address.port()),
+            ),
+        );
+        let (result, ()) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::join!(start, server)
+        })
+        .await
+        .expect("incompatible startup must close the transport");
+        assert_eq!(
+            result.unwrap_err().kind(),
+            &ErrorKind::Protocol(ProtocolErrorKind::VersionMismatch {
+                server: version,
+                min: 4,
+                max: 4,
+            })
+        );
+    }
 }
 
 #[tokio::test]
@@ -446,7 +533,13 @@ async fn succeeds_when_version_missing() {
 async fn connect_handshake_supplies_protocol_version() {
     let (client_write, server_read) = duplex(8192);
     let (server_write, client_read) = duplex(8192);
-    let client = Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
+    let client = Client::from_streams(
+        copilot_sdk::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        std::env::temp_dir(),
+    )
+    .unwrap();
 
     let mut server_read = server_read;
     let mut server_write = server_write;
@@ -464,7 +557,7 @@ async fn connect_handshake_supplies_protocol_version() {
     let response = serde_json::json!({
         "jsonrpc": "2.0",
         "id": req["id"],
-        "result": { "ok": true, "protocolVersion": 3, "version": "test-1.0.0" },
+        "result": { "ok": true, "protocolVersion": 4, "version": "test-1.0.0" },
     });
     write_framed(&mut server_write, &serde_json::to_vec(&response).unwrap()).await;
 
@@ -473,7 +566,7 @@ async fn connect_handshake_supplies_protocol_version() {
         .unwrap()
         .unwrap();
     assert!(res.is_ok());
-    assert_eq!(client.protocol_version(), Some(3));
+    assert_eq!(client.protocol_version(), Some(4));
 }
 
 #[tokio::test]
@@ -513,7 +606,7 @@ async fn connect_handshake_forwards_explicit_and_generated_tokens() {
         let response = serde_json::json!({
             "jsonrpc": "2.0",
             "id": req["id"],
-            "result": { "ok": true, "protocolVersion": 3, "version": "test-1.0.0" },
+            "result": { "ok": true, "protocolVersion": 4, "version": "test-1.0.0" },
         });
         write_framed(&mut server_write, &serde_json::to_vec(&response).unwrap()).await;
 
@@ -529,7 +622,7 @@ async fn connect_handshake_forwards_explicit_and_generated_tokens() {
 async fn connect_handshake_serializes_client_info_and_omits_empty_fields() {
     for (info, expected) in [
         (
-            github_copilot_sdk::ClientInfo::new()
+            copilot_sdk::ClientInfo::new()
                 .with_application_name("acme-developer-portal")
                 .with_application_version("2.4.0")
                 .with_integration_name("copilot-assistant")
@@ -542,13 +635,13 @@ async fn connect_handshake_serializes_client_info_and_omits_empty_fields() {
             })),
         ),
         (
-            github_copilot_sdk::ClientInfo::new()
+            copilot_sdk::ClientInfo::new()
                 .with_application_name("example-app")
                 .with_application_version(""),
             Some(serde_json::json!({ "editorName": "example-app" })),
         ),
         (
-            github_copilot_sdk::ClientInfo::new()
+            copilot_sdk::ClientInfo::new()
                 .with_application_name("")
                 .with_application_version("")
                 .with_integration_name("")
@@ -578,7 +671,7 @@ async fn connect_handshake_serializes_client_info_and_omits_empty_fields() {
         let response = serde_json::json!({
             "jsonrpc": "2.0",
             "id": req["id"],
-            "result": { "ok": true, "protocolVersion": 3, "version": "test-1.0.0" },
+            "result": { "ok": true, "protocolVersion": 4, "version": "test-1.0.0" },
         });
         write_framed(&mut server_write, &serde_json::to_vec(&response).unwrap()).await;
 

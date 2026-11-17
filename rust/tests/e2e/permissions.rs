@@ -2,17 +2,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::{PermissionHandler, PermissionResult};
-use github_copilot_sdk::rpc::{
+use copilot_sdk::handler::{PermissionHandler, PermissionResult};
+use copilot_sdk::rpc::{
     PermissionsSetApproveAllRequest, PermissionsSetModeRequest,
     SessionPermissionsManagedReviewRequiredParams,
 };
-use github_copilot_sdk::session_events::{
+use copilot_sdk::session_events::{
     AssistedApprovalAssessment, AssistedApprovalCompletedRecommendation, PermissionMode,
     SessionEventType, ToolExecutionCompleteData,
 };
-use github_copilot_sdk::{
-    PermissionRequestData, RequestId, ResumeSessionConfig, SessionConfig, SessionId,
+use copilot_sdk::{
+    CreateSessionOptions, PermissionRequestData, RequestId, ResumeSessionOptions, SessionId,
 };
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
@@ -35,11 +35,13 @@ async fn should_deny_permission_when_handler_returns_denied() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(StaticPermissionHandler::new(
-                                PermissionResult::reject(None),
-                            ))),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(StaticPermissionHandler::new(
+                                    PermissionResult::reject(None),
+                                )))
+                            }),
                     )
                     .await
                     .expect("create session");
@@ -86,11 +88,13 @@ async fn should_deny_tool_operations_when_handler_explicitly_denies() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(StaticPermissionHandler::new(
-                                PermissionResult::user_not_available(),
-                            ))),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(StaticPermissionHandler::new(
+                                    PermissionResult::user_not_available(),
+                                )))
+                            }),
                     )
                     .await
                     .expect("create session");
@@ -127,11 +131,13 @@ async fn should_handle_async_permission_handler() {
                 let (request_tx, mut request_rx) = mpsc::unbounded_channel();
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(AsyncPermissionHandler {
-                                request_tx,
-                            })),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(AsyncPermissionHandler {
+                                    request_tx,
+                                }))
+                            }),
                     )
                     .await
                     .expect("create session");
@@ -203,11 +209,13 @@ async fn should_resume_session_with_permission_handler() {
                 let (request_tx, mut request_rx) = mpsc::unbounded_channel();
                 let resumed = new_client
                     .resume_session(
-                        ResumeSessionConfig::new(session_id)
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(RecordingPermissionHandler {
-                                request_tx,
-                            })),
+                        ResumeSessionOptions::new(session_id)
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(RecordingPermissionHandler {
+                                    request_tx,
+                                }))
+                            }),
                     )
                     .await
                     .expect("resume session");
@@ -257,11 +265,13 @@ async fn should_deny_tool_operations_when_handler_explicitly_denies_after_resume
                 let new_client = ctx.start_client().await;
                 let resumed = new_client
                     .resume_session(
-                        ResumeSessionConfig::new(session_id)
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(StaticPermissionHandler::new(
-                                PermissionResult::user_not_available(),
-                            ))),
+                        ResumeSessionOptions::new(session_id)
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(StaticPermissionHandler::new(
+                                    PermissionResult::user_not_available(),
+                                )))
+                            }),
                     )
                     .await
                     .expect("resume session");
@@ -337,16 +347,16 @@ async fn should_preserve_assisted_assessment_in_handler_pending_and_resume() {
             let client = ctx.start_client().await;
             let session = client
                 .create_session(
-                    SessionConfig::default()
+                    CreateSessionOptions::default()
                         .with_model("claude-sonnet-4.5")
                         .with_working_directory(ctx.work_dir())
-                        .with_request_extensions(false)
-                        .with_feature_flags(feature_flags.clone())
-                        .with_github_token(DEFAULT_TEST_TOKEN)
-                        .with_permission_handler(Arc::new(NotifyingPermissionHandler {
+                        .with_extensions(|group| group.with_enabled(false))
+                        .with_experiments(|group| group.with_flags(feature_flags.clone()))
+                        .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                        .with_permissions(|group| group.with_on_request(Arc::new(NotifyingPermissionHandler {
                             request_tx,
                             result: PermissionResult::no_result(),
-                        })),
+                        }))),
                 )
                 .await
                 .expect("create assisted session");
@@ -391,16 +401,16 @@ async fn should_preserve_assisted_assessment_in_handler_pending_and_resume() {
             let resumed_client = ctx.start_client().await;
             let resumed = resumed_client
                 .resume_session(
-                    ResumeSessionConfig::new(session_id)
+                    ResumeSessionOptions::new(session_id)
                         .with_model("claude-sonnet-4.5")
                         .with_working_directory(ctx.work_dir())
-                        .with_request_extensions(false)
+                        .with_extensions(|group| group.with_enabled(false))
                         .with_continue_pending_work(true)
-                        .with_feature_flags(feature_flags)
-                        .with_github_token(DEFAULT_TEST_TOKEN)
-                        .with_permission_handler(Arc::new(StaticPermissionHandler::new(
+                        .with_experiments(|group| group.with_flags(feature_flags))
+                        .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                        .with_permissions(|group| group.with_on_request(Arc::new(StaticPermissionHandler::new(
                             PermissionResult::no_result(),
-                        ))),
+                        )))),
                 )
                 .await
                 .expect("resume assisted session");
@@ -441,11 +451,13 @@ async fn should_receive_toolcallid_in_permission_requests() {
                 let (request_tx, mut request_rx) = mpsc::unbounded_channel();
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(RecordingPermissionHandler {
-                                request_tx,
-                            })),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(RecordingPermissionHandler {
+                                    request_tx,
+                                }))
+                            }),
                     )
                     .await
                     .expect("create session");
@@ -482,12 +494,14 @@ async fn should_deny_permission_with_noresult_kind() {
                 let (request_tx, mut request_rx) = mpsc::unbounded_channel();
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(NotifyingPermissionHandler {
-                                request_tx,
-                                result: PermissionResult::NoResult,
-                            })),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(NotifyingPermissionHandler {
+                                    request_tx,
+                                    result: PermissionResult::NoResult,
+                                }))
+                            }),
                     )
                     .await
                     .expect("create session");
@@ -518,11 +532,13 @@ async fn should_short_circuit_permission_handler_when_set_approve_all_enabled() 
                 let (request_tx, mut request_rx) = mpsc::unbounded_channel();
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(RecordingPermissionHandler {
-                                request_tx,
-                            })),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(RecordingPermissionHandler {
+                                    request_tx,
+                                }))
+                            }),
                     )
                     .await
                     .expect("create session");
@@ -589,12 +605,14 @@ async fn should_wait_for_slow_permission_handler() {
                 let (release_tx, release_rx) = oneshot::channel();
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(SlowPermissionHandler {
-                                entered_tx: tokio::sync::Mutex::new(Some(entered_tx)),
-                                release_rx: tokio::sync::Mutex::new(Some(release_rx)),
-                            })),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(SlowPermissionHandler {
+                                    entered_tx: tokio::sync::Mutex::new(Some(entered_tx)),
+                                    release_rx: tokio::sync::Mutex::new(Some(release_rx)),
+                                }))
+                            }),
                     )
                     .await
                     .expect("create session");
@@ -655,11 +673,15 @@ async fn should_invoke_permission_handler_for_write_operations() {
                 let (request_tx, mut request_rx) = mpsc::unbounded_channel();
                 let session = client
                     .create_session(
-                        github_copilot_sdk::SessionConfig::default()
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(RecordingPermissionHandler {
-                                request_tx,
-                            })),
+                        copilot_sdk::CreateSessionOptions::default()
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(RecordingPermissionHandler {
+                                    request_tx,
+                                }))
+                            }),
                     )
                     .await
                     .expect("create session");
@@ -689,7 +711,7 @@ async fn should_invoke_permission_handler_for_write_operations() {
     .await;
 }
 
-fn is_permission_denied_tool_completion(event: &github_copilot_sdk::SessionEvent) -> bool {
+fn is_permission_denied_tool_completion(event: &copilot_sdk::SessionEvent) -> bool {
     if event.parsed_type() != SessionEventType::ToolExecutionComplete {
         return false;
     }
@@ -704,7 +726,7 @@ fn is_permission_denied_tool_completion(event: &github_copilot_sdk::SessionEvent
             .unwrap_or(false)
 }
 
-fn is_user_rejected_tool_completion(event: &github_copilot_sdk::SessionEvent) -> bool {
+fn is_user_rejected_tool_completion(event: &copilot_sdk::SessionEvent) -> bool {
     if event.parsed_type() != SessionEventType::ToolExecutionComplete {
         return false;
     }

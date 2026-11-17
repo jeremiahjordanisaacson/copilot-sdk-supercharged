@@ -3,12 +3,12 @@
 
 #![allow(clippy::unwrap_used)]
 
-use github_copilot_sdk::session_events::{SessionEventData, SessionEventType, TypedSessionEvent};
-use github_copilot_sdk::{SessionEvent, SessionEventWithMetadata};
+use copilot_sdk::session_events::{SessionEventData, SessionEventType, TypedSessionEvent};
+use copilot_sdk::{SessionEvent, SessionEventWithMetadata};
 
 #[test]
 fn external_tool_requests_preserve_public_struct_literals() {
-    use github_copilot_sdk::session_events::ExternalToolRequestedData;
+    use copilot_sdk::session_events::ExternalToolRequestedData;
 
     let request = ExternalToolRequestedData {
         request_id: "request".into(),

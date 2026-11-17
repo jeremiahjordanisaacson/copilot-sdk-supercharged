@@ -13,7 +13,9 @@ from copilot._jsonrpc import JsonRpcClient
 async def test_create_and_resume_preserve_builtin_agent_allowlist(
     monkeypatch, included_builtin_agents
 ):
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     rpc = AsyncMock(spec=JsonRpcClient)
     captured = {}
 
@@ -27,16 +29,19 @@ async def test_create_and_resume_preserve_builtin_agent_allowlist(
     rpc.request.side_effect = request
     monkeypatch.setattr(client, "_client", rpc)
     try:
-        session = await client.create_session(included_builtin_agents=included_builtin_agents)
+        session = await client.create_session(
+            agents={"included_builtin_agents": included_builtin_agents}
+        )
         await client.resume_session(
-            session.session_id,
-            included_builtin_agents=included_builtin_agents,
+            session.session_id, agents={"included_builtin_agents": included_builtin_agents}
         )
         for method in ("session.create", "session.resume"):
             if included_builtin_agents is None:
-                assert "includedBuiltinAgents" not in captured[method]
+                assert "includedBuiltinAgents" not in captured[method].get("agents", {})
             else:
-                assert captured[method]["includedBuiltinAgents"] == included_builtin_agents
+                assert (
+                    captured[method]["agents"]["includedBuiltinAgents"] == included_builtin_agents
+                )
     finally:
         await client.force_stop()
 
@@ -44,7 +49,9 @@ async def test_create_and_resume_preserve_builtin_agent_allowlist(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("roots", [None, [], ["relative-root", "other-root"]])
 async def test_customization_roots_preserved_on_create_and_resume(monkeypatch, roots):
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     rpc = AsyncMock(spec=JsonRpcClient)
     requests = {}
 
@@ -67,38 +74,36 @@ async def test_customization_roots_preserved_on_create_and_resume(monkeypatch, r
         session = await client.create_session(
             working_directory="request-cwd",
             enable_config_discovery=False,
-            enable_file_hooks=False,
-            skill_directories=skills,
-            agent_directories=agents,
-            instruction_directories=instructions,
-            hook_directories=hooks,
+            hooks={"enable_repository_hooks": False, "directories": hooks},
+            skills={"directories": skills},
+            agents={"directories": agents},
+            instructions={"directories": instructions},
         )
         await client.resume_session(
             session.session_id,
             working_directory="resume-cwd",
             enable_config_discovery=False,
-            enable_file_hooks=False,
-            skill_directories=skills,
-            agent_directories=agents,
-            instruction_directories=instructions,
-            hook_directories=hooks,
+            hooks={"enable_repository_hooks": False, "directories": hooks},
+            skills={"directories": skills},
+            agents={"directories": agents},
+            instructions={"directories": instructions},
         )
         for method in ("session.create", "session.resume"):
             payload = requests[method]
-            for key, expected in (
-                ("skillDirectories", skills),
-                ("agentDirectories", agents),
-                ("instructionDirectories", instructions),
-                ("hookDirectories", hooks),
+            for group, expected in (
+                ("skills", skills),
+                ("agents", agents),
+                ("instructions", instructions),
+                ("hooks", hooks),
             ):
                 if expected is None:
-                    assert key not in payload
+                    assert "directories" not in payload.get(group, {})
                 else:
-                    assert payload[key] == expected
+                    assert payload[group]["directories"] == expected
             assert payload["enableConfigDiscovery"] is False
-            assert payload["enableFileHooks"] is False
-            assert "additionalDirectories" not in payload
-            assert "customAgents" not in payload
-            assert "hooks" not in payload
+            assert payload["hooks"]["enableRepositoryHooks"] is False
+            assert "additionalDirectories" not in payload.get("filesystem", {})
+            assert "definitions" not in payload.get("agents", {})
+            assert "hasHandlers" not in payload.get("hooks", {})
     finally:
         await client.force_stop()

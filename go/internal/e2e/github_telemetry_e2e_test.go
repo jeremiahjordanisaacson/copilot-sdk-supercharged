@@ -4,17 +4,15 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestGitHubTelemetryE2E(t *testing.T) {
 	t.Parallel()
 	t.Run("should forward github telemetry for a live session", func(t *testing.T) {
-		// TODO(cli-1.0.81-2): CLI 1.0.81-2 does not forward GitHub telemetry notifications
-		// over the in-process (FFI) host, mirroring the existing telemetry-configuration
-		// limitation. Still covered by the default (stdio) transport.
+		// This notification-forwarding test currently runs in the explicit stdio matrix cell.
 		testharness.SkipIfInProcess(t, "GitHub telemetry forwarding is not honored in-process")
 
 		ctx := testharness.NewTestContext(t)
@@ -22,7 +20,7 @@ func TestGitHubTelemetryE2E(t *testing.T) {
 
 		notifications := make(chan *rpc.GitHubTelemetryNotification, 1)
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.OnGitHubTelemetry = func(notification *rpc.GitHubTelemetryNotification) {
+			opts.GitHub.OnTelemetry = func(notification *rpc.GitHubTelemetryNotification) {
 				select {
 				case notifications <- notification:
 				default:
@@ -31,9 +29,7 @@ func TestGitHubTelemetryE2E(t *testing.T) {
 		})
 		t.Cleanup(func() { client.ForceStop() })
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}

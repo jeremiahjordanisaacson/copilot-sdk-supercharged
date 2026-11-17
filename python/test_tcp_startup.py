@@ -81,7 +81,10 @@ sys.exit(3)
 
 
 def tcp_client(*args: str) -> CopilotClient:
-    return CopilotClient(connection=RuntimeConnection.for_tcp(path=sys.executable, args=args))
+    return CopilotClient(
+        mode="coding-agent",
+        runtime=RuntimeConnection.for_spawned_tcp(path=sys.executable, args=args),
+    )
 
 
 @pytest.fixture

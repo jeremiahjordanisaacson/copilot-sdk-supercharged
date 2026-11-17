@@ -8,12 +8,12 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 /// <summary>
 /// Behavior tests for the SDK's hand-rolled JSON-RPC transport (params shape, serializer
 /// metadata, request/response routing, error propagation). Reflection is used to force
-/// every generated <c>JsonSerializable</c> registration on the <see cref="GitHub.Copilot.Rpc.RpcJsonSerializerContext"/>,
+/// every generated <c>JsonSerializable</c> registration on the <see cref="Microsoft.Copilot.Rpc.RpcJsonSerializerContext"/>,
 /// which guards against regressions in the C# code generator (<c>scripts/codegen/csharp.ts</c>)
 /// silently dropping a registration. Functional behavior of individual RPC methods lives
 /// in the <c>Rpc*Tests</c> classes; this file owns transport- and serializer-shape concerns.
@@ -280,7 +280,7 @@ public class JsonRpcTests
     public async Task JsonRpc_Process_Exit_Reports_Connection_Lost(bool requestBeforeExit)
     {
         using var pair = JsonRpcReflectionPair.Create(startServer: false);
-        await using var client = new CopilotClient();
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
         var pending = requestBeforeExit
             ? pair.Client.InvokeAsync<string>("pendingAtExit", args: null)
             : null;
@@ -674,7 +674,7 @@ public class JsonRpcTests
     private sealed class JsonRpcReflection : IDisposable
     {
         private static readonly Type JsonRpcType =
-            typeof(CopilotClient).Assembly.GetType("GitHub.Copilot.JsonRpc", throwOnError: true)!;
+            typeof(CopilotClient).Assembly.GetType("Microsoft.Copilot.JsonRpc", throwOnError: true)!;
 
         private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
 

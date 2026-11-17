@@ -4,7 +4,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>
 /// Arguments passed to a bearer-token callback (the <c>BearerTokenProvider</c> property
@@ -19,10 +19,7 @@ namespace GitHub.Copilot;
 public sealed class ProviderTokenArgs
 {
     /// <summary>
-    /// Name of the BYOK provider needing a token. For the singular, whole-session
-    /// <see cref="ProviderConfig"/> this is the implicit provider name
-    /// (<c>"default"</c>); for <see cref="NamedProviderConfig"/> entries it is
-    /// <see cref="NamedProviderConfig.Name"/>.
+    /// Configured <see cref="NamedProviderConfig.Name"/> of the connection needing a token.
     /// </summary>
     /// <remarks>
     /// The callback closes over its own token scope/audience; the runtime is

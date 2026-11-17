@@ -5,8 +5,8 @@ package copilot_test
 import (
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	legacy "github.com/github/copilot-sdk/go/testdata/prompt_answer_legacy"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	legacy "github.com/microsoft/copilot-sdk/go/v2/testdata/prompt_answer_legacy"
 )
 
 // The legacy package compiles only while the prompt answer structs keep their
@@ -22,8 +22,8 @@ func TestPromptAnswerLegacyPositionalLiterals(t *testing.T) {
 	if legacy.Elicitation.Action != copilot.ElicitationActionAccept || len(legacy.Elicitation.Content) != 1 || legacy.Elicitation.Content["region"] != "us-east" {
 		t.Errorf("positional ElicitationResult = %+v, want accept with region us-east", legacy.Elicitation)
 	}
-	if legacy.Create.OnUserInputRequest == nil || legacy.Create.OnExitPlanModeRequest == nil || legacy.Create.OnElicitationRequest == nil ||
-		legacy.Resume.OnUserInputRequest == nil || legacy.Resume.OnExitPlanModeRequest == nil || legacy.Resume.OnElicitationRequest == nil {
+	if legacy.Create.Interaction.OnUserInputRequest == nil || legacy.Create.Interaction.OnExitPlanModeRequest == nil || legacy.Create.Interaction.OnElicitationRequest == nil ||
+		legacy.Resume.Interaction.OnUserInputRequest == nil || legacy.Resume.Interaction.OnExitPlanModeRequest == nil || legacy.Resume.Interaction.OnElicitationRequest == nil {
 		t.Error("plain prompt handlers were not retained in the session configs")
 	}
 }

@@ -19,10 +19,7 @@ fn build_and_runtime_share_versioned_cache_paths() {
     let cache = Path::new("cache");
     assert_eq!(
         runtime_install_dir(None, || Ok(cache.into()), version).expect("available cache"),
-        cache
-            .join("github-copilot-sdk")
-            .join("runtime")
-            .join("1.2.3_test")
+        cache.join("copilot-sdk").join("runtime").join("1.2.3_test")
     );
 }
 

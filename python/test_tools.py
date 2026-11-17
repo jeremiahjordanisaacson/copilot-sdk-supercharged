@@ -8,7 +8,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
 from copilot import define_tool
-from copilot.generated.rpc import ExternalToolTextResultForLlm
+from copilot.rpc import ExternalToolTextResultForLlm
 from copilot.tools import (
     ToolBinaryResult,
     ToolInvocation,

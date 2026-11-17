@@ -9,15 +9,42 @@ using System.Text.Json;
 #if !NET8_0_OR_GREATER
 using System.Runtime.Serialization;
 #endif
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 /// <summary>
 /// Tests for JSON serialization compatibility with the SDK's configured options.
 /// </summary>
 public class SerializationTests
 {
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(false, 1)]
+    [InlineData(false, 2)]
+    [InlineData(true, 0)]
+    [InlineData(true, 1)]
+    [InlineData(true, 2)]
+    public void DefaultProvider_Preserves_Omitted_Null_And_Name(bool resume, int presence)
+    {
+        var inference = new SessionInferenceOptions();
+        if (presence != 0)
+        {
+            inference.DefaultProvider = presence == 1 ? null : "named";
+        }
+        var github = new SessionGitHubOptions { Token = "identity", Capi = new CapiSessionOptions { Enabled = false } };
+        var options = GetSerializerOptions();
+        var json = resume
+            ? JsonSerializer.Serialize(new ResumeSessionOptions { Inference = inference, GitHub = github }.Clone(), options)
+            : JsonSerializer.Serialize(new CreateSessionOptions { Inference = inference, GitHub = github }.Clone(), options);
+        using var document = JsonDocument.Parse(json);
+        var hasDefault = document.RootElement.GetProperty("inference").TryGetProperty("defaultProvider", out var value);
+        Assert.Equal(presence != 0, hasDefault);
+        if (presence == 1) Assert.Equal(JsonValueKind.Null, value.ValueKind);
+        if (presence == 2) Assert.Equal("named", value.GetString());
+        Assert.False(document.RootElement.GetProperty("github").GetProperty("capi").GetProperty("enabled").GetBoolean());
+    }
+
     [Fact]
     public void FetchErrorData_RoundTrips_WithSdkSerializerOptions()
     {
@@ -77,11 +104,7 @@ public class SerializationTests
     public void ToJsonElementForWire_Preserves_Concrete_SessionEvent_Type()
     {
         var wire = CopilotClient.ToJsonElementForWire(new SessionIdleEvent
-        {
-            Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-            Timestamp = DateTimeOffset.Parse("2026-03-15T21:26:02.642Z"),
-            Data = new SessionIdleData(),
-        })!.Value;
+        { Id = Guid.Parse("11111111-1111-1111-1111-111111111111"), Timestamp = DateTimeOffset.Parse("2026-03-15T21:26:02.642Z"), Data = new SessionIdleData(), })!.Value;
 
         Assert.Equal("session.idle", wire.GetProperty("type").GetString());
     }
@@ -130,7 +153,7 @@ public class SerializationTests
     public void ModelInfo_PreservesNativeProvider(string id, string kind, string label)
     {
         var provider = $$"""{"id":"{{id}}","kind":"{{kind}}","label":"{{label}}"}""";
-        var model = JsonSerializer.Deserialize<ModelInfo>(
+        var model = JsonSerializer.Deserialize<Model>(
             "{\"id\":\"shared-model\",\"name\":\"Shared Model\",\"capabilities\":{},\"provider\":" + provider + "}",
             GetSerializerOptions())!;
 
@@ -146,10 +169,11 @@ public class SerializationTests
     public void ModelInfo_PreservesMaxOutputTokens()
     {
         const string limits = """{"max_prompt_tokens":128000,"max_output_tokens":16384,"max_context_window_tokens":144384}""";
-        var model = JsonSerializer.Deserialize<ModelInfo>(
+        var model = JsonSerializer.Deserialize<Model>(
             "{\"id\":\"m\",\"name\":\"M\",\"capabilities\":{\"supports\":{},\"limits\":" + limits + "}}",
             GetSerializerOptions())!;
 
+        Assert.NotNull(model.Capabilities.Limits);
         Assert.Equal(16384, model.Capabilities.Limits.MaxOutputTokens);
         using var encoded = JsonDocument.Parse(JsonSerializer.Serialize(model.Capabilities.Limits, GetSerializerOptions()));
         Assert.Equal(16384, encoded.RootElement.GetProperty("max_output_tokens").GetInt32());
@@ -158,7 +182,7 @@ public class SerializationTests
     [Fact]
     public void ModelInfo_OmitsUnattributedProvider()
     {
-        var model = JsonSerializer.Deserialize<ModelInfo>(
+        var model = JsonSerializer.Deserialize<Model>(
             "{\"id\":\"configured/model\",\"name\":\"Configured Model\",\"capabilities\":{}}",
             GetSerializerOptions())!;
         using var encoded = JsonDocument.Parse(JsonSerializer.Serialize(model, GetSerializerOptions()));
@@ -175,11 +199,11 @@ public class SerializationTests
     {
         var options = GetSerializerOptions();
         var json = errorReporting is null
-            ? """{"version":"1.2.3","protocolVersion":2}"""
+            ? """{"version":"1.2.3","protocolVersion":4}"""
             : $$"""
                 {
                     "version": "1.2.3",
-                    "protocolVersion": 2,
+                    "protocolVersion": 4,
                     "hostDiagnostics": { "errorReporting": "{{errorReporting}}" }
                 }
                 """;
@@ -188,7 +212,7 @@ public class SerializationTests
 
         Assert.NotNull(response);
         Assert.Equal("1.2.3", response.Version);
-        Assert.Equal(2, response.ProtocolVersion);
+        Assert.Equal(4, response.ProtocolVersion);
         using var roundTrip = JsonDocument.Parse(JsonSerializer.Serialize(response, options));
         if (errorReporting is null)
         {
@@ -411,7 +435,7 @@ public class SerializationTests
         var original = new ModelBilling
         {
             Multiplier = 1.5,
-            TokenPrices = new GitHub.Copilot.Rpc.ModelBillingTokenPrices
+            TokenPrices = new Microsoft.Copilot.Rpc.ModelBillingTokenPrices
             {
                 InputPrice = 2.0,
                 OutputPrice = 8.0,
@@ -419,7 +443,7 @@ public class SerializationTests
                 CacheWritePrice = 0.75,
                 BatchSize = 1_000_000L,
                 MaxPromptTokens = 128_000L,
-                LongContext = new GitHub.Copilot.Rpc.ModelBillingTokenPricesLongContext
+                LongContext = new Microsoft.Copilot.Rpc.ModelBillingTokenPricesLongContext
                 {
                     InputPrice = 4.0,
                     OutputPrice = 16.0,
@@ -512,13 +536,13 @@ public class SerializationTests
         var request = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("InstructionDirectories", new List<string> { "C:\\extra-instructions", "C:\\more-instructions" }));
+            ("Instructions.Directories", new List<string> { "C:\\extra-instructions", "C:\\more-instructions" }));
 
         var json = JsonSerializer.Serialize(request, requestType, options);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        Assert.Equal("C:\\extra-instructions", root.GetProperty("instructionDirectories")[0].GetString());
-        Assert.Equal("C:\\more-instructions", root.GetProperty("instructionDirectories")[1].GetString());
+        Assert.Equal("C:\\extra-instructions", root.GetProperty("instructions").GetProperty("directories")[0].GetString());
+        Assert.Equal("C:\\more-instructions", root.GetProperty("instructions").GetProperty("directories")[1].GetString());
     }
 
     [Fact]
@@ -553,14 +577,14 @@ public class SerializationTests
         var requestType = GetNestedType(typeof(CopilotClient), "CreateSessionRequest");
         var request = CreateInternalRequest(
             requestType,
-            ("RequestExitPlanMode", true),
-            ("RequestAutoModeSwitch", true));
+            ("Interaction.RequestExitPlanMode", true),
+            ("Interaction.RequestAutoModeSwitch", true));
 
         var json = JsonSerializer.Serialize(request, requestType, options);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        Assert.True(root.GetProperty("requestExitPlanMode").GetBoolean());
-        Assert.True(root.GetProperty("requestAutoModeSwitch").GetBoolean());
+        Assert.True(root.GetProperty("interaction").GetProperty("requestExitPlanMode").GetBoolean());
+        Assert.True(root.GetProperty("interaction").GetProperty("requestAutoModeSwitch").GetBoolean());
     }
 
     [Fact]
@@ -571,12 +595,12 @@ public class SerializationTests
         var request = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("InstructionDirectories", new List<string> { "C:\\resume-instructions" }));
+            ("Instructions.Directories", new List<string> { "C:\\resume-instructions" }));
 
         var json = JsonSerializer.Serialize(request, requestType, options);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        Assert.Equal("C:\\resume-instructions", root.GetProperty("instructionDirectories")[0].GetString());
+        Assert.Equal("C:\\resume-instructions", root.GetProperty("instructions").GetProperty("directories")[0].GetString());
     }
 
     [Fact]
@@ -589,21 +613,21 @@ public class SerializationTests
         var createRequest = CreateInternalRequest(
             createRequestType,
             ("SessionId", "session-id"),
-            ("Capi", capi));
+            ("GitHub.Capi", capi));
 
         var createJson = JsonSerializer.Serialize(createRequest, createRequestType, options);
         using var createDocument = JsonDocument.Parse(createJson);
-        Assert.False(createDocument.RootElement.GetProperty("capi").GetProperty("enableWebSocketResponses").GetBoolean());
+        Assert.False(createDocument.RootElement.GetProperty("github").GetProperty("capi").GetProperty("enableWebSocketResponses").GetBoolean());
 
         var resumeRequestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
         var resumeRequest = CreateInternalRequest(
             resumeRequestType,
             ("SessionId", "session-id"),
-            ("Capi", capi));
+            ("GitHub.Capi", capi));
 
         var resumeJson = JsonSerializer.Serialize(resumeRequest, resumeRequestType, options);
         using var resumeDocument = JsonDocument.Parse(resumeJson);
-        Assert.False(resumeDocument.RootElement.GetProperty("capi").GetProperty("enableWebSocketResponses").GetBoolean());
+        Assert.False(resumeDocument.RootElement.GetProperty("github").GetProperty("capi").GetProperty("enableWebSocketResponses").GetBoolean());
     }
 
     [Fact]
@@ -618,7 +642,7 @@ public class SerializationTests
 
         var createJson = JsonSerializer.Serialize(createRequest, createRequestType, options);
         using var createDocument = JsonDocument.Parse(createJson);
-        Assert.False(createDocument.RootElement.TryGetProperty("capi", out _));
+        Assert.False(createDocument.RootElement.TryGetProperty("github", out _));
 
         var resumeRequestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
         var resumeRequest = CreateInternalRequest(
@@ -627,7 +651,7 @@ public class SerializationTests
 
         var resumeJson = JsonSerializer.Serialize(resumeRequest, resumeRequestType, options);
         using var resumeDocument = JsonDocument.Parse(resumeJson);
-        Assert.False(resumeDocument.RootElement.TryGetProperty("capi", out _));
+        Assert.False(resumeDocument.RootElement.TryGetProperty("github", out _));
     }
 
     [Fact]
@@ -646,9 +670,9 @@ public class SerializationTests
         var createRequestType = GetNestedType(typeof(CopilotClient), "CreateSessionRequest");
         var createRequest = CreateInternalRequest(
             createRequestType,
-            ("GitHubMcpToolConfig", githubConfig));
+            ("GitHub.Mcp", githubConfig));
         using var createDocument = JsonDocument.Parse(JsonSerializer.Serialize(createRequest, createRequestType, options));
-        var createConfig = createDocument.RootElement.GetProperty("githubMcpToolConfig");
+        var createConfig = createDocument.RootElement.GetProperty("github").GetProperty("mcp");
         Assert.True(createConfig.GetProperty("enableAllTools").GetBoolean());
         Assert.Equal("repos", createConfig.GetProperty("additionalToolsets")[0].GetString());
         Assert.True(createConfig.GetProperty("disableFormDeferral").GetBoolean());
@@ -657,9 +681,9 @@ public class SerializationTests
         var resumeRequest = CreateInternalRequest(
             resumeRequestType,
             ("SessionId", "session-id"),
-            ("GitHubMcpToolConfig", githubConfig));
+            ("GitHub.Mcp", githubConfig));
         using var resumeDocument = JsonDocument.Parse(JsonSerializer.Serialize(resumeRequest, resumeRequestType, options));
-        Assert.True(resumeDocument.RootElement.TryGetProperty("githubMcpToolConfig", out _));
+        Assert.True(resumeDocument.RootElement.GetProperty("github").TryGetProperty("mcp", out _));
     }
 
     [Fact]
@@ -671,7 +695,7 @@ public class SerializationTests
             var requestType = GetNestedType(typeof(CopilotClient), requestName);
             var request = CreateInternalRequest(requestType, ("SessionId", "session-id"));
             using var document = JsonDocument.Parse(JsonSerializer.Serialize(request, requestType, options));
-            Assert.False(document.RootElement.TryGetProperty("githubMcpToolConfig", out _));
+            Assert.False(document.RootElement.TryGetProperty("github", out _));
         }
     }
 
@@ -683,21 +707,21 @@ public class SerializationTests
         var createRequest = CreateInternalRequest(
             createRequestType,
             ("SessionId", "session-id"),
-            ("ReasoningSummary", ReasoningSummary.Detailed));
+            ("Inference.ReasoningSummary", ReasoningSummary.Detailed));
 
         var createJson = JsonSerializer.Serialize(createRequest, createRequestType, options);
         using var createDocument = JsonDocument.Parse(createJson);
-        Assert.Equal("detailed", createDocument.RootElement.GetProperty("reasoningSummary").GetString());
+        Assert.Equal("detailed", createDocument.RootElement.GetProperty("inference").GetProperty("reasoningSummary").GetString());
 
         var resumeRequestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
         var resumeRequest = CreateInternalRequest(
             resumeRequestType,
             ("SessionId", "session-id"),
-            ("ReasoningSummary", ReasoningSummary.None));
+            ("Inference.ReasoningSummary", ReasoningSummary.None));
 
         var resumeJson = JsonSerializer.Serialize(resumeRequest, resumeRequestType, options);
         using var resumeDocument = JsonDocument.Parse(resumeJson);
-        Assert.Equal("none", resumeDocument.RootElement.GetProperty("reasoningSummary").GetString());
+        Assert.Equal("none", resumeDocument.RootElement.GetProperty("inference").GetProperty("reasoningSummary").GetString());
     }
 
     [Fact]
@@ -708,21 +732,21 @@ public class SerializationTests
         var createRequest = CreateInternalRequest(
             createRequestType,
             ("SessionId", "session-id"),
-            ("ContextTier", ContextTier.LongContext));
+            ("Inference.ContextTier", ContextTier.LongContext));
 
         var createJson = JsonSerializer.Serialize(createRequest, createRequestType, options);
         using var createDocument = JsonDocument.Parse(createJson);
-        Assert.Equal("long_context", createDocument.RootElement.GetProperty("contextTier").GetString());
+        Assert.Equal("long_context", createDocument.RootElement.GetProperty("inference").GetProperty("contextTier").GetString());
 
         var resumeRequestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
         var resumeRequest = CreateInternalRequest(
             resumeRequestType,
             ("SessionId", "session-id"),
-            ("ContextTier", ContextTier.Default));
+            ("Inference.ContextTier", ContextTier.Default));
 
         var resumeJson = JsonSerializer.Serialize(resumeRequest, resumeRequestType, options);
         using var resumeDocument = JsonDocument.Parse(resumeJson);
-        Assert.Equal("default", resumeDocument.RootElement.GetProperty("contextTier").GetString());
+        Assert.Equal("default", resumeDocument.RootElement.GetProperty("inference").GetProperty("contextTier").GetString());
     }
 
     [Fact]
@@ -741,17 +765,17 @@ public class SerializationTests
         var createRequest = CreateInternalRequest(
             createRequestType,
             ("SessionId", "session-id"),
-            ("PluginDirectories", pluginDirs),
-            ("DisabledMcpServers", new List<string> { "local-files", "remote-github" }),
-            ("LargeOutput", largeOutput));
+            ("Plugins.Directories", pluginDirs),
+            ("Mcp.DisabledServers", new List<string> { "local-files", "remote-github" }),
+            ("Tools.LargeOutput", largeOutput));
 
         var createJson = JsonSerializer.Serialize(createRequest, createRequestType, options);
         using var createDocument = JsonDocument.Parse(createJson);
         var createRoot = createDocument.RootElement;
-        Assert.Equal("/tmp/plugins/a", createRoot.GetProperty("pluginDirectories")[0].GetString());
-        Assert.Equal("local-files", createRoot.GetProperty("disabledMcpServers")[0].GetString());
-        Assert.Equal("/tmp/plugins/b", createRoot.GetProperty("pluginDirectories")[1].GetString());
-        var createLargeOutput = createRoot.GetProperty("largeOutput");
+        Assert.Equal("/tmp/plugins/a", createRoot.GetProperty("plugins").GetProperty("directories")[0].GetString());
+        Assert.Equal("local-files", createRoot.GetProperty("mcp").GetProperty("disabledServers")[0].GetString());
+        Assert.Equal("/tmp/plugins/b", createRoot.GetProperty("plugins").GetProperty("directories")[1].GetString());
+        var createLargeOutput = createRoot.GetProperty("tools").GetProperty("largeOutput");
         Assert.True(createLargeOutput.GetProperty("enabled").GetBoolean());
         Assert.Equal(1024, createLargeOutput.GetProperty("maxSizeBytes").GetInt64());
         Assert.Equal("/tmp/large-output", createLargeOutput.GetProperty("outputDir").GetString());
@@ -760,16 +784,16 @@ public class SerializationTests
         var resumeRequest = CreateInternalRequest(
             resumeRequestType,
             ("SessionId", "session-id"),
-            ("PluginDirectories", pluginDirs),
-            ("DisabledMcpServers", new List<string> { "local-files", "remote-github" }),
-            ("LargeOutput", largeOutput));
+            ("Plugins.Directories", pluginDirs),
+            ("Mcp.DisabledServers", new List<string> { "local-files", "remote-github" }),
+            ("Tools.LargeOutput", largeOutput));
 
         var resumeJson = JsonSerializer.Serialize(resumeRequest, resumeRequestType, options);
         using var resumeDocument = JsonDocument.Parse(resumeJson);
         var resumeRoot = resumeDocument.RootElement;
-        Assert.Equal("/tmp/plugins/a", resumeRoot.GetProperty("pluginDirectories")[0].GetString());
-        Assert.Equal("local-files", resumeRoot.GetProperty("disabledMcpServers")[0].GetString());
-        var resumeLargeOutput = resumeRoot.GetProperty("largeOutput");
+        Assert.Equal("/tmp/plugins/a", resumeRoot.GetProperty("plugins").GetProperty("directories")[0].GetString());
+        Assert.Equal("local-files", resumeRoot.GetProperty("mcp").GetProperty("disabledServers")[0].GetString());
+        var resumeLargeOutput = resumeRoot.GetProperty("tools").GetProperty("largeOutput");
         Assert.True(resumeLargeOutput.GetProperty("enabled").GetBoolean());
         Assert.Equal(1024, resumeLargeOutput.GetProperty("maxSizeBytes").GetInt64());
         Assert.Equal("/tmp/large-output", resumeLargeOutput.GetProperty("outputDir").GetString());
@@ -787,7 +811,7 @@ public class SerializationTests
                 var request = CreateInternalRequest(
                     requestType,
                     ("SessionId", "session-id"),
-                    ("SandboxConfig", new SandboxConfig
+                    ("Permissions.Sandbox", new SandboxConfig
                     {
                         Enabled = enabled,
                         AddCurrentWorkingDirectory = false,
@@ -796,7 +820,7 @@ public class SerializationTests
 
                 var json = JsonSerializer.Serialize(request, requestType, options);
                 using var document = JsonDocument.Parse(json);
-                var sandbox = document.RootElement.GetProperty("sandboxConfig");
+                var sandbox = document.RootElement.GetProperty("permissions").GetProperty("sandbox");
                 Assert.Equal(enabled, sandbox.GetProperty("enabled").GetBoolean());
                 Assert.False(sandbox.GetProperty("addCurrentWorkingDirectory").GetBoolean());
                 Assert.True(sandbox.GetProperty("sandboxMcpServers").GetBoolean());
@@ -805,11 +829,11 @@ public class SerializationTests
             var omitted = CreateInternalRequest(requestType, ("SessionId", "session-id"));
             var omittedJson = JsonSerializer.Serialize(omitted, requestType, options);
             using var omittedDocument = JsonDocument.Parse(omittedJson);
-            Assert.False(omittedDocument.RootElement.TryGetProperty("sandboxConfig", out _));
+            Assert.False(omittedDocument.RootElement.TryGetProperty("permissions", out _));
         }
     }
 
-#pragma warning disable GHCP001 // Memory injection mode is intentionally experimental.
+#pragma warning disable MCPSDK001 // Memory injection mode is intentionally experimental.
     [Fact]
     public void SessionRequests_CanSerializeMemory_WithSdkOptions()
     {
@@ -819,25 +843,25 @@ public class SerializationTests
         var createRequest = CreateInternalRequest(
             createRequestType,
             ("SessionId", "session-id"),
-            ("Memory", new MemoryConfiguration { Enabled = true, Mode = MemoryMode.UserPrompt }));
+            ("State.Memory", new MemoryConfiguration { Enabled = true, Mode = MemoryMode.UserPrompt }));
 
         var createJson = JsonSerializer.Serialize(createRequest, createRequestType, options);
         using var createDocument = JsonDocument.Parse(createJson);
         var createRoot = createDocument.RootElement;
-        Assert.True(createRoot.GetProperty("memory").GetProperty("enabled").GetBoolean());
-        Assert.Equal("user-prompt", createRoot.GetProperty("memory").GetProperty("mode").GetString());
+        Assert.True(createRoot.GetProperty("state").GetProperty("memory").GetProperty("enabled").GetBoolean());
+        Assert.Equal("user-prompt", createRoot.GetProperty("state").GetProperty("memory").GetProperty("mode").GetString());
 
         var resumeRequestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
         var resumeRequest = CreateInternalRequest(
             resumeRequestType,
             ("SessionId", "session-id"),
-            ("Memory", new MemoryConfiguration { Enabled = false, Mode = MemoryMode.SystemPrompt }));
+            ("State.Memory", new MemoryConfiguration { Enabled = false, Mode = MemoryMode.SystemPrompt }));
 
         var resumeJson = JsonSerializer.Serialize(resumeRequest, resumeRequestType, options);
         using var resumeDocument = JsonDocument.Parse(resumeJson);
         var resumeRoot = resumeDocument.RootElement;
-        Assert.False(resumeRoot.GetProperty("memory").GetProperty("enabled").GetBoolean());
-        Assert.Equal("system-prompt", resumeRoot.GetProperty("memory").GetProperty("mode").GetString());
+        Assert.False(resumeRoot.GetProperty("state").GetProperty("memory").GetProperty("enabled").GetBoolean());
+        Assert.Equal("system-prompt", resumeRoot.GetProperty("state").GetProperty("memory").GetProperty("mode").GetString());
     }
 
     [Theory]
@@ -868,15 +892,15 @@ public class SerializationTests
                 attribute.AttributeType.FullName == "System.Diagnostics.CodeAnalysis.ExperimentalAttribute");
 
         var typeAttribute = Assert.Single(ExperimentalAttributes(typeof(MemoryMode)));
-        Assert.Equal("GHCP001", Assert.Single(typeAttribute.ConstructorArguments).Value);
+        Assert.Equal("MCPSDK001", Assert.Single(typeAttribute.ConstructorArguments).Value);
         var modeAttribute = Assert.Single(ExperimentalAttributes(
             typeof(MemoryConfiguration).GetProperty(nameof(MemoryConfiguration.Mode))!));
-        Assert.Equal("GHCP001", Assert.Single(modeAttribute.ConstructorArguments).Value);
+        Assert.Equal("MCPSDK001", Assert.Single(modeAttribute.ConstructorArguments).Value);
         Assert.Empty(ExperimentalAttributes(typeof(MemoryConfiguration)));
         Assert.Empty(ExperimentalAttributes(
             typeof(MemoryConfiguration).GetProperty(nameof(MemoryConfiguration.Enabled))!));
     }
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 
     [Fact]
     public void SessionRequests_CanSerializeCitationAgentExclusionAndLimits_WithSdkOptions()
@@ -888,41 +912,41 @@ public class SerializationTests
         var createRequest = CreateInternalRequest(
             createRequestType,
             ("SessionId", "session-id"),
-            ("EnableCitations", true),
-            ("EnableFileChangeTracking", true),
-            ("ExcludedBuiltInAgents", excludedAgents),
-            ("SessionLimits", new SessionLimitsConfig { MaxAiCredits = 12.5 }),
-            ("Autopilot", new AutopilotOptions { ContinuationEnabled = false, MaxContinues = 0 }));
+            ("Inference.EnableCitations", true),
+            ("Filesystem.TrackFileChanges", true),
+            ("Agents.ExcludedBuiltInAgents", excludedAgents),
+            ("Execution.Limits", new SessionLimitsConfig { MaxAiCredits = 12.5 }),
+            ("Execution.Autopilot", new AutopilotOptions { ContinuationEnabled = false, MaxContinues = 0 }));
 
         var createJson = JsonSerializer.Serialize(createRequest, createRequestType, options);
         using var createDocument = JsonDocument.Parse(createJson);
         var createRoot = createDocument.RootElement;
-        Assert.True(createRoot.GetProperty("enableCitations").GetBoolean());
-        Assert.True(createRoot.GetProperty("enableFileChangeTracking").GetBoolean());
-        Assert.Equal("explore", createRoot.GetProperty("excludedBuiltinAgents")[0].GetString());
-        Assert.Equal(12.5, createRoot.GetProperty("sessionLimits").GetProperty("maxAiCredits").GetDouble());
-        Assert.False(createRoot.GetProperty("autopilot").GetProperty("continuationEnabled").GetBoolean());
-        Assert.Equal(0, createRoot.GetProperty("autopilot").GetProperty("maxContinues").GetInt64());
+        Assert.True(createRoot.GetProperty("inference").GetProperty("enableCitations").GetBoolean());
+        Assert.True(createRoot.GetProperty("filesystem").GetProperty("trackFileChanges").GetBoolean());
+        Assert.Equal("explore", createRoot.GetProperty("agents").GetProperty("excludedBuiltinAgents")[0].GetString());
+        Assert.Equal(12.5, createRoot.GetProperty("execution").GetProperty("limits").GetProperty("maxAiCredits").GetDouble());
+        Assert.False(createRoot.GetProperty("execution").GetProperty("autopilot").GetProperty("continuationEnabled").GetBoolean());
+        Assert.Equal(0, createRoot.GetProperty("execution").GetProperty("autopilot").GetProperty("maxContinues").GetInt64());
 
         var resumeRequestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
         var resumeRequest = CreateInternalRequest(
             resumeRequestType,
             ("SessionId", "session-id"),
-            ("EnableCitations", true),
-            ("EnableFileChangeTracking", true),
-            ("ExcludedBuiltInAgents", excludedAgents),
-            ("SessionLimits", new SessionLimitsConfig { MaxAiCredits = 7.25 }),
-            ("Autopilot", new AutopilotOptions { MaxContinues = 2 }));
+            ("Inference.EnableCitations", true),
+            ("Filesystem.TrackFileChanges", true),
+            ("Agents.ExcludedBuiltInAgents", excludedAgents),
+            ("Execution.Limits", new SessionLimitsConfig { MaxAiCredits = 7.25 }),
+            ("Execution.Autopilot", new AutopilotOptions { MaxContinues = 2 }));
 
         var resumeJson = JsonSerializer.Serialize(resumeRequest, resumeRequestType, options);
         using var resumeDocument = JsonDocument.Parse(resumeJson);
         var resumeRoot = resumeDocument.RootElement;
-        Assert.True(resumeRoot.GetProperty("enableCitations").GetBoolean());
-        Assert.True(resumeRoot.GetProperty("enableFileChangeTracking").GetBoolean());
-        Assert.Equal("task", resumeRoot.GetProperty("excludedBuiltinAgents")[1].GetString());
-        Assert.Equal(7.25, resumeRoot.GetProperty("sessionLimits").GetProperty("maxAiCredits").GetDouble());
-        Assert.Equal(2, resumeRoot.GetProperty("autopilot").GetProperty("maxContinues").GetInt64());
-        Assert.False(resumeRoot.GetProperty("autopilot").TryGetProperty("continuationEnabled", out _));
+        Assert.True(resumeRoot.GetProperty("inference").GetProperty("enableCitations").GetBoolean());
+        Assert.True(resumeRoot.GetProperty("filesystem").GetProperty("trackFileChanges").GetBoolean());
+        Assert.Equal("task", resumeRoot.GetProperty("agents").GetProperty("excludedBuiltinAgents")[1].GetString());
+        Assert.Equal(7.25, resumeRoot.GetProperty("execution").GetProperty("limits").GetProperty("maxAiCredits").GetDouble());
+        Assert.Equal(2, resumeRoot.GetProperty("execution").GetProperty("autopilot").GetProperty("maxContinues").GetInt64());
+        Assert.False(resumeRoot.GetProperty("execution").GetProperty("autopilot").TryGetProperty("continuationEnabled", out _));
     }
 
     [Fact]
@@ -962,7 +986,7 @@ public class SerializationTests
 
         var createJson = JsonSerializer.Serialize(createRequest, createRequestType, options);
         using var createDocument = JsonDocument.Parse(createJson);
-        Assert.False(createDocument.RootElement.TryGetProperty("memory", out _));
+        Assert.False(createDocument.RootElement.TryGetProperty("state", out _));
 
         var resumeRequestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
         var resumeRequest = CreateInternalRequest(
@@ -971,7 +995,7 @@ public class SerializationTests
 
         var resumeJson = JsonSerializer.Serialize(resumeRequest, resumeRequestType, options);
         using var resumeDocument = JsonDocument.Parse(resumeJson);
-        Assert.False(resumeDocument.RootElement.TryGetProperty("memory", out _));
+        Assert.False(resumeDocument.RootElement.TryGetProperty("state", out _));
     }
 
     [Fact]
@@ -983,7 +1007,7 @@ public class SerializationTests
         var createRequest = CreateInternalRequest(
             createRequestType,
             ("SessionId", "session-id"),
-            ("ExpAssignments", new CopilotExpAssignmentResponse
+            ("Experiments.Assignments", new CopilotExpAssignmentResponse
             {
                 Configs = new List<ExpConfigEntry> { new() { Id = "exp-create" } },
             }));
@@ -991,13 +1015,13 @@ public class SerializationTests
         var createJson = JsonSerializer.Serialize(createRequest, createRequestType, options);
         using var createDocument = JsonDocument.Parse(createJson);
         var createRoot = createDocument.RootElement;
-        Assert.Equal("exp-create", createRoot.GetProperty("expAssignments").GetProperty("Configs")[0].GetProperty("Id").GetString());
+        Assert.Equal("exp-create", createRoot.GetProperty("experiments").GetProperty("assignments").GetProperty("Configs")[0].GetProperty("Id").GetString());
 
         var resumeRequestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
         var resumeRequest = CreateInternalRequest(
             resumeRequestType,
             ("SessionId", "session-id"),
-            ("ExpAssignments", new CopilotExpAssignmentResponse
+            ("Experiments.Assignments", new CopilotExpAssignmentResponse
             {
                 Configs = new List<ExpConfigEntry> { new() { Id = "exp-resume" } },
             }));
@@ -1005,7 +1029,7 @@ public class SerializationTests
         var resumeJson = JsonSerializer.Serialize(resumeRequest, resumeRequestType, options);
         using var resumeDocument = JsonDocument.Parse(resumeJson);
         var resumeRoot = resumeDocument.RootElement;
-        Assert.Equal("exp-resume", resumeRoot.GetProperty("expAssignments").GetProperty("Configs")[0].GetProperty("Id").GetString());
+        Assert.Equal("exp-resume", resumeRoot.GetProperty("experiments").GetProperty("assignments").GetProperty("Configs")[0].GetProperty("Id").GetString());
     }
 
     [Fact]
@@ -1020,7 +1044,7 @@ public class SerializationTests
 
         var createJson = JsonSerializer.Serialize(createRequest, createRequestType, options);
         using var createDocument = JsonDocument.Parse(createJson);
-        Assert.False(createDocument.RootElement.TryGetProperty("expAssignments", out _));
+        Assert.False(createDocument.RootElement.TryGetProperty("experiments", out _));
 
         var resumeRequestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
         var resumeRequest = CreateInternalRequest(
@@ -1029,42 +1053,60 @@ public class SerializationTests
 
         var resumeJson = JsonSerializer.Serialize(resumeRequest, resumeRequestType, options);
         using var resumeDocument = JsonDocument.Parse(resumeJson);
-        Assert.False(resumeDocument.RootElement.TryGetProperty("expAssignments", out _));
+        Assert.False(resumeDocument.RootElement.TryGetProperty("experiments", out _));
     }
 
     [Fact]
     public void SessionConfigClone_PreservesExpAssignments()
     {
-        var config = new SessionConfig
+        var config = new CreateSessionOptions
         {
             SessionId = "session-id",
-            ExpAssignments = new CopilotExpAssignmentResponse
+            Experiments = new SessionExperimentOptions
             {
-                Configs = new List<ExpConfigEntry> { new() { Id = "exp-create" } },
+                Assignments = new CopilotExpAssignmentResponse
+                {
+                    Configs = new List<ExpConfigEntry>
+            {
+                new()
+                {
+                    Id = "exp-create"
+                }
             },
+                }
+            }
         };
 
         var clone = config.Clone();
 
-        Assert.NotNull(clone.ExpAssignments);
-        Assert.Equal("exp-create", clone.ExpAssignments!.Configs[0].Id);
+        Assert.NotNull(clone.Experiments.Assignments);
+        Assert.Equal("exp-create", clone.Experiments.Assignments!.Configs[0].Id);
     }
 
     [Fact]
     public void ResumeSessionConfigClone_PreservesExpAssignments()
     {
-        var config = new ResumeSessionConfig
+        var config = new ResumeSessionOptions
         {
-            ExpAssignments = new CopilotExpAssignmentResponse
+            Experiments = new SessionExperimentOptions
             {
-                Configs = new List<ExpConfigEntry> { new() { Id = "exp-resume" } },
+                Assignments = new CopilotExpAssignmentResponse
+                {
+                    Configs = new List<ExpConfigEntry>
+            {
+                new()
+                {
+                    Id = "exp-resume"
+                }
             },
+                }
+            }
         };
 
         var clone = config.Clone();
 
-        Assert.NotNull(clone.ExpAssignments);
-        Assert.Equal("exp-resume", clone.ExpAssignments!.Configs[0].Id);
+        Assert.NotNull(clone.Experiments.Assignments);
+        Assert.Equal("exp-resume", clone.Experiments.Assignments!.Configs[0].Id);
     }
 
     [Fact]
@@ -1083,10 +1125,10 @@ public class SerializationTests
             var request = CreateInternalRequest(
                 requestType,
                 ("SessionId", "session-id"),
-                ("FeatureFlags", flags));
+                ("Experiments.Flags", flags));
             using var document = JsonDocument.Parse(
                 JsonSerializer.Serialize(request, requestType, options));
-            var serializedFlags = document.RootElement.GetProperty("featureFlags");
+            var serializedFlags = document.RootElement.GetProperty("experiments").GetProperty("flags");
             Assert.True(serializedFlags.GetProperty("ENABLED_TEST_FLAG").GetBoolean());
             Assert.False(serializedFlags.GetProperty("DISABLED_TEST_FLAG").GetBoolean());
         }
@@ -1095,16 +1137,22 @@ public class SerializationTests
     [Fact]
     public void SessionConfigClone_CopiesFeatureFlags()
     {
-        var config = new SessionConfig
+        var config = new CreateSessionOptions
         {
-            FeatureFlags = new Dictionary<string, bool> { ["TEST_FLAG"] = true },
+            Experiments = new SessionExperimentOptions
+            {
+                Flags = new Dictionary<string, bool>
+                {
+                    ["TEST_FLAG"] = true
+                }
+            }
         };
 
         var clone = config.Clone();
-        clone.FeatureFlags!["TEST_FLAG"] = false;
+        clone.Experiments.Flags!["TEST_FLAG"] = false;
 
-        Assert.True(config.FeatureFlags["TEST_FLAG"]);
-        Assert.False(clone.FeatureFlags["TEST_FLAG"]);
+        Assert.True(config.Experiments.Flags["TEST_FLAG"]);
+        Assert.False(clone.Experiments.Flags["TEST_FLAG"]);
     }
 
     [Fact]
@@ -1115,12 +1163,12 @@ public class SerializationTests
         var request = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("EnableSessionTelemetry", false));
+            ("GitHub.TelemetryEnabled", false));
 
         var json = JsonSerializer.Serialize(request, requestType, options);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        Assert.False(root.GetProperty("enableSessionTelemetry").GetBoolean());
+        Assert.False(root.GetProperty("github").GetProperty("telemetryEnabled").GetBoolean());
     }
 
     [Fact]
@@ -1131,11 +1179,11 @@ public class SerializationTests
         var request = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("CustomAgentsLocalOnly", true));
+            ("Agents.LocalDiscoveryOnly", true));
 
         var json = JsonSerializer.Serialize(request, requestType, options);
         using var document = JsonDocument.Parse(json);
-        Assert.True(document.RootElement.GetProperty("customAgentsLocalOnly").GetBoolean());
+        Assert.True(document.RootElement.GetProperty("agents").GetProperty("localDiscoveryOnly").GetBoolean());
     }
 
     [Fact]
@@ -1146,11 +1194,11 @@ public class SerializationTests
         var request = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("CustomAgentsLocalOnly", true));
+            ("Agents.LocalDiscoveryOnly", true));
 
         var json = JsonSerializer.Serialize(request, requestType, options);
         using var document = JsonDocument.Parse(json);
-        Assert.True(document.RootElement.GetProperty("customAgentsLocalOnly").GetBoolean());
+        Assert.True(document.RootElement.GetProperty("agents").GetProperty("localDiscoveryOnly").GetBoolean());
     }
 
     [Fact]
@@ -1164,7 +1212,7 @@ public class SerializationTests
             ("SessionId", "session-id"));
         var createJson = JsonSerializer.Serialize(createRequest, createRequestType, options);
         using var createDocument = JsonDocument.Parse(createJson);
-        Assert.False(createDocument.RootElement.TryGetProperty("customAgentsLocalOnly", out _));
+        Assert.False(createDocument.RootElement.TryGetProperty("agents", out _));
 
         var resumeRequestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
         var resumeRequest = CreateInternalRequest(
@@ -1172,7 +1220,7 @@ public class SerializationTests
             ("SessionId", "session-id"));
         var resumeJson = JsonSerializer.Serialize(resumeRequest, resumeRequestType, options);
         using var resumeDocument = JsonDocument.Parse(resumeJson);
-        Assert.False(resumeDocument.RootElement.TryGetProperty("customAgentsLocalOnly", out _));
+        Assert.False(resumeDocument.RootElement.TryGetProperty("agents", out _));
     }
 
     [Fact]
@@ -1183,12 +1231,12 @@ public class SerializationTests
         var request = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("EnableSessionTelemetry", false));
+            ("GitHub.TelemetryEnabled", false));
 
         var json = JsonSerializer.Serialize(request, requestType, options);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        Assert.False(root.GetProperty("enableSessionTelemetry").GetBoolean());
+        Assert.False(root.GetProperty("github").GetProperty("telemetryEnabled").GetBoolean());
     }
 
     [Fact]
@@ -1200,9 +1248,9 @@ public class SerializationTests
         var createRequest = CreateInternalRequest(
             createRequestType,
             ("SessionId", "session-id"),
-            ("IsExperimentalMode", false));
+            ("Experiments.EnableExperimentalMode", false));
         var createRoot = JsonDocument.Parse(JsonSerializer.Serialize(createRequest, createRequestType, options)).RootElement;
-        Assert.False(createRoot.GetProperty("isExperimentalMode").GetBoolean());
+        Assert.False(createRoot.GetProperty("experiments").GetProperty("enableExperimentalMode").GetBoolean());
 
         var createRequestOmitted = CreateInternalRequest(
             createRequestType,
@@ -1214,9 +1262,9 @@ public class SerializationTests
         var resumeRequest = CreateInternalRequest(
             resumeRequestType,
             ("SessionId", "session-id"),
-            ("IsExperimentalMode", true));
+            ("Experiments.EnableExperimentalMode", true));
         var resumeRoot = JsonDocument.Parse(JsonSerializer.Serialize(resumeRequest, resumeRequestType, options)).RootElement;
-        Assert.True(resumeRoot.GetProperty("isExperimentalMode").GetBoolean());
+        Assert.True(resumeRoot.GetProperty("experiments").GetProperty("enableExperimentalMode").GetBoolean());
 
         var resumeRequestOmitted = CreateInternalRequest(
             resumeRequestType,
@@ -1234,22 +1282,22 @@ public class SerializationTests
         var requestTrue = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("EnableOnDemandInstructionDiscovery", true));
+            ("Instructions.OnDemandDiscovery", true));
         var rootTrue = JsonDocument.Parse(JsonSerializer.Serialize(requestTrue, requestType, options)).RootElement;
-        Assert.True(rootTrue.GetProperty("enableOnDemandInstructionDiscovery").GetBoolean());
+        Assert.True(rootTrue.GetProperty("instructions").GetProperty("onDemandDiscovery").GetBoolean());
 
         var requestFalse = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("EnableOnDemandInstructionDiscovery", false));
+            ("Instructions.OnDemandDiscovery", false));
         var rootFalse = JsonDocument.Parse(JsonSerializer.Serialize(requestFalse, requestType, options)).RootElement;
-        Assert.False(rootFalse.GetProperty("enableOnDemandInstructionDiscovery").GetBoolean());
+        Assert.False(rootFalse.GetProperty("instructions").GetProperty("onDemandDiscovery").GetBoolean());
 
         var requestOmitted = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"));
         var rootOmitted = JsonDocument.Parse(JsonSerializer.Serialize(requestOmitted, requestType, options)).RootElement;
-        Assert.False(rootOmitted.TryGetProperty("enableOnDemandInstructionDiscovery", out _));
+        Assert.False(rootOmitted.TryGetProperty("instructions", out _));
     }
 
     [Fact]
@@ -1261,22 +1309,22 @@ public class SerializationTests
         var requestTrue = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("EnableOnDemandInstructionDiscovery", true));
+            ("Instructions.OnDemandDiscovery", true));
         var rootTrue = JsonDocument.Parse(JsonSerializer.Serialize(requestTrue, requestType, options)).RootElement;
-        Assert.True(rootTrue.GetProperty("enableOnDemandInstructionDiscovery").GetBoolean());
+        Assert.True(rootTrue.GetProperty("instructions").GetProperty("onDemandDiscovery").GetBoolean());
 
         var requestFalse = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("EnableOnDemandInstructionDiscovery", false));
+            ("Instructions.OnDemandDiscovery", false));
         var rootFalse = JsonDocument.Parse(JsonSerializer.Serialize(requestFalse, requestType, options)).RootElement;
-        Assert.False(rootFalse.GetProperty("enableOnDemandInstructionDiscovery").GetBoolean());
+        Assert.False(rootFalse.GetProperty("instructions").GetProperty("onDemandDiscovery").GetBoolean());
 
         var requestOmitted = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"));
         var rootOmitted = JsonDocument.Parse(JsonSerializer.Serialize(requestOmitted, requestType, options)).RootElement;
-        Assert.False(rootOmitted.TryGetProperty("enableOnDemandInstructionDiscovery", out _));
+        Assert.False(rootOmitted.TryGetProperty("instructions", out _));
     }
 
     [Fact]
@@ -1296,12 +1344,12 @@ public class SerializationTests
         var request = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("OpenCanvases", instances));
+            ("Canvases.Open", instances));
 
         var json = JsonSerializer.Serialize(request, requestType, options);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        var openCanvases = root.GetProperty("openCanvases");
+        var openCanvases = root.GetProperty("canvases").GetProperty("open");
         Assert.Equal(1, openCanvases.GetArrayLength());
         Assert.Equal("canvas-id", openCanvases[0].GetProperty("canvasId").GetString());
     }
@@ -1314,14 +1362,14 @@ public class SerializationTests
         var request = CreateInternalRequest(
             requestType,
             ("SessionId", "session-id"),
-            ("RequestExitPlanMode", true),
-            ("RequestAutoModeSwitch", true));
+            ("Interaction.RequestExitPlanMode", true),
+            ("Interaction.RequestAutoModeSwitch", true));
 
         var json = JsonSerializer.Serialize(request, requestType, options);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        Assert.True(root.GetProperty("requestExitPlanMode").GetBoolean());
-        Assert.True(root.GetProperty("requestAutoModeSwitch").GetBoolean());
+        Assert.True(root.GetProperty("interaction").GetProperty("requestExitPlanMode").GetBoolean());
+        Assert.True(root.GetProperty("interaction").GetProperty("requestAutoModeSwitch").GetBoolean());
     }
 
     [Fact]
@@ -1633,7 +1681,7 @@ public class SerializationTests
         Assert.False(document.RootElement.TryGetProperty("toolReferences", out _));
     }
 
-#pragma warning disable GHCP001 // The queue management surface is intentionally experimental.
+#pragma warning disable MCPSDK001 // The queue management surface is intentionally experimental.
     [Theory]
     [InlineData("message-1")]
     [InlineData(null)]
@@ -1665,7 +1713,7 @@ public class SerializationTests
             Assert.Equal(messageId, document.RootElement.GetProperty("messageId").GetString());
         }
     }
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 
     [Fact]
     public void ModelSwitchRequests_DistinguishRequiredNullFromOmittedOptionalValue()
@@ -1673,7 +1721,7 @@ public class SerializationTests
         var options = GetSerializerOptions();
         var assembly = typeof(CopilotClient).Assembly;
 
-        var switchAutoTierType = assembly.GetType("GitHub.Copilot.Rpc.ModelSwitchAutoTierRequest");
+        var switchAutoTierType = assembly.GetType("Microsoft.Copilot.Rpc.ModelSwitchAutoTierRequest");
         Assert.NotNull(switchAutoTierType);
         var switchAutoTierRequest = CreateInternalRequest(
             switchAutoTierType!,
@@ -1684,7 +1732,7 @@ public class SerializationTests
         Assert.True(switchAutoTierDocument.RootElement.TryGetProperty("autoTier", out var requiredAutoTier));
         Assert.Equal(JsonValueKind.Null, requiredAutoTier.ValueKind);
 
-        var switchToType = assembly.GetType("GitHub.Copilot.Rpc.ModelSwitchToRequestWithSession");
+        var switchToType = assembly.GetType("Microsoft.Copilot.Rpc.ModelSwitchToRequest");
         Assert.NotNull(switchToType);
         var switchToRequest = CreateInternalRequest(
             switchToType!,
@@ -1755,12 +1803,23 @@ public class SerializationTests
 
         foreach (var (name, value) in properties)
         {
-            var property = type.GetProperty(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+            var target = instance;
+            var owner = type;
+            var path = name.Split('.');
+            foreach (var group in path.Take(path.Length - 1))
+            {
+                var groupProperty = owner.GetProperty(group)!;
+                var child = groupProperty.GetValue(target) ?? Activator.CreateInstance(groupProperty.PropertyType, nonPublic: true)!;
+                groupProperty.SetValue(target, child);
+                target = child;
+                owner = groupProperty.PropertyType;
+            }
+            var property = owner.GetProperty(path[^1], System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
             Assert.NotNull(property);
 
             if (property!.SetMethod is not null)
             {
-                property.SetValue(instance, value);
+                property.SetValue(target, value);
                 continue;
             }
 

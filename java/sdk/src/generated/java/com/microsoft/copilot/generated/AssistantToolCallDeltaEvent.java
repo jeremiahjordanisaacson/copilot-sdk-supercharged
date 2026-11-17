@@ -1,0 +1,128 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: session-events.schema.json
+
+package com.microsoft.copilot.generated;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import javax.annotation.processing.Generated;
+
+/**
+ * Session event "assistant.tool_call_delta". Streaming tool-call input delta for incremental tool-call updates
+ * @since 1.0.0
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+@JsonInclude(JsonInclude.Include.NON_NULL)
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+public final class AssistantToolCallDeltaEvent extends SessionEvent {
+
+    @Override
+    public String getType() { return "assistant.tool_call_delta"; }
+
+    @JsonProperty("data")
+    private AssistantToolCallDeltaEventData data;
+
+    public AssistantToolCallDeltaEventData getData() { return data; }
+    public void setData(AssistantToolCallDeltaEventData data) { this.data = data; }
+
+    /** Data payload for {@link AssistantToolCallDeltaEvent}. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record AssistantToolCallDeltaEventData(
+        /** Tool call ID this delta belongs to, matching the corresponding assistant.message tool request */
+        @JsonProperty("toolCallId") String toolCallId,
+        /** Name of the tool being invoked, when known from the stream */
+        @JsonProperty("toolName") String toolName,
+        /** Tool call type, when known from the stream */
+        @JsonProperty("toolType") AssistantMessageToolRequestType toolType,
+        /** Raw provider tool input fragment to append for this tool call. Function/tool-use providers stream serialized JSON argument text (so newlines inside JSON string values may appear as escaped `\n` until the accumulated JSON is parsed); custom tool calls stream raw custom input. */
+        @JsonProperty("inputDelta") String inputDelta
+    ) {
+
+        /**
+         * Creates a record positionally.
+         * Use {@link #builder()} for named construction.
+         */
+        public AssistantToolCallDeltaEventData {}
+
+        /**
+         * Returns a named builder.
+         * @return a new builder
+         * @since 2.0.0
+         */
+        public static Builder builder() { return new Builder(); }
+
+        /**
+         * Named construction for this record.
+         * @since 2.0.0
+         */
+        public static final class Builder {
+            private Builder() {}
+            private String toolCallId;
+            private String toolName;
+            private AssistantMessageToolRequestType toolType;
+            private String inputDelta;
+
+            /**
+             * Sets the {@code toolCallId} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder toolCallId(String value) {
+                this.toolCallId = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code toolName} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder toolName(String value) {
+                this.toolName = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code toolType} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder toolType(AssistantMessageToolRequestType value) {
+                this.toolType = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code inputDelta} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder inputDelta(String value) {
+                this.inputDelta = value;
+                return this;
+            }
+
+            /**
+             * Builds a record after checking required property presence.
+             * @return a new record
+             * @throws IllegalStateException if a required property is missing
+             * @since 2.0.0
+             */
+            public AssistantToolCallDeltaEventData build() {
+                if (toolCallId == null) throw new IllegalStateException("Missing required property: toolCallId");
+                if (inputDelta == null) throw new IllegalStateException("Missing required property: inputDelta");
+                return new AssistantToolCallDeltaEventData(toolCallId, toolName, toolType, inputDelta);
+            }
+        }
+    }
+}

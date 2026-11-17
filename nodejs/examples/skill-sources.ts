@@ -8,7 +8,7 @@ import type {
     SkillsInstallSourceResult,
     SkillsRemoveSourceRequest,
     SkillsRemoveSourceOutcome,
-} from "@github/copilot-sdk";
+} from "@microsoft/copilot-sdk";
 
 /** Install direct HTTPS/file sources or register discovery directories without catalog plans. */
 export async function installSkillSources(

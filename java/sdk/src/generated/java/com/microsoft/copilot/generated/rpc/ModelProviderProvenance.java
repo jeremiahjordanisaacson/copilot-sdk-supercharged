@@ -1,0 +1,140 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: api.schema.json
+
+package com.microsoft.copilot.generated.rpc;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.microsoft.copilot.CopilotExperimental;
+import javax.annotation.processing.Generated;
+
+/**
+ * Attribution for the adapter that produced a provider row.
+ *
+ * @apiNote This type is experimental and may change in a future version.
+ *
+ * @since 1.0.0
+ */
+@CopilotExperimental
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+@JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonIgnoreProperties(ignoreUnknown = true)
+public record ModelProviderProvenance(
+    /** Stable opaque adapter identity from the effective catalog. Treat this as a whole identifier, not a parseable owner or kind. */
+    @JsonProperty("adapterId") String adapterId,
+    /** Descriptive provider family that produced this row; not a routing key. */
+    @JsonProperty("providerKind") String providerKind,
+    /** Kind of component that supplied the adapter. */
+    @JsonProperty("source") ModelProviderProvenanceSource source,
+    /** Stable contributor identifier when the adapter has an owner outside the runtime. Independent of the contribution mechanism and not a routing key. */
+    @JsonProperty("ownerId") String ownerId,
+    /** Human-readable contributor name, not the adapter display name. */
+    @JsonProperty("ownerDisplayName") String ownerDisplayName
+) {
+
+    /**
+     * Creates a record positionally.
+     * Use {@link #builder()} for named construction.
+     */
+    public ModelProviderProvenance {}
+
+    /**
+     * Returns a named builder.
+     * @return a new builder
+     * @since 2.0.0
+     */
+    @com.microsoft.copilot.CopilotExperimental
+    public static Builder builder() { return new Builder(); }
+
+    /**
+     * Named construction for this record.
+     * @since 2.0.0
+     */
+    @com.microsoft.copilot.CopilotExperimental
+    public static final class Builder {
+        private Builder() {}
+        private String adapterId;
+        private String providerKind;
+        private ModelProviderProvenanceSource source;
+        private String ownerId;
+        private String ownerDisplayName;
+
+        /**
+         * Sets the {@code adapterId} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder adapterId(String value) {
+            this.adapterId = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code providerKind} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder providerKind(String value) {
+            this.providerKind = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code source} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder source(ModelProviderProvenanceSource value) {
+            this.source = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code ownerId} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder ownerId(String value) {
+            this.ownerId = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code ownerDisplayName} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder ownerDisplayName(String value) {
+            this.ownerDisplayName = value;
+            return this;
+        }
+
+        /**
+         * Builds a record after checking required property presence.
+         * @return a new record
+         * @throws IllegalStateException if a required property is missing
+         * @since 2.0.0
+         */
+        public ModelProviderProvenance build() {
+            if (adapterId == null) throw new IllegalStateException("Missing required property: adapterId");
+            if (providerKind == null) throw new IllegalStateException("Missing required property: providerKind");
+            if (source == null) throw new IllegalStateException("Missing required property: source");
+            return new ModelProviderProvenance(adapterId, providerKind, source, ownerId, ownerDisplayName);
+        }
+    }
+}

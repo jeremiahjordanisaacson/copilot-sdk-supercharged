@@ -22,7 +22,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="module")
 class TestClientApi:
     async def test_should_delete_session_by_id(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session.session_id
         await session.send_and_wait("Say OK.")
@@ -38,7 +38,7 @@ class TestClientApi:
 
         with pytest.raises(Exception) as exc_info:
             await ctx.client.delete_session(unknown_session_id)
-        assert f"failed to delete session {unknown_session_id}" in str(exc_info.value).lower()
+        assert "not found" in str(exc_info.value).lower()
 
     async def test_should_get_null_last_session_id_before_any_sessions_exist(
         self, ctx: E2ETestContext
@@ -56,7 +56,7 @@ class TestClientApi:
 
     async def test_should_track_last_session_id_after_session_created(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await session.send_and_wait("Say OK.")
         session_id = session.session_id
@@ -76,7 +76,7 @@ class TestClientApi:
         self, ctx: E2ETestContext
     ):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         try:
             with pytest.raises(Exception) as exc_info:

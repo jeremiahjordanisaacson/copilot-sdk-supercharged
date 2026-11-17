@@ -4,11 +4,11 @@
 
 #if NET8_0_OR_GREATER
 using System.Runtime.ExceptionServices;
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -32,28 +32,28 @@ public sealed partial class ClientSessionLifetimeTests
         };
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         await client.StartAsync();
         server.ClearRequests();
         var find = client.Rpc.Sessions.FindByPrefixAsync;
 
-        Assert.Equal("abcdef12-abcd-4123-8123-123456789abc", (await find("abcdef12", CancellationToken.None)).SessionId);
+        Assert.Equal("abcdef12-abcd-4123-8123-123456789abc", (await find("abcdef12", null, CancellationToken.None)).SessionId);
         var request = Assert.Single(server.Requests);
         Assert.Equal("abcdef12", request.Params.GetProperty("prefix").GetString());
         Assert.False(request.Params.TryGetProperty("configDir", out _));
         server.ClearRequests();
-        var findWithOptions = client.Rpc.Sessions.FindByPrefixWithOptionsAsync;
+        var findWithOptions = client.Rpc.Sessions.FindByPrefixAsync;
         Assert.Equal("abcdef12-abcd-4123-8123-123456789abc", (await findWithOptions(
-            new SessionsFindByPrefixRequest { Prefix = "abcdef12", ConfigDir = "configured-home" },
-            CancellationToken.None)).SessionId);
+            "abcdef12", "configured-home", CancellationToken.None)).SessionId);
         request = Assert.Single(server.Requests);
         Assert.Equal("abcdef12", request.Params.GetProperty("prefix").GetString());
         Assert.Equal("configured-home", request.Params.GetProperty("configDir").GetString());
     }
 
     [Fact]
-    public async Task AutoModeRecovery_Direct_Registration_Preserves_CancellationToken_Calls_And_Method_Group_Inference()
+    public async Task AutoModeRecovery_Direct_Registration_Omits_Optional_Request_And_Honors_Cancellation()
     {
         const string method = "session.ui.registerDirectAutoModeSwitchHandler";
         await using var server = await FakeCopilotServer.StartAsync();
@@ -69,21 +69,21 @@ public sealed partial class ClientSessionLifetimeTests
         };
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         using var cancellation = new CancellationTokenSource();
         var register = session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerAsync;
 
         Assert.Equal("direct-handler", (await session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerAsync()).Handle);
         Assert.Equal("direct-handler", (await session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerAsync(default)).Handle);
-        Assert.Equal("direct-handler", (await session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerAsync(cancellation.Token)).Handle);
         Assert.Equal("direct-handler", (await session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerAsync(cancellationToken: cancellation.Token)).Handle);
-        Assert.Equal("direct-handler", (await register(cancellation.Token)).Handle);
-        Assert.Equal("direct-handler", (await session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerWithAutoModeRecoveryAsync(request: null, cancellationToken: cancellation.Token)).Handle);
+        Assert.Equal("direct-handler", (await register(null, cancellation.Token)).Handle);
+        Assert.Equal("direct-handler", (await session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerAsync(request: null, cancellationToken: cancellation.Token)).Handle);
 
         var requests = server.Requests.Where(request => request.Method == method).ToArray();
-        Assert.Equal(6, requests.Length);
+        Assert.Equal(5, requests.Length);
         Assert.All(requests, request =>
         {
             Assert.Equal(session.SessionId, request.Params.GetProperty("sessionId").GetString());
@@ -92,10 +92,8 @@ public sealed partial class ClientSessionLifetimeTests
 
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerAsync(cancellation.Token));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => register(cancellation.Token));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerWithAutoModeRecoveryAsync(cancellationToken: cancellation.Token));
+            () => session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerAsync(cancellationToken: cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => register(null, cancellation.Token));
     }
 
     [Theory]
@@ -118,11 +116,12 @@ public sealed partial class ClientSessionLifetimeTests
         };
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
 
-        var acknowledged = await session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerWithAutoModeRecoveryAsync(
+        var acknowledged = await session.Rpc.Ui.RegisterDirectAutoModeSwitchHandlerAsync(
             new SessionUiRegisterDirectAutoModeSwitchHandlerRequest { AutoModeRecovery = enabled },
             default);
 
@@ -147,11 +146,30 @@ public sealed partial class ClientSessionLifetimeTests
     {
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri("http://127.0.0.1:1")
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp("127.0.0.1", 1)
         });
         var error = await Assert.ThrowsAsync<ArgumentException>(() => resume
-            ? client.ResumeSessionAsync("session-1", new ResumeSessionConfig { AutoModeRecovery = true, OnEvent = _ => { } })
-            : client.CreateSessionAsync(new SessionConfig { AutoModeRecovery = true, OnEvent = _ => { } }));
+            ? client.ResumeSessionAsync("session-1", new ResumeSessionOptions
+            {
+                Interaction = new SessionInteractionOptions { AutoModeRecovery = true },
+                Events = new SessionEventOptions
+                {
+                    OnEvent = _ =>
+{
+}
+                }
+            })
+            : client.CreateSessionAsync(new CreateSessionOptions
+            {
+                Interaction = new SessionInteractionOptions { AutoModeRecovery = true },
+                Events = new SessionEventOptions
+                {
+                    OnEvent = _ =>
+{
+}
+                }
+            }));
         Assert.Contains("requires OnAutoModeSwitchRequest", error.Message);
     }
 
@@ -166,21 +184,16 @@ public sealed partial class ClientSessionLifetimeTests
         server.Capabilities = acknowledged is { } value ? AutoModeRecoveryCapabilities(value) : null;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         Func<AutoModeSwitchRequest, AutoModeSwitchInvocation, Task<AutoModeSwitchResponse>> handler =
             (_, _) => Task.FromResult(AutoModeSwitchResponse.No);
         var error = await Assert.ThrowsAsync<NotSupportedException>(() => resume
-            ? client.ResumeSessionAsync("session-1", new ResumeSessionConfig
-            {
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = handler
-            })
-            : client.CreateSessionAsync(new SessionConfig
-            {
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = handler
-            }));
+            ? client.ResumeSessionAsync("session-1", new ResumeSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = handler } })
+            : client.CreateSessionAsync(new CreateSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = handler } }));
         Assert.Contains("does not support AutoModeRecovery", error.Message);
         var detach = Assert.Single(server.Requests, r => r.Method == "session.detach");
         Assert.DoesNotContain(server.Requests, request => request.Method == "session.delete");
@@ -203,8 +216,9 @@ public sealed partial class ClientSessionLifetimeTests
         var logger = new RecoveryCleanupLogger();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
-            Logger = logger
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+            Observability = new ClientObservabilityOptions { Logger = logger }
         });
         using var cancellation = new CancellationTokenSource();
         var detachStarted = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -221,16 +235,10 @@ public sealed partial class ClientSessionLifetimeTests
         Func<AutoModeSwitchRequest, AutoModeSwitchInvocation, Task<AutoModeSwitchResponse>> handler =
             (_, _) => Task.FromResult(AutoModeSwitchResponse.No);
         var initialization = resume
-            ? client.ResumeSessionAsync("session-1", new ResumeSessionConfig
-            {
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = handler
-            }, cancellation.Token)
-            : client.CreateSessionAsync(new SessionConfig
-            {
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = handler
-            }, cancellation.Token);
+            ? client.ResumeSessionAsync("session-1", new ResumeSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = handler } }, cancellation.Token)
+            : client.CreateSessionAsync(new CreateSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = handler } }, cancellation.Token);
         var rejection = Record.ExceptionAsync(async () => await initialization);
         var timeout = TimeSpan.FromSeconds(5);
         Exception? failure = null;
@@ -245,7 +253,7 @@ public sealed partial class ClientSessionLifetimeTests
                 Assert.Equal(cancellation.Token, error.CancellationToken);
                 Assert.True(initialization.IsCanceled);
                 await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                    client.CreateSessionAsync(new SessionConfig { SessionId = sessionId }).WaitAsync(timeout));
+                    client.CreateSessionAsync(new CreateSessionOptions { SessionId = sessionId }).WaitAsync(timeout));
                 Assert.Contains("Canceled",
                     await logger.CleanupWarning.Task.WaitAsync(TimeSpan.FromSeconds(15)));
             }
@@ -266,14 +274,14 @@ public sealed partial class ClientSessionLifetimeTests
                 }).WaitAsync(timeout));
             Assert.Contains("disposed object", callbackError.Message);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(timeout));
+                client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(timeout));
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.CreateSessionAsync(new SessionConfig { SessionId = sessionId }).WaitAsync(timeout));
-            await using var unrelated = await client.ResumeSessionAsync("unrelated", new ResumeSessionConfig()).WaitAsync(timeout);
+                client.CreateSessionAsync(new CreateSessionOptions { SessionId = sessionId }).WaitAsync(timeout));
+            await using var unrelated = await client.ResumeSessionAsync("unrelated", new ResumeSessionOptions()).WaitAsync(timeout);
             Assert.Equal("unrelated", unrelated.SessionId);
             await unrelated.DisposeAsync();
             await client.StopAsync();
-            await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(timeout);
+            await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(timeout);
             Assert.Equal(sessionId, replacement.SessionId);
         }
         catch (Exception error)
@@ -307,41 +315,35 @@ public sealed partial class ClientSessionLifetimeTests
         server.FailSessionDetach = true;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         const string sessionId = "failed-recovery-cleanup";
         Func<AutoModeSwitchRequest, AutoModeSwitchInvocation, Task<AutoModeSwitchResponse>> handler =
             (_, _) => Task.FromResult(AutoModeSwitchResponse.No);
         var failure = await Record.ExceptionAsync(() => resume
-            ? client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
-            {
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = handler
-            })
-            : client.CreateSessionAsync(new SessionConfig
-            {
-                SessionId = sessionId,
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = handler
-            }));
+            ? client.ResumeSessionAsync(sessionId, new ResumeSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = handler } })
+            : client.CreateSessionAsync(new CreateSessionOptions
+            { SessionId = sessionId, Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = handler } }));
         var error = Assert.IsType<AggregateException>(failure);
         Assert.Contains(error.InnerExceptions, inner => inner is NotSupportedException);
         Assert.Contains(error.InnerExceptions, inner => inner.Message.Contains("detach rejected"));
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()));
+            client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()));
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.CreateSessionAsync(new SessionConfig { SessionId = sessionId }));
+            client.CreateSessionAsync(new CreateSessionOptions { SessionId = sessionId }));
         Assert.Single(server.Requests, request => request.Method is "session.create" or "session.resume");
         var callbackError = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             server.SendRequestAsync("autoModeSwitch.request", new Dictionary<string, object?> { ["sessionId"] = sessionId }));
         Assert.Contains("disposed object", callbackError.Message);
-        await using (var unrelated = await client.ResumeSessionAsync("unrelated", new ResumeSessionConfig()))
+        await using (var unrelated = await client.ResumeSessionAsync("unrelated", new ResumeSessionOptions()))
         {
             Assert.Equal("unrelated", unrelated.SessionId);
         }
         await client.StopAsync();
         server.FailSessionDetach = false;
-        await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionConfig());
+        await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionOptions());
         Assert.Equal(sessionId, replacement.SessionId);
     }
 
@@ -352,11 +354,12 @@ public sealed partial class ClientSessionLifetimeTests
         server.FailSessionDetach = true;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        var session = await client.CreateSessionAsync(new SessionConfig { SessionId = "public-disposal" });
+        var session = await client.CreateSessionAsync(new CreateSessionOptions { SessionId = "public-disposal" });
         await session.DisposeAsync();
-        await using var replacement = await client.ResumeSessionAsync(session.SessionId, new ResumeSessionConfig());
+        await using var replacement = await client.ResumeSessionAsync(session.SessionId, new ResumeSessionOptions());
         Assert.Equal(session.SessionId, replacement.SessionId);
     }
 
@@ -366,14 +369,12 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         const string canonicalId = "abcdef12-abcd-4123-8123-123456789abc";
-        await using var previous = await client.CreateSessionAsync(new SessionConfig
-        {
-            SessionId = canonicalId,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No)
-        });
+        await using var previous = await client.CreateSessionAsync(new CreateSessionOptions
+        { SessionId = canonicalId, Interaction = new SessionInteractionOptions { OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No) } });
         server.ResumedSessionId = canonicalId;
         server.Capabilities = AutoModeRecoveryCapabilities(true);
         server.FailMcpAuthInterestRegistration = true;
@@ -383,13 +384,9 @@ public sealed partial class ClientSessionLifetimeTests
             return new Dictionary<string, object?> { ["sessionId"] = canonicalId };
         };
 
-        var error = await Assert.ThrowsAsync<IOException>(() => client.ResumeSessionAsync("ABCDEF12",
-            new ResumeSessionConfig
-            {
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways),
-                OnMcpAuthRequest = _ => Task.FromResult<McpAuthResult?>(McpAuthResult.Cancel())
-            }));
+        var error = await Assert.ThrowsAsync<RemoteRpcException>(() => client.ResumeSessionAsync("ABCDEF12",
+            new ResumeSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways) }, Mcp = new SessionMcpOptions { OnAuthRequest = _ => Task.FromResult<McpAuthResult?>(McpAuthResult.Cancel()) } }));
         Assert.Contains("interest registration failed", error.Message);
         var callback = await server.SendRequestAsync("autoModeSwitch.request",
             new Dictionary<string, object?> { ["sessionId"] = canonicalId }).WaitAsync(TimeSpan.FromSeconds(5));
@@ -398,11 +395,8 @@ public sealed partial class ClientSessionLifetimeTests
 
         server.FailMcpAuthInterestRegistration = false;
         await previous.DisposeAsync();
-        await using var retried = await client.ResumeSessionAsync(canonicalId, new ResumeSessionConfig
-        {
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways)
-        });
+        await using var retried = await client.ResumeSessionAsync(canonicalId, new ResumeSessionOptions
+        { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways) } });
         Assert.Equal(canonicalId, retried.SessionId);
     }
 
@@ -417,7 +411,8 @@ public sealed partial class ClientSessionLifetimeTests
         server.FailSessionDetach = failDetach;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         const string sessionId = "abcdef12-abcd-4123-8123-123456789abc";
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -431,17 +426,10 @@ public sealed partial class ClientSessionLifetimeTests
             }
         };
         var initialization = Record.ExceptionAsync(() => resume
-            ? client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
-            {
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways)
-            })
-            : client.CreateSessionAsync(new SessionConfig
-            {
-                SessionId = sessionId,
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways)
-            }));
+            ? client.ResumeSessionAsync(sessionId, new ResumeSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways) } })
+            : client.CreateSessionAsync(new CreateSessionOptions
+            { SessionId = sessionId, Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways) } }));
         var timeout = TimeSpan.FromSeconds(5);
         try
         {
@@ -452,7 +440,7 @@ public sealed partial class ClientSessionLifetimeTests
                 new Dictionary<string, object?> { ["sessionId"] = sessionId }).WaitAsync(timeout);
             Assert.Equal("yes_always", response.GetProperty("response").GetString());
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(timeout));
+                client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(timeout));
             release.TrySetResult();
             var error = await initialization.WaitAsync(timeout);
             if (failDetach)
@@ -460,7 +448,7 @@ public sealed partial class ClientSessionLifetimeTests
                 Assert.IsType<AggregateException>(error);
                 await Assert.ThrowsAsync<InvalidOperationException>(() => client.DeleteSessionAsync(sessionId).WaitAsync(timeout));
                 await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                    client.ResumeSessionAsync(sessionId.ToUpperInvariant(), new ResumeSessionConfig()).WaitAsync(timeout));
+                    client.ResumeSessionAsync(sessionId.ToUpperInvariant(), new ResumeSessionOptions()).WaitAsync(timeout));
                 await client.StopAsync();
                 server.FailSessionDetach = false;
             }
@@ -468,7 +456,7 @@ public sealed partial class ClientSessionLifetimeTests
             {
                 Assert.IsType<NotSupportedException>(error);
             }
-            await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(timeout);
+            await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(timeout);
             await client.DeleteSessionAsync(sessionId).WaitAsync(timeout);
             Assert.Single(server.Requests, request => request.Method == "session.delete");
         }
@@ -487,14 +475,12 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         const string canonicalId = "abcdef12-abcd-4123-8123-123456789abc";
-        var previous = await client.CreateSessionAsync(new SessionConfig
-        {
-            SessionId = canonicalId,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No)
-        });
+        var previous = await client.CreateSessionAsync(new CreateSessionOptions
+        { SessionId = canonicalId, Interaction = new SessionInteractionOptions { OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No) } });
         server.ResumedSessionId = canonicalId;
         server.Capabilities = AutoModeRecoveryCapabilities(acknowledged);
         server.ResponseFactory = request =>
@@ -513,13 +499,16 @@ public sealed partial class ClientSessionLifetimeTests
             }
         };
         CopilotSession? accepted = null;
-        var initialization = client.ResumeSessionAsync("ABCDEF12", new ResumeSessionConfig
+        var initialization = client.ResumeSessionAsync("ABCDEF12", new ResumeSessionOptions
         {
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, invocation) =>
+            Interaction = new SessionInteractionOptions
             {
-                Assert.Equal(canonicalId, invocation.SessionId);
-                return Task.FromResult(AutoModeSwitchResponse.YesAlways);
+                AutoModeRecovery = true,
+                OnAutoModeSwitchRequest = (_, invocation) =>
+        {
+            Assert.Equal(canonicalId, invocation.SessionId);
+            return Task.FromResult(AutoModeSwitchResponse.YesAlways);
+        }
             }
         });
         var timeout = TimeSpan.FromSeconds(5);
@@ -530,7 +519,7 @@ public sealed partial class ClientSessionLifetimeTests
                 new Dictionary<string, object?> { ["sessionId"] = canonicalId }).WaitAsync(timeout);
             Assert.Equal("yes_always", before.GetProperty("response").GetString());
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.CreateSessionAsync(new SessionConfig { SessionId = canonicalId }).WaitAsync(timeout));
+                client.CreateSessionAsync(new CreateSessionOptions { SessionId = canonicalId }).WaitAsync(timeout));
             await Assert.ThrowsAsync<InvalidOperationException>(() => client.DeleteSessionAsync(canonicalId).WaitAsync(timeout));
             release.TrySetResult();
             if (acknowledged)
@@ -566,7 +555,8 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync(acceptReconnect: true);
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         const string prefix = "ABCDEF12-AB";
         const string canonicalId = "abcdef12-abcd-4123-8123-123456789abc";
@@ -596,11 +586,8 @@ public sealed partial class ClientSessionLifetimeTests
             }
         };
         using var cancellation = new CancellationTokenSource();
-        var initialization = client.ResumeSessionAsync(prefix, new ResumeSessionConfig
-        {
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways)
-        }, cancellation.Token);
+        var initialization = client.ResumeSessionAsync(prefix, new ResumeSessionOptions
+        { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways) } }, cancellation.Token);
         var timeout = TimeSpan.FromSeconds(5);
         try
         {
@@ -610,9 +597,9 @@ public sealed partial class ClientSessionLifetimeTests
                 new Dictionary<string, object?> { ["sessionId"] = canonicalId }).WaitAsync(timeout);
             Assert.Equal("yes_always", before.GetProperty("response").GetString());
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.CreateSessionAsync(new SessionConfig { SessionId = canonicalId }).WaitAsync(timeout));
+                client.CreateSessionAsync(new CreateSessionOptions { SessionId = canonicalId }).WaitAsync(timeout));
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.ResumeSessionAsync("abcdef1", new ResumeSessionConfig()).WaitAsync(timeout));
+                client.ResumeSessionAsync("abcdef1", new ResumeSessionOptions()).WaitAsync(timeout));
             await Assert.ThrowsAsync<InvalidOperationException>(() => client.DeleteSessionAsync(canonicalId).WaitAsync(timeout));
             releaseResume.TrySetResult();
             Assert.Equal(canonicalId, await detachStarted.Task.WaitAsync(timeout));
@@ -622,7 +609,7 @@ public sealed partial class ClientSessionLifetimeTests
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() => initialization.WaitAsync(timeout));
             }
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.ResumeSessionAsync(canonicalId.ToUpperInvariant(), new ResumeSessionConfig()).WaitAsync(timeout));
+                client.ResumeSessionAsync(canonicalId.ToUpperInvariant(), new ResumeSessionOptions()).WaitAsync(timeout));
             await Assert.ThrowsAsync<InvalidOperationException>(() => client.DeleteSessionAsync("ABCDEF1").WaitAsync(timeout));
             var during = await server.SendRequestAsync("autoModeSwitch.request",
                 new Dictionary<string, object?> { ["sessionId"] = canonicalId }).WaitAsync(timeout);
@@ -664,12 +651,12 @@ public sealed partial class ClientSessionLifetimeTests
             {
                 await Assert.ThrowsAsync<InvalidOperationException>(() => client.DeleteSessionAsync("ABCDEF1").WaitAsync(timeout));
                 await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                    client.CreateSessionAsync(new SessionConfig { SessionId = canonicalId.ToUpperInvariant() }).WaitAsync(timeout));
+                    client.CreateSessionAsync(new CreateSessionOptions { SessionId = canonicalId.ToUpperInvariant() }).WaitAsync(timeout));
                 await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                    client.ResumeSessionAsync(prefix, new ResumeSessionConfig()).WaitAsync(timeout));
+                    client.ResumeSessionAsync(prefix, new ResumeSessionOptions()).WaitAsync(timeout));
                 await client.StopAsync();
                 server.FailSessionDetach = false;
-                await using var replacement = await client.ResumeSessionAsync(prefix, new ResumeSessionConfig()).WaitAsync(timeout);
+                await using var replacement = await client.ResumeSessionAsync(prefix, new ResumeSessionOptions()).WaitAsync(timeout);
                 Assert.Equal(canonicalId, replacement.SessionId);
             }
         }
@@ -687,21 +674,16 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         const string prefix = "ambiguous-session-";
         const string firstId = prefix + "a";
         const string secondId = prefix + "b";
-        await using var first = await client.CreateSessionAsync(new SessionConfig
-        {
-            SessionId = firstId,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.Yes)
-        });
-        await using var second = await client.CreateSessionAsync(new SessionConfig
-        {
-            SessionId = secondId,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways)
-        });
+        await using var first = await client.CreateSessionAsync(new CreateSessionOptions
+        { SessionId = firstId, Interaction = new SessionInteractionOptions { OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.Yes) } });
+        await using var second = await client.CreateSessionAsync(new CreateSessionOptions
+        { SessionId = secondId, Interaction = new SessionInteractionOptions { OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways) } });
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var provisionalCalls = 0;
@@ -714,13 +696,16 @@ public sealed partial class ClientSessionLifetimeTests
                 await release.Task.WaitAsync(token);
             }
         };
-        var resuming = client.ResumeSessionAsync(prefix, new ResumeSessionConfig
+        var resuming = client.ResumeSessionAsync(prefix, new ResumeSessionOptions
         {
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, _) =>
+            Interaction = new SessionInteractionOptions
             {
-                Interlocked.Increment(ref provisionalCalls);
-                return Task.FromResult(AutoModeSwitchResponse.No);
+                AutoModeRecovery = true,
+                OnAutoModeSwitchRequest = (_, _) =>
+        {
+            Interlocked.Increment(ref provisionalCalls);
+            return Task.FromResult(AutoModeSwitchResponse.No);
+        }
             }
         });
         var timeout = TimeSpan.FromSeconds(5);
@@ -740,7 +725,7 @@ public sealed partial class ClientSessionLifetimeTests
             release.TrySetResult();
             await Record.ExceptionAsync(() => resuming.WaitAsync(timeout));
         }
-        await Assert.ThrowsAsync<IOException>(() => resuming.WaitAsync(timeout));
+        await Assert.ThrowsAsync<RemoteRpcException>(() => resuming.WaitAsync(timeout));
         Assert.DoesNotContain(server.Requests, request => request.Method is "session.detach" or "session.delete");
     }
 
@@ -750,14 +735,12 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         const string canonicalId = "abcdef12-abcd-4123-8123-123456789abc";
-        await using var previous = await client.CreateSessionAsync(new SessionConfig
-        {
-            SessionId = canonicalId,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No)
-        });
+        await using var previous = await client.CreateSessionAsync(new CreateSessionOptions
+        { SessionId = canonicalId, Interaction = new SessionInteractionOptions { OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No) } });
         server.ResumedSessionId = canonicalId;
         server.ResponseFactory = request =>
         {
@@ -775,11 +758,8 @@ public sealed partial class ClientSessionLifetimeTests
             }
         };
         server.FailSessionResume = true;
-        var initialization = client.ResumeSessionAsync("ABCDEF12", new ResumeSessionConfig
-        {
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways)
-        });
+        var initialization = client.ResumeSessionAsync("ABCDEF12", new ResumeSessionOptions
+        { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways) } });
         var timeout = TimeSpan.FromSeconds(5);
         try
         {
@@ -788,7 +768,7 @@ public sealed partial class ClientSessionLifetimeTests
                 new Dictionary<string, object?> { ["sessionId"] = canonicalId }).WaitAsync(timeout);
             Assert.Equal("yes_always", before.GetProperty("response").GetString());
             release.TrySetResult();
-            await Assert.ThrowsAsync<IOException>(() => initialization.WaitAsync(timeout));
+            await Assert.ThrowsAsync<RemoteRpcException>(() => initialization.WaitAsync(timeout));
             var after = await server.SendRequestAsync("autoModeSwitch.request",
                 new Dictionary<string, object?> { ["sessionId"] = canonicalId }).WaitAsync(timeout);
             Assert.Equal("no", after.GetProperty("response").GetString());
@@ -807,7 +787,8 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -823,25 +804,22 @@ public sealed partial class ClientSessionLifetimeTests
             }
         };
         var timeout = TimeSpan.FromSeconds(5);
-        var first = client.ResumeSessionAsync("abcdef12-abcd-4123-8123-123456789abc", new ResumeSessionConfig
+        var first = client.ResumeSessionAsync("abcdef12-abcd-4123-8123-123456789abc", new ResumeSessionOptions
         {
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = async (_, _) =>
+            Interaction = new SessionInteractionOptions
             {
-                await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                    client.DeleteSessionAsync("ABCDEF12").WaitAsync(timeout));
-                await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                    client.ResumeSessionAsync("ABCDEF12", new ResumeSessionConfig()).WaitAsync(timeout));
-                await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                    client.CreateSessionAsync(new SessionConfig { SessionId = "ABCDEF12" }).WaitAsync(timeout));
-                return AutoModeSwitchResponse.YesAlways;
+                AutoModeRecovery = true,
+                OnAutoModeSwitchRequest = async (_, _) =>
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => client.DeleteSessionAsync("ABCDEF12").WaitAsync(timeout));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => client.ResumeSessionAsync("ABCDEF12", new ResumeSessionOptions()).WaitAsync(timeout));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => client.CreateSessionAsync(new CreateSessionOptions { SessionId = "ABCDEF12" }).WaitAsync(timeout));
+            return AutoModeSwitchResponse.YesAlways;
+        }
             }
         });
-        var second = client.ResumeSessionAsync("abcdef12-abcd-4123-8123-123456789def", new ResumeSessionConfig
-        {
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No)
-        });
+        var second = client.ResumeSessionAsync("abcdef12-abcd-4123-8123-123456789def", new ResumeSessionOptions
+        { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No) } });
         try
         {
             await Task.WhenAll(firstStarted.Task, secondStarted.Task).WaitAsync(timeout);
@@ -849,7 +827,7 @@ public sealed partial class ClientSessionLifetimeTests
                 new Dictionary<string, object?> { ["sessionId"] = "abcdef12-abcd-4123-8123-123456789abc" }).WaitAsync(timeout);
             Assert.Equal("yes_always", response.GetProperty("response").GetString());
             await Assert.ThrowsAsync<InvalidOperationException>(() => client.DeleteSessionAsync("ABCDEF12").WaitAsync(timeout));
-            await using var unrelated = await client.CreateSessionAsync(new SessionConfig { SessionId = "unrelated" }).WaitAsync(timeout);
+            await using var unrelated = await client.CreateSessionAsync(new CreateSessionOptions { SessionId = "unrelated" }).WaitAsync(timeout);
             await client.DeleteSessionAsync(unrelated.SessionId).WaitAsync(timeout);
             Assert.Equal(2, server.Requests.Count(request => request.Method == "session.resume"));
             release.TrySetResult();
@@ -870,9 +848,10 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var previous = await client.CreateSessionAsync(new SessionConfig { SessionId = "abcdef12-abcd-4123-8123-123456789abc" });
+        await using var previous = await client.CreateSessionAsync(new CreateSessionOptions { SessionId = "abcdef12-abcd-4123-8123-123456789abc" });
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.BeforeResponseAsync = async (request, token) =>
@@ -888,11 +867,8 @@ public sealed partial class ClientSessionLifetimeTests
         try
         {
             await started.Task.WaitAsync(timeout);
-            await Assert.ThrowsAsync<InvalidOperationException>(() => client.ResumeSessionAsync("ABCDEF12", new ResumeSessionConfig
-            {
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No)
-            }).WaitAsync(timeout));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => client.ResumeSessionAsync("ABCDEF12", new ResumeSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No) } }).WaitAsync(timeout));
             Assert.DoesNotContain(server.Requests, request => request.Method == "session.resume");
             release.TrySetResult();
             await deletion.WaitAsync(timeout);
@@ -912,12 +888,13 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         const string canonicalId = "abcdef12-abcd-4123-8123-123456789abc";
         if (resident)
         {
-            _ = await client.CreateSessionAsync(new SessionConfig { SessionId = canonicalId });
+            _ = await client.CreateSessionAsync(new CreateSessionOptions { SessionId = canonicalId });
         }
         server.ResumedSessionId = canonicalId;
         server.ResponseFactory = request =>
@@ -935,11 +912,8 @@ public sealed partial class ClientSessionLifetimeTests
                 await release.Task.WaitAsync(token);
             }
         };
-        var initialization = client.ResumeSessionAsync("ABCDEF12", new ResumeSessionConfig
-        {
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways)
-        });
+        var initialization = client.ResumeSessionAsync("ABCDEF12", new ResumeSessionOptions
+        { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways) } });
         var timeout = TimeSpan.FromSeconds(5);
         try
         {
@@ -975,7 +949,8 @@ public sealed partial class ClientSessionLifetimeTests
         server.FailSessionDetach = cleanupFailure;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         using var cancellation = new CancellationTokenSource();
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -999,19 +974,10 @@ public sealed partial class ClientSessionLifetimeTests
             })
         };
         var creation = resume
-            ? client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
-            {
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = handler,
-                Hooks = hooks
-            }, cancellation.Token)
-            : client.CreateSessionAsync(new SessionConfig
-            {
-                SessionId = sessionId,
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = handler,
-                Hooks = hooks
-            }, cancellation.Token);
+            ? client.ResumeSessionAsync(sessionId, new ResumeSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = handler }, Hooks = new SessionHookOptions { Handlers = hooks } }, cancellation.Token)
+            : client.CreateSessionAsync(new CreateSessionOptions
+            { SessionId = sessionId, Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = handler }, Hooks = new SessionHookOptions { Handlers = hooks } }, cancellation.Token);
         var timeout = TimeSpan.FromSeconds(5);
         try
         {
@@ -1063,7 +1029,7 @@ public sealed partial class ClientSessionLifetimeTests
             if (cleanupFailure)
             {
                 await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                    client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(timeout));
+                    client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(timeout));
             }
         }
         finally
@@ -1080,23 +1046,20 @@ public sealed partial class ClientSessionLifetimeTests
         server.IgnoreDetach();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         const string sessionId = "pending-recovery-cleanup";
-        var creation = Record.ExceptionAsync(() => client.CreateSessionAsync(new SessionConfig
-        {
-            SessionId = sessionId,
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No)
-        }));
+        var creation = Record.ExceptionAsync(() => client.CreateSessionAsync(new CreateSessionOptions
+        { SessionId = sessionId, Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No) } }));
         CopilotSession? unrelated = null;
         var timeout = TimeSpan.FromSeconds(5);
         try
         {
             await server.DestroyStarted.WaitAsync(timeout);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(timeout));
-            unrelated = await client.ResumeSessionAsync("unrelated", new ResumeSessionConfig()).WaitAsync(timeout);
+                client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(timeout));
+            unrelated = await client.ResumeSessionAsync("unrelated", new ResumeSessionOptions()).WaitAsync(timeout);
             Assert.Equal("unrelated", unrelated.SessionId);
             Assert.False(creation.IsCompleted);
         }
@@ -1118,18 +1081,16 @@ public sealed partial class ClientSessionLifetimeTests
         server.FailSessionResume = true;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         const string sessionId = "rejected-resume";
-        var error = await Assert.ThrowsAsync<IOException>(() => client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
-        {
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No)
-        }));
+        var error = await Assert.ThrowsAsync<RemoteRpcException>(() => client.ResumeSessionAsync(sessionId, new ResumeSessionOptions
+        { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No) } }));
         Assert.Contains("session resume failed", error.Message);
         Assert.DoesNotContain(server.Requests, request => request.Method is "session.detach" or "session.delete");
         server.FailSessionResume = false;
-        await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionConfig());
+        await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionOptions());
         Assert.Equal(sessionId, replacement.SessionId);
     }
 
@@ -1139,23 +1100,16 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         const string sessionId = "caller-assigned-cloud";
-        await Assert.ThrowsAsync<NotSupportedException>(() => client.CreateSessionAsync(new SessionConfig
-        {
-            SessionId = sessionId,
-            Cloud = new CloudSessionOptions
-            {
-                Repository = new CloudSessionRepository { Owner = "github", Name = "copilot-sdk", Branch = "main" }
-            },
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No)
-        }));
+        await Assert.ThrowsAsync<NotSupportedException>(() => client.CreateSessionAsync(new CreateSessionOptions
+        { SessionId = sessionId, Cloud = new CloudSessionOptions { Repository = new CloudSessionRepository { Owner = "github", Name = "copilot-sdk", Branch = "main" } }, Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No) } }));
         var detach = Assert.Single(server.Requests, request => request.Method == "session.detach");
         Assert.Equal(sessionId, detach.Params.GetProperty("sessionId").GetString());
         Assert.DoesNotContain(server.Requests, request => request.Method == "session.delete");
-        await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionConfig());
+        await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionOptions());
         Assert.Equal(sessionId, replacement.SessionId);
     }
 
@@ -1171,8 +1125,9 @@ public sealed partial class ClientSessionLifetimeTests
         var logger = new RecoveryCleanupLogger();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
-            Logger = logger
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+            Observability = new ClientObservabilityOptions { Logger = logger }
         });
         using var cancellation = new CancellationTokenSource();
         var detachStarted = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1192,15 +1147,8 @@ public sealed partial class ClientSessionLifetimeTests
                 await releaseDelete.Task.WaitAsync(token);
             }
         };
-        var creation = client.CreateSessionAsync(new SessionConfig
-        {
-            Cloud = new CloudSessionOptions
-            {
-                Repository = new CloudSessionRepository { Owner = "github", Name = "copilot-sdk", Branch = "main" }
-            },
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways)
-        }, cancellation.Token);
+        var creation = client.CreateSessionAsync(new CreateSessionOptions
+        { Cloud = new CloudSessionOptions { Repository = new CloudSessionRepository { Owner = "github", Name = "copilot-sdk", Branch = "main" } }, Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.YesAlways) } }, cancellation.Token);
         var timeout = TimeSpan.FromSeconds(5);
         try
         {
@@ -1223,14 +1171,14 @@ public sealed partial class ClientSessionLifetimeTests
                 new Dictionary<string, object?> { ["sessionId"] = sessionId }).WaitAsync(timeout);
             Assert.Equal("yes_always", callback.GetProperty("response").GetString());
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(timeout));
+                client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(timeout));
             releaseDelete.TrySetResult();
             if (failDelete)
             {
                 var cleanupError = await logger.CleanupError.Task.WaitAsync(timeout);
                 Assert.Contains("Failed to delete session", cleanupError.ToString());
                 await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                    client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(timeout));
+                    client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(timeout));
             }
             using var settlement = new CancellationTokenSource(timeout);
             while (true)
@@ -1249,7 +1197,7 @@ public sealed partial class ClientSessionLifetimeTests
                         // Callback retirement precedes release of the cleanup reservation.
                         try
                         {
-                            await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(settlement.Token);
+                            await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(settlement.Token);
                         }
                         catch (InvalidOperationException pending) when (pending.Message ==
                             $"Session '{sessionId}' has a pending operation or rejected AutoModeRecovery cleanup.")
@@ -1280,7 +1228,8 @@ public sealed partial class ClientSessionLifetimeTests
         server.FailSessionDelete = failDelete;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         var deleteStarted = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseDelete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1292,24 +1241,17 @@ public sealed partial class ClientSessionLifetimeTests
                 await releaseDelete.Task.WaitAsync(token);
             }
         };
-        var creation = Record.ExceptionAsync(() => client.CreateSessionAsync(new SessionConfig
-        {
-            Cloud = new CloudSessionOptions
-            {
-                Repository = new CloudSessionRepository { Owner = "github", Name = "copilot-sdk", Branch = "main" }
-            },
-            AutoModeRecovery = true,
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No)
-        }));
+        var creation = Record.ExceptionAsync(() => client.CreateSessionAsync(new CreateSessionOptions
+        { Cloud = new CloudSessionOptions { Repository = new CloudSessionRepository { Owner = "github", Name = "copilot-sdk", Branch = "main" } }, Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No) } }));
         var timeout = TimeSpan.FromSeconds(5);
         string sessionId;
         try
         {
             sessionId = await deleteStarted.Task.WaitAsync(timeout);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(timeout));
+                client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(timeout));
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.CreateSessionAsync(new SessionConfig { SessionId = sessionId }).WaitAsync(timeout));
+                client.CreateSessionAsync(new CreateSessionOptions { SessionId = sessionId }).WaitAsync(timeout));
             Assert.Single(server.Requests, request => request.Method is "session.create" or "session.resume");
         }
         finally
@@ -1338,10 +1280,10 @@ public sealed partial class ClientSessionLifetimeTests
         if (failDelete)
         {
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(timeout));
+                client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(timeout));
             await client.StopAsync();
         }
-        await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionConfig()).WaitAsync(timeout);
+        await using var replacement = await client.ResumeSessionAsync(sessionId, new ResumeSessionOptions()).WaitAsync(timeout);
         Assert.Equal(sessionId, replacement.SessionId);
     }
 
@@ -1353,7 +1295,8 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         await client.StartAsync();
         using var cancellation = new CancellationTokenSource();
@@ -1390,17 +1333,10 @@ public sealed partial class ClientSessionLifetimeTests
         Func<AutoModeSwitchRequest, AutoModeSwitchInvocation, Task<AutoModeSwitchResponse>> handler =
             (_, _) => Task.FromResult(AutoModeSwitchResponse.No);
         var initialization = factory.StartNew(() => resume
-            ? client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
-            {
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = handler
-            }, cancellation.Token)
-            : client.CreateSessionAsync(new SessionConfig
-            {
-                SessionId = sessionId,
-                AutoModeRecovery = true,
-                OnAutoModeSwitchRequest = handler
-            }, cancellation.Token)).Unwrap();
+            ? client.ResumeSessionAsync(sessionId, new ResumeSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = handler } }, cancellation.Token)
+            : client.CreateSessionAsync(new CreateSessionOptions
+            { SessionId = sessionId, Interaction = new SessionInteractionOptions { AutoModeRecovery = true, OnAutoModeSwitchRequest = handler } }, cancellation.Token)).Unwrap();
         var rejected = Record.ExceptionAsync(async () => await initialization);
         Task? blocker = null;
         var timeout = TimeSpan.FromSeconds(5);
@@ -1481,7 +1417,8 @@ public sealed partial class ClientSessionLifetimeTests
         server.Capabilities = enabled ? AutoModeRecoveryCapabilities(true) : null;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         AutoModeSwitchRequest? received = null;
         string? receivedSessionId = null;
@@ -1493,19 +1430,13 @@ public sealed partial class ClientSessionLifetimeTests
                 return Task.FromResult(enabled ? AutoModeSwitchResponse.Yes : AutoModeSwitchResponse.YesAlways);
             };
         await using var session = resume
-            ? await client.ResumeSessionAsync("session-1", new ResumeSessionConfig
-            {
-                AutoModeRecovery = enabled,
-                OnAutoModeSwitchRequest = handler
-            }.Clone())
-            : await client.CreateSessionAsync(new SessionConfig
-            {
-                AutoModeRecovery = enabled,
-                OnAutoModeSwitchRequest = handler
-            }.Clone());
+            ? await client.ResumeSessionAsync("session-1", new ResumeSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = enabled, OnAutoModeSwitchRequest = handler } }.Clone())
+            : await client.CreateSessionAsync(new CreateSessionOptions
+            { Interaction = new SessionInteractionOptions { AutoModeRecovery = enabled, OnAutoModeSwitchRequest = handler } }.Clone());
         var request = Assert.Single(server.Requests, r => r.Method == (resume ? "session.resume" : "session.create"));
-        Assert.True(request.Params.GetProperty("requestAutoModeSwitch").GetBoolean());
-        Assert.Equal(enabled, request.Params.TryGetProperty("requestAutoModeRecovery", out var flag) && flag.GetBoolean());
+        Assert.True(request.Params.GetProperty("interaction").GetProperty("requestAutoModeSwitch").GetBoolean());
+        Assert.Equal(enabled, request.Params.GetProperty("interaction").TryGetProperty("requestAutoModeRecovery", out var flag) && flag.GetBoolean());
         var offer = new Dictionary<string, object?>
         {
             ["sessionId"] = session.SessionId,

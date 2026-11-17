@@ -1,0 +1,809 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+package com.microsoft.copilot;
+
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.rpc.ChildProcessRuntimeConnection;
+import com.microsoft.copilot.rpc.ClientGitHubOptions;
+import com.microsoft.copilot.rpc.OwnedRuntimeConnection;
+import com.microsoft.copilot.rpc.SessionExperimentOptions;
+import com.microsoft.copilot.rpc.TcpRuntimeConnection;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.RuntimeConnection;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
+import com.microsoft.copilot.rpc.SpawnedStdioRuntimeConnection;
+import com.microsoft.copilot.rpc.SpawnedTcpRuntimeConnection;
+
+/**
+ * E2E test context that manages the test environment including the CapiProxy,
+ * working directories, and CLI path.
+ *
+ * <p>
+ * This provides a complete test environment similar to the Node.js, .NET, Go,
+ * and Python SDK test harnesses. It manages:
+ * </p>
+ * <ul>
+ * <li>A replaying CapiProxy for deterministic API responses</li>
+ * <li>Temporary home and work directories for test isolation</li>
+ * <li>Environment variables for the Copilot CLI</li>
+ * </ul>
+ *
+ * <p>
+ * Usage example:
+ * </p>
+ *
+ * <pre>
+ * {@code
+ * try (E2ETestContext ctx = E2ETestContext.create()) {
+ * 	ctx.configureForTest("tools", "my_test_name");
+ *
+ * 	try (CopilotClient client = ctx.createClient()) {
+ * 		CopilotSession session = client
+ * 				.createSession(ctx.newSessionConfig()
+ * 						.setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)))
+ * 				.get();
+ * 		// ... run test ...
+ * 	}
+ * }
+ * }
+ * </pre>
+ */
+public class E2ETestContext implements AutoCloseable {
+
+    private static final Logger LOG = Logger.getLogger(E2ETestContext.class.getName());
+
+    /**
+     * The default GitHub token used by the CLI in e2e tests. The proxy resolves
+     * this token to the default Copilot user registered at context creation.
+     */
+    private static final String DEFAULT_GITHUB_TOKEN = "fake-token-for-e2e-tests";
+    private static final Pattern SNAKE_CASE = Pattern.compile("[^a-zA-Z0-9]");
+    private static final Pattern USER_ROLE_PATTERN = Pattern.compile("^(\\s*)-\\s+role:\\s+user\\s*$");
+    private static final Pattern CONTENT_PATTERN = Pattern.compile("^(\\s*)content:\\s*(.*)$");
+
+    private final String cliPath;
+    private final Path homeDir;
+    private final Path workDir;
+    private String proxyUrl;
+    private final CapiProxy proxy;
+    private final Path repoRoot;
+    private Path currentSnapshotFile;
+
+    private E2ETestContext(String cliPath, Path homeDir, Path workDir, String proxyUrl, CapiProxy proxy,
+            Path repoRoot) {
+        this.cliPath = cliPath;
+        this.homeDir = homeDir;
+        this.workDir = workDir;
+        this.proxyUrl = proxyUrl;
+        this.proxy = proxy;
+        this.repoRoot = repoRoot;
+    }
+
+    /**
+     * Creates a new E2E test context.
+     *
+     * @return the test context
+     * @throws IOException
+     *             if setup fails
+     * @throws InterruptedException
+     *             if setup is interrupted
+     */
+    public static E2ETestContext create() throws IOException, InterruptedException {
+        Path repoRoot = findRepoRoot();
+        String cliPath = getCliPath(repoRoot);
+
+        Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"));
+        Path homeDir = Files.createTempDirectory(tempDir, "copilot-test-config-");
+        Path workDir = Files.createTempDirectory(tempDir, "copilot-test-work-").toRealPath();
+
+        CapiProxy proxy = new CapiProxy();
+        String proxyUrl = proxy.start();
+
+        // Register a default Copilot user for the CLI's default token so the proxy's
+        // /copilot_internal/user endpoint returns a valid user (HTTP 200) instead of
+        // 401 "Bad credentials". CLI 1.0.64-1 gates MCP enablement on this user:
+        // `is_mcp_enabled` (added by the proxy) is the global gate, and snake_case
+        // `copilot_plan` makes the third-party MCP policy resolver early-return
+        // allow-all for non-org plans (anything other than business/enterprise),
+        // avoiding a /copilot/mcp_registry network call the proxy does not serve.
+        // Without this, MCP servers never reach CONNECTED. This mirrors the Go,
+        // Node, Python, and .NET harnesses, which all register the same default
+        // individual_pro user at context creation.
+        Map<String, Object> defaultUser = new HashMap<>();
+        defaultUser.put("login", "e2e-test-user");
+        defaultUser.put("id", 12345);
+        defaultUser.put("copilot_plan", "individual_pro");
+        defaultUser.put("endpoints", Map.of("api", proxyUrl, "telemetry", proxyUrl));
+        defaultUser.put("analytics_tracking_id", "e2e-test-tracking-id");
+        proxy.setCopilotUserByToken(DEFAULT_GITHUB_TOKEN, defaultUser);
+
+        return new E2ETestContext(cliPath, homeDir, workDir, proxyUrl, proxy, repoRoot);
+    }
+
+    /**
+     * Gets the Copilot CLI path.
+     */
+    public String getCliPath() {
+        return cliPath;
+    }
+
+    /**
+     * Gets the temporary home directory for test isolation.
+     */
+    public Path getHomeDir() {
+        return homeDir;
+    }
+
+    /**
+     * Gets the temporary working directory for tests.
+     */
+    public Path getWorkDir() {
+        return workDir;
+    }
+
+    /**
+     * Creates session options rooted in this fixture without changing process cwd.
+     *
+     * @return session options with the owned working directory
+     */
+    public CreateSessionOptions newSessionConfig() {
+        return new CreateSessionOptions().setWorkingDirectory(workDir.toString())
+                .setExperiments(new SessionExperimentOptions().setFlags(Map.of("MCP_APPS", true)));
+    }
+
+    /**
+     * Gets the repository root for locating shared test assets.
+     */
+    public Path getRepoRoot() {
+        return repoRoot;
+    }
+
+    /**
+     * Gets the proxy URL.
+     */
+    public String getProxyUrl() {
+        return proxyUrl;
+    }
+
+    /**
+     * Configures the proxy for a specific test.
+     *
+     * @param testFile
+     *            the test category folder (e.g., "tools", "session", "permissions")
+     * @param testName
+     *            the test method name (will be converted to snake_case)
+     * @throws IOException
+     *             if configuration fails
+     * @throws InterruptedException
+     *             if configuration is interrupted
+     */
+    public void configureForTest(String testFile, String testName) throws IOException, InterruptedException {
+        // Restart the proxy if it has crashed
+        ensureProxyAlive();
+
+        // Convert test method names to lowercase snake_case for snapshot filenames
+        // to avoid case collisions on case-insensitive filesystems (macOS/Windows)
+        String sanitizedName = SNAKE_CASE.matcher(testName).replaceAll("_").toLowerCase();
+        Path snapshotFile = repoRoot.resolve("test").resolve("snapshots").resolve(testFile)
+                .resolve(sanitizedName + ".yaml");
+
+        // Validate snapshot exists - fail fast with a clear message
+        if (!Files.exists(snapshotFile)) {
+            Path snapshotsDir = repoRoot.resolve("test").resolve("snapshots").resolve(testFile);
+            String availableSnapshots = "";
+            if (Files.exists(snapshotsDir)) {
+                try (var files = Files.list(snapshotsDir)) {
+                    availableSnapshots = files.filter(p -> p.toString().endsWith(".yaml"))
+                            .map(p -> p.getFileName().toString().replace(".yaml", "")).sorted()
+                            .reduce((a, b) -> a + ", " + b).orElse("<none>");
+                }
+            }
+            throw new IOException(String.format(
+                    "Snapshot file not found: %s%n" + "Category: %s, Test: %s (sanitized: %s)%n"
+                            + "Available snapshots in '%s/': %s%n"
+                            + "Ensure the snapshot exists and the test name matches exactly.",
+                    snapshotFile, testFile, testName, sanitizedName, testFile, availableSnapshots));
+        }
+
+        this.currentSnapshotFile = snapshotFile;
+        proxy.configure(snapshotFile.toString(), workDir.toString());
+
+        // Log expected prompts to help debug prompt mismatch issues
+        List<String> expectedPrompts = getExpectedUserPrompts();
+        if (!expectedPrompts.isEmpty()) {
+            LOG.info(() -> String.format("Configured snapshot '%s/%s' expects prompts: %s", testFile, sanitizedName,
+                    expectedPrompts));
+        }
+    }
+
+    /**
+     * Gets the expected user prompts from the current snapshot file.
+     * <p>
+     * This is useful for debugging when tests fail with "No cached response found"
+     * errors from CapiProxy. The prompts in your test must match these exactly.
+     * </p>
+     *
+     * @return list of expected user prompt strings, or empty list if none found
+     */
+    public List<String> getExpectedUserPrompts() {
+        if (currentSnapshotFile == null || !Files.exists(currentSnapshotFile)) {
+            return List.of();
+        }
+        try {
+            return parseExpectedUserPrompts(Files.readString(currentSnapshotFile));
+        } catch (IOException e) {
+            LOG.warning("Failed to read snapshot file: " + e.getMessage());
+            return List.of();
+        }
+    }
+
+    static List<String> parseExpectedUserPrompts(String yaml) {
+        String[] lines = yaml.split("\\R", -1);
+        List<String> prompts = new ArrayList<>();
+
+        for (int i = 0; i < lines.length; i++) {
+            Matcher roleMatcher = USER_ROLE_PATTERN.matcher(lines[i]);
+            if (!roleMatcher.matches()) {
+                continue;
+            }
+
+            int roleIndent = roleMatcher.group(1).length();
+            for (i++; i < lines.length; i++) {
+                String line = lines[i];
+                if (!line.isBlank() && leadingWhitespace(line) <= roleIndent) {
+                    i--;
+                    break;
+                }
+
+                Matcher contentMatcher = CONTENT_PATTERN.matcher(line);
+                if (!contentMatcher.matches()) {
+                    continue;
+                }
+
+                int contentIndent = contentMatcher.group(1).length();
+                String value = contentMatcher.group(2).trim();
+                List<String> continuation = new ArrayList<>();
+                while (i + 1 < lines.length
+                        && (lines[i + 1].isBlank() || leadingWhitespace(lines[i + 1]) > contentIndent)) {
+                    continuation.add(lines[++i]);
+                }
+
+                String prompt = isBlockScalar(value)
+                        ? parseBlockScalar(value.charAt(0), continuation)
+                        : parsePlainScalar(value, continuation);
+                if (!prompt.isEmpty() && !prompts.contains(prompt)) {
+                    prompts.add(prompt);
+                }
+                break;
+            }
+        }
+
+        return prompts;
+    }
+
+    private static String parsePlainScalar(String firstLine, List<String> continuation) {
+        StringBuilder value = new StringBuilder(unquote(firstLine));
+        for (String line : continuation) {
+            if (!line.isBlank()) {
+                if (!value.isEmpty()) {
+                    value.append(' ');
+                }
+                value.append(line.trim());
+            }
+        }
+        return value.toString();
+    }
+
+    private static String parseBlockScalar(char style, List<String> lines) {
+        int contentIndent = lines.stream().filter(line -> !line.isBlank()).mapToInt(E2ETestContext::leadingWhitespace)
+                .min().orElse(0);
+        StringBuilder value = new StringBuilder();
+        boolean previousWasContent = false;
+        for (String line : lines) {
+            String text = line.isBlank() ? "" : line.substring(Math.min(contentIndent, line.length()));
+            if (text.isEmpty()) {
+                value.append('\n');
+                previousWasContent = false;
+            } else {
+                if (previousWasContent) {
+                    value.append(style == '>' ? ' ' : '\n');
+                }
+                value.append(text);
+                previousWasContent = true;
+            }
+        }
+        return value.toString().stripTrailing();
+    }
+
+    private static boolean isBlockScalar(String value) {
+        return value.matches("[>|][+-]?");
+    }
+
+    private static String unquote(String value) {
+        if (value.length() >= 2 && ((value.startsWith("\"") && value.endsWith("\""))
+                || (value.startsWith("'") && value.endsWith("'")))) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
+    }
+
+    private static int leadingWhitespace(String value) {
+        int index = 0;
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index;
+    }
+
+    /**
+     * Awaits a retained readiness observation under one owner budget. A successful
+     * probe survives observer cancellation; timeout never starts another probe.
+     *
+     * @param condition
+     *            the authoritative readiness probe
+     * @param timeoutMs
+     *            the complete observation budget
+     * @param pollIntervalMs
+     *            the interval between completed pending observations
+     * @param description
+     *            the timeout diagnostic
+     * @throws Exception
+     *             if a probe fails or the observer is interrupted
+     */
+    public static void awaitCondition(java.util.concurrent.Callable<Boolean> condition, long timeoutMs,
+            long pollIntervalMs, String description) throws Exception {
+        awaitCondition(condition, timeoutMs, pollIntervalMs, description,
+                java.util.concurrent.Executors.newSingleThreadExecutor());
+    }
+
+    static void awaitCondition(java.util.concurrent.Callable<Boolean> condition, long timeoutMs, long pollIntervalMs,
+            String description, java.util.concurrent.ExecutorService executor) throws Exception {
+        java.util.concurrent.Future<Boolean> observation = null;
+        var observedReady = new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.concurrent.TimeoutException expired = null;
+        try {
+            observation = executor.submit(() -> {
+                while (!condition.call()) {
+                    Thread.sleep(pollIntervalMs);
+                }
+                observedReady.set(true);
+                return true;
+            });
+            try {
+                observation.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.TimeoutException timeout) {
+                if (observation.isDone()) {
+                    observation.get();
+                } else {
+                    expired = timeout;
+                }
+            }
+        } finally {
+            if (observation != null) {
+                observation.cancel(true);
+            }
+            executor.shutdownNow();
+            executor.awaitTermination(Long.MAX_VALUE, java.util.concurrent.TimeUnit.NANOSECONDS);
+        }
+        if (expired != null && !observedReady.get()) {
+            throw new AssertionError(description, expired);
+        }
+    }
+
+    /**
+     * Checks the same reply without waiting again if it completes between the timed
+     * wait's final check and delivery of its timeout.
+     */
+    static <T> T awaitReply(java.util.concurrent.CompletableFuture<T> reply, long timeout,
+            java.util.concurrent.TimeUnit unit) throws InterruptedException, java.util.concurrent.ExecutionException,
+            java.util.concurrent.TimeoutException {
+        try {
+            return reply.get(timeout, unit);
+        } catch (java.util.concurrent.TimeoutException expired) {
+            if (!reply.isDone()) {
+                throw expired;
+            }
+            try {
+                return reply.getNow(null);
+            } catch (java.util.concurrent.CompletionException failure) {
+                var cause = failure.getCause();
+                var failedReply = new java.util.concurrent.ExecutionException(cause == null ? failure : cause);
+                failedReply.addSuppressed(expired);
+                throw failedReply;
+            } catch (java.util.concurrent.CancellationException failure) {
+                failure.addSuppressed(expired);
+                throw failure;
+            }
+        }
+    }
+
+    /**
+     * Observes real replies on the test thread, with one query outstanding. Callers
+     * must have a native JUnit timeout; readiness has no speed contract.
+     */
+    static <T> T awaitReadiness(java.util.function.Supplier<java.util.concurrent.CompletableFuture<T>> query,
+            java.util.function.Predicate<T> ready, long pollIntervalMs, String description) throws Exception {
+        return awaitReadiness(query, null, ready, pollIntervalMs, description);
+    }
+
+    static <T> T awaitReadiness(java.util.function.Supplier<java.util.concurrent.CompletableFuture<T>> query,
+            java.util.concurrent.CompletableFuture<T> firstQuery, java.util.function.Predicate<T> ready,
+            long pollIntervalMs, String description) throws Exception {
+        var current = firstQuery;
+        T last = null;
+        boolean observed = false;
+        try {
+            while (true) {
+                if (Thread.interrupted()) {
+                    throw new InterruptedException(description);
+                }
+                if (current == null) {
+                    current = query.get();
+                }
+                last = current.get();
+                observed = true;
+                if (ready.test(last)) {
+                    return last;
+                }
+                current = null;
+                Thread.sleep(pollIntervalMs);
+            }
+        } catch (InterruptedException interrupted) {
+            interrupted.addSuppressed(new IllegalStateException(
+                    description + "; last observation=" + (observed ? String.valueOf(last) : "<no completed reply>")));
+            throw interrupted;
+        } finally {
+            if (current != null) {
+                current.cancel(true);
+            }
+        }
+    }
+
+    /**
+     * Awaits a nonblocking buffered-state probe, retaining consumed readiness even
+     * when cancellation discards the worker's result. After stopping the worker,
+     * checks the final buffered state only if readiness was not observed. Do not
+     * use this for RPCs or other blocking probes.
+     *
+     * @param condition
+     *            the nonblocking buffered-state probe
+     * @param timeoutMs
+     *            the complete observation budget
+     * @param pollIntervalMs
+     *            the interval between completed pending observations
+     * @param description
+     *            the timeout diagnostic
+     * @throws Exception
+     *             if a probe fails or the observer is interrupted
+     */
+    public static void awaitBufferedCondition(java.util.concurrent.Callable<Boolean> condition, long timeoutMs,
+            long pollIntervalMs, String description) throws Exception {
+        awaitBufferedCondition(condition, timeoutMs, pollIntervalMs, description,
+                java.util.concurrent.Executors.newSingleThreadExecutor());
+    }
+
+    static void awaitBufferedCondition(java.util.concurrent.Callable<Boolean> condition, long timeoutMs,
+            long pollIntervalMs, String description, java.util.concurrent.ExecutorService executor) throws Exception {
+        var observedReady = new java.util.concurrent.atomic.AtomicBoolean();
+        try {
+            awaitCondition(() -> {
+                boolean ready = condition.call();
+                if (ready) {
+                    observedReady.set(true);
+                }
+                return ready;
+            }, timeoutMs, pollIntervalMs, description, executor);
+        } catch (AssertionError failure) {
+            if (!(failure.getCause() instanceof java.util.concurrent.TimeoutException)
+                    || (!observedReady.get() && !condition.call())) {
+                throw failure;
+            }
+        }
+    }
+
+    /**
+     * Ensures that the configured fixture process has not exited.
+     *
+     * @throws IOException
+     *             if the proxy exited
+     */
+    public void ensureProxyAlive() throws IOException, InterruptedException {
+        if (!proxy.isAlive()) {
+            throw new IOException(
+                    "The configured replay proxy exited; its test state cannot be recovered by restarting");
+        }
+    }
+
+    /**
+     * Gets the captured HTTP exchanges from the proxy.
+     *
+     * @return list of exchange maps
+     * @throws IOException
+     *             if the request fails
+     * @throws InterruptedException
+     *             if the request is interrupted
+     */
+    public List<Map<String, Object>> getExchanges() throws IOException, InterruptedException {
+        return proxy.getExchanges();
+    }
+
+    /**
+     * Gets the environment variables needed for the Copilot CLI.
+     *
+     * @return map of environment variables
+     */
+    public Map<String, String> getEnvironment() {
+        Map<String, String> env = new HashMap<>(System.getenv());
+        env.put("COPILOT_API_URL", proxyUrl);
+        // Route GitHub API calls (e.g. the MCP registry policy check) to the
+        // replay proxy so MCP enablement stays hermetic. Without this the CLI
+        // reaches the real api.github.com, which is slow/unreachable on macOS
+        // CI runners and makes MCP servers time out before reaching connected.
+        env.put("COPILOT_DEBUG_GITHUB_API_URL", proxyUrl);
+        env.put("COPILOT_HOME", homeDir.toString());
+        env.put("GH_CONFIG_DIR", homeDir.toString());
+        env.put("XDG_CONFIG_HOME", homeDir.toString());
+        env.put("XDG_STATE_HOME", homeDir.toString());
+        env.put("COPILOT_MCP_APPS", "true");
+        env.put("MCP_APPS", "true");
+
+        // Configure CONNECT proxy for HTTPS interception if available
+        String connectUrl = proxy.getConnectProxyUrl();
+        String caFile = proxy.getCaFilePath();
+        if (connectUrl != null && !connectUrl.isEmpty() && caFile != null && !caFile.isEmpty()) {
+            String noProxy = "127.0.0.1,localhost,::1";
+            env.put("HTTP_PROXY", connectUrl);
+            env.put("HTTPS_PROXY", connectUrl);
+            env.put("http_proxy", connectUrl);
+            env.put("https_proxy", connectUrl);
+            env.put("NO_PROXY", noProxy);
+            env.put("no_proxy", noProxy);
+            env.put("NODE_EXTRA_CA_CERTS", caFile);
+            env.put("SSL_CERT_FILE", caFile);
+            env.put("REQUESTS_CA_BUNDLE", caFile);
+            env.put("CURL_CA_BUNDLE", caFile);
+            env.put("GIT_SSL_CAINFO", caFile);
+            env.put("GH_ENTERPRISE_TOKEN", "");
+            env.put("GITHUB_ENTERPRISE_TOKEN", "");
+        }
+
+        env.put("GH_TOKEN", DEFAULT_GITHUB_TOKEN);
+        env.put("GITHUB_TOKEN", DEFAULT_GITHUB_TOKEN);
+        env.put("COPILOT_HMAC_KEY", "");
+        env.put("CAPI_HMAC_KEY", "");
+        return env;
+    }
+
+    /**
+     * Creates a CopilotClient configured for this test context.
+     *
+     * @return a new CopilotClient
+     */
+    public CopilotClient createClient() {
+        CopilotClientOptions options = new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+                .setGitHub(new ClientGitHubOptions().setToken(DEFAULT_GITHUB_TOKEN));
+        return createClient(options);
+    }
+
+    /**
+     * Creates a CopilotClient with the given options, applied on top of the default
+     * options for this test context.
+     *
+     * @param options
+     *            options to apply; spawned connection process settings will be set
+     *            from the context if not already set
+     * @return a new CopilotClient
+     */
+    public CopilotClient createClient(CopilotClientOptions options) {
+        applyContextOptions(options);
+        if (!(options.getRuntime() instanceof TcpRuntimeConnection) && options.getInternalTestOptions() == null) {
+            var environment = options.getRuntime() instanceof ChildProcessRuntimeConnection<?> child
+                    ? child.getEnvironment()
+                    : null;
+            Map<String, String> env = new HashMap<>(environment != null ? environment : getEnvironment());
+            options.setInternalTestOptions(new com.microsoft.copilot.rpc.InternalTestOptions()
+                    .setCopilotApiUrl(env.get("COPILOT_API_URL"))
+                    .setGitHubApiUrl(env.get("COPILOT_DEBUG_GITHUB_API_URL")).setProxyUrl(env.get("HTTPS_PROXY"))
+                    .setNoProxy(env.get("NO_PROXY")).setCaCertificatePath(env.get("NODE_EXTRA_CA_CERTS")));
+            options.getInternalTestOptions().toEnvironment().keySet().forEach(env::remove);
+            if (options.getRuntime() instanceof ChildProcessRuntimeConnection<?> child) {
+                child.setEnvironment(env);
+            }
+        }
+        if (!(options.getRuntime() instanceof TcpRuntimeConnection) && options.getGitHub().getToken() == null) {
+            options.setGitHub(options.getGitHub().setToken(DEFAULT_GITHUB_TOKEN));
+        }
+
+        return new CopilotClient(options);
+    }
+
+    private void applyContextOptions(CopilotClientOptions options) {
+        if (options.getRuntime() == null)
+            options.setRuntime(RuntimeConnection.forDefault());
+        if (options.getRuntime() instanceof OwnedRuntimeConnection<?> owned && owned.getBaseDirectory() == null)
+            owned.setBaseDirectory(homeDir.toString());
+        if (options.getRuntime() instanceof ChildProcessRuntimeConnection<?> child) {
+            if (child instanceof SpawnedStdioRuntimeConnection stdio && stdio.getPath() == null)
+                stdio.setPath(cliPath);
+            if (child instanceof SpawnedTcpRuntimeConnection tcp && tcp.getPath() == null)
+                tcp.setPath(cliPath);
+            if (child.getWorkingDirectory() == null)
+                child.setWorkingDirectory(workDir.toString());
+            if (child.getEnvironment() == null)
+                child.setEnvironment(getEnvironment());
+        }
+    }
+
+    /**
+     * Configures the proxy to return a specific Copilot user response for a given
+     * token. Used for per-session authentication tests.
+     *
+     * @param token
+     *            the GitHub token
+     * @param login
+     *            the user login
+     * @param copilotPlan
+     *            the Copilot plan
+     * @param apiUrl
+     *            the API URL for the user endpoints
+     * @param telemetryUrl
+     *            the telemetry URL
+     * @param analyticsTrackingId
+     *            the analytics tracking ID
+     * @throws IOException
+     *             if the request fails
+     * @throws InterruptedException
+     *             if the request is interrupted
+     */
+    public void setCopilotUserByToken(String token, String login, String copilotPlan, String apiUrl,
+            String telemetryUrl, String analyticsTrackingId) throws IOException, InterruptedException {
+        ensureProxyAlive();
+        proxy.setCopilotUserByToken(token, login, copilotPlan, apiUrl, telemetryUrl, analyticsTrackingId);
+    }
+
+    /**
+     * Configures the proxy to return a raw Copilot user response for a given token.
+     *
+     * @param token
+     *            the GitHub token
+     * @param response
+     *            the raw response object to return for the token
+     * @throws IOException
+     *             if the request fails
+     * @throws InterruptedException
+     *             if the request is interrupted
+     */
+    public void setCopilotUserByToken(String token, Map<String, Object> response)
+            throws IOException, InterruptedException {
+        ensureProxyAlive();
+        proxy.setCopilotUserByToken(token, response);
+    }
+
+    /**
+     * Initializes the proxy state without loading a snapshot.
+     * <p>
+     * Use this for tests that need the proxy to be active (e.g., for per-session
+     * auth token resolution via {@code /copilot_internal/user}) but do not make AI
+     * completion requests and therefore have no snapshot to load.
+     * </p>
+     * <p>
+     * The proxy requires its internal {@code state} to be initialized before it can
+     * handle most endpoints. Without this call the proxy throws an error and
+     * returns HTTP 500 for any request that arrives before a {@code /config} POST
+     * has been made.
+     * </p>
+     *
+     * @throws IOException
+     *             if the proxy configuration request fails
+     * @throws InterruptedException
+     *             if the request is interrupted
+     */
+    public void initializeProxy() throws IOException, InterruptedException {
+        ensureProxyAlive();
+        // Pass a non-existent snapshot path. The proxy initializes its state even when
+        // the file is absent (storedData simply remains undefined), which is fine for
+        // tests that never make AI chat-completion requests.
+        proxy.configure(workDir.resolve("no-snapshot.yaml").toString(), workDir.toString());
+    }
+
+    @Override
+    public void close() throws Exception {
+        try {
+            proxy.stop();
+        } finally {
+            deleteRecursively(homeDir);
+            deleteRecursively(workDir);
+        }
+    }
+
+    private static Path findRepoRoot() throws IOException {
+        // First, check for copilot.sdk.dir system property (set by Maven during tests)
+        String sdkDir = System.getProperty("copilot.sdk.dir");
+        if (sdkDir != null && !sdkDir.isEmpty()) {
+            Path sdkPath = Paths.get(sdkDir);
+            if (Files.exists(sdkPath)) {
+                return sdkPath;
+            }
+        }
+
+        // Fallback: search up from current directory
+        Path dir = Paths.get(System.getProperty("user.dir"));
+        while (dir != null) {
+            if (Files.exists(dir.resolve("nodejs")) && Files.exists(dir.resolve("test").resolve("harness"))) {
+                return dir;
+            }
+            dir = dir.getParent();
+        }
+        throw new IOException("Could not find repository root. Either set copilot.sdk.dir system property "
+                + "or run from within the copilot-sdk repository.");
+    }
+
+    private static String getCliPath(Path repoRoot) throws IOException {
+        String envPath = System.getenv("COPILOT_CLI_PATH");
+        if (envPath != null && !envPath.isEmpty()) {
+            return envPath;
+        }
+
+        try {
+            return TestUtil.preparePinnedCli(repoRoot);
+        } catch (Exception e) {
+            String copilotInPath = findCopilotInPath();
+            if (copilotInPath != null) {
+                return copilotInPath;
+            }
+            throw new IOException("The pinned CLI could not be prepared and no CLI was found on PATH.", e);
+        }
+    }
+
+    private static String findCopilotInPath() {
+        try {
+            String command = System.getProperty("os.name").toLowerCase().contains("win") ? "where" : "which";
+            ProcessBuilder pb = new ProcessBuilder(command, "copilot");
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line = reader.readLine();
+                int exitCode = process.waitFor();
+                if (exitCode == 0 && line != null && !line.isEmpty()) {
+                    return line.trim();
+                }
+            }
+        } catch (Exception e) {
+            // Ignore - copilot not found in PATH
+        }
+        return null;
+    }
+
+    private static void deleteRecursively(Path path) {
+        try {
+            if (Files.exists(path)) {
+                Files.walk(path).sorted((a, b) -> b.compareTo(a)) // Reverse order to delete children first
+                        .forEach(p -> {
+                            try {
+                                Files.delete(p);
+                            } catch (IOException e) {
+                                // Best effort
+                            }
+                        });
+            }
+        } catch (IOException e) {
+            // Best effort
+        }
+    }
+}

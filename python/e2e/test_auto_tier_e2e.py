@@ -34,18 +34,18 @@ async def pending_auto_tier(session) -> AutoTier | None:
 
 def create_auto_client(ctx: E2ETestContext) -> CopilotClient:
     return CopilotClient(
-        connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-        working_directory=ctx.work_dir,
-        env=ctx.get_env(),
-        github_token=DEFAULT_GITHUB_TOKEN,
+        mode="coding-agent",
+        runtime=RuntimeConnection.for_spawned_stdio(
+            path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+        ),
+        github={"token": DEFAULT_GITHUB_TOKEN},
     )
 
 
 class TestAutoTier:
     async def test_should_stage_and_reset_auto_tier_preference(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            model="auto",
+            model="auto", permissions={"on_request": PermissionHandler.approve_all}
         )
         try:
             assert await pending_auto_tier(session) is None
@@ -80,8 +80,7 @@ class TestAutoTier:
 
     async def test_should_preserve_auto_tier_when_set_model_omits_it(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            model="auto",
+            model="auto", permissions={"on_request": PermissionHandler.approve_all}
         )
         try:
             await session.set_auto_tier("balance")
@@ -107,14 +106,14 @@ class TestAutoTier:
     ):
         client = create_auto_client(ctx)
         fast_session = await client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="auto",
-            capi={"auto_tier": "fast", "enable_web_socket_responses": False},
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"capi": {"auto_tier": "fast", "enable_web_socket_responses": False}},
         )
         tierless_session = await client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="auto",
-            capi={"enable_web_socket_responses": False},
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"capi": {"enable_web_socket_responses": False}},
         )
         fast_session_id = fast_session.session_id
         tierless_session_id = tierless_session.session_id
@@ -130,12 +129,10 @@ class TestAutoTier:
 
         restored_client = create_auto_client(ctx)
         restored_fast = await restored_client.resume_session(
-            fast_session_id,
-            on_permission_request=PermissionHandler.approve_all,
+            fast_session_id, permissions={"on_request": PermissionHandler.approve_all}
         )
         restored_tierless = await restored_client.resume_session(
-            tierless_session_id,
-            on_permission_request=PermissionHandler.approve_all,
+            tierless_session_id, permissions={"on_request": PermissionHandler.approve_all}
         )
         assert (await restored_fast.rpc.model.get_current()).auto_tier == AutoTier.FAST
         assert (await restored_tierless.rpc.model.get_current()).auto_tier is None
@@ -146,9 +143,9 @@ class TestAutoTier:
         override_client = create_auto_client(ctx)
         overridden = await override_client.resume_session(
             fast_session_id,
-            on_permission_request=PermissionHandler.approve_all,
             model="auto",
-            capi={"auto_tier": "balance", "enable_web_socket_responses": False},
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"capi": {"auto_tier": "balance", "enable_web_socket_responses": False}},
         )
         assert (await overridden.rpc.model.get_current()).auto_tier == AutoTier.BALANCE
         await overridden.disconnect()
@@ -157,9 +154,9 @@ class TestAutoTier:
     async def test_should_commit_fast_auto_tier_after_successful_turn(self, ctx: E2ETestContext):
         client = create_auto_client(ctx)
         session = await client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="auto",
-            capi={"auto_tier": "efficiency", "enable_web_socket_responses": False},
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"capi": {"auto_tier": "efficiency", "enable_web_socket_responses": False}},
         )
         model_change_task = get_next_event_of_type(session, "session.model_change", timeout=None)
         try:
@@ -196,9 +193,9 @@ class TestAutoTier:
     ):
         client = create_auto_client(ctx)
         session = await client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="auto",
-            capi={"auto_tier": "efficiency", "enable_web_socket_responses": False},
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"capi": {"auto_tier": "efficiency", "enable_web_socket_responses": False}},
         )
         session_id = session.session_id
 
@@ -246,8 +243,7 @@ class TestAutoTier:
         resumed_client = create_auto_client(ctx)
         try:
             resumed = await resumed_client.resume_session(
-                session_id,
-                on_permission_request=PermissionHandler.approve_all,
+                session_id, permissions={"on_request": PermissionHandler.approve_all}
             )
             resumed_current = await resumed.rpc.model.get_current()
             assert resumed_current.auto_tier == AutoTier.EFFICIENCY

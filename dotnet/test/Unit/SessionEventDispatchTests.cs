@@ -9,7 +9,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public class SessionEventDispatchTests
 {
@@ -233,7 +233,7 @@ public class SessionEventDispatchTests
     {
         get
         {
-            var contextType = typeof(SessionEvent).Assembly.GetType("GitHub.Copilot.SessionEventsJsonContext", true)!;
+            var contextType = typeof(SessionEvent).Assembly.GetType("Microsoft.Copilot.SessionEventsJsonContext", true)!;
             var context = (JsonSerializerContext)contextType.GetProperty("Default")!.GetValue(null)!;
             return (JsonTypeInfo<SessionEvent>)context.GetTypeInfo(typeof(SessionEvent))!;
         }

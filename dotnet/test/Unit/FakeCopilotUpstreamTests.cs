@@ -8,10 +8,10 @@ using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
-using GitHub.Copilot.Test.E2E;
+using Microsoft.Copilot.Test.E2E;
 using Xunit;
 
-namespace GitHub.Copilot.Test;
+namespace Microsoft.Copilot.Test;
 
 public class FakeCopilotUpstreamTests
 {

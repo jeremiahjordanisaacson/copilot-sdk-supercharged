@@ -3,12 +3,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 #if NET8_0_OR_GREATER
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -22,8 +22,8 @@ public sealed partial class ClientSessionLifetimeTests
         foreach (var source in new[] { "user", "assistant", "autopilot", "system", "session-memory-rollover", "marked", "pre-message", "steering" })
         {
             await using var server = await FakeCopilotServer.StartAsync();
-            await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-            await using var session = await client.CreateSessionAsync(new SessionConfig());
+            await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+            await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
             async Task Emit(string messageId)
             {
                 await server.SendSessionEventAsync(session.SessionId, "assistant.message", new()
@@ -73,8 +73,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task SendAndWait_Ignores_Earlier_Successful_Idle(bool beforeAck)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         async Task Emit(string messageId)
         {
             await server.SendSessionEventAsync(session.SessionId, "assistant.message", new()
@@ -110,8 +110,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task SendAndWait_Correlates_Policy_Blocked_Prompts(bool beforeAck, bool aborted)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         async Task Emit(string messageId)
         {
             await server.SendSessionEventAsync(session.SessionId, "session.warning", new()
@@ -156,8 +156,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Autopilot_Error_Terminal_Does_Not_Require_Session_Error(bool structured)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         using var schema = JsonDocument.Parse("""{"type":"object"}""");
         var waiting = session.SendAndWaitAsync(new MessageOptions
         {
@@ -180,8 +180,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Autopilot_Aborted_Terminal_Does_Not_Succeed(bool structured)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         using var schema = JsonDocument.Parse("""{"type":"object"}""");
         var waiting = session.SendAndWaitAsync(new MessageOptions
         {
@@ -210,8 +210,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Autopilot_Terminal_Buffers_PreAck_And_Ignores_Unrelated_Requests(bool structured)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.BeforeSendResponse = async messageId =>
         {
             await server.SendSessionEventAsync(session.SessionId, "assistant.message", new()
@@ -264,8 +264,8 @@ public sealed partial class ClientSessionLifetimeTests
     {
         await using var server = await FakeCopilotServer.StartAsync();
         server.UniqueMessageIds = true;
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         using var schema = JsonDocument.Parse("""{"type":"object"}""");
         var options = new MessageOptions { Prompt = "inventory", ResponseSchema = structured ? schema.RootElement.Clone() : null };
         var first = session.SendAndWaitAsync(options, TimeSpan.FromSeconds(5));
@@ -298,8 +298,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Raw_Format_Is_Forwarded_Without_Rewriting(string api)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         using var document = JsonDocument.Parse("""{"type":"object","properties":{"value":{"type":"integer"}},"x-provider":{"anything":[true,42,null]}}""");
         var format = new ResponseFormatJsonSchema
         {
@@ -351,8 +351,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Uses_Default_Custom_Tool_Serialization_Options()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var task = session.SendAndWaitAsync<StructuredAnswer>("Answer");
         if (!JsonSerializer.IsReflectionEnabledByDefault)
         {
@@ -376,8 +376,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Initializes_Fresh_Serializer_Options_Without_Mutating_Them(bool withResolver)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         if (withResolver)
         {
@@ -409,8 +409,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Infers_Schema_Using_Serialization_Contract()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var options = new MessageOptions { Prompt = "Answer", RequestHeaders = new Dictionary<string, string> { ["x-test"] = "preserved" } };
         var task = session.SendAndWaitAsync<StructuredAnswer>(options, StructuredOutputJsonContext.Default.Options);
         var request = await WaitForRequestAsync(server, "session.send");
@@ -441,8 +441,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Rejects_Unparseable_Or_Null_Result(string content)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var task = session.SendAndWaitAsync<StructuredAnswer>("Answer", StructuredOutputJsonContext.Default.Options);
         await WaitForRequestAsync(server, "session.send");
         await SendStructuredAnswerAsync(server, session, "message-1", content);
@@ -454,8 +454,8 @@ public sealed partial class ClientSessionLifetimeTests
     {
         using var schema = JsonDocument.Parse("{}");
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         await Assert.ThrowsAsync<ArgumentException>(() => session.SendAndWaitAsync<StructuredAnswer>(
             new MessageOptions { Prompt = "Answer", Mode = "immediate" }, StructuredOutputJsonContext.Default.Options));
         await Assert.ThrowsAsync<ArgumentException>(() => session.SendAndWaitAsync<StructuredAnswer>(
@@ -470,8 +470,8 @@ public sealed partial class ClientSessionLifetimeTests
     {
         await using var server = await FakeCopilotServer.StartAsync();
         server.UniqueMessageIds = true;
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         async Task<StructuredAnswer> SendAsync(string prompt)
         {
             if (typed)
@@ -500,8 +500,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Buffers_Events_Before_Send_Response()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.BeforeSendResponse = messageId =>
             SendStructuredAnswerAsync(server, session, messageId, """{"answer_text":"early","count":42}""");
         var result = await session.SendAndWaitAsync<StructuredAnswer>(
@@ -513,8 +513,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Ignores_Idle_Until_Own_Message_Is_Consumed()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var task = session.SendAndWaitAsync<StructuredAnswer>("Answer", StructuredOutputJsonContext.Default.Options);
         await WaitForRequestAsync(server, "session.send");
         await server.SendSessionEventAsync(session.SessionId, "session.idle", new());
@@ -538,8 +538,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Ignores_Subagent_Completion_And_Autopilot_Idle()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var task = session.SendAndWaitAsync<StructuredAnswer>("Answer", StructuredOutputJsonContext.Default.Options);
         await WaitForRequestAsync(server, "session.send");
         await server.SendSessionEventAsync(session.SessionId, "user.message", new()
@@ -564,8 +564,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Rejects_Missing_Final_Response(bool toolOnly)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var task = session.SendAndWaitAsync<StructuredAnswer>("Answer", StructuredOutputJsonContext.Default.Options);
         await WaitForRequestAsync(server, "session.send");
         await server.SendSessionEventAsync(session.SessionId, "user.message", new()
@@ -594,8 +594,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Uses_Last_Correlated_Message_Not_Subagent_Or_Tool_Commentary(bool laterWorkAborted)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var task = session.SendAndWaitAsync<StructuredAnswer>("Answer", StructuredOutputJsonContext.Default.Options);
         await WaitForRequestAsync(server, "session.send");
         await server.SendSessionEventAsync(session.SessionId, "user.message", new()
@@ -642,8 +642,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Preserves_Timeout_And_Cancellation(bool cancel)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         using var cts = new CancellationTokenSource();
         var task = session.SendAndWaitAsync<StructuredAnswer>("Answer", StructuredOutputJsonContext.Default.Options,
             cancel ? Timeout.InfiniteTimeSpan : TimeSpan.FromMilliseconds(100), cts.Token);
@@ -666,8 +666,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Propagates_Rpc_And_Session_Errors(bool rpcError)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         if (rpcError)
         {
             server.FailSessionSend();
@@ -691,7 +691,7 @@ public sealed partial class ClientSessionLifetimeTests
         }
         else
         {
-            var error = await Assert.ThrowsAsync<IOException>(() => task.WaitAsync(TimeSpan.FromSeconds(5)));
+            var error = await Assert.ThrowsAsync<RemoteRpcException>(() => task.WaitAsync(TimeSpan.FromSeconds(5)));
             Assert.Contains("session send failed", error.Message);
         }
     }
@@ -700,8 +700,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Response_Does_Not_Hide_Later_Session_Errors()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var task = session.SendAndWaitAsync<StructuredAnswer>("Answer", StructuredOutputJsonContext.Default.Options);
         await WaitForRequestAsync(server, "session.send");
         await server.SendSessionEventAsync(session.SessionId, "user.message", new()
@@ -729,8 +729,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Can_Correlate_Without_User_Message_Event()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var task = session.SendAndWaitAsync<StructuredAnswer>("Answer", StructuredOutputJsonContext.Default.Options);
         await WaitForRequestAsync(server, "session.send");
         await server.SendSessionEventAsync(session.SessionId, "assistant.message", new()
@@ -749,8 +749,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Rejects_When_Connection_Or_Session_Closes(bool disposeSession)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var sendReplied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.AfterResponseAsync = (request, _) =>
         {
@@ -787,8 +787,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Dispatches_Queued_Events_Before_Judging_A_Closed_Transport()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var sendReplied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.AfterResponseAsync = (request, _) =>
         {
@@ -838,8 +838,8 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task StructuredOutput_Timeout_Includes_Send_Acknowledgement()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.BeforeSendResponse = _ => release.Task;
         try

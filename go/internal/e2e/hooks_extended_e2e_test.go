@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 // Mirrors dotnet/test/HookLifecycleAndOutputTests.cs (snapshot category "hooks_extended").
@@ -34,21 +34,19 @@ func TestHooksExtendedE2E(t *testing.T) {
 			inputs []copilot.UserPromptSubmittedHookInput
 		)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Hooks: &copilot.SessionHooks{
-				OnUserPromptSubmitted: func(input copilot.UserPromptSubmittedHookInput, invocation copilot.HookInvocation) (*copilot.UserPromptSubmittedHookOutput, error) {
-					mu.Lock()
-					inputs = append(inputs, input)
-					mu.Unlock()
-					if invocation.SessionID == "" {
-						t.Error("Expected non-empty session ID in invocation")
-					}
-					return &copilot.UserPromptSubmittedHookOutput{
-						ModifiedPrompt: "Reply with exactly: HOOKED_PROMPT",
-					}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnUserPromptSubmitted: func(input copilot.UserPromptSubmittedHookInput, invocation copilot.HookInvocation) (*copilot.UserPromptSubmittedHookOutput, error) {
+				mu.Lock()
+				inputs = append(inputs, input)
+				mu.Unlock()
+				if invocation.SessionID == "" {
+					t.Error("Expected non-empty session ID in invocation")
+				}
+				return &copilot.UserPromptSubmittedHookOutput{
+					ModifiedPrompt: "Reply with exactly: HOOKED_PROMPT",
+				}, nil
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -81,21 +79,19 @@ func TestHooksExtendedE2E(t *testing.T) {
 			mu     sync.Mutex
 			inputs []copilot.UserPromptTransformedHookInput
 		)
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Hooks: &copilot.SessionHooks{
-				OnUserPromptTransformed: func(input copilot.UserPromptTransformedHookInput, invocation copilot.HookInvocation) (*copilot.UserPromptTransformedHookOutput, error) {
-					mu.Lock()
-					inputs = append(inputs, input)
-					mu.Unlock()
-					if invocation.SessionID == "" {
-						t.Error("Expected non-empty session ID in invocation")
-					}
-					return &copilot.UserPromptTransformedHookOutput{
-						ModifiedTransformedPrompt: copilot.String("Reply with exactly: HOOKED_TRANSFORMED_PROMPT"),
-					}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnUserPromptTransformed: func(input copilot.UserPromptTransformedHookInput, invocation copilot.HookInvocation) (*copilot.UserPromptTransformedHookOutput, error) {
+				mu.Lock()
+				inputs = append(inputs, input)
+				mu.Unlock()
+				if invocation.SessionID == "" {
+					t.Error("Expected non-empty session ID in invocation")
+				}
+				return &copilot.UserPromptTransformedHookOutput{
+					ModifiedTransformedPrompt: copilot.String("Reply with exactly: HOOKED_TRANSFORMED_PROMPT"),
+				}, nil
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -135,21 +131,19 @@ func TestHooksExtendedE2E(t *testing.T) {
 			inputs []copilot.SessionStartHookInput
 		)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Hooks: &copilot.SessionHooks{
-				OnSessionStart: func(input copilot.SessionStartHookInput, invocation copilot.HookInvocation) (*copilot.SessionStartHookOutput, error) {
-					mu.Lock()
-					inputs = append(inputs, input)
-					mu.Unlock()
-					if invocation.SessionID == "" {
-						t.Error("Expected non-empty session ID in invocation")
-					}
-					return &copilot.SessionStartHookOutput{
-						AdditionalContext: "Session start hook context.",
-					}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnSessionStart: func(input copilot.SessionStartHookInput, invocation copilot.HookInvocation) (*copilot.SessionStartHookOutput, error) {
+				mu.Lock()
+				inputs = append(inputs, input)
+				mu.Unlock()
+				if invocation.SessionID == "" {
+					t.Error("Expected non-empty session ID in invocation")
+				}
+				return &copilot.SessionStartHookOutput{
+					AdditionalContext: "Session start hook context.",
+				}, nil
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -181,25 +175,23 @@ func TestHooksExtendedE2E(t *testing.T) {
 			invocations = make(chan copilot.SessionEndHookInput, 4)
 		)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Hooks: &copilot.SessionHooks{
-				OnSessionEnd: func(input copilot.SessionEndHookInput, invocation copilot.HookInvocation) (*copilot.SessionEndHookOutput, error) {
-					mu.Lock()
-					inputs = append(inputs, input)
-					mu.Unlock()
-					if invocation.SessionID == "" {
-						t.Error("Expected non-empty session ID in invocation")
-					}
-					select {
-					case invocations <- input:
-					default:
-					}
-					return &copilot.SessionEndHookOutput{
-						SessionSummary: "session ended",
-					}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnSessionEnd: func(input copilot.SessionEndHookInput, invocation copilot.HookInvocation) (*copilot.SessionEndHookOutput, error) {
+				mu.Lock()
+				inputs = append(inputs, input)
+				mu.Unlock()
+				if invocation.SessionID == "" {
+					t.Error("Expected non-empty session ID in invocation")
+				}
+				select {
+				case invocations <- input:
+				default:
+				}
+				return &copilot.SessionEndHookOutput{
+					SessionSummary: "session ended",
+				}, nil
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -233,19 +225,17 @@ func TestHooksExtendedE2E(t *testing.T) {
 			inputs []copilot.ErrorOccurredHookInput
 		)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Hooks: &copilot.SessionHooks{
-				OnErrorOccurred: func(input copilot.ErrorOccurredHookInput, invocation copilot.HookInvocation) (*copilot.ErrorOccurredHookOutput, error) {
-					mu.Lock()
-					inputs = append(inputs, input)
-					mu.Unlock()
-					if invocation.SessionID == "" {
-						t.Error("Expected non-empty session ID in invocation")
-					}
-					return &copilot.ErrorOccurredHookOutput{ErrorHandling: "skip"}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnErrorOccurred: func(input copilot.ErrorOccurredHookInput, invocation copilot.HookInvocation) (*copilot.ErrorOccurredHookOutput, error) {
+				mu.Lock()
+				inputs = append(inputs, input)
+				mu.Unlock()
+				if invocation.SessionID == "" {
+					t.Error("Expected non-empty session ID in invocation")
+				}
+				return &copilot.ErrorOccurredHookOutput{ErrorHandling: "skip"}, nil
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -278,26 +268,24 @@ func TestHooksExtendedE2E(t *testing.T) {
 			inputs []copilot.AgentStopHookInput
 		)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Hooks: &copilot.SessionHooks{
-				OnAgentStop: func(input copilot.AgentStopHookInput, invocation copilot.HookInvocation) (*copilot.AgentStopHookOutput, error) {
-					mu.Lock()
-					inputs = append(inputs, input)
-					callCount := len(inputs)
-					mu.Unlock()
-					if invocation.SessionID == "" {
-						t.Error("Expected non-empty session ID in invocation")
-					}
-					if callCount == 1 {
-						return &copilot.AgentStopHookOutput{
-							Decision: "block",
-							Reason:   "Reply with exactly: AGENT_STOP_CONTINUED",
-						}, nil
-					}
-					return nil, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnAgentStop: func(input copilot.AgentStopHookInput, invocation copilot.HookInvocation) (*copilot.AgentStopHookOutput, error) {
+				mu.Lock()
+				inputs = append(inputs, input)
+				callCount := len(inputs)
+				mu.Unlock()
+				if invocation.SessionID == "" {
+					t.Error("Expected non-empty session ID in invocation")
+				}
+				if callCount == 1 {
+					return &copilot.AgentStopHookOutput{
+						Decision: "block",
+						Reason:   "Reply with exactly: AGENT_STOP_CONTINUED",
+					}, nil
+				}
+				return nil, nil
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -346,24 +334,21 @@ func TestHooksExtendedE2E(t *testing.T) {
 			inputs []copilot.PreToolUseHookInput
 		)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools:               []copilot.Tool{echoTool},
-			Hooks: &copilot.SessionHooks{
-				OnPreToolUse: func(input copilot.PreToolUseHookInput, invocation copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
-					mu.Lock()
-					inputs = append(inputs, input)
-					mu.Unlock()
-					if input.ToolName != "echo_value" {
-						return &copilot.PreToolUseHookOutput{PermissionDecision: "allow"}, nil
-					}
-					return &copilot.PreToolUseHookOutput{
-						PermissionDecision: "allow",
-						ModifiedArgs:       map[string]any{"value": "modified by hook"},
-						SuppressOutput:     false,
-					}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{echoTool}}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnPreToolUse: func(input copilot.PreToolUseHookInput, invocation copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
+				mu.Lock()
+				inputs = append(inputs, input)
+				mu.Unlock()
+				if input.ToolName != "echo_value" {
+					return &copilot.PreToolUseHookOutput{PermissionDecision: "allow"}, nil
+				}
+				return &copilot.PreToolUseHookOutput{
+					PermissionDecision: "allow",
+					ModifiedArgs:       map[string]any{"value": "modified by hook"},
+					SuppressOutput:     false,
+				}, nil
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -406,26 +391,24 @@ func TestHooksExtendedE2E(t *testing.T) {
 			inputs []copilot.PostToolUseHookInput
 		)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Hooks: &copilot.SessionHooks{
-				OnPostToolUse: func(input copilot.PostToolUseHookInput, invocation copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
-					mu.Lock()
-					inputs = append(inputs, input)
-					mu.Unlock()
-					if input.ToolName != "view" {
-						return nil, nil
-					}
-					return &copilot.PostToolUseHookOutput{
-						ModifiedResult: copilot.ToolResult{
-							TextResultForLLM: "modified by post hook",
-							ResultType:       "success",
-							ToolTelemetry:    map[string]any{},
-						},
-						SuppressOutput: false,
-					}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnPostToolUse: func(input copilot.PostToolUseHookInput, invocation copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
+				mu.Lock()
+				inputs = append(inputs, input)
+				mu.Unlock()
+				if input.ToolName != "view" {
+					return nil, nil
+				}
+				return &copilot.PostToolUseHookOutput{
+					ModifiedResult: copilot.ToolResult{
+						TextResultForLLM: "modified by post hook",
+						ResultType:       "success",
+						ToolTelemetry:    map[string]any{},
+					},
+					SuppressOutput: false,
+				}, nil
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -469,28 +452,25 @@ func TestHooksExtendedE2E(t *testing.T) {
 			postToolUseInputs []copilot.PostToolUseHookInput
 		)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			AvailableTools:      []string{"report_intent"},
-			Hooks: &copilot.SessionHooks{
-				OnPostToolUse: func(input copilot.PostToolUseHookInput, invocation copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
-					mu.Lock()
-					postToolUseInputs = append(postToolUseInputs, input)
-					mu.Unlock()
-					return nil, nil
-				},
-				OnPostToolUseFailure: func(input copilot.PostToolUseFailureHookInput, invocation copilot.HookInvocation) (*copilot.PostToolUseFailureHookOutput, error) {
-					mu.Lock()
-					failureInputs = append(failureInputs, input)
-					mu.Unlock()
-					if invocation.SessionID == "" {
-						t.Error("Expected non-empty session ID in invocation")
-					}
-					return &copilot.PostToolUseFailureHookOutput{
-						AdditionalContext: "HOOK_FAILURE_GUIDANCE_APPLIED",
-					}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{AvailableTools: []string{"report_intent"}}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnPostToolUse: func(input copilot.PostToolUseHookInput, invocation copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
+				mu.Lock()
+				postToolUseInputs = append(postToolUseInputs, input)
+				mu.Unlock()
+				return nil, nil
 			},
+			OnPostToolUseFailure: func(input copilot.PostToolUseFailureHookInput, invocation copilot.HookInvocation) (*copilot.PostToolUseFailureHookOutput, error) {
+				mu.Lock()
+				failureInputs = append(failureInputs, input)
+				mu.Unlock()
+				if invocation.SessionID == "" {
+					t.Error("Expected non-empty session ID in invocation")
+				}
+				return &copilot.PostToolUseFailureHookOutput{
+					AdditionalContext: "HOOK_FAILURE_GUIDANCE_APPLIED",
+				}, nil
+			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)

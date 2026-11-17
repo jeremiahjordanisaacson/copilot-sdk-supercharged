@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 
 [package]
-name = "github-copilot-sdk"
+name = "copilot-sdk"
 version = "0.0.0-dev"
 edition = "2024"
 rust-version = "1.94.0"
@@ -10,7 +10,7 @@ keywords = ["copilot", "github", "ai", "json-rpc", "sdk"]
 categories = ["api-bindings", "development-tools"]
 repository = "https://github.com/github/copilot-sdk"
 homepage = "https://github.com/github/copilot-sdk"
-documentation = "https://docs.rs/github-copilot-sdk"
+documentation = "https://docs.rs/copilot-sdk"
 readme = "README.md"
 license = "MIT"
 include = [
@@ -27,10 +27,10 @@ include = [
 ]
 
 [lib]
-name = "github_copilot_sdk"
+name = "copilot_sdk"
 
 [features]
-default = ["bundled-cli"]
+default = ["bundled-in-process"]
 runtime = ["dep:openssl", "dep:rustls", "dep:ureq"]
 bundled-cli = ["runtime", "network-forwarding", "dep:tar", "dep:flate2", "dep:zip"]
 in-process = ["runtime", "dep:libloading"]

@@ -6,7 +6,7 @@ Run the SDK in backends, APIs, microservices and workers. Connect to an independ
 
 ## How it works
 
-Instead of the SDK spawning a CLI child process, you run the CLI independently in **headless server mode**. Your backend connects to it over TCP using the `Connection` option (`URIConnection`).
+Instead of the SDK spawning a CLI child process, you run the CLI independently in **headless server mode**. Your backend connects to it over TCP using the `Connection` option (`TCPConnection`).
 
 ```mermaid
 flowchart TB
@@ -22,7 +22,7 @@ flowchart TB
 
     Users["👥 Users"] --> API
     API --> SDK
-    SDK -- "RuntimeConnection.forUri: localhost:4321" --> RPC
+    SDK -- "RuntimeConnection.forTcp: localhost:4321" --> RPC
     RPC --> Sessions
     RPC --> Copilot["☁️ GitHub Copilot<br/>or Model Provider"]
 
@@ -31,10 +31,11 @@ flowchart TB
 ```
 
 **Key characteristics:**
-* CLI runs as a persistent server process (not spawned per request)
-* SDK connects over TCP—CLI and app can run in different containers
-* Multiple SDK clients can share one CLI server
-* Works with any auth method (GitHub tokens, env vars, BYOK)
+
+- CLI runs as a persistent server process (not spawned per request)
+- SDK connects over TCP—CLI and app can run in different containers
+- Multiple SDK clients can share one CLI server
+- Works with any auth method (GitHub tokens, env vars, BYOK)
 
 For multi-user server mode, configure SDK clients with `mode: "empty"`, pass user credentials per session, and explicitly allow tools for each session. See [Multi-Tenancy & Server Deployments](./multi-tenancy.md) for the full pattern.
 
@@ -48,7 +49,7 @@ flowchart LR
     end
 
     subgraph External["External Server (Backend)"]
-        B1["SDK"] -->|"forUri"| B2["CLI Server"]
+        B1["SDK"] -->|"forTcp"| B2["CLI Server"]
         B2 -.->|"independent<br/>lifecycle"| B1
     end
 
@@ -129,14 +130,15 @@ Restart=always
 ## Step 2: connect the SDK
 
 > [!IMPORTANT]
-> If you started the server with a non-loopback `--host` (for example the Docker setup above), it requires a connection token. Pass the same `COPILOT_CONNECTION_TOKEN` value to the client as the second argument to `RuntimeConnection.forUri`, for example `RuntimeConnection.forUri("your-host:4321", { connectionToken: process.env.COPILOT_CONNECTION_TOKEN })` (Node), `RuntimeConnection.for_uri("your-host:4321", connection_token=...)` (Python), or the equivalent option in your language. A loopback server (the default `copilot --headless`) needs no token.
+> If you started the server with a non-loopback `--host` (for example the Docker setup above), it requires a connection token. Pass the same `COPILOT_CONNECTION_TOKEN` value to the client with `RuntimeConnection.forTcp`, for example `RuntimeConnection.forTcp("your-host", 4321, { connectionToken: process.env.COPILOT_CONNECTION_TOKEN })` (Node), `RuntimeConnection.for_tcp("your-host", 4321, connection_token=...)` (Python), or the equivalent option in your language. A loopback server (the default `copilot --headless`) needs no token.
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 // Provided by your web framework and auth layer
 declare const userId: string;
@@ -145,34 +147,44 @@ declare const req: { body: { message: string } };
 declare const res: { json(body: unknown): void };
 
 const client = new CopilotClient({
-    connection: RuntimeConnection.forUri("localhost:4321"),
+    runtime: RuntimeConnection.forTcp("localhost", 4321),
     mode: "empty",
 });
 
 const session = await client.createSession({
     sessionId: `user-${userId}-${Date.now()}`,
     model: "auto",
-    availableTools: ["custom:*"],
-    gitHubToken: user.githubToken,
+    tools: {
+        availableTools: ["custom:*"],
+    },
+    github: {
+        token: user.githubToken,
+    },
 });
 
 const response = await session.sendAndWait({ prompt: req.body.message });
 res.json({ content: response?.data.content });
 ```
+
 <!-- /docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-    connection: RuntimeConnection.forUri("localhost:4321"),
+    runtime: RuntimeConnection.forTcp("localhost", 4321),
     mode: "empty",
 });
 
 const session = await client.createSession({
     sessionId: `user-${userId}-${Date.now()}`,
     model: "auto",
-    availableTools: ["custom:*"],
-    gitHubToken: user.githubToken,
+    tools: {
+        availableTools: ["custom:*"],
+    },
+    github: {
+        token: user.githubToken,
+    },
 });
 
 const response = await session.sendAndWait({ prompt: req.body.message });
@@ -193,11 +205,16 @@ user_id = "123"
 message = "Hello!"
 
 client = CopilotClient(
-    connection=RuntimeConnection.for_uri("localhost:4321"),
+    mode="coding-agent",
+    runtime=RuntimeConnection.for_tcp("localhost", 4321),
 )
 await client.start()
 
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all, model="auto", session_id=f"user-{user_id}-{int(time.time())}")
+session = await client.create_session(
+    model="auto",
+    session_id=f"user-{user_id}-{int(time.time())}",
+    permissions={"on_request": PermissionHandler.approve_all},
+)
 
 response = await session.send_and_wait(message)
 ```
@@ -208,14 +225,15 @@ response = await session.send_and_wait(message)
 <summary><strong>Go</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```go
 package main
 
 import (
 	"context"
 	"fmt"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 	"time"
-	copilot "github.com/github/copilot-sdk/go"
 )
 
 func main() {
@@ -224,35 +242,43 @@ func main() {
 	message := "Hello"
 
     client := copilot.NewClient(&copilot.ClientOptions{
-        Connection: copilot.URIConnection{URL: "localhost:4321"},
+        Mode: copilot.ModeCodingAgent,
+        Runtime: copilot.TCPConnection{Host: "localhost", Port: 4321},
     })
 	client.Start(ctx)
 	defer client.Stop()
 
-	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
+	session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
 		SessionID: fmt.Sprintf("user-%s-%d", userID, time.Now().Unix()),
 		Model:     "auto",
 	})
 
-	response, _ := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: message})
+	response, _ := session.SendAndWait(ctx, copilot.MessageOptions{
+		Prompt: message,
+	})
 	_ = response
 }
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```go
 client := copilot.NewClient(&copilot.ClientOptions{
-    Connection: copilot.URIConnection{URL: "localhost:4321"},
+    Mode: copilot.ModeCodingAgent,
+    Runtime: copilot.TCPConnection{Host: "localhost", Port: 4321},
 })
 client.Start(ctx)
 defer client.Stop()
 
-session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-    SessionID: fmt.Sprintf("user-%s-%d", userID, time.Now().Unix()),
-    Model:     "auto",
+session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	SessionID: fmt.Sprintf("user-%s-%d", userID, time.Now().Unix()),
+	Model:     "auto",
 })
 
-response, _ := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: message})
+response, _ := session.SendAndWait(ctx, copilot.MessageOptions{
+	Prompt: message,
+})
+
 ```
 
 </details>
@@ -261,42 +287,45 @@ response, _ := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: message})
 <summary><strong>.NET</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 var userId = "user1";
 var message = "Hello";
-
 var client = new CopilotClient(new CopilotClientOptions
 {
-    Connection = RuntimeConnection.ForUri("localhost:4321"),
+    Mode = CopilotClientMode.CodingAgent,
+    Runtime = RuntimeConnection.ForTcp("localhost", 4321),
 });
-
-await using var session = await client.CreateSessionAsync(new SessionConfig
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
     SessionId = $"user-{userId}-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}",
-    Model = "auto",
+    Model = "auto"
 });
-
-var response = await session.SendAndWaitAsync(
-    new MessageOptions { Prompt = message });
+var response = await session.SendAndWaitAsync(new MessageOptions
+{
+    Prompt = message
+});
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```csharp
 var client = new CopilotClient(new CopilotClientOptions
 {
-    Connection = RuntimeConnection.ForUri("localhost:4321"),
+    Mode = CopilotClientMode.CodingAgent,
+    Runtime = RuntimeConnection.ForTcp("localhost", 4321),
 });
-
-await using var session = await client.CreateSessionAsync(new SessionConfig
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
     SessionId = $"user-{userId}-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}",
-    Model = "auto",
+    Model = "auto"
 });
-
-var response = await session.SendAndWaitAsync(
-    new MessageOptions { Prompt = message });
+var response = await session.SendAndWaitAsync(new MessageOptions
+{
+    Prompt = message
+});
 ```
 
 </details>
@@ -305,29 +334,39 @@ var response = await session.SendAndWaitAsync(
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 
 var userId = "user1";
 var message = "Hello!";
 
-var client = new CopilotClient(new CopilotClientOptions()
-    .setCliUrl("localhost:4321")
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+    .setRuntime(RuntimeConnection.forTcp("localhost", 4321))
 );
 
 try {
-    client.start().get();
+    client
+            .start()
+            .get();
 
-    var session = client.createSession(new SessionConfig()
-        .setSessionId(String.format("user-%s-%d", userId, System.currentTimeMillis() / 1000))
-        .setModel("auto")
-        .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-    ).get();
+    var session = client
+            .createSession(new CreateSessionOptions()
+                    .setSessionId(String
+                            .format("user-%s-%d", userId, System
+                                    .currentTimeMillis() / 1000))
+                    .setModel("auto")
+                    .setPermissions(new SessionPermissionOptions()
+                            .setOnRequest(PermissionHandler.APPROVE_ALL)))
+            .get();
 
-    var response = session.sendAndWait(new MessageOptions()
-        .setPrompt(message)).get();
+    var response = session
+            .sendAndWait(new MessageOptions()
+                    .setPrompt(message))
+            .get();
 } finally {
-    client.stop().get();
+    client
+            .stop()
+            .get();
 }
 ```
 
@@ -363,8 +402,9 @@ copilot --headless --port 4321
 Pass individual user tokens when creating sessions. See [GitHub OAuth](./github-oauth.md) for the full flow.
 
 <!-- docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 // Provided by your web framework and auth layer
 interface AuthenticatedRequest {
@@ -381,7 +421,7 @@ declare const app: {
 declare const authMiddleware: unknown;
 
 const client = new CopilotClient({
-    connection: RuntimeConnection.forUri("localhost:4321"),
+    runtime: RuntimeConnection.forTcp("localhost", 4321),
     mode: "empty",
 });
 
@@ -390,8 +430,12 @@ app.post("/chat", authMiddleware, async (req, res) => {
     const session = await client.createSession({
         sessionId: `user-${req.user.id}-chat`,
         model: "auto",
-        availableTools: ["custom:*"],
-        gitHubToken: req.user.githubToken,
+        tools: {
+            availableTools: ["custom:*"],
+        },
+        github: {
+            token: req.user.githubToken,
+        },
     });
 
     const response = await session.sendAndWait({
@@ -401,10 +445,12 @@ app.post("/chat", authMiddleware, async (req, res) => {
     res.json({ content: response?.data.content });
 });
 ```
+
 <!-- /docs-validate: hidden -->
+
 ```typescript
 const client = new CopilotClient({
-    connection: RuntimeConnection.forUri("localhost:4321"),
+    runtime: RuntimeConnection.forTcp("localhost", 4321),
     mode: "empty",
 });
 
@@ -413,8 +459,12 @@ app.post("/chat", authMiddleware, async (req, res) => {
     const session = await client.createSession({
         sessionId: `user-${req.user.id}-chat`,
         model: "auto",
-        availableTools: ["custom:*"],
-        gitHubToken: req.user.githubToken,
+        tools: {
+            availableTools: ["custom:*"],
+        },
+        github: {
+            token: req.user.githubToken,
+        },
     });
 
     const response = await session.sendAndWait({
@@ -430,16 +480,22 @@ app.post("/chat", authMiddleware, async (req, res) => {
 Use your own API keys for the model provider. See [BYOK](../auth/byok.md) for details.
 
 ```typescript
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
+
 const client = new CopilotClient({
-    connection: RuntimeConnection.forUri("localhost:4321"),
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forTcp("localhost", 4321),
 });
 
 const session = await client.createSession({
     model: "gpt-5.4",
-    provider: {
-        type: "openai",
-        baseUrl: "https://api.openai.com/v1",
-        apiKey: process.env.OPENAI_API_KEY,
+    github: { capi: { enabled: false } },
+    inference: {
+        defaultProvider: "byok", providers: [{ name: "byok",
+            type: "openai",
+            baseUrl: "https://api.openai.com/v1",
+            apiKey: process.env.OPENAI_API_KEY,
+        }],
     },
 });
 ```
@@ -470,14 +526,14 @@ Your application's `authMiddleware` must set `req.user.id` and `req.user.githubT
 
 ```typescript
 import express from "express";
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 const app = express();
 app.use(express.json());
 
 // Single shared CLI connection for multi-user server mode
 const client = new CopilotClient({
-    connection: RuntimeConnection.forUri(process.env.CLI_URL || "localhost:4321"),
+    runtime: RuntimeConnection.forTcp(process.env.CLI_HOST || "localhost", Number(process.env.CLI_PORT || "4321")),
     mode: "empty",
 });
 
@@ -492,15 +548,23 @@ app.post("/api/chat", authMiddleware, async (req, res) => {
         let session;
         try {
             session = await client.resumeSession(sessionId, {
-                availableTools: ["custom:*"],
-                gitHubToken: req.user.githubToken,
+                tools: {
+                    availableTools: ["custom:*"],
+                },
+                github: {
+                    token: req.user.githubToken,
+                },
             });
         } catch {
             session = await client.createSession({
                 sessionId,
                 model: "auto",
-                availableTools: ["custom:*"],
-                gitHubToken: req.user.githubToken,
+                tools: {
+                    availableTools: ["custom:*"],
+                },
+                github: {
+                    token: req.user.githubToken,
+                },
             });
         }
         let response;
@@ -530,7 +594,7 @@ app.listen(3000);
 ### Background worker
 
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 // Provided by your application's job queue and result store
 interface Job {
@@ -540,7 +604,8 @@ interface Job {
 declare function saveResult(jobId: string, content: string | undefined): Promise<void>;
 
 const client = new CopilotClient({
-    connection: RuntimeConnection.forUri(process.env.CLI_URL || "localhost:4321"),
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forTcp(process.env.CLI_HOST || "localhost", Number(process.env.CLI_PORT || "4321")),
 });
 
 // Process jobs from a queue
@@ -555,7 +620,7 @@ async function processJob(job: Job) {
     });
 
     await saveResult(job.id, response?.data.content);
-    await session.disconnect();  // Clean up after job completes
+    await session.disconnect(); // Clean up after job completes
 }
 ```
 
@@ -565,32 +630,33 @@ async function processJob(job: Job) {
 version: "3.8"
 
 services:
-  copilot-cli:
-    image: copilot-cli:latest  # See "Step 1" above for how to build this image
-    command: ["--headless", "--host", "0.0.0.0", "--port", "4321"]
-    environment:
-      - COPILOT_GITHUB_TOKEN=${COPILOT_GITHUB_TOKEN}
-      # Required for a non-loopback bind; the server refuses to start without it.
-      - COPILOT_CONNECTION_TOKEN=${COPILOT_CONNECTION_TOKEN}
-    ports:
-      - "4321:4321"
-    restart: always
-    volumes:
-      - session-data:/root/.copilot/session-state
+    copilot-cli:
+        image: copilot-cli:latest # See "Step 1" above for how to build this image
+        command: ["--headless", "--host", "0.0.0.0", "--port", "4321"]
+        environment:
+            - COPILOT_GITHUB_TOKEN=${COPILOT_GITHUB_TOKEN}
+            # Required for a non-loopback bind; the server refuses to start without it.
+            - COPILOT_CONNECTION_TOKEN=${COPILOT_CONNECTION_TOKEN}
+        ports:
+            - "4321:4321"
+        restart: always
+        volumes:
+            - session-data:/root/.copilot/session-state
 
-  api:
-    build: .
-    environment:
-      - CLI_URL=copilot-cli:4321
-      # Pass this as `connectionToken` to RuntimeConnection.forUri.
-      - COPILOT_CONNECTION_TOKEN=${COPILOT_CONNECTION_TOKEN}
-    depends_on:
-      - copilot-cli
-    ports:
-      - "3000:3000"
+    api:
+        build: .
+        environment:
+            - CLI_HOST=copilot-cli
+            - CLI_PORT=4321
+            # Pass this as `connectionToken` to RuntimeConnection.forTcp.
+            - COPILOT_CONNECTION_TOKEN=${COPILOT_CONNECTION_TOKEN}
+        depends_on:
+            - copilot-cli
+        ports:
+            - "3000:3000"
 
 volumes:
-  session-data:
+    session-data:
 ```
 
 ```mermaid
@@ -615,6 +681,7 @@ flowchart TB
 Monitor the CLI server's health:
 
 <!-- docs-validate: strict -->
+
 ```typescript
 // Periodic health check
 async function checkCLIHealth(): Promise<boolean> {
@@ -632,6 +699,7 @@ async function checkCLIHealth(): Promise<boolean> {
 Lock cleanup, creation, resume, and sends until all work completes. Share locks across processes or clients sharing storage. Failed cancellation blocks reuse, not unrelated cleanup. Call `recoverSession` with the original resume configuration after correcting the cause to reconnect, reacquire ownership, and drain.
 
 <!-- docs-validate: strict -->
+
 ```typescript
 const sessionLocks = new Map<string, Promise<void>>();
 const sessionRecoveries = new Map<string, Awaited<ReturnType<typeof client.resumeSession>>>();
@@ -639,7 +707,9 @@ const sessionRecoveries = new Map<string, Awaited<ReturnType<typeof client.resum
 async function withSessionLock<T>(sessionId: string, operation: () => Promise<T>, allowRecovery = false): Promise<T> {
     const previous = sessionLocks.get(sessionId) ?? Promise.resolve();
     let release!: () => void;
-    const current = new Promise<void>((resolve) => { release = resolve; });
+    const current = new Promise<void>((resolve) => {
+        release = resolve;
+    });
     const tail = previous.then(() => current);
     sessionLocks.set(sessionId, tail);
     await previous;
@@ -663,12 +733,16 @@ async function cancelAndDisconnect(sessionId: string, session: Awaited<ReturnTyp
 }
 
 async function recoverSession(sessionId: string, config: Parameters<typeof client.resumeSession>[1]) {
-    await withSessionLock(sessionId, async () => {
-        if (!sessionRecoveries.has(sessionId)) throw new Error(`No recovery pending for session ${sessionId}`);
-        await client.start();
-        const session = await client.resumeSession(sessionId, config);
-        await cancelAndDisconnect(sessionId, session);
-    }, true);
+    await withSessionLock(
+        sessionId,
+        async () => {
+            if (!sessionRecoveries.has(sessionId)) throw new Error(`No recovery pending for session ${sessionId}`);
+            await client.start();
+            const session = await client.resumeSession(sessionId, config);
+            await cancelAndDisconnect(sessionId, session);
+        },
+        true,
+    );
 }
 
 async function cleanupSessions(maxIdleMs: number) {
@@ -676,44 +750,51 @@ async function cleanupSessions(maxIdleMs: number) {
 
     for (const session of sessions) {
         if (Date.now() - session.modifiedTime.getTime() <= maxIdleMs) continue;
-        await withSessionLock(session.sessionId, async () => {
-            if (sessionRecoveries.has(session.sessionId)) return;
-            // Recheck freshness while requests for this session are excluded.
-            const latest = (await client.listSessions()).find((s) => s.sessionId === session.sessionId);
-            if (latest && Date.now() - latest.modifiedTime.getTime() > maxIdleMs) {
-                await client.deleteSession(session.sessionId);
-            }
-        }, true);
+        await withSessionLock(
+            session.sessionId,
+            async () => {
+                if (sessionRecoveries.has(session.sessionId)) return;
+                // Recheck freshness while requests for this session are excluded.
+                const latest = (await client.listSessions()).find((s) => s.sessionId === session.sessionId);
+                if (latest && Date.now() - latest.modifiedTime.getTime() > maxIdleMs) {
+                    await client.deleteSession(session.sessionId);
+                }
+            },
+            true,
+        );
     }
 }
 
 // Run every hour
-setInterval(() => {
-    cleanupSessions(24 * 60 * 60 * 1000).catch(console.error);
-}, 60 * 60 * 1000);
+setInterval(
+    () => {
+        cleanupSessions(24 * 60 * 60 * 1000).catch(console.error);
+    },
+    60 * 60 * 1000,
+);
 ```
 
 ## Limitations
 
-| Limitation | Details |
-|------------|---------|
-| **Single CLI server = single point of failure** | See [Scaling guide](./scaling.md) for HA patterns |
-| **No built-in auth between SDK and CLI** | Secure the network path (same host, VPC, etc.) |
-| **Session state on local disk** | Mount persistent storage for container restarts |
-| **No idle timeout by default** | Pass `--session-idle-timeout <seconds>` to the CLI server to automatically clean up inactive sessions |
+| Limitation                                      | Details                                                                                               |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Single CLI server = single point of failure** | See [Scaling guide](./scaling.md) for HA patterns                                                     |
+| **No built-in auth between SDK and CLI**        | Secure the network path (same host, VPC, etc.)                                                        |
+| **Session state on local disk**                 | Mount persistent storage for container restarts                                                       |
+| **No idle timeout by default**                  | Pass `--session-idle-timeout <seconds>` to the CLI server to automatically clean up inactive sessions |
 
 ## When to move on
 
-| Need | Next Guide |
-|------|-----------|
-| Multiple CLI servers / high availability | [Scaling & Multi-Tenancy](./scaling.md) |
-| SDK isolation for concurrent users | [Multi-Tenancy & Server Deployments](./multi-tenancy.md) |
-| GitHub account auth for users | [GitHub OAuth](./github-oauth.md) |
-| Your own model keys | [BYOK](../auth/byok.md) |
+| Need                                     | Next Guide                                               |
+| ---------------------------------------- | -------------------------------------------------------- |
+| Multiple CLI servers / high availability | [Scaling & Multi-Tenancy](./scaling.md)                  |
+| SDK isolation for concurrent users       | [Multi-Tenancy & Server Deployments](./multi-tenancy.md) |
+| GitHub account auth for users            | [GitHub OAuth](./github-oauth.md)                        |
+| Your own model keys                      | [BYOK](../auth/byok.md)                                  |
 
 ## Next steps
 
-* **[Multi-Tenancy & Server Deployments](./multi-tenancy.md)**: Configure SDK isolation for concurrent users
-* **[Scaling & Multi-Tenancy](./scaling.md)**: Handle more users, add redundancy
-* **[Session Persistence](../features/session-persistence.md)**: Resume sessions across restarts
-* **[GitHub OAuth](./github-oauth.md)**: Add user authentication
+- **[Multi-Tenancy & Server Deployments](./multi-tenancy.md)**: Configure SDK isolation for concurrent users
+- **[Scaling & Multi-Tenancy](./scaling.md)**: Handle more users, add redundancy
+- **[Session Persistence](../features/session-persistence.md)**: Resume sessions across restarts
+- **[GitHub OAuth](./github-oauth.md)**: Add user authentication

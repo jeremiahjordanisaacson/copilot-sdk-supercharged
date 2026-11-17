@@ -1,15 +1,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::rpc::{EventLogReadRequest, ModelSwitchAutoTierStatus};
-use github_copilot_sdk::session::Session;
-use github_copilot_sdk::session_events::{
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::rpc::{EventLogReadRequest, ModelSwitchAutoTierStatus};
+use copilot_sdk::session::Session;
+use copilot_sdk::session_events::{
     AutoTier, AutoTierSwitchFailureReason, SessionAutoTierSwitchFailedData, SessionEventType,
     SessionModelChangeData,
 };
-use github_copilot_sdk::{
-    CapiSessionOptions, MessageOptions, ResumeSessionConfig, SessionConfig, SessionId,
+use copilot_sdk::{
+    CapiSessionOptions, CreateSessionOptions, MessageOptions, ResumeSessionOptions, SessionId,
     SetModelOptions,
 };
 use serde_json::json;
@@ -35,23 +35,23 @@ async fn pending_auto_tier(session: &Session) -> Option<AutoTier> {
         .pending_auto_tier
 }
 
-fn auto_session_config(tier: Option<AutoTier>) -> SessionConfig {
+fn auto_session_config(tier: Option<AutoTier>) -> CreateSessionOptions {
     let capi = CapiSessionOptions::new().with_enable_web_socket_responses(false);
     let capi = match tier {
         Some(tier) => capi.with_auto_tier(tier),
         None => capi,
     };
-    SessionConfig::default()
+    CreateSessionOptions::default()
         .with_model(MODEL_ID)
-        .with_capi(capi)
-        .with_permission_handler(Arc::new(ApproveAllHandler))
-        .with_github_token(DEFAULT_TEST_TOKEN)
+        .with_github(|group| group.with_capi(capi))
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+        .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
 }
 
-fn auto_resume_config(session_id: SessionId) -> ResumeSessionConfig {
-    ResumeSessionConfig::new(session_id)
-        .with_permission_handler(Arc::new(ApproveAllHandler))
-        .with_github_token(DEFAULT_TEST_TOKEN)
+fn auto_resume_config(session_id: SessionId) -> ResumeSessionOptions {
+    ResumeSessionOptions::new(session_id)
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+        .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
 }
 
 async fn send_prompt(session: &Session, prompt: &str) {
@@ -280,11 +280,13 @@ async fn should_restore_and_override_fast_auto_tier_on_cold_resume() {
                     .resume_session(
                         auto_resume_config(fast_session_id)
                             .with_model(MODEL_ID)
-                            .with_capi(
-                                CapiSessionOptions::new()
-                                    .with_auto_tier(AutoTier::Balance)
-                                    .with_enable_web_socket_responses(false),
-                            ),
+                            .with_github(|group| {
+                                group.with_capi(
+                                    CapiSessionOptions::new()
+                                        .with_auto_tier(AutoTier::Balance)
+                                        .with_enable_web_socket_responses(false),
+                                )
+                            }),
                     )
                     .await
                     .expect("resume session with balance override");
@@ -471,13 +473,14 @@ async fn should_preserve_effective_tier_when_fast_activation_fails() {
                         include_ephemeral: Some(false),
                         max: Some(100),
                         types: Some(json!("*")),
+                        view: None,
                         wait_ms: Some(0),
                     })
                     .await
                     .expect("read event log");
                 assert!(
                     persisted.events.iter().all(|event| {
-                        event.parsed_type() != SessionEventType::SessionAutoTierSwitchFailed
+                        event.event.parsed_type() != SessionEventType::SessionAutoTierSwitchFailed
                     }),
                     "ephemeral failure event was replayed after cold resume"
                 );

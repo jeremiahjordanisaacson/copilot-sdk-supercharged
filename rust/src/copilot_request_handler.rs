@@ -1,7 +1,7 @@
 //! Connection-level interception of the model-layer HTTP and WebSocket traffic
 //! the runtime issues — for both CAPI and BYOK sessions.
 //!
-//! When [`ClientOptions::request_handler`](crate::ClientOptions::request_handler)
+//! When [`ClientModelOptions::request_handler`](crate::ClientModelOptions::request_handler)
 //! is set, the SDK registers itself as the runtime's request handler on
 //! [`Client::start`](crate::Client::start). From then on, whenever the runtime
 //! would issue a model-layer request (inference, `/models`, `/policy`, …) it

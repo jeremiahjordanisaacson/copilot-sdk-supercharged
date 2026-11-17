@@ -46,7 +46,7 @@ fn factory_options() -> (
             let created_tx = created_tx.clone();
             async move {
                 assert!(!request.cancellation_token.is_cancelled());
-                assert!(request.config.permission_handler.is_none());
+                assert!(request.config.permissions.on_request.is_none());
                 let session = Arc::new(client.create_session(request.config).await?);
                 created_tx.send(session.clone()).unwrap();
                 Ok(session)
@@ -176,7 +176,7 @@ async fn resume_rejects_superseded_retained_original() {
         let client = client.clone();
         tokio::spawn(async move {
             client
-                .resume_session(ResumeSessionConfig::new("retained".into()))
+                .resume_session(ResumeSessionOptions::new("retained".into()))
                 .await
         })
     };
@@ -277,7 +277,7 @@ async fn resume_factory_registered_before_start_retains_original_and_preserves_s
     assert_eq!(resume["params"]["sessionId"], "durable");
     assert_eq!(resume["params"]["workingDirectory"], "/workspace");
     assert_eq!(resume["params"]["continuePendingWork"], false);
-    assert_eq!(resume["params"]["disableResume"], true);
+    assert_eq!(resume["params"]["suppressResumeEvent"], true);
     peer.respond(&resume, json!({"sessionId": "durable"})).await;
     let reload = peer.request().await;
     assert_eq!(reload["method"], "session.skills.reload");
@@ -384,17 +384,18 @@ async fn factory_registered_before_start_response_retains_exact_original_once() 
         host_id,
         "handoff",
         json!({
-            "sessionId": "requested", "workingDirectory": "/workspace", "streaming": true,
-            "enableMcpApps": true, "enableConfigDiscovery": false,
-            "mcpOAuthTokenStorage": "in-memory"
+            "sessionId": "requested", "workingDirectory": "/workspace",
+            "streaming": true,
+            "enableConfigDiscovery": false,
+            "enableMcpApps": true, "mcpOAuthTokenStorage": "in-memory"
         }),
     )
     .await;
     let create = peer.created().await;
     assert_eq!(create["params"]["workingDirectory"], "/workspace");
-    assert_eq!(create["params"]["requestMcpApps"], true);
-    assert_eq!(create["params"]["requestPermission"], false);
-    assert_eq!(create["params"]["mcpOAuthTokenStorage"], "in-memory");
+    assert_eq!(create["params"]["mcp"]["enableApps"], true);
+    assert_eq!(create["params"]["permissions"]["request"], false);
+    assert_eq!(create["params"]["mcp"]["oauthTokenStorage"], "in-memory");
     assert!(create["params"].get("mcpOauthTokenStorage").is_none());
     assert_eq!(
         peer.request().await["result"],
@@ -487,7 +488,7 @@ async fn altered_post_create_setting_is_rejected_and_original_released() {
     let options = local_options()
         .with_create_session(
             |mut request: AhpSessionRequest, client: Client| async move {
-                request.config.skip_custom_instructions = None;
+                request.config.instructions.skip_custom_instructions = None;
                 Ok(Arc::new(client.create_session(request.config).await?))
             },
         )
@@ -597,7 +598,7 @@ fn host_create_refresh_custom_instructions_round_trips_without_widening_resume()
         }
         let settings = serde_json::from_value(value.clone()).unwrap();
         let config = config_from_host(&settings).unwrap();
-        assert_eq!(config.refresh_custom_instructions, refresh);
+        assert_eq!(config.instructions.refresh_custom_instructions, refresh);
         assert_eq!(config_for_host(&config).unwrap(), value);
         if refresh.is_some() {
             assert!(resume_config_from_host(&settings).is_err());
@@ -610,31 +611,37 @@ fn host_create_refresh_custom_instructions_round_trips_without_widening_resume()
 #[test]
 fn host_settings_round_trip_without_callbacks_or_losing_constraints() {
     let value = json!({
-        "sessionId": "id", "workingDirectory": "/work", "additionalDirectories": ["/extra"],
-        "configDir": "/config", "enableExperimentalMode": true,
+        "sessionId": "id", "workingDirectory": "/work", "model": "model",
+        "additionalDirectories": ["/extra"],
+        "configDir": "/config", "enableConfigDiscovery": false,
+        "enableExperimentalMode": true, "featureFlags": {"flag": true},
         "infiniteSessions": {"enabled": false, "backgroundCompactionThreshold": 0.7},
-        "streaming": true, "gitHubToken": "test", "mcpOAuthTokenStorage": "in-memory",
-        "enableConfigDiscovery": false, "featureFlags": {"flag": true},
-        "enableManagedSettings": false, "enableSessionStore": true,
-        "availableTools": ["read_file"], "excludedTools": ["shell"], "allowedModels": ["model"],
-        "systemMessage": {"mode":"append","content":"app"}, "skipCustomInstructions": true,
-        "customAgentsLocalOnly": true, "coauthorEnabled": false, "manageScheduleEnabled": false,
-        "memory": {"enabled":false}, "pluginDirectories": ["/plugins"],
-        "skillDirectories": ["/skills"], "instructionDirectories": ["/instructions"],
-        "agentDirectories": ["relative-agents"], "hookDirectories": [],
-        "enableMcpApps": true, "model":"model", "reasoningEffort":"high", "contextTier":"long_context",
+        "enableSessionStore": true, "memory": {"enabled": false},
+        "streaming": true,
+        "gitHubToken": "test", "enableManagedSettings": false,
+        "mcpOAuthTokenStorage": "in-memory", "enableMcpApps": true,
+        "availableTools": ["read_file"], "excludedTools": ["shell"], "manageScheduleEnabled": false,
+        "allowedModels": ["model"],
+        "systemMessage": {"mode":"append","content":"app"},
+        "skipCustomInstructions": true, "instructionDirectories": ["/instructions"],
+        "customAgentsLocalOnly": true, "agentDirectories": ["relative-agents"],
+        "coauthorEnabled": false,
+        "pluginDirectories": ["/plugins"],
+        "skillDirectories": ["/skills"],
+        "hookDirectories": [],
+        "reasoningEffort":"high", "contextTier":"long_context",
         "permissionMode": "allow-all"
     });
     let config = config_from_host(&serde_json::from_value(value.clone()).unwrap()).unwrap();
-    assert!(config.permission_handler.is_none());
+    assert!(config.permissions.on_request.is_none());
     assert_eq!(
-        config.permission_mode,
+        config.permissions.mode,
         Some(crate::PermissionMode::AllowAll)
     );
     assert_eq!(config.config_directory, Some(PathBuf::from("/config")));
-    assert_eq!(config.enable_experimental_mode, Some(true));
+    assert_eq!(config.experiments.enable_experimental_mode, Some(true));
     assert_eq!(
-        config.infinite_sessions.as_ref().unwrap().enabled,
+        config.state.infinite_sessions.as_ref().unwrap().enabled,
         Some(false)
     );
     assert_eq!(config_for_host(&config).unwrap(), value);
@@ -642,20 +649,20 @@ fn host_settings_round_trip_without_callbacks_or_losing_constraints() {
     resume_value["allowTranscriptRecovery"] = json!(false);
     let resume =
         resume_config_from_host(&serde_json::from_value(resume_value.clone()).unwrap()).unwrap();
-    assert!(resume.permission_handler.is_none());
+    assert!(resume.permissions.on_request.is_none());
     assert_eq!(
-        resume.permission_mode,
+        resume.permissions.mode,
         Some(crate::PermissionMode::AllowAll)
     );
     assert_eq!(resume.config_directory, Some(PathBuf::from("/config")));
-    assert_eq!(resume.enable_experimental_mode, Some(true));
+    assert_eq!(resume.experiments.enable_experimental_mode, Some(true));
     assert_eq!(
-        resume.infinite_sessions.as_ref().unwrap().enabled,
+        resume.state.infinite_sessions.as_ref().unwrap().enabled,
         Some(false)
     );
     assert_eq!(resume_config_for_host(&resume).unwrap(), resume_value);
     assert_eq!(resume.allow_transcript_recovery, Some(false));
-    let explicit_true = crate::ResumeSessionConfig::new(crate::SessionId::from("id"))
+    let explicit_true = crate::ResumeSessionOptions::new(crate::SessionId::from("id"))
         .with_allow_transcript_recovery(true);
     assert_eq!(
         resume_config_for_host(&explicit_true).unwrap()["allowTranscriptRecovery"],
@@ -671,12 +678,61 @@ fn host_settings_round_trip_without_callbacks_or_losing_constraints() {
         &json!({"a":["b"]})
     ));
 
-    let mut resume = crate::ResumeSessionConfig::new(crate::SessionId::from("id"));
-    resume.mcp_oauth_token_storage = Some("in-memory".into());
+    let mut resume = crate::ResumeSessionOptions::new(crate::SessionId::from("id"));
+    resume.mcp.oauth_token_storage = Some("in-memory".into());
     let (wire, _) = resume.into_wire().unwrap();
     let wire = serde_json::to_value(wire).unwrap();
-    assert_eq!(wire["mcpOAuthTokenStorage"], "in-memory");
+    assert_eq!(wire["mcp"]["oauthTokenStorage"], "in-memory");
     assert!(wire.get("mcpOauthTokenStorage").is_none());
+}
+
+#[test]
+fn host_routing_settings_preserve_capi_and_default_provider_presence() {
+    for default_provider in [None, Some(Value::Null), Some(json!("gateway"))] {
+        let mut settings = json!({
+            "sessionId": "routing",
+            "capi": {"enabled": false},
+            "providers": [{
+                "name": "gateway",
+                "type": "openai",
+                "baseUrl": "https://gateway.invalid",
+                "apiKeyCommand": "provider-token",
+                "transport": "http"
+            }],
+            "models": [{
+                "provider": "gateway",
+                "id": "friendly",
+                "modelId": "gpt-4o",
+                "wireModel": "deployment"
+            }]
+        });
+        if let Some(value) = default_provider {
+            settings["defaultProvider"] = value;
+        }
+        let host_settings = serde_json::from_value(settings.clone()).unwrap();
+        let create = config_from_host(&host_settings).unwrap();
+        let resume = resume_config_from_host(&host_settings).unwrap();
+        assert_eq!(config_for_host(&create).unwrap(), settings);
+        assert_eq!(resume_config_for_host(&resume).unwrap(), settings);
+        let (create, _) = create.into_wire(None).unwrap();
+        let (resume, _) = resume.into_wire().unwrap();
+        for wire in [
+            serde_json::to_value(create).unwrap(),
+            serde_json::to_value(resume).unwrap(),
+        ] {
+            assert_eq!(wire["github"]["capi"]["enabled"], false);
+            assert_eq!(
+                wire["inference"].get("defaultProvider"),
+                settings.get("defaultProvider")
+            );
+            assert!(wire.get("defaultProvider").is_none());
+            assert_eq!(wire["inference"]["providers"], settings["providers"]);
+            assert_eq!(wire["inference"]["models"], settings["models"]);
+            assert!(wire.get("providers").is_none());
+            assert!(wire.get("models").is_none());
+            assert!(wire.get("capi").is_none());
+        }
+    }
 }
 
 #[tokio::test]
@@ -733,7 +789,7 @@ async fn callback_returning_another_clients_session_is_released_not_destroyed() 
     let (other, mut other_peer) = fixture();
     let create = tokio::spawn(async move {
         other
-            .create_session(SessionConfig::default().with_session_id("foreign"))
+            .create_session(CreateSessionOptions::default().with_session_id("foreign"))
             .await
             .unwrap()
     });

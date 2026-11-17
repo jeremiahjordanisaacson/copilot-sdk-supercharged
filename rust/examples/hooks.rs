@@ -5,20 +5,20 @@
 //! for audit purposes.
 //!
 //! ```sh
-//! cargo run -p github-copilot-sdk --example hooks
+//! cargo run -p copilot-sdk --example hooks
 //! ```
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::hooks::{
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::hooks::{
     HookEvent, HookOutput, PostToolUseOutput, PreToolUseOutput, SessionEndOutput, SessionHooks,
     SessionStartOutput,
 };
-use github_copilot_sdk::types::{MessageOptions, SessionConfig};
-use github_copilot_sdk::{Client, ClientOptions};
+use copilot_sdk::types::{CreateSessionOptions, MessageOptions};
+use copilot_sdk::{Client, ClientOptions};
 
 /// Hooks implementation that logs lifecycle events to stdout.
 struct AuditHooks;
@@ -98,13 +98,13 @@ impl SessionHooks for AuditHooks {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), github_copilot_sdk::Error> {
-    let client = Client::start(ClientOptions::default()).await?;
+async fn main() -> Result<(), copilot_sdk::Error> {
+    let client = Client::start(ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)).await?;
 
     // hooks: true is set automatically when a hooks handler is provided.
-    let config = SessionConfig::default()
-        .with_permission_handler(Arc::new(ApproveAllHandler))
-        .with_hooks(Arc::new(AuditHooks));
+    let config = CreateSessionOptions::default()
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+        .with_hooks(|group| group.with_handlers(Arc::new(AuditHooks)));
     let session = client.create_session(config).await?;
 
     println!(

@@ -61,13 +61,15 @@ flowchart TB
 ```
 
 **When to use:**
-* Multi-tenant SaaS where data isolation is critical
-* Users with different auth credentials
-* Compliance requirements (SOC 2, HIPAA)
+
+- Multi-tenant SaaS where data isolation is critical
+- Users with different auth credentials
+- Compliance requirements (SOC 2, HIPAA)
 
 <!-- docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 declare function spawnCLI(port: number, token?: string): Promise<void>;
 
@@ -86,7 +88,8 @@ class CLIPool {
         await spawnCLI(port, token);
 
         const client = new CopilotClient({
-            connection: RuntimeConnection.forUri(`localhost:${port}`),
+            mode: "coding-agent",
+            runtime: RuntimeConnection.forTcp("localhost", port),
         });
 
         this.instances.set(userId, { client, port });
@@ -102,9 +105,11 @@ class CLIPool {
     }
 }
 ```
+
 <!-- /docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 // CLI pool manager — one CLI per user
 class CLIPool {
@@ -122,7 +127,8 @@ class CLIPool {
         await spawnCLI(port, token);
 
         const client = new CopilotClient({
-            connection: RuntimeConnection.forUri(`localhost:${port}`),
+            mode: "coding-agent",
+            runtime: RuntimeConnection.forTcp("localhost", port),
         });
 
         this.instances.set(userId, { client, port });
@@ -172,15 +178,17 @@ flowchart TB
 ```
 
 **When to use:**
-* Internal tools with trusted users
-* Resource-constrained environments
-* Lower isolation requirements
+
+- Internal tools with trusted users
+- Resource-constrained environments
+- Lower isolation requirements
 
 ```typescript
-import { CopilotClient, RuntimeConnection, type CopilotSession } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection, type CopilotSession } from "@microsoft/copilot-sdk";
 
 const sharedClient = new CopilotClient({
-    connection: RuntimeConnection.forUri("localhost:4321"),
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forTcp("localhost", 4321),
 });
 
 // Enforce session isolation through naming conventions
@@ -189,10 +197,7 @@ function getSessionId(userId: string, purpose: string): string {
 }
 
 // Access control: ensure users can only access their own sessions
-async function resumeSessionWithAuth(
-    sessionId: string,
-    currentUserId: string
-): Promise<CopilotSession> {
+async function resumeSessionWithAuth(sessionId: string, currentUserId: string): Promise<CopilotSession> {
     const [sessionUserId] = sessionId.split("-");
     if (sessionUserId !== currentUserId) {
         throw new Error("Access denied: session belongs to another user");
@@ -232,13 +237,15 @@ flowchart TB
 ```
 
 **When to use:**
-* Team collaboration tools
-* Shared code review sessions
-* Pair programming assistants
+
+- Team collaboration tools
+- Shared code review sessions
+- Pair programming assistants
 
 > ⚠️ **Important:** The SDK doesn't provide built-in session locking. You **must** serialize access to prevent concurrent writes to the same session.
 
 <!-- docs-validate: hidden -->
+
 ```typescript
 import { Redis } from "ioredis";
 
@@ -246,21 +253,14 @@ declare const app: {
     post(
         path: string,
         middleware: unknown,
-        handler: (
-            req: { body: { message: string } },
-            res: { json(body: unknown): void },
-        ) => Promise<void>,
+        handler: (req: { body: { message: string } }, res: { json(body: unknown): void }) => Promise<void>,
     ): void;
 };
 declare const authMiddleware: unknown;
 
 const redis = new Redis();
 
-async function withSessionLock<T>(
-    sessionId: string,
-    fn: () => Promise<T>,
-    timeoutSec = 300
-): Promise<T> {
+async function withSessionLock<T>(sessionId: string, fn: () => Promise<T>, timeoutSec = 300): Promise<T> {
     const lockKey = `session-lock:${sessionId}`;
     const lockId = crypto.randomUUID();
 
@@ -291,17 +291,15 @@ app.post("/team-chat", authMiddleware, async (req, res) => {
     res.json({ content: result?.data.content });
 });
 ```
+
 <!-- /docs-validate: hidden -->
+
 ```typescript
 import { Redis } from "ioredis";
 
 const redis = new Redis();
 
-async function withSessionLock<T>(
-    sessionId: string,
-    fn: () => Promise<T>,
-    timeoutSec = 300
-): Promise<T> {
+async function withSessionLock<T>(sessionId: string, fn: () => Promise<T>, timeoutSec = 300): Promise<T> {
     const lockKey = `session-lock:${sessionId}`;
     const lockId = crypto.randomUUID();
 
@@ -335,13 +333,13 @@ app.post("/team-chat", authMiddleware, async (req, res) => {
 
 ## Comparison of isolation patterns
 
-| | Isolated CLI Per User | Shared CLI + Session Isolation | Shared Sessions |
-|---|---|---|---|
-| **Isolation** | ✅ Complete | ⚠️ Logical | ❌ Shared |
-| **Resource usage** | High (CLI per user) | Low (one CLI) | Low (one CLI + session) |
-| **Complexity** | Medium | Low | High (locking) |
-| **Auth flexibility** | ✅ Per-user tokens | ⚠️ Service token | ⚠️ Service token |
-| **Best for** | Multi-tenant SaaS | Internal tools | Collaboration |
+|                      | Isolated CLI Per User | Shared CLI + Session Isolation | Shared Sessions         |
+| -------------------- | --------------------- | ------------------------------ | ----------------------- |
+| **Isolation**        | ✅ Complete           | ⚠️ Logical                     | ❌ Shared               |
+| **Resource usage**   | High (CLI per user)   | Low (one CLI)                  | Low (one CLI + session) |
+| **Complexity**       | Medium                | Low                            | High (locking)          |
+| **Auth flexibility** | ✅ Per-user tokens    | ⚠️ Service token               | ⚠️ Service token        |
+| **Best for**         | Multi-tenant SaaS     | Internal tools                 | Collaboration           |
 
 ## Horizontal scaling
 
@@ -376,14 +374,18 @@ flowchart TB
 **Key requirement:** Session state must be on **shared storage** so any CLI server can resume any session.
 
 <!-- docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 declare const app: {
     post(
         path: string,
         handler: (
-            req: { user: { id: string }; body: { message: string; prompt: string; sessionId: string } },
+            req: {
+                user: { id: string };
+                body: { message: string; prompt: string; sessionId: string };
+            },
             res: { json(body: unknown): void },
         ) => Promise<void>,
     ): void;
@@ -420,15 +422,11 @@ class CLILoadBalancer {
     }
 }
 
-const lb = new CLILoadBalancer([
-    "cli-1:4321",
-    "cli-2:4321",
-    "cli-3:4321",
-]);
+const lb = new CLILoadBalancer(["cli-1", "cli-2", "cli-3"]);
 
 app.post("/chat", async (req, res) => {
     const server = lb.getServerForUser(req.user.id);
-    const client = new CopilotClient({ connection: RuntimeConnection.forUri(server) });
+    const client = new CopilotClient({ mode: "coding-agent", runtime: RuntimeConnection.forTcp(server, 4321) });
 
     const session = await client.createSession({
         sessionId: `user-${req.user.id}-chat`,
@@ -439,9 +437,11 @@ app.post("/chat", async (req, res) => {
     res.json({ content: response?.data.content });
 });
 ```
+
 <!-- /docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 // Route sessions to CLI servers
 class CLILoadBalancer {
@@ -475,15 +475,11 @@ class CLILoadBalancer {
     }
 }
 
-const lb = new CLILoadBalancer([
-    "cli-1:4321",
-    "cli-2:4321",
-    "cli-3:4321",
-]);
+const lb = new CLILoadBalancer(["cli-1", "cli-2", "cli-3"]);
 
 app.post("/chat", async (req, res) => {
     const server = lb.getServerForUser(req.user.id);
-    const client = new CopilotClient({ connection: RuntimeConnection.forUri(server) });
+    const client = new CopilotClient({ mode: "coding-agent", runtime: RuntimeConnection.forTcp(server, 4321) });
 
     const session = await client.createSession({
         sessionId: `user-${req.user.id}-chat`,
@@ -544,7 +540,7 @@ flowchart TB
 **Session lifecycle management** is key to vertical scaling:
 
 ```typescript
-import type { CopilotSession } from "@github/copilot-sdk";
+import type { CopilotSession } from "@microsoft/copilot-sdk";
 
 // Limit concurrent active sessions
 class SessionManager {
@@ -613,6 +609,7 @@ flowchart LR
 For stateless API endpoints where each request is independent:
 
 <!-- docs-validate: hidden -->
+
 ```typescript
 declare const app: {
     post(
@@ -635,11 +632,13 @@ app.post("/api/analyze", async (req, res) => {
         });
         res.json({ result: response?.data.content });
     } finally {
-        await session.disconnect();  // Clean up immediately
+        await session.disconnect(); // Clean up immediately
     }
 });
 ```
+
 <!-- /docs-validate: hidden -->
+
 ```typescript
 app.post("/api/analyze", async (req, res) => {
     const session = await client.createSession({
@@ -652,7 +651,7 @@ app.post("/api/analyze", async (req, res) => {
         });
         res.json({ result: response?.data.content });
     } finally {
-        await session.disconnect();  // Clean up immediately
+        await session.disconnect(); // Clean up immediately
     }
 });
 ```
@@ -662,12 +661,16 @@ app.post("/api/analyze", async (req, res) => {
 For conversational interfaces or long-running workflows:
 
 <!-- docs-validate: hidden -->
+
 ```typescript
 declare const app: {
     post(
         path: string,
         handler: (
-            req: { user: { id: string }; body: { message: string; prompt: string; sessionId: string } },
+            req: {
+                user: { id: string };
+                body: { message: string; prompt: string; sessionId: string };
+            },
             res: { json(body: unknown): void },
         ) => Promise<void>,
     ): void;
@@ -680,9 +683,11 @@ app.post("/api/chat/start", async (req, res) => {
     const session = await client.createSession({
         sessionId,
         model: "auto",
-        infiniteSessions: {
-            enabled: true,
-            backgroundCompactionThreshold: 0.80,
+        state: {
+            infiniteSessions: {
+                enabled: true,
+                backgroundCompactionThreshold: 0.8,
+            },
         },
     });
 
@@ -703,7 +708,9 @@ app.post("/api/chat/end", async (req, res) => {
     res.json({ success: true });
 });
 ```
+
 <!-- /docs-validate: hidden -->
+
 ```typescript
 // Create a resumable session
 app.post("/api/chat/start", async (req, res) => {
@@ -712,9 +719,11 @@ app.post("/api/chat/start", async (req, res) => {
     const session = await client.createSession({
         sessionId,
         model: "auto",
-        infiniteSessions: {
-            enabled: true,
-            backgroundCompactionThreshold: 0.80,
+        state: {
+            infiniteSessions: {
+                enabled: true,
+                backgroundCompactionThreshold: 0.8,
+            },
         },
     });
 
@@ -744,55 +753,55 @@ app.post("/api/chat/end", async (req, res) => {
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: copilot-cli
+    name: copilot-cli
 spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: copilot-cli
-  template:
-    metadata:
-      labels:
-        app: copilot-cli
-    spec:
-      containers:
-        - name: copilot-cli
-          image: your-registry/copilot-cli:latest  # See backend-services.md for how to build and push this image
-          args: ["--headless", "--host", "0.0.0.0", "--port", "4321"]
-          env:
-            - name: COPILOT_GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: copilot-secrets
-                  key: github-token
-            # A non-loopback bind (--host 0.0.0.0) requires a connection token,
-            # or the server refuses to start. Clients pass the same value as
-            # `connectionToken` to RuntimeConnection.forUri (see backend-services.md).
-            - name: COPILOT_CONNECTION_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: copilot-secrets
-                  key: connection-token
-          ports:
-            - containerPort: 4321
-          volumeMounts:
-            - name: session-state
-              mountPath: /root/.copilot/session-state
-      volumes:
-        - name: session-state
-          persistentVolumeClaim:
-            claimName: copilot-sessions-pvc
+    replicas: 3
+    selector:
+        matchLabels:
+            app: copilot-cli
+    template:
+        metadata:
+            labels:
+                app: copilot-cli
+        spec:
+            containers:
+                - name: copilot-cli
+                  image: your-registry/copilot-cli:latest # See backend-services.md for how to build and push this image
+                  args: ["--headless", "--host", "0.0.0.0", "--port", "4321"]
+                  env:
+                      - name: COPILOT_GITHUB_TOKEN
+                        valueFrom:
+                            secretKeyRef:
+                                name: copilot-secrets
+                                key: github-token
+                      # A non-loopback bind (--host 0.0.0.0) requires a connection token,
+                      # or the server refuses to start. Clients pass the same value as
+                      # `connectionToken` to RuntimeConnection.forTcp (see backend-services.md).
+                      - name: COPILOT_CONNECTION_TOKEN
+                        valueFrom:
+                            secretKeyRef:
+                                name: copilot-secrets
+                                key: connection-token
+                  ports:
+                      - containerPort: 4321
+                  volumeMounts:
+                      - name: session-state
+                        mountPath: /root/.copilot/session-state
+            volumes:
+                - name: session-state
+                  persistentVolumeClaim:
+                      claimName: copilot-sessions-pvc
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: copilot-cli
+    name: copilot-cli
 spec:
-  selector:
-    app: copilot-cli
-  ports:
-    - port: 4321
-      targetPort: 4321
+    selector:
+        app: copilot-cli
+    ports:
+        - port: 4321
+          targetPort: 4321
 ```
 
 ```mermaid
@@ -821,26 +830,26 @@ flowchart TB
 
 ```yaml
 containers:
-  - name: copilot-cli
-    image: your-registry/copilot-cli:latest  # See backend-services.md for how to build and push this image
-    command: ["copilot", "--headless", "--host", "0.0.0.0", "--port", "4321"]
-    # A non-loopback bind (--host 0.0.0.0) requires COPILOT_CONNECTION_TOKEN to be
-    # set to a non-empty value, or the server refuses to start. Supply it from your
-    # secret store and pass the same value as `connectionToken` from the SDK client.
-    environmentVariables:
-      - name: COPILOT_GITHUB_TOKEN
-        secureValue: your-github-token
-      - name: COPILOT_CONNECTION_TOKEN
-        secureValue: your-connection-token
-    volumeMounts:
-      - name: session-storage
-        mountPath: /root/.copilot/session-state
+    - name: copilot-cli
+      image: your-registry/copilot-cli:latest # See backend-services.md for how to build and push this image
+      command: ["copilot", "--headless", "--host", "0.0.0.0", "--port", "4321"]
+      # A non-loopback bind (--host 0.0.0.0) requires COPILOT_CONNECTION_TOKEN to be
+      # set to a non-empty value, or the server refuses to start. Supply it from your
+      # secret store and pass the same value as `connectionToken` from the SDK client.
+      environmentVariables:
+          - name: COPILOT_GITHUB_TOKEN
+            secureValue: your-github-token
+          - name: COPILOT_CONNECTION_TOKEN
+            secureValue: your-connection-token
+      volumeMounts:
+          - name: session-storage
+            mountPath: /root/.copilot/session-state
 
 volumes:
-  - name: session-storage
-    azureFile:
-      shareName: copilot-sessions
-      storageAccountName: myaccount
+    - name: session-storage
+      azureFile:
+          shareName: copilot-sessions
+          storageAccountName: myaccount
 ```
 
 ## Production checklist
@@ -861,29 +870,29 @@ flowchart TB
     style Checklist fill:#0d1117,stroke:#3fb950,color:#c9d1d9
 ```
 
-| Concern | Recommendation |
-|---------|---------------|
-| **Session cleanup** | Run periodic cleanup to delete sessions older than your TTL |
-| **Health checks** | Ping the CLI server periodically; restart if unresponsive |
-| **Storage** | Mount persistent volumes for `~/.copilot/session-state/` |
-| **Secrets** | Use your platform's secret manager (Vault, K8s Secrets, etc.) |
-| **Monitoring** | Track active session count, response latency, error rates |
-| **Locking** | Use Redis or similar for shared session access |
-| **Shutdown** | Drain active sessions before stopping CLI servers |
+| Concern             | Recommendation                                                |
+| ------------------- | ------------------------------------------------------------- |
+| **Session cleanup** | Run periodic cleanup to delete sessions older than your TTL   |
+| **Health checks**   | Ping the CLI server periodically; restart if unresponsive     |
+| **Storage**         | Mount persistent volumes for `~/.copilot/session-state/`      |
+| **Secrets**         | Use your platform's secret manager (Vault, K8s Secrets, etc.) |
+| **Monitoring**      | Track active session count, response latency, error rates     |
+| **Locking**         | Use Redis or similar for shared session access                |
+| **Shutdown**        | Drain active sessions before stopping CLI servers             |
 
 ## Limitations
 
-| Limitation | Details |
-|------------|---------|
-| **No built-in session locking** | Implement application-level locking for concurrent access |
-| **No built-in load balancing** | Use external LB or service mesh |
-| **Session state is file-based** | Requires shared filesystem for multi-server setups |
-| **No idle timeout by default** | Pass `--session-idle-timeout <seconds>` to the CLI server to automatically clean up inactive sessions |
-| **CLI is single-process** | Scale by adding more CLI server instances, not threads |
+| Limitation                      | Details                                                                                               |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **No built-in session locking** | Implement application-level locking for concurrent access                                             |
+| **No built-in load balancing**  | Use external LB or service mesh                                                                       |
+| **Session state is file-based** | Requires shared filesystem for multi-server setups                                                    |
+| **No idle timeout by default**  | Pass `--session-idle-timeout <seconds>` to the CLI server to automatically clean up inactive sessions |
+| **CLI is single-process**       | Scale by adding more CLI server instances, not threads                                                |
 
 ## Next steps
 
-* **[Session Persistence](../features/session-persistence.md)**: Deep dive on resumable sessions
-* **[Backend Services](./backend-services.md)**: Core server-side setup
-* **[GitHub OAuth](./github-oauth.md)**: Multi-user authentication
-* **[BYOK](../auth/byok.md)**: Use your own model provider
+- **[Session Persistence](../features/session-persistence.md)**: Deep dive on resumable sessions
+- **[Backend Services](./backend-services.md)**: Core server-side setup
+- **[GitHub OAuth](./github-oauth.md)**: Multi-user authentication
+- **[BYOK](../auth/byok.md)**: Use your own model provider

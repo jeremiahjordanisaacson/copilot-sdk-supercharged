@@ -3,7 +3,7 @@ bin/
 obj/
 
 # Generated build props (contains CLI version)
-src/build/GitHub.Copilot.SDK.props
+src/build/Microsoft.Copilot.SDK.props
 
 # NuGet packages
 *.nupkg

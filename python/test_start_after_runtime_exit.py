@@ -98,12 +98,12 @@ async def test_start_after_runtime_exit(tmp_path, transport, mode, state_before_
         )
         assert external.stdout is not None
         announcement = await asyncio.to_thread(external.stdout.readline)
-        connection = RuntimeConnection.for_uri(f"127.0.0.1:{int(announcement.split()[-1])}")
+        connection = RuntimeConnection.for_tcp("127.0.0.1", int(announcement.split()[-1]))
     elif transport == "tcp":
-        connection = RuntimeConnection.for_tcp(path=sys.executable, args=("-c", *script))
+        connection = RuntimeConnection.for_spawned_tcp(path=sys.executable, args=("-c", *script))
     else:
-        connection = RuntimeConnection.for_stdio(path=sys.executable, args=("-c", *script))
-    client = CopilotClient(connection=connection)
+        connection = RuntimeConnection.for_spawned_stdio(path=sys.executable, args=("-c", *script))
+    client = CopilotClient(mode="coding-agent", runtime=connection)
     connect = AsyncMock(wraps=client._connect_to_server)
     client._connect_to_server = connect
     ping: asyncio.Task | None = None

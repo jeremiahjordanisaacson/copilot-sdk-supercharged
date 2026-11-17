@@ -3,7 +3,7 @@ package copilot
 import (
 	"fmt"
 
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 // GitHubTokenRequestReason describes why the runtime needs a GitHub token.

@@ -18,7 +18,7 @@ The `onSessionStart` hook is called when a session begins (new or resumed).
 
 <!-- docs-validate: hidden -->
 ```ts
-import type { SessionStartHookInput, HookInvocation, SessionStartHookOutput } from "@github/copilot-sdk";
+import type { SessionStartHookInput, HookInvocation, SessionStartHookOutput } from "@microsoft/copilot-sdk";
 type SessionStartHandler = (
   input: SessionStartHookInput,
   invocation: HookInvocation
@@ -68,7 +68,7 @@ SessionStartHandler = Callable[
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
 
 // Aliases let the signature below use the package's own type names.
 type (
@@ -101,7 +101,7 @@ type SessionStartHandler func(
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 public delegate Task<SessionStartHookOutput?> SessionStartHandler(
     SessionStartHookInput input,
@@ -127,7 +127,7 @@ public delegate Task<SessionStartHookOutput?> SessionStartHandler(
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 public class SessionStartSignature {
@@ -189,21 +189,23 @@ public interface SessionStartHandler {
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async (input, invocation) => {
-      console.log(`Session ${invocation.sessionId} started (${input.source})`);
-      
-      const projectInfo = await detectProjectType(input.workingDirectory);
-      
-      return {
-        additionalContext: `
+    hooks: {
+        handlers: {
+            onSessionStart: async (input, invocation) => {
+                console.log(`Session ${invocation.sessionId} started (${input.source})`);
+
+                const projectInfo = await detectProjectType(input.workingDirectory);
+
+                return {
+                    additionalContext: `
 This is a ${projectInfo.type} project.
 Main language: ${projectInfo.language}
 Package manager: ${projectInfo.packageManager}
         `.trim(),
-      };
+                };
+            },
+        },
     },
-  },
 });
 ```
 
@@ -216,6 +218,7 @@ Package manager: ${projectInfo.packageManager}
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
+
 async def create_project_session(client: CopilotClient, detect_project_type):
     async def on_session_start(input_data, invocation):
         print(f"Session {invocation['session_id']} started ({input_data['source']})")
@@ -224,13 +227,16 @@ async def create_project_session(client: CopilotClient, detect_project_type):
 
         return {
             "additionalContext": f"""
-This is a {project_info['type']} project.
-Main language: {project_info['language']}
-Package manager: {project_info['packageManager']}
+This is a {project_info["type"]} project.
+Main language: {project_info["language"]}
+Package manager: {project_info["packageManager"]}
             """.strip()
         }
 
-    return await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={"on_session_start": on_session_start})
+    return await client.create_session(
+        permissions={"on_request": PermissionHandler.approve_all},
+        hooks={"handlers": {"on_session_start": on_session_start}},
+    )
 ```
 
 </details>
@@ -239,23 +245,25 @@ Package manager: {project_info['packageManager']}
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async (input, invocation) => {
-      if (input.source === "resume") {
-        // Load previous session state
-        const previousState = await loadSessionState(invocation.sessionId);
-        
-        return {
-          additionalContext: `
+    hooks: {
+        handlers: {
+            onSessionStart: async (input, invocation) => {
+                if (input.source === "resume") {
+                    // Load previous session state
+                    const previousState = await loadSessionState(invocation.sessionId);
+
+                    return {
+                        additionalContext: `
 Session resumed. Previous context:
 - Last topic: ${previousState.lastTopic}
 - Open files: ${previousState.openFiles.join(", ")}
           `.trim(),
-        };
-      }
-      return null;
+                    };
+                }
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -263,27 +271,29 @@ Session resumed. Previous context:
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async () => {
-      const preferences = await loadUserPreferences();
-      
-      const contextParts = [];
-      
-      if (preferences.language) {
-        contextParts.push(`Preferred language: ${preferences.language}`);
-      }
-      if (preferences.codeStyle) {
-        contextParts.push(`Code style: ${preferences.codeStyle}`);
-      }
-      if (preferences.verbosity === "concise") {
-        contextParts.push("Keep responses brief and to the point.");
-      }
-      
-      return {
-        additionalContext: contextParts.join("\n"),
-      };
+    hooks: {
+        handlers: {
+            onSessionStart: async () => {
+                const preferences = await loadUserPreferences();
+
+                const contextParts = [];
+
+                if (preferences.language) {
+                    contextParts.push(`Preferred language: ${preferences.language}`);
+                }
+                if (preferences.codeStyle) {
+                    contextParts.push(`Code style: ${preferences.codeStyle}`);
+                }
+                if (preferences.verbosity === "concise") {
+                    contextParts.push("Keep responses brief and to the point.");
+                }
+
+                return {
+                    additionalContext: contextParts.join("\n"),
+                };
+            },
+        },
     },
-  },
 });
 ```
 
@@ -341,7 +351,7 @@ SessionEndHandler = Callable[
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
 
 // Aliases let the signature below use the package's own type names.
 type (
@@ -374,7 +384,7 @@ type SessionEndHandler func(
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 public delegate Task<SessionEndHookOutput?> SessionEndHandler(
     SessionEndHookInput input,
@@ -400,7 +410,7 @@ public delegate Task<SessionEndHookOutput?> SessionEndHandler(
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 public class SessionEndSignature {
@@ -476,25 +486,27 @@ public interface SessionEndHandler {
 const sessionStartTimes = new Map<string, Date>();
 
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async (input, invocation) => {
-      sessionStartTimes.set(invocation.sessionId, input.timestamp);
-      return null;
+    hooks: {
+        handlers: {
+            onSessionStart: async (input, invocation) => {
+                sessionStartTimes.set(invocation.sessionId, input.timestamp);
+                return null;
+            },
+            onSessionEnd: async (input, invocation) => {
+                const startTime = sessionStartTimes.get(invocation.sessionId);
+                const duration = startTime ? input.timestamp.getTime() - startTime.getTime() : 0;
+
+                await recordMetrics({
+                    sessionId: invocation.sessionId,
+                    duration,
+                    endReason: input.reason,
+                });
+
+                sessionStartTimes.delete(invocation.sessionId);
+                return null;
+            },
+        },
     },
-    onSessionEnd: async (input, invocation) => {
-      const startTime = sessionStartTimes.get(invocation.sessionId);
-      const duration = startTime ? input.timestamp.getTime() - startTime.getTime() : 0;
-      
-      await recordMetrics({
-        sessionId: invocation.sessionId,
-        duration,
-        endReason: input.reason,
-      });
-      
-      sessionStartTimes.delete(invocation.sessionId);
-      return null;
-    },
-  },
 });
 ```
 
@@ -507,6 +519,7 @@ const session = await client.createSession({
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
+
 async def create_instrumented_session(client: CopilotClient, record_metrics):
     session_start_times = {}
 
@@ -516,21 +529,32 @@ async def create_instrumented_session(client: CopilotClient, record_metrics):
 
     async def on_session_end(input_data, invocation):
         start_time = session_start_times.get(invocation["session_id"])
-        duration = (input_data["timestamp"] - start_time).total_seconds() * 1000 if start_time else 0
+        duration = (
+            (input_data["timestamp"] - start_time).total_seconds() * 1000
+            if start_time
+            else 0
+        )
 
-        await record_metrics({
-            "session_id": invocation["session_id"],
-            "duration": duration,
-            "end_reason": input_data["reason"],
-        })
+        await record_metrics(
+            {
+                "session_id": invocation["session_id"],
+                "duration": duration,
+                "end_reason": input_data["reason"],
+            }
+        )
 
         session_start_times.pop(invocation["session_id"], None)
         return None
 
-    return await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={
-        "on_session_start": on_session_start,
-        "on_session_end": on_session_end,
-    })
+    return await client.create_session(
+        permissions={"on_request": PermissionHandler.approve_all},
+        hooks={
+            "handlers": {
+                "on_session_start": on_session_start,
+                "on_session_end": on_session_end,
+            }
+        },
+    )
 ```
 
 </details>
@@ -541,26 +565,28 @@ async def create_instrumented_session(client: CopilotClient, record_metrics):
 const sessionResources = new Map<string, { tempFiles: string[] }>();
 
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async (input, invocation) => {
-      sessionResources.set(invocation.sessionId, { tempFiles: [] });
-      return null;
+    hooks: {
+        handlers: {
+            onSessionStart: async (input, invocation) => {
+                sessionResources.set(invocation.sessionId, { tempFiles: [] });
+                return null;
+            },
+            onSessionEnd: async (input, invocation) => {
+                const resources = sessionResources.get(invocation.sessionId);
+
+                if (resources) {
+                    // Clean up temp files
+                    for (const file of resources.tempFiles) {
+                        await fs.unlink(file).catch(() => {});
+                    }
+                    sessionResources.delete(invocation.sessionId);
+                }
+
+                console.log(`Session ${invocation.sessionId} ended: ${input.reason}`);
+                return null;
+            },
+        },
     },
-    onSessionEnd: async (input, invocation) => {
-      const resources = sessionResources.get(invocation.sessionId);
-      
-      if (resources) {
-        // Clean up temp files
-        for (const file of resources.tempFiles) {
-          await fs.unlink(file).catch(() => {});
-        }
-        sessionResources.delete(invocation.sessionId);
-      }
-      
-      console.log(`Session ${invocation.sessionId} ended: ${input.reason}`);
-      return null;
-    },
-  },
 });
 ```
 
@@ -568,19 +594,21 @@ const session = await client.createSession({
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onSessionEnd: async (input, invocation) => {
-      if (input.reason !== "error") {
-        // Save state for potential resume
-        await saveSessionState(invocation.sessionId, {
-          endTime: input.timestamp,
-          cwd: input.workingDirectory,
-          reason: input.reason,
-        });
-      }
-      return null;
+    hooks: {
+        handlers: {
+            onSessionEnd: async (input, invocation) => {
+                if (input.reason !== "error") {
+                    // Save state for potential resume
+                    await saveSessionState(invocation.sessionId, {
+                        endTime: input.timestamp,
+                        cwd: input.workingDirectory,
+                        reason: input.reason,
+                    });
+                }
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -590,38 +618,42 @@ const session = await client.createSession({
 const sessionData: Record<string, { prompts: number; tools: number; startTime: Date }> = {};
 
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async (input, invocation) => {
-      sessionData[invocation.sessionId] = { 
-        prompts: 0, 
-        tools: 0, 
-        startTime: input.timestamp 
-      };
-      return null;
-    },
-    onUserPromptSubmitted: async (_, invocation) => {
-      sessionData[invocation.sessionId].prompts++;
-      return null;
-    },
-    onPreToolUse: async (_, invocation) => {
-      sessionData[invocation.sessionId].tools++;
-      return { permissionDecision: "allow" };
-    },
-    onSessionEnd: async (input, invocation) => {
-      const data = sessionData[invocation.sessionId];
-      console.log(`
+    hooks: {
+        handlers: {
+            onSessionStart: async (input, invocation) => {
+                sessionData[invocation.sessionId] = {
+                    prompts: 0,
+                    tools: 0,
+                    startTime: input.timestamp,
+                };
+                return null;
+            },
+            onUserPromptSubmitted: async (_, invocation) => {
+                sessionData[invocation.sessionId].prompts++;
+                return null;
+            },
+            onPreToolUse: async (_, invocation) => {
+                sessionData[invocation.sessionId].tools++;
+                return { permissionDecision: "allow" };
+            },
+            onSessionEnd: async (input, invocation) => {
+                const data = sessionData[invocation.sessionId];
+                console.log(
+                    `
 Session Summary:
   ID: ${invocation.sessionId}
   Duration: ${(input.timestamp.getTime() - data.startTime.getTime()) / 1000}s
   Prompts: ${data.prompts}
   Tool calls: ${data.tools}
   End reason: ${input.reason}
-      `.trim());
-      
-      delete sessionData[invocation.sessionId];
-      return null;
+      `.trim(),
+                );
+
+                delete sessionData[invocation.sessionId];
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 

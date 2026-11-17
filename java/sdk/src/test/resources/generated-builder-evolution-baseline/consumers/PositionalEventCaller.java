@@ -1,6 +1,6 @@
 package fixture;
 
-import com.github.copilot.generated.SampleUpdatedEvent;
+import com.microsoft.copilot.generated.SampleUpdatedEvent;
 import java.util.List;
 
 public final class PositionalEventCaller {

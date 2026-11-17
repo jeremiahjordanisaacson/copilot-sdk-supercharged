@@ -22,14 +22,19 @@ pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 def _make_empty_client(ctx: E2ETestContext) -> CopilotClient:
     return CopilotClient(
-        connection=RuntimeConnection.for_stdio(path=ctx.cli_path, args=()),
-        working_directory=ctx.work_dir,
-        env=ctx.get_env(),
-        github_token=(
-            "fake-token-for-e2e-tests" if os.environ.get("GITHUB_ACTIONS") == "true" else None
-        ),
-        base_directory=ctx.home_dir,
         mode="empty",
+        runtime=RuntimeConnection.for_spawned_stdio(
+            path=ctx.cli_path,
+            args=(),
+            working_directory=ctx.work_dir,
+            env=ctx.get_env(),
+            base_directory=ctx.home_dir,
+        ),
+        github={
+            "token": "fake-token-for-e2e-tests"
+            if os.environ.get("GITHUB_ACTIONS") == "true"
+            else None
+        },
     )
 
 
@@ -74,8 +79,8 @@ class TestModeEmpty:
         try:
             await client.start()
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                available_tools=ToolSet().add_builtin(BUILTIN_TOOLS_ISOLATED),
+                permissions={"on_request": PermissionHandler.approve_all},
+                tools={"available_tools": ToolSet().add_builtin(BUILTIN_TOOLS_ISOLATED)},
             )
             try:
                 await session.send_and_wait("Say hi.", timeout=20.0)
@@ -97,8 +102,8 @@ class TestModeEmpty:
         try:
             await client.start()
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                available_tools=ToolSet().add_builtin("*"),
+                permissions={"on_request": PermissionHandler.approve_all},
+                tools={"available_tools": ToolSet().add_builtin("*")},
             )
             try:
                 await session.send_and_wait("Say hi.", timeout=20.0)
@@ -119,9 +124,11 @@ class TestModeEmpty:
         try:
             await client.start()
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                available_tools=ToolSet().add_builtin("*"),
-                excluded_tools=[f"builtin:{shell}"],
+                permissions={"on_request": PermissionHandler.approve_all},
+                tools={
+                    "available_tools": ToolSet().add_builtin("*"),
+                    "excluded_tools": [f"builtin:{shell}"],
+                },
             )
             try:
                 await session.send_and_wait("Say hi.", timeout=20.0)
@@ -142,8 +149,6 @@ class TestModeEmpty:
         try:
             await client.start()
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                available_tools=ToolSet().add_builtin(BUILTIN_TOOLS_ISOLATED),
                 system_message={
                     "mode": "customize",
                     "content": (
@@ -151,6 +156,8 @@ class TestModeEmpty:
                         "the single word ARGON in all caps and nothing else."
                     ),
                 },
+                permissions={"on_request": PermissionHandler.approve_all},
+                tools={"available_tools": ToolSet().add_builtin(BUILTIN_TOOLS_ISOLATED)},
             )
             try:
                 reply = await session.send_and_wait("Name an element.", timeout=20.0)
@@ -171,8 +178,6 @@ class TestModeEmpty:
         try:
             await client.start()
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                available_tools=ToolSet().add_builtin(BUILTIN_TOOLS_ISOLATED),
                 system_message={
                     "mode": "replace",
                     "content": (
@@ -181,6 +186,8 @@ class TestModeEmpty:
                         "and nothing else."
                     ),
                 },
+                permissions={"on_request": PermissionHandler.approve_all},
+                tools={"available_tools": ToolSet().add_builtin(BUILTIN_TOOLS_ISOLATED)},
             )
             try:
                 reply = await session.send_and_wait("Hello.", timeout=20.0)
@@ -198,8 +205,6 @@ class TestModeEmpty:
         try:
             await client.start()
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                available_tools=ToolSet().add_builtin(BUILTIN_TOOLS_ISOLATED),
                 system_message={
                     "mode": "append",
                     "content": (
@@ -207,6 +212,8 @@ class TestModeEmpty:
                         "the single word XENON in all caps and nothing else."
                     ),
                 },
+                permissions={"on_request": PermissionHandler.approve_all},
+                tools={"available_tools": ToolSet().add_builtin(BUILTIN_TOOLS_ISOLATED)},
             )
             try:
                 reply = await session.send_and_wait("Name a noble gas.", timeout=20.0)

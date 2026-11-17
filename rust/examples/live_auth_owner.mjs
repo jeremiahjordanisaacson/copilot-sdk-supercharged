@@ -224,7 +224,7 @@ async function main() {
             console.log("Server catalog: revoked request rejected before dispatch");
         } else if (values.scenario === "independent-utility") {
             sessionId = await createExampleSession(cliNative, root, {
-                gitHubToken: "ghs_synthetic_independent_utility",
+                github: { token: "ghs_synthetic_independent_utility" },
             });
             owner.dispose();
             revoked = true;
@@ -488,11 +488,11 @@ async function main() {
                     await cliNative.cliRuntimeCall(
                         "session.create",
                         JSON.stringify({
-                            gitHubToken: "ghs_synthetic_explicit_session",
+                            github: { token: "ghs_synthetic_explicit_session" },
                             workingDirectory: root,
-                            enableHostGitOperations: false,
+                            git: { enableHostGitOperations: false },
                             enableMcp: false,
-                            enableSkills: false,
+                            skills: { enabled: false },
                             enableHooks: false,
                             enableConfigDiscovery: false,
                         }),
@@ -618,9 +618,9 @@ async function verifyCredentialIsolation(cli, root, fixture) {
 async function createExampleSession(cli, root, options = {}) {
     const created = JSON.parse(await cli.cliRuntimeCall("session.create", JSON.stringify({
         workingDirectory: root,
-        enableHostGitOperations: false,
+        git: { enableHostGitOperations: false },
         enableMcp: false,
-        enableSkills: false,
+        skills: { enabled: false },
         enableHooks: false,
         enableConfigDiscovery: false,
         ...options,

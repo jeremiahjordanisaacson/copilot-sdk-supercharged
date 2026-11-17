@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use github_copilot_sdk::{
-    CustomAgentConfig, MessageOptions, NamedProviderConfig, ProviderModelConfig,
-};
+use copilot_sdk::{CustomAgentConfig, MessageOptions, NamedProviderConfig, ProviderModelConfig};
 use serde_json::Value;
 
 const CATEGORY: &str = "multi_provider_registry";
@@ -30,46 +28,55 @@ async fn should_register_multiple_providers_with_custom_agents_bound_to_their_mo
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_providers(vec![
-                                NamedProviderConfig::new("alpha", "https://alpha.example.test/v1")
+                            .with_inference(|group| {
+                                group.with_providers(vec![
+                                    NamedProviderConfig::new(
+                                        "alpha",
+                                        "https://alpha.example.test/v1",
+                                    )
                                     .with_provider_type("openai")
                                     .with_wire_api("completions")
                                     .with_api_key("alpha-secret")
                                     .with_headers(headers("alpha")),
-                                NamedProviderConfig::new("beta", "https://beta.example.test")
-                                    .with_provider_type("anthropic")
-                                    .with_bearer_token("beta-bearer")
-                                    .with_headers(headers("beta")),
-                            ])
-                            .with_models(vec![
-                                ProviderModelConfig::new("sonnet", "alpha")
-                                    .with_wire_model("byok-gpt-4o")
-                                    .with_max_prompt_tokens(111_111),
-                                ProviderModelConfig::new("haiku", "alpha")
-                                    .with_wire_model("byok-gpt-4o-mini"),
-                                ProviderModelConfig::new("opus", "beta")
-                                    .with_wire_model("byok-claude-3-opus"),
-                                ProviderModelConfig::new("haiku", "beta")
-                                    .with_wire_model("byok-claude-3-haiku"),
-                            ])
-                            .with_custom_agents([
-                                CustomAgentConfig::new("orchestrator", "Plan and delegate.")
-                                    .with_display_name("Orchestrator")
-                                    .with_description("Top-level planner.")
-                                    .with_model("alpha/sonnet"),
-                                CustomAgentConfig::new("researcher", "Research thoroughly.")
-                                    .with_display_name("Researcher")
-                                    .with_description("Deep research subagent.")
-                                    .with_model("beta/opus"),
-                                CustomAgentConfig::new("fast-helper", "Answer quickly.")
-                                    .with_display_name("Fast Helper")
-                                    .with_description("Quick subagent.")
-                                    .with_model("alpha/haiku"),
-                                CustomAgentConfig::new("summarizer", "Summarize.")
-                                    .with_display_name("Summarizer")
-                                    .with_description("Summarizing subagent.")
-                                    .with_model("beta/haiku"),
-                            ]),
+                                    NamedProviderConfig::new("beta", "https://beta.example.test")
+                                        .with_provider_type("anthropic")
+                                        .with_bearer_token("beta-bearer")
+                                        .with_headers(headers("beta")),
+                                ])
+                            })
+                            .with_inference(|group| {
+                                group.with_models(vec![
+                                    ProviderModelConfig::new("sonnet", "alpha")
+                                        .with_wire_model("byok-gpt-4o")
+                                        .with_max_prompt_tokens(111_111),
+                                    ProviderModelConfig::new("haiku", "alpha")
+                                        .with_wire_model("byok-gpt-4o-mini"),
+                                    ProviderModelConfig::new("opus", "beta")
+                                        .with_wire_model("byok-claude-3-opus"),
+                                    ProviderModelConfig::new("haiku", "beta")
+                                        .with_wire_model("byok-claude-3-haiku"),
+                                ])
+                            })
+                            .with_agents(|group| {
+                                group.with_definitions([
+                                    CustomAgentConfig::new("orchestrator", "Plan and delegate.")
+                                        .with_display_name("Orchestrator")
+                                        .with_description("Top-level planner.")
+                                        .with_model("alpha/sonnet"),
+                                    CustomAgentConfig::new("researcher", "Research thoroughly.")
+                                        .with_display_name("Researcher")
+                                        .with_description("Deep research subagent.")
+                                        .with_model("beta/opus"),
+                                    CustomAgentConfig::new("fast-helper", "Answer quickly.")
+                                        .with_display_name("Fast Helper")
+                                        .with_description("Quick subagent.")
+                                        .with_model("alpha/haiku"),
+                                    CustomAgentConfig::new("summarizer", "Summarize.")
+                                        .with_display_name("Summarizer")
+                                        .with_description("Summarizing subagent.")
+                                        .with_model("beta/haiku"),
+                                ])
+                            }),
                     )
                     .await
                     .expect("create session");
@@ -138,26 +145,30 @@ async fn assert_routing(
                 .create_session(
                     ctx.approve_all_session_config()
                         .with_model(selection_id)
-                        .with_providers(vec![
-                            NamedProviderConfig::new("alpha", proxy_url.clone())
-                                .with_provider_type("openai")
-                                .with_wire_api("completions")
-                                .with_api_key("alpha-secret")
-                                .with_headers(headers("alpha")),
-                            NamedProviderConfig::new("delta", proxy_url.clone())
-                                .with_provider_type("openai")
-                                .with_wire_api("completions")
-                                .with_api_key("delta-secret")
-                                .with_headers(headers("delta")),
-                        ])
-                        .with_models(vec![
-                            ProviderModelConfig::new("sonnet", "alpha")
-                                .with_wire_model("byok-gpt-4o"),
-                            ProviderModelConfig::new("haiku", "alpha")
-                                .with_wire_model("byok-gpt-4o-mini"),
-                            ProviderModelConfig::new("turbo", "delta")
-                                .with_wire_model("byok-gpt-4-turbo"),
-                        ]),
+                        .with_inference(|group| {
+                            group.with_providers(vec![
+                                NamedProviderConfig::new("alpha", proxy_url.clone())
+                                    .with_provider_type("openai")
+                                    .with_wire_api("completions")
+                                    .with_api_key("alpha-secret")
+                                    .with_headers(headers("alpha")),
+                                NamedProviderConfig::new("delta", proxy_url.clone())
+                                    .with_provider_type("openai")
+                                    .with_wire_api("completions")
+                                    .with_api_key("delta-secret")
+                                    .with_headers(headers("delta")),
+                            ])
+                        })
+                        .with_inference(|group| {
+                            group.with_models(vec![
+                                ProviderModelConfig::new("sonnet", "alpha")
+                                    .with_wire_model("byok-gpt-4o"),
+                                ProviderModelConfig::new("haiku", "alpha")
+                                    .with_wire_model("byok-gpt-4o-mini"),
+                                ProviderModelConfig::new("turbo", "delta")
+                                    .with_wire_model("byok-gpt-4-turbo"),
+                            ])
+                        }),
                 )
                 .await
                 .expect("create session");

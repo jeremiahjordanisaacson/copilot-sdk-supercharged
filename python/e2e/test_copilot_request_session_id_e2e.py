@@ -20,6 +20,7 @@ import pytest
 
 from copilot import CopilotRequestContext, CopilotRequestHandler
 from copilot.session import PermissionHandler
+from e2e.testharness.provider_options import byok_inference
 
 from ._copilot_request_helpers import (
     assistant_text,
@@ -79,7 +80,9 @@ class TestCopilotRequestSessionId:
         client, handler = session_id_client
         await client.start()
         baseline = len(handler.records)
-        session = await client.create_session(on_permission_request=PermissionHandler.approve_all)
+        session = await client.create_session(
+            permissions={"on_request": PermissionHandler.approve_all}
+        )
         TestCopilotRequestSessionId.capi_session_id = session.session_id
         text = ""
         try:
@@ -104,16 +107,22 @@ class TestCopilotRequestSessionId:
         await client.start()
         baseline = len(handler.records)
         session = await client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="claude-sonnet-5",
-            provider={
-                "type": "openai",
-                "wire_api": "responses",
-                "base_url": "https://byok.invalid/v1",
-                "api_key": "byok-secret",
-                "model_id": "claude-sonnet-5",
-                "wire_model": "claude-sonnet-5",
+            permissions={"on_request": PermissionHandler.approve_all},
+            inference={
+                **byok_inference(
+                    {
+                        "type": "openai",
+                        "wire_api": "responses",
+                        "base_url": "https://byok.invalid/v1",
+                        "api_key": "byok-secret",
+                        "model_id": "claude-sonnet-5",
+                        "wire_model": "claude-sonnet-5",
+                    },
+                    "claude-sonnet-5",
+                )
             },
+            github={"capi": {"enabled": False}},
         )
         byok_session_id = session.session_id
         text = ""

@@ -1,0 +1,98 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFrameworks>net8.0;net10.0;netstandard2.0</TargetFrameworks>
+        <RootNamespace>Microsoft.Copilot</RootNamespace>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <Version>0.0.0-dev</Version>
+        <PackageId Condition="'$(PackageId)' == ''">Microsoft.Copilot.SDK</PackageId>
+        <Description>SDK for programmatic control of GitHub Copilot CLI</Description>
+        <Authors>Microsoft</Authors>
+        <Company>Microsoft</Company>
+        <Copyright>© Microsoft Corporation. All rights reserved.</Copyright>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <PackageProjectUrl>https://github.com/github/copilot-sdk</PackageProjectUrl>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <RepositoryUrl>https://github.com/github/copilot-sdk</RepositoryUrl>
+        <PackageIcon>copilot.png</PackageIcon>
+        <PackageTags>github;copilot;sdk;jsonrpc;agent</PackageTags>
+        <IsAotCompatible Condition="'$(TargetFramework)' != 'netstandard2.0'">true</IsAotCompatible>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <_CopilotCliVersionTarget>_GetCopilotCliVersion</_CopilotCliVersionTarget>
+    </PropertyGroup>
+
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);MCPSDK001</NoWarn>
+  </PropertyGroup>
+
+    <PropertyGroup Condition="'$(CI)' == 'true' or '$(TF_BUILD)' == 'true'">
+        <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="../README.md" Pack="true" PackagePath="/" />
+        <None Include="../../assets/copilot.png" Pack="true" PackagePath="/" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+        <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' != '' and !$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">
+        <PackageReference Include="System.Text.Json" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+        <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
+        <PackageReference Include="System.Collections.Immutable" />
+        <PackageReference Include="System.ComponentModel.Annotations" />
+        <PackageReference Include="System.Memory" />
+        <PackageReference Include="System.Threading.Channels" />
+        <PackageReference Include="System.Threading.Tasks.Extensions" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' != 'netstandard2.0'">
+        <Compile Remove="Polyfills\**\*.cs" />
+        <Compile Include="Polyfills\IsExternalInit.cs" />
+    </ItemGroup>
+
+    <!-- Generate version props file at build time (gitignored) -->
+    <Target Name="_GetCopilotCliVersion" Condition="'$(CopilotCliVersion)' == ''">
+        <Exec Command="node -e &quot;console.log(require('./nodejs/package.json').copilotCliVersion)&quot;" WorkingDirectory="$(MSBuildThisFileDirectory)../.." ConsoleToMSBuild="true" StandardOutputImportance="low">
+            <Output TaskParameter="ConsoleOutput" PropertyName="CopilotCliVersion" />
+        </Exec>
+        <Error Condition="'$(CopilotCliVersion)' == ''" Text="CopilotCliVersion could not be read from nodejs/package.json" />
+    </Target>
+
+    <Target Name="_GenerateVersionProps" DependsOnTargets="_GetCopilotCliVersion" BeforeTargets="_GetPackageFiles">
+        <PropertyGroup>
+            <_VersionPropsContent>
+                <![CDATA[<Project>
+  <PropertyGroup>
+    <CopilotCliVersion>$(CopilotCliVersion)</CopilotCliVersion>
+  </PropertyGroup>
+</Project>]]>
+            </_VersionPropsContent>
+        </PropertyGroup>
+        <WriteLinesToFile File="$(MSBuildThisFileDirectory)build\Microsoft.Copilot.SDK.props" Lines="$(_VersionPropsContent)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+        <!-- Explicitly add props file to package content after generation.
+             NuGet imports build/<PackageId>.props, so the packed name follows the package id. -->
+        <ItemGroup>
+            <None Include="build\Microsoft.Copilot.SDK.props" Pack="true" PackagePath="build\$(PackageId).props" />
+        </ItemGroup>
+    </Target>
+
+    <!-- Include .targets file in package (props is added dynamically by _GenerateVersionProps) -->
+    <!-- Also import the .targets for local dev (same logic consumers get) -->
+    <ItemGroup>
+        <None Include="build\Microsoft.Copilot.SDK.targets" Pack="true" PackagePath="build\$(PackageId).targets" CopyToOutputDirectory="Never" />
+    </ItemGroup>
+    <Import Project="build\Microsoft.Copilot.SDK.targets" />
+
+</Project>

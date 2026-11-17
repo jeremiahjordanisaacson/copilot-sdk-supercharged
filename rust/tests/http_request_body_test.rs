@@ -15,6 +15,7 @@
 //! binary's tests on parallel threads, so the counting case is `#[serial]` and every other case
 //! `#[parallel]`: nothing else runs while it counts.
 
+use copilot_sdk::{RuntimeConnection, TcpRuntimeOptions};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -22,11 +23,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::stream;
-use github_copilot_sdk::{
+use copilot_sdk::{
     Client, ClientOptions, CopilotHttpRequest, CopilotHttpResponse, CopilotRequestContext,
-    CopilotRequestError, CopilotRequestHandler, SDK_PROTOCOL_VERSION, Transport,
+    CopilotRequestError, CopilotRequestHandler, SDK_PROTOCOL_VERSION,
 };
+use futures_util::stream;
 use http::HeaderMap;
 use serde_json::{Value, json};
 use serial_test::{parallel, serial};
@@ -200,15 +201,13 @@ impl Peer {
         let port = listener.local_addr().expect("a bound address").port();
         let work = tempfile::tempdir().expect("a temp dir");
         let (captured_tx, captured) = mpsc::unbounded_channel();
-        let options = ClientOptions::new()
-            .with_program(std::env::current_exe().expect("the test binary's path"))
-            .with_cwd(work.path())
-            .with_transport(Transport::External {
-                host: "127.0.0.1".into(),
+        let options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+            .with_runtime(RuntimeConnection::Tcp(TcpRuntimeOptions {
+                host: "127.0.0.1".to_string(),
                 port,
                 connection_token: None,
-            })
-            .with_request_handler(CaptureHandler(captured_tx));
+            }))
+            .with_models(|group| group.with_request_handler(CaptureHandler(captured_tx)));
         let (client, (read, write)) = timeout(DEADLINE, async {
             tokio::join!(Client::start(options), async {
                 let (socket, _) = listener.accept().await.expect("the SDK connects");

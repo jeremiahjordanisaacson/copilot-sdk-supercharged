@@ -185,10 +185,11 @@ Adding a classifier JAR does not change the client's connection automatically. U
 
 ```java
 CopilotClientOptions options = new CopilotClientOptions()
+    .setMode(CopilotClientMode.CODING_AGENT)
     .setConnection(RuntimeConnection.forInProcess());
 ```
 
-The `COPILOT_SDK_DEFAULT_CONNECTION=inprocess` environment variable also selects the in-process connection when no explicit or legacy subprocess options override it.
+The `COPILOT_SDK_DEFAULT_CONNECTION=inprocess` environment variable also selects the in-process connection when no explicit connection overrides it.
 
 The selected connection is strict:
 

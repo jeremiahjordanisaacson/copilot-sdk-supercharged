@@ -34,29 +34,45 @@ Set the option on session create, and set it again on resume if you want citatio
 <!-- docs-validate: strict -->
 <!-- docs-validate: hidden -->
 ```typescript
-import { approveAll } from "@github/copilot-sdk";
+import { approveAll } from "@microsoft/copilot-sdk";
 
 const session = await client.createSession({
-    onPermissionRequest: approveAll,
-    enableCitations: true,
+    permissions: {
+        onRequest: approveAll,
+    },
+    inference: {
+        enableCitations: true,
+    },
 });
 
 const resumed = await client.resumeSession(session.sessionId, {
-    onPermissionRequest: approveAll,
-    enableCitations: true,
+    permissions: {
+        onRequest: approveAll,
+    },
+    inference: {
+        enableCitations: true,
+    },
 });
 ```
 <!-- /docs-validate: hidden -->
 
 ```typescript
 const session = await client.createSession({
-    onPermissionRequest: approveAll,
-    enableCitations: true,
+    permissions: {
+        onRequest: approveAll,
+    },
+    inference: {
+        enableCitations: true,
+    },
 });
 
 const resumed = await client.resumeSession(session.sessionId, {
-    onPermissionRequest: approveAll,
-    enableCitations: true,
+    permissions: {
+        onRequest: approveAll,
+    },
+    inference: {
+        enableCitations: true,
+    },
 });
 ```
 
@@ -69,30 +85,31 @@ const resumed = await client.resumeSession(session.sessionId, {
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
+
 async def main(client: CopilotClient):
     session = await client.create_session(
-        on_permission_request=PermissionHandler.approve_all,
-        enable_citations=True,
+        permissions={"on_request": PermissionHandler.approve_all},
+        inference={"enable_citations": True},
     )
 
     resumed = await client.resume_session(
         session.session_id,
-        on_permission_request=PermissionHandler.approve_all,
-        enable_citations=True,
+        permissions={"on_request": PermissionHandler.approve_all},
+        inference={"enable_citations": True},
     )
 ```
 <!-- /docs-validate: hidden -->
 
 ```python
 session = await client.create_session(
-    on_permission_request=PermissionHandler.approve_all,
-    enable_citations=True,
+    permissions={"on_request": PermissionHandler.approve_all},
+    inference={"enable_citations": True},
 )
 
 resumed = await client.resume_session(
     session.session_id,
-    on_permission_request=PermissionHandler.approve_all,
-    enable_citations=True,
+    permissions={"on_request": PermissionHandler.approve_all},
+    inference={"enable_citations": True},
 )
 ```
 
@@ -107,21 +124,29 @@ package main
 import (
 	"context"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
 	ctx := context.Background()
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		EnableCitations:     copilot.Bool(true),
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: copilot.PermissionHandler.ApproveAll,
+		},
+		Inference: copilot.SessionInferenceOptions{
+			EnableCitations: copilot.Bool(true),
+		},
 	})
 
-	resumed, err := client.ResumeSession(ctx, session.SessionID, &copilot.ResumeSessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		EnableCitations:     copilot.Bool(true),
+	resumed, err := client.ResumeSession(ctx, session.SessionID, &copilot.ResumeSessionOptions{
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: copilot.PermissionHandler.ApproveAll,
+		},
+		Inference: copilot.SessionInferenceOptions{
+			EnableCitations: copilot.Bool(true),
+		},
 	})
 	_, _ = resumed, err
 }
@@ -129,15 +154,24 @@ func main() {
 <!-- /docs-validate: hidden -->
 
 ```go
-session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-	OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	EnableCitations:     copilot.Bool(true),
+session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	Permissions: copilot.SessionPermissionOptions{
+		OnRequest: copilot.PermissionHandler.ApproveAll,
+	},
+	Inference: copilot.SessionInferenceOptions{
+		EnableCitations: copilot.Bool(true),
+	},
 })
 
-resumed, err := client.ResumeSession(ctx, session.SessionID, &copilot.ResumeSessionConfig{
-	OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	EnableCitations:     copilot.Bool(true),
+resumed, err := client.ResumeSession(ctx, session.SessionID, &copilot.ResumeSessionOptions{
+	Permissions: copilot.SessionPermissionOptions{
+		OnRequest: copilot.PermissionHandler.ApproveAll,
+	},
+	Inference: copilot.SessionInferenceOptions{
+		EnableCitations: copilot.Bool(true),
+	},
 })
+
 ```
 
 </details>
@@ -145,17 +179,29 @@ resumed, err := client.ResumeSession(ctx, session.SessionID, &copilot.ResumeSess
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-#pragma warning disable GHCP001 // Citations are experimental.
-var session = await client.CreateSessionAsync(new SessionConfig
-{
-    OnPermissionRequest = PermissionHandler.ApproveAll,
-    EnableCitations = true,
-});
+#pragma warning disable MCPSDK001 // Citations are experimental.
 
-var resumed = await client.ResumeSessionAsync(session.SessionId, new ResumeSessionConfig
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    OnPermissionRequest = PermissionHandler.ApproveAll,
-    EnableCitations = true,
+    Permissions = new SessionPermissionOptions
+    {
+        OnRequest = PermissionHandler.ApproveAll
+    },
+    Inference = new SessionInferenceOptions
+    {
+        EnableCitations = true
+    }
+});
+var resumed = await client.ResumeSessionAsync(session.SessionId, new ResumeSessionOptions
+{
+    Permissions = new SessionPermissionOptions
+    {
+        OnRequest = PermissionHandler.ApproveAll
+    },
+    Inference = new SessionInferenceOptions
+    {
+        EnableCitations = true
+    }
 });
 ```
 
@@ -165,25 +211,33 @@ var resumed = await client.ResumeSessionAsync(session.SessionId, new ResumeSessi
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.CopilotSession;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.CopilotSession;
+import com.microsoft.copilot.rpc.*;
 
 public class EnableCitationsExample {
     public static void main(String[] args) throws Exception {
-        try (var client = new CopilotClient()) {
-            client.start().get();
+        try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
+            client
+                    .start()
+                    .get();
 
             CopilotSession session = client
-                    .createSession(new SessionConfig()
-                            .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                            .setEnableCitations(true))
+                    .createSession(new CreateSessionOptions()
+                            .setPermissions(new SessionPermissionOptions()
+                                    .setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setInference(new SessionInferenceOptions()
+                                    .setEnableCitations(true)))
                     .get();
 
             CopilotSession resumed = client
-                    .resumeSession(session.getSessionId(), new ResumeSessionConfig()
-                            .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                            .setEnableCitations(true))
+                    .resumeSession(session
+                            .getSessionId(),
+                            new ResumeSessionOptions()
+                                    .setPermissions(new SessionPermissionOptions()
+                                            .setOnRequest(PermissionHandler.APPROVE_ALL))
+                                    .setInference(new SessionInferenceOptions()
+                                            .setEnableCitations(true)))
                     .get();
         }
     }
@@ -193,15 +247,21 @@ public class EnableCitationsExample {
 
 ```java
 CopilotSession session = client
-        .createSession(new SessionConfig()
-                .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                .setEnableCitations(true))
+        .createSession(new CreateSessionOptions()
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL))
+                .setInference(new SessionInferenceOptions()
+                        .setEnableCitations(true)))
         .get();
 
 CopilotSession resumed = client
-        .resumeSession(session.getSessionId(), new ResumeSessionConfig()
-                .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                .setEnableCitations(true))
+        .resumeSession(session
+                .getSessionId(),
+                new ResumeSessionOptions()
+                        .setPermissions(new SessionPermissionOptions()
+                                .setOnRequest(PermissionHandler.APPROVE_ALL))
+                        .setInference(new SessionInferenceOptions()
+                                .setEnableCitations(true)))
         .get();
 ```
 
@@ -212,17 +272,17 @@ CopilotSession resumed = client
 ```rust
 let session = client
     .create_session(
-        SessionConfig::default()
-            .approve_all_permissions()
-            .with_enable_citations(true),
+        CreateSessionOptions::default()
+            .with_permissions(|__sdk_group| __sdk_group.approve_all_permissions())
+            .with_inference(|__sdk_group| __sdk_group.with_enable_citations(true)),
     )
     .await?;
 
 let resumed = client
     .resume_session(
-        ResumeSessionConfig::new(session.id().clone())
-            .approve_all_permissions()
-            .with_enable_citations(true),
+        ResumeSessionOptions::new(session.id().clone())
+            .with_permissions(|__sdk_group| __sdk_group.approve_all_permissions())
+            .with_inference(|__sdk_group| __sdk_group.with_enable_citations(true)),
     )
     .await?;
 ```
@@ -239,7 +299,7 @@ Citations arrive on the final `assistant.message` event, not on `assistant.messa
 <!-- docs-validate: strict -->
 <!-- docs-validate: hidden -->
 ```typescript
-import type { CopilotSession } from "@github/copilot-sdk";
+import type { CopilotSession } from "@microsoft/copilot-sdk";
 
 declare const session: CopilotSession;
 
@@ -351,7 +411,7 @@ import (
 	"fmt"
 	"unicode/utf16"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func subscribeCitations(session *copilot.Session) {
@@ -433,7 +493,7 @@ session.On(func(event copilot.SessionEvent) {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-#pragma warning disable GHCP001 // Citations are experimental.
+#pragma warning disable MCPSDK001 // Citations are experimental.
 session.On<SessionEvent>(evt =>
 {
     if (evt is not AssistantMessageEvent message || message.Data.Citations is null)
@@ -456,7 +516,7 @@ session.On<SessionEvent>(evt =>
 });
 ```
 
-The .NET `EnableCitations` option and `Citations` property raise the `GHCP001` experimental diagnostic. Suppress it with `#pragma warning disable GHCP001` or a project-level `<NoWarn>GHCP001</NoWarn>`.
+The .NET `EnableCitations` option and `Citations` property raise the `MCPSDK001` experimental diagnostic. Suppress it with `#pragma warning disable MCPSDK001` or a project-level `<NoWarn>MCPSDK001</NoWarn>`.
 
 </details>
 <details>
@@ -464,12 +524,12 @@ The .NET `EnableCitations` option and `Citations` property raise the `GHCP001` e
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.CopilotSession;
-import com.github.copilot.generated.AssistantMessageEvent;
-import com.github.copilot.generated.CitationReference;
-import com.github.copilot.generated.CitationSource;
-import com.github.copilot.generated.CitationSpan;
-import com.github.copilot.generated.Citations;
+import com.microsoft.copilot.CopilotSession;
+import com.microsoft.copilot.generated.AssistantMessageEvent;
+import com.microsoft.copilot.generated.CitationReference;
+import com.microsoft.copilot.generated.CitationSource;
+import com.microsoft.copilot.generated.CitationSpan;
+import com.microsoft.copilot.generated.Citations;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -503,11 +563,11 @@ final class CitationsExample {
 <!-- /docs-validate: hidden -->
 
 ```java
-import com.github.copilot.generated.AssistantMessageEvent;
-import com.github.copilot.generated.CitationReference;
-import com.github.copilot.generated.CitationSource;
-import com.github.copilot.generated.CitationSpan;
-import com.github.copilot.generated.Citations;
+import com.microsoft.copilot.generated.AssistantMessageEvent;
+import com.microsoft.copilot.generated.CitationReference;
+import com.microsoft.copilot.generated.CitationSource;
+import com.microsoft.copilot.generated.CitationSpan;
+import com.microsoft.copilot.generated.Citations;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -540,7 +600,7 @@ session.on(AssistantMessageEvent.class, event -> {
 <summary><strong>Rust</strong></summary>
 
 ```rust
-use github_copilot_sdk::session_events::AssistantMessageData;
+use copilot_sdk::session_events::AssistantMessageData;
 use std::collections::HashMap;
 
 let mut events = session.subscribe();
@@ -633,7 +693,7 @@ When citations are enabled and the session uses an Anthropic provider, file atta
 <!-- docs-validate: strict -->
 <!-- docs-validate: hidden -->
 ```typescript
-import type { CopilotSession } from "@github/copilot-sdk";
+import type { CopilotSession } from "@microsoft/copilot-sdk";
 
 declare const session: CopilotSession;
 declare const pdfBase64: string;

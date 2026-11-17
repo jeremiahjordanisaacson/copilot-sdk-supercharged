@@ -6,20 +6,20 @@
 //! policies before bytes are read or written.
 //!
 //! ```sh
-//! cargo run -p github-copilot-sdk --example session_fs
+//! cargo run -p copilot-sdk --example session_fs
 //! ```
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::session_fs::{
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::session_fs::{
     DirEntry, DirEntryKind, FileInfo, FsError, FsErrorKind, SessionFsConfig, SessionFsConventions,
     SessionFsProvider,
 };
-use github_copilot_sdk::types::{MessageOptions, SessionConfig};
-use github_copilot_sdk::{Client, ClientOptions};
+use copilot_sdk::types::{CreateSessionOptions, MessageOptions};
+use copilot_sdk::{Client, ClientOptions};
 use parking_lot::Mutex;
 
 #[cfg(test)]
@@ -273,22 +273,20 @@ impl SessionFsProvider for InMemoryProvider {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let provider: Arc<dyn SessionFsProvider> = Arc::new(InMemoryProvider::new());
 
-    let options = {
-        let mut opts = ClientOptions::default();
-        opts.session_fs = Some(SessionFsConfig::new(
+    let options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_session_fs(
+        SessionFsConfig::new(
             "/workspace",
             "/workspace/.copilot",
             SessionFsConventions::Posix,
-        ));
-        opts
-    };
+        ),
+    );
 
     let client = Client::start(options).await?;
     let session = client
         .create_session(
-            SessionConfig::default()
-                .with_permission_handler(Arc::new(ApproveAllHandler))
-                .with_session_fs_provider(provider),
+            CreateSessionOptions::default()
+                .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+                .with_state(|group| group.with_session_fs_provider(provider)),
         )
         .await?;
 

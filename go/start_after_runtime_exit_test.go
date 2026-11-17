@@ -146,7 +146,8 @@ func TestStartAfterRuntimeExit(t *testing.T) {
 				}
 			})
 			client := NewClient(&ClientOptions{
-				Connection: StdioConnection{
+				Mode: ModeCodingAgent,
+				Runtime: SpawnedStdioConnection{
 					Path: os.Args[0],
 					Args: []string{"-test.run=^TestStartAfterRuntimeExitHelper$", "--"},
 					Env: append(os.Environ(),

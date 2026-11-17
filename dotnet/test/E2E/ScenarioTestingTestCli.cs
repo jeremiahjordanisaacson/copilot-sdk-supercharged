@@ -2,10 +2,10 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using System.Text.Json;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 internal static class ScenarioTestingTestCli
 {
@@ -86,7 +86,7 @@ internal static class ScenarioTestingTestCli
           saveCapture();
 
           if (message.method === "connect") {
-            writeResponse(message.id, { ok: true, protocolVersion: 3, version: "scenario-client-test" });
+            writeResponse(message.id, { ok: true, protocolVersion: 4, version: "scenario-client-test" });
             return;
           }
 

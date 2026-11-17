@@ -42,7 +42,9 @@ LABELED = pytest.mark.parametrize("labeled", [True, False], ids=["person", "unla
 
 
 def _client_with_session() -> tuple[CopilotClient, CopilotSession]:
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     session = CopilotSession("session-1", Mock())
     client._sessions[session.session_id] = session
     return client, session

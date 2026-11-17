@@ -75,7 +75,7 @@ import type { FfiRuntimeHost } from "./ffiRuntimeHost.js";
 import { ensureRuntimeBundle } from "./runtimeArtifacts.js";
 import { createLocalModelJsonCodec } from "./localModelJson.js";
 import { COPILOT_CLI_VERSION } from "./cliVersion.js";
-import { createSessionFsAdapter, type SessionFsProvider } from "./sessionFsProvider.js";
+import { createSessionFsAdapter } from "./sessionFsProvider.js";
 import { createCopilotRequestAdapter } from "./copilotRequestHandler.js";
 import {
     createInstallationConfirmationAdapter,
@@ -105,19 +105,17 @@ import type {
     GitHubTokenProvider,
     GetStatusResponse,
     InternalRuntimeConnection,
-    RuntimeConnection,
     LargeToolOutputConfig,
     MCPServerConfig,
-    ModelInfo,
+    Model,
     NamedProviderConfig,
     NetworkConfig,
-    ProviderConfig,
-    ResumeSessionConfig,
+    ResumeSessionOptions,
     SectionTransformFn,
     ShellAuthenticationRequest,
     ShellAuthenticationResponse,
-    SessionConfig,
-    SessionConfigBase,
+    CreateSessionOptions,
+    SessionOptionsBase,
     SystemMessageConfig,
     SessionCapabilities,
     SessionEvent,
@@ -134,7 +132,7 @@ import type {
     TypedSessionLifecycleHandler,
     UserInputResponse,
 } from "./types.js";
-import { defaultJoinSessionPermissionHandler } from "./types.js";
+import { defaultJoinSessionPermissionHandler, RuntimeConnection } from "./types.js";
 import { getWorkflowRegistration, type WorkflowHandle } from "./workflow.js";
 
 interface ExtensionOrchestrationContributions {
@@ -145,10 +143,74 @@ interface ExtensionOrchestrationContributions {
  * Minimum protocol version this SDK can communicate with.
  * Servers reporting a version below this are rejected.
  */
-const MIN_PROTOCOL_VERSION = 3;
+const MIN_PROTOCOL_VERSION = 4;
 const RUNTIME_SHUTDOWN_TIMEOUT_MS = 10_000;
 const CLOUD_SESSION_CLEANUP_TIMEOUT_MS = 10_000;
 const AUTO_MODE_RECOVERY_CLEANUP_TIMEOUT_MS = 10_000;
+
+// host.createSession carries internal host settings, not public session RPC options.
+function groupHostSessionSettings(
+    settings: Record<string, unknown> & { sessionId?: string }
+): AhpSessionCreateRequest["config"] &
+    Pick<
+        ResumeSessionOptions,
+        "continuePendingWork" | "suppressResumeEvent" | "allowTranscriptRecovery"
+    > {
+    const paths: Record<string, readonly [string, string]> = {
+        enableExperimentalMode: ["experiments", "enableExperimentalMode"],
+        infiniteSessions: ["state", "infiniteSessions"],
+        additionalDirectories: ["filesystem", "additionalDirectories"],
+        streaming: ["events", "streaming"],
+        gitHubToken: ["github", "token"],
+        mcpOAuthTokenStorage: ["mcp", "oauthTokenStorage"],
+        featureFlags: ["experiments", "flags"],
+        enableManagedSettings: ["github", "fetchManagedSettings"],
+        excludedManagedSettings: ["policy", "excludedManagedSettings"],
+        enableSessionStore: ["state", "enableCrossSessionStore"],
+        availableTools: ["tools", "availableTools"],
+        excludedTools: ["tools", "excludedTools"],
+        allowedModels: ["policy", "allowedModels"],
+        skipCustomInstructions: ["instructions", "skipCustomInstructions"],
+        refreshCustomInstructions: ["instructions", "refreshCustomInstructions"],
+        customAgentsLocalOnly: ["agents", "localDiscoveryOnly"],
+        coauthorEnabled: ["git", "coauthorEnabled"],
+        manageScheduleEnabled: ["tools", "manageScheduleEnabled"],
+        memory: ["state", "memory"],
+        pluginDirectories: ["plugins", "directories"],
+        skillDirectories: ["skills", "directories"],
+        agentDirectories: ["agents", "directories"],
+        hookDirectories: ["hooks", "directories"],
+        instructionDirectories: ["instructions", "directories"],
+        enableMcpApps: ["mcp", "enableApps"],
+        reasoningEffort: ["inference", "reasoningEffort"],
+        allowMultipleToolCalls: ["inference", "allowMultipleToolCalls"],
+        contextTier: ["inference", "contextTier"],
+        providers: ["inference", "providers"],
+        models: ["inference", "models"],
+        defaultProvider: ["inference", "defaultProvider"],
+        capi: ["github", "capi"],
+        autopilot: ["execution", "autopilot"],
+        sessionLimits: ["execution", "limits"],
+        permissionMode: ["permissions", "mode"],
+    };
+    const root: Record<string, unknown> = {};
+    const groups: Record<string, Record<string, unknown>> = {};
+    for (const [name, value] of Object.entries(settings)) {
+        const path = Object.hasOwn(paths, name) ? paths[name] : undefined;
+        if (path) {
+            const [group, field] = path;
+            (groups[group] ??= {})[field] = value;
+        } else {
+            root[name === "configDir" ? "configDirectory" : name] = value;
+        }
+    }
+    for (const group of Object.keys(groups)) {
+        if (Object.hasOwn(root, group)) {
+            throw new Error("AHP host settings must not mix flat and grouped options");
+        }
+    }
+    return { ...root, ...groups };
+}
 
 function sessionIdsOverlap(left: string, right: string): boolean {
     if (left === right) return true;
@@ -450,49 +512,27 @@ async function authenticateClientBasic(
     return credentials ? { username: credentials.username, password: credentials.password } : {};
 }
 
-/** Implicit provider name for the singular, whole-session {@link ProviderConfig}. */
-const DEFAULT_PROVIDER_NAME = "default";
-
-/** Wire-safe singular provider config carrying the `hasBearerTokenProvider` flag. */
-type WireProviderConfig = Omit<ProviderConfig, "bearerTokenProvider"> & {
-    hasBearerTokenProvider?: boolean;
-};
-
 /** Wire-safe named provider config carrying the `hasBearerTokenProvider` flag. */
 type WireNamedProviderConfig = Omit<NamedProviderConfig, "bearerTokenProvider"> & {
     hasBearerTokenProvider?: boolean;
 };
 
 /**
- * Strips the non-serializable {@link BearerTokenProvider} callbacks from the singular
- * and named provider configs before they cross the RPC boundary, replacing each
+ * Strips the non-serializable {@link BearerTokenProvider} callbacks from named
+ * provider configs before they cross the RPC boundary, replacing each
  * with a `hasBearerTokenProvider: true` wire flag. The callback closes over its
  * own token scope/audience, so nothing scope-related crosses the wire — the
  * runtime only forwards the provider name back when it needs a token.
  * Returns wire-safe provider configs alongside a map of provider name → callback
  * for session-side registration.
  */
-function extractBearerTokenProviders(
-    provider: ProviderConfig | undefined,
-    providers: NamedProviderConfig[] | undefined
-): {
-    wireProvider: WireProviderConfig | undefined;
+function extractBearerTokenProviders(providers: readonly NamedProviderConfig[] | undefined): {
     wireProviders: WireNamedProviderConfig[] | undefined;
     callbacks: Map<string, BearerTokenProvider>;
 } {
     const callbacks = new Map<string, BearerTokenProvider>();
 
-    let wireProvider: WireProviderConfig | undefined = provider;
-    if (provider?.bearerTokenProvider) {
-        const { bearerTokenProvider, ...rest } = provider;
-        callbacks.set(DEFAULT_PROVIDER_NAME, bearerTokenProvider);
-        wireProvider = {
-            ...rest,
-            hasBearerTokenProvider: true,
-        };
-    }
-
-    let wireProviders: WireNamedProviderConfig[] | undefined = providers;
+    let wireProviders: WireNamedProviderConfig[] | undefined = providers && [...providers];
     if (providers?.some((p) => p.bearerTokenProvider)) {
         wireProviders = providers.map((p) => {
             if (!p.bearerTokenProvider) return p;
@@ -505,7 +545,7 @@ function extractBearerTokenProviders(
         });
     }
 
-    return { wireProvider, wireProviders, callbacks };
+    return { wireProviders, callbacks };
 }
 
 /**
@@ -549,7 +589,9 @@ function toWireMemoryConfiguration(
  * Convert custom agent configs, transforming nested mcpServers from
  * public API format (workingDirectory) to wire format (cwd).
  */
-function toWireCustomAgents(agents: CustomAgentConfig[] | undefined): unknown[] | undefined {
+function toWireCustomAgents(
+    agents: readonly CustomAgentConfig[] | undefined
+): unknown[] | undefined {
     if (!agents) return undefined;
     return agents.map((agent) => {
         if (!agent.mcpServers) return agent;
@@ -601,15 +643,17 @@ function toWireLargeOutput(
     return wire;
 }
 
-function toolFilterListToArray(value: string[] | ToolSet | undefined): string[] | undefined {
+function toolFilterListToArray(
+    value: readonly string[] | ToolSet | undefined
+): string[] | undefined {
     if (value === undefined) {
         return undefined;
     }
-    return value instanceof ToolSet ? value.toArray() : value;
+    return value instanceof ToolSet ? value.toArray() : [...value];
 }
 
 /**
- * Catches misuse of `availableTools`/`excludedTools` at the SDK boundary so
+ * Catches misuse of `tools.availableTools`/`tools.excludedTools` at the SDK boundary so
  * users get an actionable error rather than a silently-empty filter.
  *
  * The runtime treats a bare `"*"` as a literal name match for a tool whose
@@ -638,8 +682,8 @@ function validateToolFilterList(field: string, list: string[] | undefined): void
  * Function-valued actions are replaced with `{ action: "transform" }` for serialization,
  * and the original callbacks are returned in a separate map.
  */
-function extractTransformCallbacks(systemMessage: SessionConfig["systemMessage"]): {
-    wirePayload: SessionConfig["systemMessage"];
+function extractTransformCallbacks(systemMessage: CreateSessionOptions["systemMessage"]): {
+    wirePayload: CreateSessionOptions["systemMessage"];
     transformCallbacks: Map<string, SectionTransformFn> | undefined;
 } {
     if (!systemMessage || systemMessage.mode !== "customize" || !systemMessage.sections) {
@@ -698,22 +742,28 @@ async function getSpawnableBundledRuntimePath(): Promise<string> {
  * Main client for interacting with the Copilot CLI.
  *
  * The CopilotClient manages the connection to the Copilot CLI server and provides
- * methods to create and manage conversation sessions. It can either spawn a CLI
+ * methods to create and manage conversation sessions. It hosts the native runtime
+ * in-process by default, or can spawn a CLI
  * server process or connect to an existing server.
  *
  * @example
  * ```typescript
- * import { CopilotClient } from "@github/copilot-sdk";
+ * import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
  *
- * // Create a client with default options (spawns CLI server)
- * const client = new CopilotClient();
+ * // Create a client with default transport (hosts the runtime in-process)
+ * const client = new CopilotClient({ mode: "coding-agent" });
  *
  * // Or connect to an existing server
- * const client = new CopilotClient({ connection: RuntimeConnection.forUri("localhost:3000") });
+ * const client = new CopilotClient({ mode: "coding-agent", runtime: RuntimeConnection.forTcp("localhost", 3000) });
  *
  * // Create a session
- * const session = await client.createSession({ onPermissionRequest: approveAll, model: "gpt-5.4" });
- *
+ * const session = await client.createSession({
+ * permissions: {
+ * onRequest: approveAll
+ * },
+ * model: "gpt-5.4"
+ * });
+ *  *
  * // Send messages and handle responses
  * session.on((event) => {
  *   if (event.type === "assistant.message") {
@@ -721,7 +771,7 @@ async function getSpawnableBundledRuntimePath(): Promise<string> {
  *   }
  * });
  * await session.send({ prompt: "Hello!" });
- *
+ *  *
  * // Clean up
  * await session.disconnect();
  * await client.stop();
@@ -832,7 +882,7 @@ export class CopilotClient {
     private runtimePort: number | null = null;
     private actualHost: string = "localhost";
     private state: "disconnected" | "connecting" | "connected" | "error" = "disconnected";
-    /** Shared in-flight start; concurrent callers await it instead of spawning another CLI. */
+    /** Shared in-flight start; concurrent callers await the same runtime startup. */
     private startPromise: Promise<void> | null = null;
     private shutdownCanceledStartup: Promise<void> | null = null;
     private stopPromise: Promise<Error[]> | null = null;
@@ -880,7 +930,7 @@ export class CopilotClient {
             hostId: string;
             requestedSessionId?: string;
             controller: AbortController;
-            configs: Map<CopilotSession, SessionConfig>;
+            configs: Map<CopilotSession, CreateSessionOptions>;
             session?: CopilotSession;
             released: boolean;
             onReleased?: AhpHostOptions["onSessionReleased"];
@@ -910,9 +960,9 @@ export class CopilotClient {
     private forceStopping: boolean = false;
     /** Token sent in `connect`; auto-generated when the SDK spawns its own CLI in TCP mode. */
     private effectiveConnectionToken?: string;
-    private onListModels?: () => Promise<ModelInfo[]> | ModelInfo[];
+    private onListModels?: () => Promise<Model[]> | Model[];
     private onGetTraceContext?: TraceContextProvider;
-    private modelsCache: { models: ModelInfo[] | null; lock: Promise<void> } = {
+    private modelsCache: { models: Model[] | null; lock: Promise<void> } = {
         models: null,
         lock: Promise.resolve(),
     };
@@ -995,106 +1045,90 @@ export class CopilotClient {
     }
 
     /**
-     * Environment variable that overrides the transport when the caller does not set
-     * {@link CopilotClientOptions.connection}. Accepts `"inprocess"` or `"stdio"`
-     * (case-insensitive); unset preserves the default stdio transport. Any other value
-     * is an error.
-     */
-    private static readonly DEFAULT_CONNECTION_ENV_VAR = "COPILOT_SDK_DEFAULT_CONNECTION";
-
-    /**
-     * Resolves the default {@link RuntimeConnection} for the no-connection case,
-     * honoring {@link CopilotClient.DEFAULT_CONNECTION_ENV_VAR}.
-     */
-    private static resolveDefaultConnection(): RuntimeConnection {
-        const value = process.env[CopilotClient.DEFAULT_CONNECTION_ENV_VAR];
-        if (!value || value.toLowerCase() === "stdio") {
-            return { kind: "stdio" };
-        }
-        if (value.toLowerCase() === "inprocess") {
-            return { kind: "inprocess" };
-        }
-        throw new Error(
-            `Invalid ${CopilotClient.DEFAULT_CONNECTION_ENV_VAR} value '${value}'. ` +
-                `Expected 'inprocess', 'stdio', or unset.`
-        );
-    }
-
-    /**
      * Creates a new CopilotClient instance.
      *
      * @param options - Configuration options for the client
      *
      * @example
      * ```typescript
-     * // Default: spawns the bundled runtime over stdio
-     * const client = new CopilotClient();
+     * // Default: loads the native runtime in this process
+     * const client = new CopilotClient({ mode: "coding-agent" });
      *
      * // Connect to an existing runtime
      * const client = new CopilotClient({
-     *   connection: RuntimeConnection.forUri("localhost:3000"),
+     *   mode: "coding-agent",
+     *   runtime: RuntimeConnection.forTcp("localhost", 3000),
      * });
-     *
+     *      *
      * // Spawn the runtime over TCP on a chosen port
      * const client = new CopilotClient({
-     *   connection: RuntimeConnection.forTcp({ port: 9001 }),
+     *   mode: "coding-agent",
+     *   runtime: RuntimeConnection.forSpawnedTcp({ port: 9001 }),
      * });
-     *
+     *      *
      * // Use a custom runtime binary
      * const client = new CopilotClient({
-     *   connection: RuntimeConnection.forStdio({ path: "/usr/local/bin/copilot" }),
-     *   logLevel: "debug",
+     *   mode: "coding-agent",
+     *   runtime: RuntimeConnection.forSpawnedStdio({ path: "/usr/local/bin/copilot" }),
+     *   observability: { logLevel: "debug" },
      * });
      * ```
      */
-    constructor(options: CopilotClientOptions = {}) {
+    constructor(options: CopilotClientOptions) {
+        if (options?.mode !== "coding-agent" && options?.mode !== "empty") {
+            throw new Error("mode is required and must be 'coding-agent' or 'empty'");
+        }
         // Resolve the connection mode. `_internalConnection` is set by
         // `joinSession()` to opt into the parent-process stdio path; consumers
-        // should always go through the public `connection` field.
+        // should always go through the public `runtime` field.
         const conn: InternalRuntimeConnection =
-            options._internalConnection ??
-            options.connection ??
-            CopilotClient.resolveDefaultConnection();
+            options._internalConnection ?? options.runtime ?? RuntimeConnection.forDefault();
 
-        if (
-            (conn.kind === "uri" || conn.kind === "parent-process") &&
-            options.internalTestOptions !== undefined
-        ) {
-            throw new Error("internalTestOptions requires a runtime owned by this client");
+        if (conn.kind === "tcp" || conn.kind === "parent-process") {
+            const runtimeOnlyOptions = {
+                "runtime.baseDirectory": "baseDirectory" in conn ? conn.baseDirectory : undefined,
+                "github.token": options.github?.token,
+                "github.useLoggedInUser": options.github?.useLoggedInUser,
+                "observability.telemetry": options.observability?.telemetry,
+                "runtime.sessionIdleTimeoutSeconds":
+                    "sessionIdleTimeoutSeconds" in conn
+                        ? conn.sessionIdleTimeoutSeconds
+                        : undefined,
+                internalTestOptions: options.internalTestOptions,
+            };
+            const unsupported = Object.entries(runtimeOnlyOptions)
+                .filter(([, value]) => value !== undefined)
+                .map(([name]) => name);
+            if (unsupported.length > 0) {
+                throw new Error(
+                    `Cannot configure runtime startup options for an attached runtime: ${unsupported.join(", ")}`
+                );
+            }
         }
-        if (
-            conn.kind === "uri" &&
-            (options.gitHubToken !== undefined || options.useLoggedInUser !== undefined)
-        ) {
+        if ("env" in options || "workingDirectory" in options) {
             throw new Error(
-                "gitHubToken and useLoggedInUser cannot be used with RuntimeConnection.forUri (external server manages its own auth)"
+                "Configure env and workingDirectory on RuntimeConnection.forSpawnedStdio/forSpawnedTcp, " +
+                    "not on CopilotClientOptions. Set session working directories on individual sessions."
             );
         }
-        if (conn.kind === "inprocess" && options.env !== undefined) {
+        if (conn.kind === "inprocess" && "env" in conn && conn.env !== undefined) {
             throw new Error(
                 "env is not supported with RuntimeConnection.forInProcess(): environment variables " +
                     "belong to the shared host process. Use typed client/session options or a child-process transport."
             );
         }
-        if (conn.kind === "inprocess" && options.workingDirectory !== undefined) {
+        if (
+            conn.kind === "inprocess" &&
+            "workingDirectory" in conn &&
+            conn.workingDirectory !== undefined
+        ) {
             throw new Error(
                 "workingDirectory is not supported with RuntimeConnection.forInProcess(): the in-process " +
                     "transport hosts the runtime in this process, so honoring it would require mutating the " +
-                    "shared process-global cwd. Set SessionConfig.workingDirectory instead."
+                    "shared process-global cwd. Set CreateSessionOptions.workingDirectory instead."
             );
         }
-        if (
-            (conn.kind === "stdio" || conn.kind === "tcp") &&
-            conn.env !== undefined &&
-            options.env !== undefined
-        ) {
-            throw new Error(
-                "Set environment variables via either the client-level env option or the connection's env " +
-                    "(RuntimeConnection.forStdio/forTcp), not both. Prefer the connection-level env for " +
-                    "child-process transports."
-            );
-        }
-        if (conn.kind === "tcp" && conn.connectionToken !== undefined) {
+        if (conn.kind === "spawned-tcp" && conn.connectionToken !== undefined) {
             if (typeof conn.connectionToken !== "string" || conn.connectionToken.length === 0) {
                 throw new Error("connectionToken must be a non-empty string");
             }
@@ -1105,22 +1139,33 @@ export class CopilotClient {
         if (options.sessionFs) {
             this.validateSessionFsConfig(options.sessionFs);
         }
-        if (options.builtinPluginDirectories) {
-            for (const path of options.builtinPluginDirectories) {
+        if (options.plugins?.builtinDirectories) {
+            for (const path of options.plugins?.builtinDirectories) {
                 if (!isAbsolute(path)) {
                     throw new Error(
                         `builtinPluginDirectories must contain only absolute paths: ${path}`
                     );
                 }
             }
-            this.builtinPluginDirectories = [...options.builtinPluginDirectories];
+            this.builtinPluginDirectories = [...options.plugins?.builtinDirectories];
         }
 
-        // Pre-parse the URI host/port and mark as external if applicable.
-        if (conn.kind === "uri") {
-            const { host, port } = this.parseCliUrl(conn.url);
-            this.actualHost = host;
-            this.runtimePort = port;
+        if (conn.kind === "tcp") {
+            if (
+                typeof conn.host !== "string" ||
+                !conn.host ||
+                /[\s/\\?#@[\]]/.test(conn.host) ||
+                (conn.host.includes(":") && !isIPv6(conn.host))
+            ) {
+                throw new Error(
+                    "host must be a hostname or IP address without a scheme, port, or path"
+                );
+            }
+            if (!Number.isInteger(conn.port) || conn.port < 1 || conn.port > 65535) {
+                throw new Error("port must be an integer from 1 through 65535");
+            }
+            this.actualHost = conn.host;
+            this.runtimePort = conn.port;
             this.isExternalServer = true;
         } else if (conn.kind === "parent-process") {
             this.isExternalServer = true;
@@ -1128,32 +1173,29 @@ export class CopilotClient {
 
         // Effective TCP connection token: explicit, else auto-generated when we
         // spawn our own runtime over TCP, else undefined.
-        if (conn.kind === "tcp") {
+        if (conn.kind === "spawned-tcp") {
             this.effectiveConnectionToken = conn.connectionToken ?? randomUUID();
-        } else if (conn.kind === "uri") {
+        } else if (conn.kind === "tcp") {
             this.effectiveConnectionToken = conn.connectionToken;
         }
 
-        this.onListModels = options.onListModels;
-        this.onGetTraceContext = options.onGetTraceContext;
+        this.onListModels = options.models?.onListModels;
+        this.onGetTraceContext = options.observability?.onGetTraceContext;
         this.sessionFsConfig = options.sessionFs ?? null;
-        this.requestHandler = options.requestHandler ?? null;
-        this.extensionLaunchProvider = options.extensionLaunchProvider;
+        this.requestHandler = options.models?.requestHandler ?? null;
+        this.extensionLaunchProvider = options.extensions?.launchProvider;
         this.network = options.network ? snapshotNetworkConfig(options.network) : undefined;
-        this.installationConfirmationHandler = options.installationConfirmationHandler;
-        this.onGitHubTelemetry = options.onGitHubTelemetry;
+        this.installationConfirmationHandler = options.installations?.confirmationHandler;
+        this.onGitHubTelemetry = options.github?.onTelemetry;
         this.setupClientGlobalHandlers();
 
-        // Connection-level env (child-process transports only) takes precedence
-        // over the client-level env, which falls back to the ambient process env.
-        // The constructor guard above rejects setting both, so at most one of the
-        // first two is defined. Mirrors .NET/Python precedence.
-        const connEnv: Record<string, string> | undefined =
-            conn.kind === "stdio" || conn.kind === "tcp" ? conn.env : undefined;
-        const effectiveEnv = connEnv ?? options.env ?? process.env;
+        const spawnedConnection =
+            conn.kind === "spawned-stdio" || conn.kind === "spawned-tcp" ? conn : undefined;
+        const effectiveEnv = spawnedConnection?.env ?? process.env;
         this.resolvedEnv = effectiveEnv;
-        if (conn.kind === "stdio" || conn.kind === "tcp") {
-            const explicitCliPath = conn.path ?? effectiveEnv.COPILOT_CLI_PATH;
+        if (conn.kind === "spawned-stdio" || conn.kind === "spawned-tcp") {
+            const explicitCliPath =
+                conn.path ?? CopilotClient.normalizeEnvironment(effectiveEnv).COPILOT_CLI_PATH;
             if (explicitCliPath) {
                 this.resolvedCliPath = explicitCliPath;
             }
@@ -1161,7 +1203,7 @@ export class CopilotClient {
 
         // Collect extra CLI args from the connection variant (if any).
         const connArgs: readonly string[] =
-            conn.kind === "stdio" || conn.kind === "tcp" ? (conn.args ?? []) : [];
+            conn.kind === "spawned-stdio" || conn.kind === "spawned-tcp" ? (conn.args ?? []) : [];
         this.connectionExtraArgs = [...connArgs];
 
         this.options = {
@@ -1169,15 +1211,19 @@ export class CopilotClient {
             entra: options.entra
                 ? { ...options.entra, tokenProvider: options.entra.tokenProvider }
                 : undefined,
-            workingDirectory: options.workingDirectory ?? process.cwd(),
-            logLevel: options.logLevel,
-            gitHubToken: options.gitHubToken,
+            workingDirectory: spawnedConnection?.workingDirectory ?? process.cwd(),
+            logLevel: options.observability?.logLevel,
+            gitHubToken: options.github?.token,
             // Default useLoggedInUser to false when gitHubToken is provided, otherwise true.
-            useLoggedInUser: options.useLoggedInUser ?? (options.gitHubToken ? false : true),
-            telemetry: options.telemetry,
-            baseDirectory: options.baseDirectory,
-            sessionIdleTimeoutSeconds: options.sessionIdleTimeoutSeconds ?? 0,
-            mode: options.mode ?? "copilot-cli",
+            useLoggedInUser:
+                options.github?.useLoggedInUser ?? (options.github?.token ? false : true),
+            telemetry: options.observability?.telemetry,
+            baseDirectory: "baseDirectory" in conn ? conn.baseDirectory : undefined,
+            sessionIdleTimeoutSeconds:
+                ("sessionIdleTimeoutSeconds" in conn
+                    ? conn.sessionIdleTimeoutSeconds
+                    : undefined) ?? 0,
+            mode: options.mode,
             clientInfo: options.clientInfo,
         };
 
@@ -1191,7 +1237,7 @@ export class CopilotClient {
                 this.sessionFsConfig !== null ||
                 // External runtimes manage their own persistence layer; the SDK
                 // can't enforce it from here.
-                conn.kind === "uri" ||
+                conn.kind === "tcp" ||
                 conn.kind === "parent-process";
             if (!hasPersistence) {
                 throw new Error(
@@ -1204,59 +1250,6 @@ export class CopilotClient {
     }
 
     private connectionExtraArgs: string[] = [];
-
-    /**
-     * Parse CLI URL into host and port
-     * Supports raw TCP addresses: "host:port", "[ipv6]:port", "http://host:port", or just "port"
-     */
-    private parseCliUrl(url: string): { host: string; port: number } {
-        if (/^https:\/\//i.test(url)) {
-            throw new Error(
-                "HTTPS runtime connections are not supported: this transport uses plaintext TCP, not TLS"
-            );
-        }
-
-        // Remove protocol if present
-        const cleanUrl = url.replace(/^http:\/\//, "");
-
-        // Check if it's just a port number
-        if (/^\d+$/.test(cleanUrl)) {
-            return { host: "localhost", port: parseInt(cleanUrl, 10) };
-        }
-
-        // Handle the canonical bracketed IPv6 host:port form without changing
-        // the existing parser behavior for other inputs.
-        const ipv6Match = cleanUrl.match(/^\[([^\]]+)\]:(\d+)$/);
-        if (ipv6Match) {
-            const host = ipv6Match[1];
-            if (!isIPv6(host)) {
-                throw new Error(`Invalid cliUrl format: ${url}`);
-            }
-
-            const port = parseInt(ipv6Match[2], 10);
-            if (isNaN(port) || port <= 0 || port > 65535) {
-                throw new Error(`Invalid port in cliUrl: ${url}`);
-            }
-            return { host, port };
-        }
-
-        // Parse host:port format
-        const parts = cleanUrl.split(":");
-        if (parts.length !== 2) {
-            throw new Error(
-                `Invalid cliUrl format: ${url}. Expected "host:port", "[ipv6]:port", "http://host:port", or "port"`
-            );
-        }
-
-        const host = parts[0] || "localhost";
-        const port = parseInt(parts[1], 10);
-
-        if (isNaN(port) || port <= 0 || port > 65535) {
-            throw new Error(`Invalid port in cliUrl: ${url}`);
-        }
-
-        return { host, port };
-    }
 
     private validateSessionFsConfig(config: SessionFsConfig): void {
         if (!config.initialCwd) {
@@ -1272,19 +1265,16 @@ export class CopilotClient {
         }
     }
 
-    private setupSessionFs(
-        session: CopilotSession,
-        config: { createSessionFsProvider?: (session: CopilotSession) => SessionFsProvider }
-    ): void {
+    private setupSessionFs(session: CopilotSession, config: SessionOptionsBase): void {
         if (!this.sessionFsConfig) {
             return;
         }
-        if (!config.createSessionFsProvider) {
+        if (!config.state?.createSessionFsProvider) {
             throw new Error(
                 "createSessionFsProvider is required in session config when sessionFs is enabled in client options."
             );
         }
-        const provider = config.createSessionFsProvider(session);
+        const provider = config.state.createSessionFsProvider(session);
         if (this.sessionFsConfig.capabilities?.sqlite && !provider.sqlite) {
             throw new Error(
                 "SessionFsConfig declares capabilities.sqlite but the provider does not implement sqlite."
@@ -1406,12 +1396,11 @@ export class CopilotClient {
     }
 
     /**
-     * Starts the CLI server and establishes a connection.
+     * Starts the runtime host and establishes a connection.
      *
-     * If connecting to an external server (via cliUrl), only establishes the connection.
-     * Otherwise, spawns the CLI server process and then connects.
-     * If the connection was lost while a CLI server process this client spawned is
-     * still running, that process is terminated before a new one is spawned.
+     * An explicit {@link RuntimeConnection.forTcp} only establishes the connection.
+     * Otherwise, starts an in-process host or the explicitly selected subprocess.
+     * If its subprocess survives a lost connection, it is terminated before restarting.
      *
      * This method is called automatically the first time you create or resume a session.
      *
@@ -1420,7 +1409,7 @@ export class CopilotClient {
      *
      * @example
      * ```typescript
-     * const client = new CopilotClient();
+     * const client = new CopilotClient({ mode: "coding-agent" });
      * await client.start();
      * // Now ready to create sessions
      * ```
@@ -1578,16 +1567,12 @@ export class CopilotClient {
      * Stops the CLI server and closes all active sessions.
      *
      * This method performs graceful cleanup:
-     * 1. Closes all active sessions (releases in-memory resources); detach
-     *    requests share one shutdown timeout
+     * 1. Closes all active sessions, suspending unfinished work for resume;
+     *    detach requests share one shutdown timeout
      * 2. Requests runtime shutdown for SDK-owned CLI processes
      * 3. Closes the JSON-RPC connection
      * 4. Signals EOF to an owned stdio process and waits for host cleanup, then
      *    terminates the process if it does not exit within the shutdown timeout
-     *
-     * In-process connections first abort active turns without a timeout. That
-     * step is outside the detach deadline, so in-process stop() can still wait
-     * indefinitely if the runtime stops answering abort requests.
      *
      * Note: session data on disk is preserved, so sessions can be resumed later.
      * To permanently remove session data before stopping, call
@@ -1623,27 +1608,14 @@ export class CopilotClient {
     private async doStop(startup: Promise<void> | null): Promise<Error[]> {
         const errors: Error[] = [];
 
-        // Disconnect all active sessions with retry logic
         const activeSessions = [...this.sessions.values()];
-        // TEMPORARY: over the in-process (FFI) transport the runtime shares this
-        // process, so a turn still running when the runtime disposes the session
-        // can leave that session's SQLite session.db handle open — it isn't
-        // reclaimed by terminating a child process, so the file stays locked
-        // (Windows) and the session-state directory can't be removed. Abort any
-        // in-flight turn first so it cancels and releases the handle. Best-effort
-        // and idempotent: a session with no active turn is a no-op. Scoped to
-        // in-process only: stdio/tcp runtimes run in a child process that we kill
-        // on shutdown (which frees the handle), and for external servers we don't
-        // own the runtime and aborting would cancel pending work other clients
-        // may still resume. Remove once the runtime cleans up fully on shutdown.
-        if (this.connectionConfig.kind === "inprocess") {
-            await Promise.allSettled(activeSessions.map((session) => session.abort()));
-        }
-        // A hung runtime never answers session.detach, so every detach shares one
-        // deadline; past it, stop() moves on to runtime shutdown and termination.
-        let detachDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
-        const detachDeadline = new Promise<"timeout">((resolve) => {
-            detachDeadlineTimer = setTimeout(() => resolve("timeout"), RUNTIME_SHUTDOWN_TIMEOUT_MS);
+        // A hung runtime may never answer detach, so all sessions share one deadline.
+        let sessionCleanupDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
+        const sessionCleanupDeadline = new Promise<"timeout">((resolve) => {
+            sessionCleanupDeadlineTimer = setTimeout(
+                () => resolve("timeout"),
+                RUNTIME_SHUTDOWN_TIMEOUT_MS
+            );
         });
         for (const session of activeSessions) {
             const sessionId = session.sessionId;
@@ -1662,7 +1634,7 @@ export class CopilotClient {
                 try {
                     const outcome = await Promise.race([
                         session.disconnect().then(() => "disconnected" as const),
-                        detachDeadline,
+                        sessionCleanupDeadline,
                     ]);
                     if (outcome === "timeout") {
                         // The detach is still in flight, which makes another
@@ -1697,7 +1669,7 @@ export class CopilotClient {
                 );
             }
         }
-        clearTimeout(detachDeadlineTimer);
+        clearTimeout(sessionCleanupDeadlineTimer);
         for (const session of new Set([...activeSessions, ...this.sessions.values()])) {
             session._markDisconnected();
         }
@@ -1805,7 +1777,7 @@ export class CopilotClient {
         if (this.cliProcess && !this.isExternalServer) {
             const child = this.cliProcess;
             if (
-                this.connectionConfig.kind === "stdio" &&
+                this.connectionConfig.kind === "spawned-stdio" &&
                 child.stdin &&
                 child.exitCode == null &&
                 child.signalCode == null
@@ -1881,6 +1853,7 @@ export class CopilotClient {
         this.stderrBuffer = "";
         this.processExitPromise = null;
         this.disconnectHosts();
+        this.connectionClosed = false;
 
         return errors;
     }
@@ -1891,8 +1864,12 @@ export class CopilotClient {
      *
      * @example
      * ```typescript
-     * await using client = new CopilotClient();
-     * const session = await client.createSession({ onPermissionRequest: approveAll });
+     * await using client = new CopilotClient({ mode: "coding-agent" });
+     * const session = await client.createSession({
+     *     permissions: {
+     *         onRequest: approveAll,
+     *     },
+     * });
      * await session.sendAndWait("Hello");
      * // client.stop() is called automatically when the block exits.
      * ```
@@ -2009,6 +1986,7 @@ export class CopilotClient {
         this.stderrBuffer = "";
         this.processExitPromise = null;
         await this.killCliProcess();
+        this.connectionClosed = false;
     }
 
     /** Sends SIGKILL to the spawned CLI process, if it is still running, and waits for it to exit. */
@@ -2044,18 +2022,26 @@ export class CopilotClient {
      * @example
      * ```typescript
      * // Basic session
-     * const session = await client.createSession({ onPermissionRequest: approveAll });
-     *
+     * const session = await client.createSession({
+     * permissions: {
+     * onRequest: approveAll
+     * }
+     * });
+     *      *
      * // Session with model and tools
      * const session = await client.createSession({
-     *   onPermissionRequest: approveAll,
-     *   model: "gpt-5.4",
-     *   tools: [{
+     * permissions: {
+     * onRequest: approveAll
+     * },
+     * model: "gpt-5.4",
+     * tools: {
+     * definitions: [{
      *     name: "get_weather",
      *     description: "Get weather for a location",
      *     parameters: { type: "object", properties: { location: { type: "string" } } },
      *     handler: async (args) => ({ temperature: 72 })
      *   }]
+     * }
      * });
      * ```
      */
@@ -2066,15 +2052,12 @@ export class CopilotClient {
      *
      * @internal
      */
-    private resolveToolFilterOptions(config: {
-        availableTools?: string[] | ToolSet;
-        excludedTools?: string[] | ToolSet;
-    }): {
+    private resolveToolFilterOptions(config: SessionOptionsBase): {
         availableTools: string[] | undefined;
         excludedTools: string[] | undefined;
     } {
-        const availableTools = toolFilterListToArray(config.availableTools);
-        const excludedTools = toolFilterListToArray(config.excludedTools);
+        const availableTools = toolFilterListToArray(config.tools?.availableTools);
+        const excludedTools = toolFilterListToArray(config.tools?.excludedTools);
         validateToolFilterList("availableTools", availableTools);
         validateToolFilterList("excludedTools", excludedTools);
 
@@ -2093,23 +2076,84 @@ export class CopilotClient {
     }
 
     /** Mode-specific defaults spread under the caller's config (app values win). */
-    private configDefaultsForMode(): Partial<SessionConfigBase> {
+    private configDefaultsForMode(): Partial<SessionOptionsBase> {
         if (this.options.mode === "empty") {
             return {
-                enableSessionTelemetry: false,
-                mcpOAuthTokenStorage: "in-memory",
-                skipEmbeddingRetrieval: true,
-                embeddingCacheStorage: "in-memory",
-                enableOnDemandInstructionDiscovery: false,
-                enableFileHooks: false,
-                enableHostGitOperations: false,
-                enableSessionStore: false,
-                enableSkills: false,
-                memory: { enabled: false },
-                customAgentsLocalOnly: true,
+                github: {
+                    telemetryEnabled: false,
+                },
+                mcp: {
+                    oauthTokenStorage: "in-memory",
+                },
+                state: {
+                    skipEmbeddingRetrieval: true,
+                    embeddingCacheStorage: "in-memory",
+                    enableCrossSessionStore: false,
+                    memory: { enabled: false },
+                },
+                instructions: {
+                    onDemandDiscovery: false,
+                },
+                hooks: {
+                    enableRepositoryHooks: false,
+                },
+                git: {
+                    enableHostGitOperations: false,
+                },
+                skills: {
+                    enabled: false,
+                },
+                agents: {
+                    localDiscoveryOnly: true,
+                },
             };
         }
         return {};
+    }
+
+    private applyModeDefaults<T extends SessionOptionsBase>(config: T): T {
+        const defaults = this.configDefaultsForMode();
+        return {
+            ...config,
+            inference: { ...config.inference },
+            filesystem: { ...config.filesystem },
+            tools: { ...config.tools },
+            interaction: { ...config.interaction },
+            experiments: { ...config.experiments },
+            permissions: { ...config.permissions },
+            events: { ...config.events },
+            plugins: { ...config.plugins },
+            execution: { ...config.execution },
+            policy: { ...config.policy },
+            canvases: { ...config.canvases },
+            extensions: { ...config.extensions },
+            github: { ...defaults.github, ...config.github },
+            mcp: { ...defaults.mcp, ...config.mcp },
+            state: { ...defaults.state, ...config.state },
+            instructions: { ...defaults.instructions, ...config.instructions },
+            hooks: { ...defaults.hooks, ...config.hooks },
+            git: { ...defaults.git, ...config.git },
+            skills: { ...defaults.skills, ...config.skills },
+            agents: {
+                ...defaults.agents,
+                ...config.agents,
+                localDiscoveryOnly:
+                    config.agents?.localDiscoveryOnly ?? defaults.agents?.localDiscoveryOnly,
+            },
+            systemMessage: this.getSystemMessageConfigForMode(config.systemMessage),
+        };
+    }
+
+    private validateSessionCredentials(config: SessionOptionsBase): void {
+        const { token, tokenProvider } = config.github ?? {};
+        if (token !== undefined && tokenProvider !== undefined) {
+            throw new Error("github.token and github.tokenProvider are mutually exclusive");
+        }
+        if (config.inference && "provider" in config.inference) {
+            throw new Error(
+                "inference.provider is no longer supported; use inference.providers and inference.models"
+            );
+        }
     }
 
     /** Mode-specific default for enableExperimentalMode. */
@@ -2166,33 +2210,39 @@ export class CopilotClient {
      * Mode-specific options applied via session.options.update after create/resume.
      *
      * In empty mode, defaults the four overridable feature flags to safe values
-     * (caller values from `config` win). `installedPlugins=[]` is unconditional
-     * in empty mode. `includedBuiltinSkills` defaults to `[]`, but callers can
+     * (caller values from `config` win). `plugins.installed=[]` is unconditional
+     * in empty mode. `skills.includedBuiltinSkills` defaults to `[]`, but callers can
      * explicitly allow selected runtime-bundled skills.
      */
     private async updateSessionOptionsForMode(
         session: CopilotSession,
-        config: SessionConfigBase
+        config: SessionOptionsBase
     ): Promise<void> {
         const patch: SessionUpdateOptionsParams = {};
         if (this.options.mode === "empty") {
-            patch.skipCustomInstructions = config.skipCustomInstructions ?? true;
-            patch.customAgentsLocalOnly = config.customAgentsLocalOnly ?? true;
-            patch.coauthorEnabled = config.coauthorEnabled ?? false;
-            patch.manageScheduleEnabled = config.manageScheduleEnabled ?? false;
-            patch.installedPlugins = [];
-            patch.includedBuiltinSkills = config.includedBuiltinSkills ?? [];
+            patch.instructions = {
+                skipCustomInstructions: config.instructions?.skipCustomInstructions ?? true,
+            };
+            patch.agents = { localDiscoveryOnly: config.agents?.localDiscoveryOnly ?? true };
+            patch.git = { coauthorEnabled: config.git?.coauthorEnabled ?? false };
+            patch.tools = { manageScheduleEnabled: config.tools?.manageScheduleEnabled ?? false };
+            patch.plugins = { installed: [] };
+            patch.skills = {
+                includedBuiltinSkills: [...(config.skills?.includedBuiltinSkills ?? [])],
+            };
         } else {
-            if (config.skipCustomInstructions !== undefined)
-                patch.skipCustomInstructions = config.skipCustomInstructions;
-            if (config.customAgentsLocalOnly !== undefined)
-                patch.customAgentsLocalOnly = config.customAgentsLocalOnly;
-            if (config.coauthorEnabled !== undefined)
-                patch.coauthorEnabled = config.coauthorEnabled;
-            if (config.manageScheduleEnabled !== undefined)
-                patch.manageScheduleEnabled = config.manageScheduleEnabled;
-            if (config.includedBuiltinSkills !== undefined)
-                patch.includedBuiltinSkills = config.includedBuiltinSkills;
+            if (config.instructions?.skipCustomInstructions !== undefined)
+                patch.instructions = {
+                    skipCustomInstructions: config.instructions.skipCustomInstructions,
+                };
+            if (config.agents?.localDiscoveryOnly !== undefined)
+                patch.agents = { localDiscoveryOnly: config.agents.localDiscoveryOnly };
+            if (config.git?.coauthorEnabled !== undefined)
+                patch.git = { coauthorEnabled: config.git.coauthorEnabled };
+            if (config.tools?.manageScheduleEnabled !== undefined)
+                patch.tools = { manageScheduleEnabled: config.tools.manageScheduleEnabled };
+            if (config.skills?.includedBuiltinSkills !== undefined)
+                patch.skills = { includedBuiltinSkills: [...config.skills.includedBuiltinSkills] };
         }
         if (Object.keys(patch).length === 0) {
             return;
@@ -2213,17 +2263,18 @@ export class CopilotClient {
         }
     }
 
-    async createSession(config: SessionConfig): Promise<CopilotSession> {
-        if (config.autoModeRecovery && typeof config.onAutoModeSwitchRequest !== "function") {
+    async createSession(config: CreateSessionOptions): Promise<CopilotSession> {
+        if (
+            config.interaction?.autoModeRecovery &&
+            typeof config.interaction?.onAutoModeSwitchRequest !== "function"
+        ) {
             throw new Error("autoModeRecovery requires onAutoModeSwitchRequest");
         }
-        if (config.gitHubToken !== undefined && config.gitHubTokenProvider !== undefined) {
-            throw new Error("gitHubToken and gitHubTokenProvider are mutually exclusive");
-        }
-        if (config.cloud != null && config.skillProvider) {
+        this.validateSessionCredentials(config);
+        if (config.cloud != null && config.skills?.provider) {
             throw new Error("Skill providers are not supported for cloud sessions.");
         }
-        const storeMemory = requestedMemoryStore(config.memory);
+        const storeMemory = requestedMemoryStore(config.state?.memory);
         if (config.cloud != null && storeMemory) {
             throw new Error("Memory stores are not supported for cloud sessions.");
         }
@@ -2334,17 +2385,14 @@ export class CopilotClient {
     }
 
     private async createSessionInternal(
-        config: SessionConfig,
+        config: CreateSessionOptions,
         signal: AbortSignal
     ): Promise<CopilotSession> {
         signal.throwIfAborted();
         const connection = this.connection!;
-        const storeMemory = requestedMemoryStore(config.memory);
+        const storeMemory = requestedMemoryStore(config.state?.memory);
 
-        const modeDefaults = this.configDefaultsForMode();
-        config = { ...modeDefaults, ...config };
-        config.customAgentsLocalOnly ??= modeDefaults.customAgentsLocalOnly;
-        config.systemMessage = this.getSystemMessageConfigForMode(config.systemMessage);
+        config = this.applyModeDefaults(config);
 
         // For cloud sessions, let the CLI/server assign the session id and
         // register the session lazily once the response arrives. For non-cloud
@@ -2358,18 +2406,15 @@ export class CopilotClient {
         const localSessionId = useServerGeneratedId ? undefined : (callerSessionId ?? randomUUID());
         const toolFilterOptions = this.resolveToolFilterOptions(config);
         const gitHubTokenProviderRegistrationId = this.registerGitHubTokenProvider(
-            config.gitHubTokenProvider,
+            config.github?.tokenProvider,
             localSessionId
         );
 
         // Strip non-serializable bearerTokenProvider callbacks from provider configs,
         // replacing them with a wire flag; keep the callbacks for session-side
         // registration so the runtime can call back to acquire tokens.
-        const {
-            wireProvider: bearerWireProvider,
-            wireProviders: bearerWireProviders,
-            callbacks: bearerTokenCallbacks,
-        } = extractBearerTokenProviders(config.provider, config.providers);
+        const { wireProviders: bearerWireProviders, callbacks: bearerTokenCallbacks } =
+            extractBearerTokenProviders(config.inference?.providers);
 
         // Extract transform callbacks from system message config before serialization.
         const { wirePayload: wireSystemMessage, transformCallbacks } = extractTransformCallbacks(
@@ -2381,48 +2426,51 @@ export class CopilotClient {
         // the sessions map.
         const initializeSession = (sessionId: string): CopilotSession => {
             const s = new CopilotSession(sessionId, connection, undefined, this.onGetTraceContext, {
-                mcpAuthHandler: config.onMcpAuthRequest,
+                mcpAuthHandler: config.mcp?.onAuthRequest,
                 managedSettingsEnabled:
-                    config.enableManagedSettings === true || config.managedSettings !== undefined,
+                    config.github?.fetchManagedSettings === true ||
+                    config.policy?.managedSettings !== undefined,
                 onDisconnected:
                     gitHubTokenProviderRegistrationId === undefined
                         ? undefined
                         : () => this.githubTokenProviders.delete(gitHubTokenProviderRegistrationId),
             });
-            s.registerTools(config.tools);
-            s.registerCanvases(config.canvases);
-            s.registerCommands(config.commands);
+            s.registerTools(config.tools?.definitions);
+            s.registerCanvases(config.canvases?.definitions);
+            s.registerCommands(config.interaction?.commands);
             if (bearerTokenCallbacks.size > 0) {
                 s.registerBearerTokenProviders(bearerTokenCallbacks);
             }
-            s.registerPermissionHandler(config.onPermissionRequest);
-            if (config.onUserInputRequest) {
-                s.registerUserInputHandler(config.onUserInputRequest);
+            s.registerPermissionHandler(config.permissions?.onRequest);
+            if (config.interaction?.onUserInputRequest) {
+                s.registerUserInputHandler(config.interaction?.onUserInputRequest);
             }
-            if (config.onShellAuthenticationRequest) {
-                s.registerShellAuthenticationHandler(config.onShellAuthenticationRequest);
+            if (config.interaction?.onShellAuthenticationRequest) {
+                s.registerShellAuthenticationHandler(
+                    config.interaction?.onShellAuthenticationRequest
+                );
             }
-            if (config.onElicitationRequest) {
-                s.registerElicitationHandler(config.onElicitationRequest);
+            if (config.interaction?.onElicitationRequest) {
+                s.registerElicitationHandler(config.interaction?.onElicitationRequest);
             }
-            if (config.onExitPlanModeRequest) {
-                s.registerExitPlanModeHandler(config.onExitPlanModeRequest);
+            if (config.interaction?.onExitPlanModeRequest) {
+                s.registerExitPlanModeHandler(config.interaction?.onExitPlanModeRequest);
             }
-            if (config.onAutoModeSwitchRequest) {
-                s.registerAutoModeSwitchHandler(config.onAutoModeSwitchRequest);
+            if (config.interaction?.onAutoModeSwitchRequest) {
+                s.registerAutoModeSwitchHandler(config.interaction?.onAutoModeSwitchRequest);
             }
-            if (config.hooks) {
-                s.registerHooks(config.hooks);
+            if (config.hooks?.handlers) {
+                s.registerHooks(config.hooks?.handlers);
             }
-            if (config.skillProvider) {
-                s.registerSkillProvider(config.skillProvider);
+            if (config.skills?.provider) {
+                s.registerSkillProvider(config.skills?.provider);
             }
             s._registerMemoryStore(storeMemory);
             if (transformCallbacks) {
                 s.registerTransformCallbacks(transformCallbacks);
             }
-            if (config.onEvent) {
-                s.on(config.onEvent);
+            if (config.events?.onEvent) {
+                s.on(config.events?.onEvent);
             }
             // Session-FS setup can throw, so finish it before the session
             // becomes routable; a failed open must not leave handlers behind.
@@ -2462,126 +2510,194 @@ export class CopilotClient {
             const response = await connection.sendRequest("session.create", {
                 ...traceContext,
                 model: config.model,
-                allowedModels: config.allowedModels,
+                policy: {
+                    allowedModels: config.policy?.allowedModels,
+                    excludedManagedSettings: config.policy?.excludedManagedSettings,
+                    enforceManagedModelDefaults: config.policy?.enforceManagedModelDefaults,
+                    managedSettings: config.policy?.managedSettings,
+                },
                 sessionId: localSessionId,
                 name: config.name,
                 clientName: config.clientName,
-                reasoningEffort: config.reasoningEffort,
-                allowMultipleToolCalls: config.allowMultipleToolCalls,
-                reasoningSummary: config.reasoningSummary,
-                isExperimentalMode: this.experimentalModeForMode(config.enableExperimentalMode),
-                contextTier: config.contextTier,
-                tools: config.tools?.map((tool) => ({
-                    name: tool.name,
-                    title: tool.title,
-                    description: tool.description,
-                    parameters: toJsonSchema(tool.parameters),
-                    overridesBuiltInTool: tool.overridesBuiltInTool,
-                    skipPermission: tool.skipPermission,
-                    hasHandler: !!tool.handler,
-                    defer: tool.defer,
-                    metadata: tool.metadata,
-                    isTerminal: tool.isTerminal,
-                    idempotent: tool.idempotent,
-                    namespace: tool.namespace,
-                })),
-                toolSearch: config.toolSearch,
-                imageGeneration: config.imageGeneration,
-                canvases: config.canvases?.map((canvas) => canvas.declaration),
-                requestCanvasRenderer: config.requestCanvasRenderer,
-                requestExtensions: config.requestExtensions,
-                extensionSdkPath: config.extensionSdkPath,
-                extensionInfo: config.extensionInfo,
-                canvasProvider: config.canvasProvider,
-                commands: config.commands?.map((cmd) => ({
-                    name: cmd.name,
-                    description: cmd.description ?? "",
-                })),
+                inference: {
+                    reasoningEffort: config.inference?.reasoningEffort,
+                    allowMultipleToolCalls: config.inference?.allowMultipleToolCalls,
+                    reasoningSummary: config.inference?.reasoningSummary,
+                    contextTier: config.inference?.contextTier,
+                    defaultProvider: config.inference?.defaultProvider,
+                    providers: bearerWireProviders,
+                    models: config.inference?.models,
+                    enableCitations: config.inference?.enableCitations,
+                    capabilities: config.inference?.capabilities,
+                },
+                experiments: {
+                    enableExperimentalMode: this.experimentalModeForMode(
+                        config.experiments?.enableExperimentalMode
+                    ),
+                    flags: config.experiments?.flags,
+                    assignments: config.experiments?.assignments,
+                },
+                tools: {
+                    definitions: config.tools?.definitions?.map((tool) => ({
+                        name: tool.name,
+                        title: tool.title,
+                        description: tool.description,
+                        parameters: toJsonSchema(tool.parameters),
+                        overridesBuiltInTool: tool.overridesBuiltInTool,
+                        skipPermission: tool.skipPermission,
+                        hasHandler: !!tool.handler,
+                        defer: tool.defer,
+                        metadata: tool.metadata,
+                        isTerminal: tool.isTerminal,
+                        idempotent: tool.idempotent,
+                        namespace: tool.namespace,
+                    })),
+                    search: config.tools?.search,
+                    imageGeneration: config.tools?.imageGeneration,
+                    availableTools: toolFilterOptions.availableTools,
+                    excludedTools: toolFilterOptions.excludedTools,
+                    largeOutput: toWireLargeOutput(config.tools?.largeOutput),
+                },
+                canvases: {
+                    definitions: config.canvases?.definitions?.map((canvas) => canvas.declaration),
+                    requestRenderer: config.canvases?.requestRenderer,
+                    provider: config.canvases?.provider,
+                },
+                extensions: {
+                    enabled: config.extensions?.enabled,
+                    sdkPath: config.extensions?.sdkPath,
+                    identity: config.extensions?.identity,
+                },
+                interaction: {
+                    commands: config.interaction?.commands?.map((cmd) => ({
+                        name: cmd.name,
+                        description: cmd.description ?? "",
+                    })),
+                    requestUserInput: !!config.interaction?.onUserInputRequest,
+                    requestElicitation: !!config.interaction?.onElicitationRequest,
+                    askUserVariant: config.interaction?.askUserVariant,
+                    requestExitPlanMode: !!config.interaction?.onExitPlanModeRequest,
+                    requestAutoModeSwitch: !!config.interaction?.onAutoModeSwitchRequest,
+                    ...(config.interaction?.onShellAuthenticationRequest
+                        ? {
+                              requestShellAuthentication: true,
+                          }
+                        : {}),
+                    ...(config.interaction?.autoModeRecovery
+                        ? {
+                              requestAutoModeRecovery: true,
+                          }
+                        : {}),
+                },
                 systemMessage: wireSystemMessage,
-                availableTools: toolFilterOptions.availableTools,
-                excludedTools: toolFilterOptions.excludedTools,
-                excludedBuiltinAgents: config.excludedBuiltinAgents,
-                includedBuiltinAgents: config.includedBuiltinAgents,
-                provider: bearerWireProvider,
-                capi: config.capi,
-                providers: bearerWireProviders,
-                models: config.models,
-                enableSessionTelemetry: config.enableSessionTelemetry,
-                enableCitations: config.enableCitations,
-                enableFileChangeTracking: config.enableFileChangeTracking,
-                sessionLimits: config.sessionLimits,
-                autopilot: config.autopilot,
-                modelCapabilities: config.modelCapabilities,
-                largeOutput: toWireLargeOutput(config.largeOutput),
-                requestPermission: !!config.onPermissionRequest,
-                requestUserInput: !!config.onUserInputRequest,
-                requestElicitation: !!config.onElicitationRequest,
-                ...(config.onShellAuthenticationRequest
-                    ? { requestShellAuthentication: true }
-                    : {}),
-                askUserVariant: config.askUserVariant,
-                ...(config.enableMcpApps ? { requestMcpApps: true } : {}),
-                ...(config.githubMcpToolConfig != null
-                    ? { githubMcpToolConfig: config.githubMcpToolConfig }
-                    : {}),
-                requestExitPlanMode: !!config.onExitPlanModeRequest,
-                requestAutoModeSwitch: !!config.onAutoModeSwitchRequest,
-                ...(config.autoModeRecovery ? { requestAutoModeRecovery: true } : {}),
-                hooks: !!(config.hooks && Object.values(config.hooks).some(Boolean)),
+                agents: {
+                    excludedBuiltinAgents: config.agents?.excludedBuiltinAgents,
+                    includedBuiltinAgents: config.agents?.includedBuiltinAgents,
+                    definitions: toWireCustomAgents(config.agents?.definitions),
+                    localDiscoveryOnly: config.agents?.localDiscoveryOnly,
+                    default: config.agents?.default,
+                    selected: config.agents?.selected,
+                    directories: config.agents?.directories,
+                },
+                github: {
+                    capi: config.github?.capi,
+                    telemetryEnabled: config.github?.telemetryEnabled,
+                    token: config.github?.token,
+                    tokenProviderRegistrationId: gitHubTokenProviderRegistrationId,
+                    fetchManagedSettings: config.github?.fetchManagedSettings,
+                    interactiveUser: config.github?.interactiveUser,
+                    ...(config.github?.mcp != null
+                        ? {
+                              mcp: config.github?.mcp,
+                          }
+                        : {}),
+                    ...(this.onGitHubTelemetry != null
+                        ? {
+                              telemetryForwarding: true,
+                          }
+                        : {}),
+                },
+                filesystem: {
+                    trackFileChanges: config.filesystem?.trackFileChanges,
+                    trustWorkingDirectory: config.filesystem?.trustWorkingDirectory,
+                    additionalDirectories: config.filesystem?.additionalDirectories,
+                },
+                execution: {
+                    limits: config.execution?.limits,
+                    autopilot: config.execution?.autopilot,
+                },
+                permissions: {
+                    request: !!config.permissions?.onRequest,
+                    sandbox: config.permissions?.sandbox,
+                    mode: config.permissions?.mode,
+                },
+                mcp: {
+                    ...(config.mcp?.enableApps
+                        ? {
+                              enableApps: true,
+                          }
+                        : {}),
+                    servers: toWireMcpServers(config.mcp?.servers),
+                    oauthTokenStorage: config.mcp?.oauthTokenStorage,
+                    authClientIdMetadataUrl: config.mcp?.authClientIdMetadataUrl,
+                    envValueMode: "direct",
+                    disabledServers: config.mcp?.disabledServers,
+                },
+                hooks: {
+                    hasHandlers: !!(
+                        config.hooks?.handlers &&
+                        Object.values(config.hooks?.handlers).some(Boolean)
+                    ),
+                    enableRepositoryHooks: config.hooks?.enableRepositoryHooks,
+                    directories: config.hooks?.directories,
+                },
                 workingDirectory: config.workingDirectory,
-                trustWorkingDirectory: config.trustWorkingDirectory,
-                additionalDirectories: config.additionalDirectories,
-                streaming: config.streaming,
-                includeSubAgentStreamingEvents: config.includeSubAgentStreamingEvents ?? true,
-                ...(this.onGitHubTelemetry != null
-                    ? { enableGitHubTelemetryForwarding: true }
-                    : {}),
-                mcpServers: toWireMcpServers(config.mcpServers),
+                events: {
+                    streaming: config.events?.streaming,
+                    includeSubAgentStreamingEvents:
+                        config.events?.includeSubAgentStreamingEvents ?? true,
+                },
                 ...(config.diagnostics !== undefined ? { diagnostics: config.diagnostics } : {}),
                 ...(config.lifecycleDiagnostics !== undefined
                     ? { lifecycleDiagnostics: config.lifecycleDiagnostics }
                     : {}),
-                mcpOAuthTokenStorage: config.mcpOAuthTokenStorage,
-                authClientIdMetadataUrl: config.authClientIdMetadataUrl,
-                envValueMode: "direct",
-                customAgents: toWireCustomAgents(config.customAgents),
-                customAgentsLocalOnly: config.customAgentsLocalOnly,
-                defaultAgent: config.defaultAgent,
-                agent: config.agent,
-                configDir: config.configDirectory,
+                configDirectory: config.configDirectory,
                 enableConfigDiscovery: config.enableConfigDiscovery,
-                refreshCustomInstructions: config.refreshCustomInstructions,
-                skipEmbeddingRetrieval: config.skipEmbeddingRetrieval,
-                embeddingCacheStorage: config.embeddingCacheStorage,
-                organizationCustomInstructions: config.organizationCustomInstructions,
-                enableOnDemandInstructionDiscovery: config.enableOnDemandInstructionDiscovery,
-                enableFileHooks: config.enableFileHooks,
-                enableHostGitOperations: config.enableHostGitOperations,
-                enableSessionStore: config.enableSessionStore,
-                enableSkills: config.enableSkills,
-                skillDirectories: config.skillDirectories,
-                ...(config.skillProvider ? { hasSkillProvider: true } : {}),
-                ...(storeMemory ? { hasMemoryStore: true } : {}),
-                agentDirectories: config.agentDirectories,
-                hookDirectories: config.hookDirectories,
-                pluginDirectories: config.pluginDirectories,
-                instructionDirectories: config.instructionDirectories,
-                disabledSkills: config.disabledSkills,
-                disabledMcpServers: config.disabledMcpServers,
-                sandboxConfig: config.sandboxConfig,
-                infiniteSessions: config.infiniteSessions,
-                memory: toWireMemoryConfiguration(config.memory),
-                gitHubToken: config.gitHubToken,
-                gitHubTokenProviderRegistrationId,
+                instructions: {
+                    refreshCustomInstructions: config.instructions?.refreshCustomInstructions,
+                    organizationText: config.instructions?.organizationText,
+                    onDemandDiscovery: config.instructions?.onDemandDiscovery,
+                    directories: config.instructions?.directories,
+                },
+                state: {
+                    skipEmbeddingRetrieval: config.state?.skipEmbeddingRetrieval,
+                    embeddingCacheStorage: config.state?.embeddingCacheStorage,
+                    enableCrossSessionStore: config.state?.enableCrossSessionStore,
+                    infiniteSessions: config.state?.infiniteSessions,
+                    memory: toWireMemoryConfiguration(config.state?.memory),
+                    ...(storeMemory
+                        ? {
+                              hasMemoryStore: true,
+                          }
+                        : {}),
+                },
+                git: {
+                    enableHostGitOperations: config.git?.enableHostGitOperations,
+                },
+                skills: {
+                    enabled: config.skills?.enabled,
+                    directories: config.skills?.directories,
+                    disabledSkills: config.skills?.disabledSkills,
+                    ...(config.skills?.provider
+                        ? {
+                              hasProvider: true,
+                          }
+                        : {}),
+                },
+                plugins: {
+                    directories: config.plugins?.directories,
+                },
                 cloud: config.cloud,
-                featureFlags: config.featureFlags,
-                expAssignments: config.expAssignments,
-                enableManagedSettings: config.enableManagedSettings,
-                excludedManagedSettings: config.excludedManagedSettings,
-                enforceManagedModelDefaults: config.enforceManagedModelDefaults,
-                interactiveUser: config.interactiveUser,
-                permissionMode: config.permissionMode,
-                managedSettings: config.managedSettings,
             });
 
             const {
@@ -2620,10 +2736,10 @@ export class CopilotClient {
             }
             this.assignGitHubTokenProvider(gitHubTokenProviderRegistrationId, returnedSessionId);
             session.setCapabilities(capabilities);
-            if (config.autoModeRecovery) {
+            if (config.interaction?.autoModeRecovery) {
                 await this.requireAutoModeRecovery(session, connection);
             }
-            if (config.onMcpAuthRequest) {
+            if (config.mcp?.onAuthRequest) {
                 await connection.sendRequest("session.eventLog.registerInterest", {
                     sessionId: returnedSessionId,
                     eventType: "mcp.oauth_required",
@@ -2665,7 +2781,7 @@ export class CopilotClient {
                         [e, cleanupError],
                         `Failed to initialize and delete cloud session ${uninitializedCloudSessionId}`
                     );
-                    if (config.autoModeRecovery) {
+                    if (config.interaction?.autoModeRecovery) {
                         this.recordFailedAutoModeRecoveryCleanup(
                             connection,
                             uninitializedCloudSessionId,
@@ -2708,23 +2824,31 @@ export class CopilotClient {
      * @example
      * ```typescript
      * // Resume a previous session
-     * const session = await client.resumeSession("session-123", { onPermissionRequest: approveAll });
-     *
+     * const session = await client.resumeSession("session-123", {
+     * permissions: {
+     * onRequest: approveAll
+     * }
+     * });
+     *      *
      * // Resume with new tools
      * const session = await client.resumeSession("session-123", {
-     *   onPermissionRequest: approveAll,
-     *   tools: [myNewTool]
+     * permissions: {
+     * onRequest: approveAll
+     * },
+     * tools: {
+     * definitions: [myNewTool]
+     * }
      * });
      * ```
      */
-    async resumeSession(sessionId: string, config: ResumeSessionConfig): Promise<CopilotSession> {
+    async resumeSession(sessionId: string, config: ResumeSessionOptions): Promise<CopilotSession> {
         return this.resumeSessionInternal(sessionId, config);
     }
 
     /** @internal */
     async resumeSessionForExtension(
         sessionId: string,
-        config: ResumeSessionConfig,
+        config: ResumeSessionOptions,
         contributions: ExtensionOrchestrationContributions = {},
         extensionOptions?: ExtensionJoinOptions
     ): Promise<CopilotSession> {
@@ -2746,17 +2870,18 @@ export class CopilotClient {
 
     private async resumeSessionInternal(
         sessionId: string,
-        config: ResumeSessionConfig,
+        config: ResumeSessionOptions,
         contributions: ExtensionOrchestrationContributions = {},
         extensionOptions?: ExtensionJoinOptions
     ): Promise<CopilotSession> {
-        if (config.autoModeRecovery && typeof config.onAutoModeSwitchRequest !== "function") {
+        if (
+            config.interaction?.autoModeRecovery &&
+            typeof config.interaction?.onAutoModeSwitchRequest !== "function"
+        ) {
             throw new Error("autoModeRecovery requires onAutoModeSwitchRequest");
         }
-        if (config.gitHubToken !== undefined && config.gitHubTokenProvider !== undefined) {
-            throw new Error("gitHubToken and gitHubTokenProvider are mutually exclusive");
-        }
-        requestedMemoryStore(config.memory);
+        this.validateSessionCredentials(config);
+        requestedMemoryStore(config.state?.memory);
         const signal = await this.getSessionInitializationSignal();
         const release = await this.acquireSessionInitialization(sessionId, signal);
         try {
@@ -2775,16 +2900,17 @@ export class CopilotClient {
 
     private async resumeSessionWithInitialization(
         sessionId: string,
-        config: ResumeSessionConfig,
+        config: ResumeSessionOptions,
         contributions: ExtensionOrchestrationContributions,
         signal: AbortSignal,
         extensionOptions?: ExtensionJoinOptions
     ): Promise<CopilotSession> {
         const { workflows } = contributions;
-        const storeMemory = requestedMemoryStore(config.memory);
+        const storeMemory = requestedMemoryStore(config.state?.memory);
         signal.throwIfAborted();
         const connection = this.connection!;
-        const resolveAliases = config.autoModeRecovery === true && !this.sessionFsConfig;
+        const resolveAliases =
+            config.interaction?.autoModeRecovery === true && !this.sessionFsConfig;
         if (resolveAliases && isAbbreviatedUuidPrefix(sessionId)) {
             // Resolve against persisted sessions before redirecting any resident callbacks.
             const resolved = await connection.sendRequest<SessionsFindByPrefixResult>(
@@ -2810,51 +2936,48 @@ export class CopilotClient {
             undefined,
             this.onGetTraceContext,
             {
-                mcpAuthHandler: config.onMcpAuthRequest,
+                mcpAuthHandler: config.mcp?.onAuthRequest,
                 managedSettingsEnabled:
-                    config.enableManagedSettings === true || config.managedSettings !== undefined,
+                    config.github?.fetchManagedSettings === true ||
+                    config.policy?.managedSettings !== undefined,
             }
         );
-        session.registerTools(config.tools);
-        session.registerCanvases(config.canvases);
-        session.registerCommands(config.commands);
+        session.registerTools(config.tools?.definitions);
+        session.registerCanvases(config.canvases?.definitions);
+        session.registerCommands(config.interaction?.commands);
         session.registerWorkflows(workflows);
-        const {
-            wireProvider: bearerWireProvider,
-            wireProviders: bearerWireProviders,
-            callbacks: bearerTokenCallbacks,
-        } = extractBearerTokenProviders(config.provider, config.providers);
+        const { wireProviders: bearerWireProviders, callbacks: bearerTokenCallbacks } =
+            extractBearerTokenProviders(config.inference?.providers);
         if (bearerTokenCallbacks.size > 0) {
             session.registerBearerTokenProviders(bearerTokenCallbacks);
         }
-        session.registerPermissionHandler(config.onPermissionRequest);
-        if (config.onUserInputRequest) {
-            session.registerUserInputHandler(config.onUserInputRequest);
+        session.registerPermissionHandler(config.permissions?.onRequest);
+        if (config.interaction?.onUserInputRequest) {
+            session.registerUserInputHandler(config.interaction?.onUserInputRequest);
         }
-        if (config.onShellAuthenticationRequest) {
-            session.registerShellAuthenticationHandler(config.onShellAuthenticationRequest);
+        if (config.interaction?.onShellAuthenticationRequest) {
+            session.registerShellAuthenticationHandler(
+                config.interaction?.onShellAuthenticationRequest
+            );
         }
-        if (config.onElicitationRequest) {
-            session.registerElicitationHandler(config.onElicitationRequest);
+        if (config.interaction?.onElicitationRequest) {
+            session.registerElicitationHandler(config.interaction?.onElicitationRequest);
         }
-        if (config.onExitPlanModeRequest) {
-            session.registerExitPlanModeHandler(config.onExitPlanModeRequest);
+        if (config.interaction?.onExitPlanModeRequest) {
+            session.registerExitPlanModeHandler(config.interaction?.onExitPlanModeRequest);
         }
-        if (config.onAutoModeSwitchRequest) {
-            session.registerAutoModeSwitchHandler(config.onAutoModeSwitchRequest);
+        if (config.interaction?.onAutoModeSwitchRequest) {
+            session.registerAutoModeSwitchHandler(config.interaction?.onAutoModeSwitchRequest);
         }
-        if (config.hooks) {
-            session.registerHooks(config.hooks);
+        if (config.hooks?.handlers) {
+            session.registerHooks(config.hooks?.handlers);
         }
-        if (config.skillProvider) {
-            session.registerSkillProvider(config.skillProvider);
+        if (config.skills?.provider) {
+            session.registerSkillProvider(config.skills?.provider);
         }
         session._registerMemoryStore(storeMemory);
 
-        const modeDefaults = this.configDefaultsForMode();
-        config = { ...modeDefaults, ...config };
-        config.customAgentsLocalOnly ??= modeDefaults.customAgentsLocalOnly;
-        config.systemMessage = this.getSystemMessageConfigForMode(config.systemMessage);
+        config = this.applyModeDefaults(config);
 
         const { wirePayload: wireSystemMessage, transformCallbacks } = extractTransformCallbacks(
             config.systemMessage
@@ -2863,8 +2986,8 @@ export class CopilotClient {
             session.registerTransformCallbacks(transformCallbacks);
         }
 
-        if (config.onEvent) {
-            session.on(config.onEvent);
+        if (config.events?.onEvent) {
+            session.on(config.events?.onEvent);
         }
         // Validation and session-FS setup can throw, so finish them before the
         // replacement session becomes routable over any resident one.
@@ -2878,7 +3001,7 @@ export class CopilotClient {
         let keepResumedSessionOnRecoveryRejection = false;
 
         const gitHubTokenProviderRegistrationId = this.registerGitHubTokenProvider(
-            config.gitHubTokenProvider,
+            config.github?.tokenProvider,
             sessionId
         );
         if (gitHubTokenProviderRegistrationId !== undefined) {
@@ -2902,130 +3025,197 @@ export class CopilotClient {
                 resolveAliases,
             });
             const response = await connection.sendRequest("session.resume", {
-                allowedModels: config.allowedModels,
+                policy: {
+                    allowedModels: config.policy?.allowedModels,
+                    excludedManagedSettings: config.policy?.excludedManagedSettings,
+                    enforceManagedModelDefaults: config.policy?.enforceManagedModelDefaults,
+                    managedSettings: config.policy?.managedSettings,
+                },
                 ...traceContext,
                 sessionId,
                 allowTranscriptRecovery: config.allowTranscriptRecovery,
                 clientName: config.clientName,
                 model: config.model,
-                reasoningEffort: config.reasoningEffort,
-                allowMultipleToolCalls: config.allowMultipleToolCalls,
-                reasoningSummary: config.reasoningSummary,
-                isExperimentalMode: this.experimentalModeForMode(config.enableExperimentalMode),
-                contextTier: config.contextTier,
+                inference: {
+                    reasoningEffort: config.inference?.reasoningEffort,
+                    allowMultipleToolCalls: config.inference?.allowMultipleToolCalls,
+                    reasoningSummary: config.inference?.reasoningSummary,
+                    contextTier: config.inference?.contextTier,
+                    enableCitations: config.inference?.enableCitations,
+                    defaultProvider: config.inference?.defaultProvider,
+                    providers: bearerWireProviders,
+                    models: config.inference?.models,
+                    capabilities: config.inference?.capabilities,
+                },
+                experiments: {
+                    enableExperimentalMode: this.experimentalModeForMode(
+                        config.experiments?.enableExperimentalMode
+                    ),
+                    flags: config.experiments?.flags,
+                    assignments: config.experiments?.assignments,
+                },
                 systemMessage: wireSystemMessage,
-                availableTools: toolFilterOptions.availableTools,
-                excludedTools: toolFilterOptions.excludedTools,
-                enableSessionTelemetry: config.enableSessionTelemetry,
-                excludedBuiltinAgents: config.excludedBuiltinAgents,
-                includedBuiltinAgents: config.includedBuiltinAgents,
-                enableCitations: config.enableCitations,
-                enableFileChangeTracking: config.enableFileChangeTracking,
-                sessionLimits: config.sessionLimits,
-                autopilot: config.autopilot,
-                tools: config.tools?.map((tool) => ({
-                    name: tool.name,
-                    title: tool.title,
-                    description: tool.description,
-                    parameters: toJsonSchema(tool.parameters),
-                    overridesBuiltInTool: tool.overridesBuiltInTool,
-                    skipPermission: tool.skipPermission,
-                    hasHandler: !!tool.handler,
-                    defer: tool.defer,
-                    metadata: tool.metadata,
-                    isTerminal: tool.isTerminal,
-                    idempotent: tool.idempotent,
-                    namespace: tool.namespace,
-                })),
-                toolSearch: config.toolSearch,
-                imageGeneration: config.imageGeneration,
-                canvases: config.canvases?.map((canvas) => canvas.declaration),
+                tools: {
+                    availableTools: toolFilterOptions.availableTools,
+                    excludedTools: toolFilterOptions.excludedTools,
+                    definitions: config.tools?.definitions?.map((tool) => ({
+                        name: tool.name,
+                        title: tool.title,
+                        description: tool.description,
+                        parameters: toJsonSchema(tool.parameters),
+                        overridesBuiltInTool: tool.overridesBuiltInTool,
+                        skipPermission: tool.skipPermission,
+                        hasHandler: !!tool.handler,
+                        defer: tool.defer,
+                        metadata: tool.metadata,
+                        isTerminal: tool.isTerminal,
+                        idempotent: tool.idempotent,
+                        namespace: tool.namespace,
+                    })),
+                    search: config.tools?.search,
+                    imageGeneration: config.tools?.imageGeneration,
+                    largeOutput: toWireLargeOutput(config.tools?.largeOutput),
+                },
+                github: {
+                    telemetryEnabled: config.github?.telemetryEnabled,
+                    capi: config.github?.capi,
+                    token: config.github?.token,
+                    tokenProviderRegistrationId: gitHubTokenProviderRegistrationId,
+                    fetchManagedSettings: config.github?.fetchManagedSettings,
+                    interactiveUser: config.github?.interactiveUser,
+                    ...(config.github?.mcp != null
+                        ? {
+                              mcp: config.github?.mcp,
+                          }
+                        : {}),
+                    ...(this.onGitHubTelemetry != null
+                        ? {
+                              telemetryForwarding: true,
+                          }
+                        : {}),
+                },
+                agents: {
+                    excludedBuiltinAgents: config.agents?.excludedBuiltinAgents,
+                    includedBuiltinAgents: config.agents?.includedBuiltinAgents,
+                    definitions: toWireCustomAgents(config.agents?.definitions),
+                    localDiscoveryOnly: config.agents?.localDiscoveryOnly,
+                    default: config.agents?.default,
+                    selected: config.agents?.selected,
+                    directories: config.agents?.directories,
+                },
+                filesystem: {
+                    trackFileChanges: config.filesystem?.trackFileChanges,
+                    additionalDirectories: config.filesystem?.additionalDirectories,
+                },
+                execution: {
+                    limits: config.execution?.limits,
+                    autopilot: config.execution?.autopilot,
+                },
+                canvases: {
+                    definitions: config.canvases?.definitions?.map((canvas) => canvas.declaration),
+                    requestRenderer: config.canvases?.requestRenderer,
+                    provider: config.canvases?.provider,
+                    open: config.canvases?.open,
+                },
                 workflows: workflows?.map(getWorkflowRegistration),
-                requestCanvasRenderer: config.requestCanvasRenderer,
-                requestExtensions: config.requestExtensions,
-                extensionSdkPath: config.extensionSdkPath,
-                extensionInfo: config.extensionInfo,
-                canvasProvider: config.canvasProvider,
-                commands: config.commands?.map((cmd) => ({
-                    name: cmd.name,
-                    description: cmd.description ?? "",
-                })),
-                provider: bearerWireProvider,
-                capi: config.capi,
-                providers: bearerWireProviders,
-                models: config.models,
-                modelCapabilities: config.modelCapabilities,
-                largeOutput: toWireLargeOutput(config.largeOutput),
-                requestPermission:
-                    config.onPermissionRequest !== defaultJoinSessionPermissionHandler,
-                requestUserInput: !!config.onUserInputRequest,
-                requestElicitation: !!config.onElicitationRequest,
-                ...(config.onShellAuthenticationRequest
-                    ? { requestShellAuthentication: true }
-                    : {}),
-                askUserVariant: config.askUserVariant,
-                ...(config.enableMcpApps ? { requestMcpApps: true } : {}),
-                ...(config.githubMcpToolConfig != null
-                    ? { githubMcpToolConfig: config.githubMcpToolConfig }
-                    : {}),
-                requestExitPlanMode: !!config.onExitPlanModeRequest,
-                requestAutoModeSwitch: !!config.onAutoModeSwitchRequest,
-                ...(config.autoModeRecovery ? { requestAutoModeRecovery: true } : {}),
-                hooks: !!(config.hooks && Object.values(config.hooks).some(Boolean)),
+                extensions: {
+                    enabled: config.extensions?.enabled,
+                    sdkPath: config.extensions?.sdkPath,
+                    identity: config.extensions?.identity,
+                },
+                interaction: {
+                    commands: config.interaction?.commands?.map((cmd) => ({
+                        name: cmd.name,
+                        description: cmd.description ?? "",
+                    })),
+                    requestUserInput: !!config.interaction?.onUserInputRequest,
+                    requestElicitation: !!config.interaction?.onElicitationRequest,
+                    askUserVariant: config.interaction?.askUserVariant,
+                    requestExitPlanMode: !!config.interaction?.onExitPlanModeRequest,
+                    requestAutoModeSwitch: !!config.interaction?.onAutoModeSwitchRequest,
+                    ...(config.interaction?.onShellAuthenticationRequest
+                        ? {
+                              requestShellAuthentication: true,
+                          }
+                        : {}),
+                    ...(config.interaction?.autoModeRecovery
+                        ? {
+                              requestAutoModeRecovery: true,
+                          }
+                        : {}),
+                },
+                permissions: {
+                    request: config.permissions?.onRequest !== defaultJoinSessionPermissionHandler,
+                    sandbox: config.permissions?.sandbox,
+                    mode: config.permissions?.mode,
+                },
+                mcp: {
+                    ...(config.mcp?.enableApps
+                        ? {
+                              enableApps: true,
+                          }
+                        : {}),
+                    servers: toWireMcpServers(config.mcp?.servers),
+                    oauthTokenStorage: config.mcp?.oauthTokenStorage,
+                    authClientIdMetadataUrl: config.mcp?.authClientIdMetadataUrl,
+                    envValueMode: "direct",
+                    disabledServers: config.mcp?.disabledServers,
+                },
+                hooks: {
+                    hasHandlers: !!(
+                        config.hooks?.handlers &&
+                        Object.values(config.hooks?.handlers).some(Boolean)
+                    ),
+                    enableRepositoryHooks: config.hooks?.enableRepositoryHooks,
+                    directories: config.hooks?.directories,
+                },
                 workingDirectory: config.workingDirectory,
-                additionalDirectories: config.additionalDirectories,
-                configDir: config.configDirectory,
+                configDirectory: config.configDirectory,
                 enableConfigDiscovery: config.enableConfigDiscovery,
-                skipEmbeddingRetrieval: config.skipEmbeddingRetrieval,
-                embeddingCacheStorage: config.embeddingCacheStorage,
-                organizationCustomInstructions: config.organizationCustomInstructions,
-                enableOnDemandInstructionDiscovery: config.enableOnDemandInstructionDiscovery,
-                enableFileHooks: config.enableFileHooks,
-                enableHostGitOperations: config.enableHostGitOperations,
-                enableSessionStore: config.enableSessionStore,
-                enableSkills: config.enableSkills,
-                streaming: config.streaming,
-                includeSubAgentStreamingEvents: config.includeSubAgentStreamingEvents ?? true,
-                ...(this.onGitHubTelemetry != null
-                    ? { enableGitHubTelemetryForwarding: true }
-                    : {}),
-                mcpServers: toWireMcpServers(config.mcpServers),
+                state: {
+                    skipEmbeddingRetrieval: config.state?.skipEmbeddingRetrieval,
+                    embeddingCacheStorage: config.state?.embeddingCacheStorage,
+                    enableCrossSessionStore: config.state?.enableCrossSessionStore,
+                    infiniteSessions: config.state?.infiniteSessions,
+                    memory: toWireMemoryConfiguration(config.state?.memory),
+                    ...(storeMemory
+                        ? {
+                              hasMemoryStore: true,
+                          }
+                        : {}),
+                },
+                instructions: {
+                    organizationText: config.instructions?.organizationText,
+                    onDemandDiscovery: config.instructions?.onDemandDiscovery,
+                    directories: config.instructions?.directories,
+                },
+                git: {
+                    enableHostGitOperations: config.git?.enableHostGitOperations,
+                },
+                skills: {
+                    enabled: config.skills?.enabled,
+                    directories: config.skills?.directories,
+                    disabledSkills: config.skills?.disabledSkills,
+                    ...(config.skills?.provider
+                        ? {
+                              hasProvider: true,
+                          }
+                        : {}),
+                },
+                events: {
+                    streaming: config.events?.streaming,
+                    includeSubAgentStreamingEvents:
+                        config.events?.includeSubAgentStreamingEvents ?? true,
+                },
                 ...(config.diagnostics !== undefined ? { diagnostics: config.diagnostics } : {}),
                 ...(config.lifecycleDiagnostics !== undefined
                     ? { lifecycleDiagnostics: config.lifecycleDiagnostics }
                     : {}),
-                mcpOAuthTokenStorage: config.mcpOAuthTokenStorage,
-                authClientIdMetadataUrl: config.authClientIdMetadataUrl,
-                envValueMode: "direct",
-                customAgents: toWireCustomAgents(config.customAgents),
-                customAgentsLocalOnly: config.customAgentsLocalOnly,
-                defaultAgent: config.defaultAgent,
-                agent: config.agent,
-                skillDirectories: config.skillDirectories,
-                ...(config.skillProvider ? { hasSkillProvider: true } : {}),
-                ...(storeMemory ? { hasMemoryStore: true } : {}),
-                agentDirectories: config.agentDirectories,
-                hookDirectories: config.hookDirectories,
-                pluginDirectories: config.pluginDirectories,
-                instructionDirectories: config.instructionDirectories,
-                disabledSkills: config.disabledSkills,
-                disabledMcpServers: config.disabledMcpServers,
-                sandboxConfig: config.sandboxConfig,
-                infiniteSessions: config.infiniteSessions,
-                memory: toWireMemoryConfiguration(config.memory),
-                disableResume: config.suppressResumeEvent,
+                plugins: {
+                    directories: config.plugins?.directories,
+                },
+                suppressResumeEvent: config.suppressResumeEvent,
                 continuePendingWork: config.continuePendingWork,
-                gitHubToken: config.gitHubToken,
-                gitHubTokenProviderRegistrationId,
-                openCanvases: config.openCanvases,
-                featureFlags: config.featureFlags,
-                expAssignments: config.expAssignments,
-                enableManagedSettings: config.enableManagedSettings,
-                excludedManagedSettings: config.excludedManagedSettings,
-                enforceManagedModelDefaults: config.enforceManagedModelDefaults,
-                interactiveUser: config.interactiveUser,
-                permissionMode: config.permissionMode,
-                managedSettings: config.managedSettings,
                 ...(extensionOptions?.requestedEnvironmentVariables
                     ? {
                           requestedEnvironmentVariables:
@@ -3091,7 +3281,7 @@ export class CopilotClient {
             };
             session["_workspacePath"] = workspacePath;
             session.setCapabilities(capabilities);
-            if (config.autoModeRecovery) {
+            if (config.interaction?.autoModeRecovery) {
                 keepResumedSessionOnRecoveryRejection =
                     replacedSession !== undefined &&
                     session.capabilities.ui?.autoModeRecovery !== true;
@@ -3104,7 +3294,7 @@ export class CopilotClient {
             session.setOpenCanvases(openCanvases ?? []);
             session.setTranscriptRecovery(transcriptRecovery);
             session.setPermissionModeResult(permissionModeResult);
-            if (config.onMcpAuthRequest) {
+            if (config.mcp?.onAuthRequest) {
                 await connection.sendRequest("session.eventLog.registerInterest", {
                     sessionId,
                     eventType: "mcp.oauth_required",
@@ -3251,9 +3441,7 @@ export class CopilotClient {
         if (!options?.localServer && !options?.githubEnvironment) {
             throw new Error("At least one of localServer or githubEnvironment is required");
         }
-        if (this.state !== "connected") {
-            await this.start();
-        }
+        await this.getStartedConnection();
         const rpc = this.rpc;
         const hostId = randomUUID();
         if (authentication.mode === "custom") {
@@ -3407,7 +3595,7 @@ export class CopilotClient {
         handoffId: string;
         resume?: boolean;
         authentication?: AhpSessionCreateRequest["authentication"];
-        config: Omit<SessionConfig, "onPermissionRequest"> & { configDir?: string };
+        config: Record<string, unknown> & { sessionId?: string };
     }): Promise<{ sessionId: string }> {
         const authentication = params.authentication;
         if (!authentication) {
@@ -3431,11 +3619,12 @@ export class CopilotClient {
         ) {
             throw new Error("AHP trusted authentication does not match host policy");
         }
+        const config = groupHostSessionSettings(params.config);
         const entry: {
             hostId: string;
             requestedSessionId?: string;
             controller: AbortController;
-            configs: Map<CopilotSession, SessionConfig>;
+            configs: Map<CopilotSession, CreateSessionOptions>;
             session?: CopilotSession;
             released: boolean;
             onReleased?: AhpHostOptions["onSessionReleased"];
@@ -3448,8 +3637,6 @@ export class CopilotClient {
             onReleased: options!.onSessionReleased,
         };
         this.hostHandoffs.set(params.handoffId, entry);
-        const { configDir, ...config } = params.config;
-        if (configDir !== undefined) config.configDirectory = configDir;
         const expected = structuredClone(config);
         const cancelled = new Promise<never>((_resolve, reject) => {
             entry.controller.signal.addEventListener(
@@ -3530,8 +3717,7 @@ export class CopilotClient {
      *
      * @param message - Optional message to include in the ping
      * @returns A promise that resolves with the ping response containing the message and timestamp
-     * @throws Error if the client is not connected, or if a {@link start} in progress when
-     *     this was called fails
+     * @throws Error if startup fails, the connection is unavailable, or shutdown is in progress
      *
      * @example
      * ```typescript
@@ -3564,17 +3750,23 @@ export class CopilotClient {
     }
 
     /**
-     * Returns the connection for a request that must not start the client. A
-     * {@link start} already in progress is awaited, so the request never precedes the
-     * `connect` handshake or the provider registrations that follow it. A caller that
-     * queues before it calls this passes the startup it observed first, because
-     * `startPromise` is cleared once that startup settles.
+     * Lazily starts the client or joins its current startup. Await the observed
+     * attempt directly so its failure cannot turn into a retry within this request.
      */
-    private async getStartedConnection(
-        startup: Promise<void> | null = this.startPromise
-    ): Promise<DrainingMessageConnection> {
-        if (startup) {
-            await startup;
+    private async getStartedConnection(): Promise<DrainingMessageConnection> {
+        let startup = this.startPromise;
+        if (startup && startup === this.shutdownCanceledStartup) {
+            // Reuse start's cancellation recovery, not an ordinary failure's implicit retry.
+            await this.start();
+        } else {
+            this.assertNotStopping();
+            if (startup) {
+                await startup;
+            } else if (this.connectionClosed) {
+                throw new Error("Client not connected");
+            } else if (!this.connection) {
+                await this.start();
+            }
         }
         // A caller that queued before this point may have observed a start that has since
         // settled while a replacement began. Follow it, so the request never precedes that
@@ -3586,10 +3778,18 @@ export class CopilotClient {
             await latest;
             latest = this.startPromise;
         }
+        this.assertNotStopping();
+        this.sessionInitializationLifetime.signal.throwIfAborted();
         if (!this.connection) {
             throw new Error("Client not connected");
         }
         return this.connection;
+    }
+
+    private assertNotStopping(): void {
+        if (this.stopPromise || this.forceStopPromise) {
+            throw new Error("Client disconnected during session initialization");
+        }
     }
 
     /**
@@ -3601,68 +3801,100 @@ export class CopilotClient {
      * Results are cached after the first successful call to avoid rate limiting.
      * The cache is cleared when the client disconnects.
      *
-     * @throws Error if not connected, or if a {@link start} in progress when this was
-     *     called fails (when no custom handler is set)
+     * Starts the client if needed, unless a custom handler is set.
+     *
+     * @throws Error if startup fails, the connection is retired, or shutdown is in
+     *     progress (when no custom handler is set)
      */
-    async listModels(): Promise<ModelInfo[]> {
-        // Serialize concurrent calls with a promise chain. The next link must be installed
-        // before the first await, so that callers started in the same tick queue behind
-        // each other instead of all waiting on the same promise and all missing the cache.
-        const cache = this.modelsCache;
-        // Observe any in-progress start now: by the time this call reaches the front of the
-        // lock, that start may have settled, and a failure would no longer be visible.
-        const startup = this.startPromise;
-        const previousLock = cache.lock;
-        let resolveLock: () => void;
-        cache.lock = new Promise((resolve) => {
-            resolveLock = resolve;
-        });
-        await previousLock;
-
-        try {
-            // Check cache (already inside lock)
-            if (cache.models !== null) {
-                return [...cache.models]; // Return a copy to prevent cache mutation
+    async listModels(): Promise<Model[]> {
+        const connection = this.onListModels ? undefined : await this.getStartedConnection();
+        const connectionEpoch = this.connectionEpoch;
+        const assertCurrentConnection = () => {
+            if (connection) {
+                this.assertNotStopping();
+                if (
+                    connectionEpoch !== this.connectionEpoch ||
+                    connection !== this.connection ||
+                    this.sessionInitializationLifetime.signal.aborted
+                ) {
+                    throw new Error("Client disconnected while listing models");
+                }
             }
+        };
+        let startup: Promise<void> | null = null;
+        while (true) {
+            assertCurrentConnection();
+            if (startup) {
+                await startup;
+                startup = null;
+                assertCurrentConnection();
+            }
+            // Install the next link before awaiting its predecessor, so concurrent
+            // cache misses queue behind each other instead of fetching independently.
+            const cache = this.modelsCache;
+            const previousLock = cache.lock;
+            let resolveLock: () => void;
+            cache.lock = new Promise((resolve) => {
+                resolveLock = resolve;
+            });
+            await previousLock;
 
-            let models: ModelInfo[];
-            if (this.onListModels) {
-                // Use custom handler instead of CLI RPC
-                models = await this.onListModels();
-            } else {
-                const connection = await this.getStartedConnection(startup);
-                // Cache miss - fetch from backend while holding lock
-                const result = await connection.sendRequest("models.list", {});
-                const response = result as { models: ModelInfo[] };
-                models = response.models;
+            try {
+                assertCurrentConnection();
+                if (connection) {
+                    if (cache !== this.modelsCache) {
+                        throw new Error("Client disconnected while listing models");
+                    }
+                    if (this.startPromise) {
+                        startup = this.startPromise;
+                        continue;
+                    }
+                }
+                // Check cache (already inside lock)
+                if (cache.models !== null) {
+                    return [...cache.models]; // Return a copy to prevent cache mutation
+                }
 
-                // Normalize model capabilities — some models (e.g. embedding models)
-                // may omit 'supports' or 'limits' in their capabilities.
-                for (const model of models) {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const m = model as any;
-                    if (!m.capabilities) {
-                        m.capabilities = {
-                            supports: {},
-                            limits: { max_context_window_tokens: 0 },
-                        };
-                    } else {
-                        if (!m.capabilities.supports) m.capabilities.supports = {};
-                        if (!m.capabilities.limits) {
-                            m.capabilities.limits = { max_context_window_tokens: 0 };
-                        } else if (m.capabilities.limits.max_context_window_tokens === undefined) {
-                            m.capabilities.limits.max_context_window_tokens = 0;
+                let models: Model[];
+                if (this.onListModels) {
+                    // Use custom handler instead of CLI RPC
+                    models = await this.onListModels();
+                } else {
+                    // Cache miss - fetch from backend while holding lock
+                    const result = await connection!.sendRequest("models.list", {});
+                    const response = result as { models: Model[] };
+                    models = response.models;
+
+                    // Normalize model capabilities — some models (e.g. embedding models)
+                    // may omit 'supports' or 'limits' in their capabilities.
+                    for (const model of models) {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const m = model as any;
+                        if (!m.capabilities) {
+                            m.capabilities = {
+                                supports: {},
+                                limits: { max_context_window_tokens: 0 },
+                            };
+                        } else {
+                            if (!m.capabilities.supports) m.capabilities.supports = {};
+                            if (!m.capabilities.limits) {
+                                m.capabilities.limits = { max_context_window_tokens: 0 };
+                            } else if (
+                                m.capabilities.limits.max_context_window_tokens === undefined
+                            ) {
+                                m.capabilities.limits.max_context_window_tokens = 0;
+                            }
                         }
                     }
                 }
+
+                // Update cache before releasing lock (copy to prevent external mutation)
+                cache.models = [...models];
+
+                return [...models]; // Return a copy to prevent cache mutation
+            } finally {
+                resolveLock!();
             }
-
-            // Update cache before releasing lock (copy to prevent external mutation)
-            cache.models = [...models];
-
-            return [...models]; // Return a copy to prevent cache mutation
-        } finally {
-            resolveLock!();
         }
     }
 
@@ -3693,6 +3925,7 @@ export class CopilotClient {
                 entra: this.options.entra && {
                     clientId: this.options.entra.clientId,
                     matsAppName: this.options.entra.matsAppName,
+                    oneAuthApplicationId: this.options.entra.oneAuthApplicationId,
                 },
                 entraTokenProvider: this.options.entra?.tokenProvider ? true : undefined,
                 token: this.effectiveConnectionToken,
@@ -3701,7 +3934,7 @@ export class CopilotClient {
             // Opt in to GitHub telemetry forwarding at the connection level when a
             // handler is registered (mirrors the runtime, which reads this flag on the
             // `connect` handshake so the first session's un-replayable `session.start`
-            // event is forwarded). Also sent on session.create/resume for older CLIs.
+            // event is forwarded). Also sent on session.create/resume for session forwarding.
             if (this.onGitHubTelemetry != null) {
                 connectParams.enableGitHubTelemetryForwarding = true;
             }
@@ -3766,16 +3999,17 @@ export class CopilotClient {
      * ```typescript
      * const lastId = await client.getLastSessionId();
      * if (lastId) {
-     *   const session = await client.resumeSession(lastId, { onPermissionRequest: approveAll });
+     *     const session = await client.resumeSession(lastId, {
+     *         permissions: {
+     *             onRequest: approveAll,
+     *         },
+     *     });
      * }
      * ```
      */
     async getLastSessionId(): Promise<string | undefined> {
-        if (!this.connection) {
-            throw new Error("Client not connected");
-        }
-
-        const response = await this.connection.sendRequest("session.getLastId", {});
+        const connection = await this.getStartedConnection();
+        const response = await connection.sendRequest("session.getLastId", {});
         return (response as { sessionId?: string }).sessionId;
     }
 
@@ -3797,10 +4031,7 @@ export class CopilotClient {
      * ```
      */
     async deleteSession(sessionId: string): Promise<void> {
-        if (!this.connection) {
-            throw new Error("Client not connected");
-        }
-
+        this.assertNotStopping();
         const signal = await this.getSessionInitializationSignal();
         const release = await this.acquireSessionInitialization(sessionId, signal);
         try {
@@ -3856,9 +4087,7 @@ export class CopilotClient {
      * const sessions = await client.listSessions({ repository: "owner/repo" });
      */
     async listSessions(filter?: SessionListFilter): Promise<SessionMetadata[]> {
-        if (!this.connection) {
-            throw new Error("Client not connected");
-        }
+        const connection = await this.getStartedConnection();
 
         // Transform filter to wire format (workingDirectory → cwd)
         let wireFilter: Record<string, unknown> | undefined;
@@ -3867,7 +4096,7 @@ export class CopilotClient {
             wireFilter = { ...rest, cwd: workingDirectory };
         }
 
-        const response = await this.connection.sendRequest("session.list", {
+        const response = await connection.sendRequest("session.list", {
             filter: wireFilter,
         });
         const { sessions } = response as {
@@ -3905,11 +4134,8 @@ export class CopilotClient {
      * ```
      */
     async getSessionMetadata(sessionId: string): Promise<SessionMetadata | undefined> {
-        if (!this.connection) {
-            throw new Error("Client not connected");
-        }
-
-        const response = await this.connection.sendRequest("session.getMetadata", { sessionId });
+        const connection = await this.getStartedConnection();
+        const response = await connection.sendRequest("session.getMetadata", { sessionId });
         const { session } = response as {
             session?: {
                 sessionId: string;
@@ -3978,11 +4204,8 @@ export class CopilotClient {
      * ```
      */
     async getForegroundSessionId(): Promise<string | undefined> {
-        if (!this.connection) {
-            throw new Error("Client not connected");
-        }
-
-        const response = await this.connection.sendRequest("session.getForeground", {});
+        const connection = await this.getStartedConnection();
+        const response = await connection.sendRequest("session.getForeground", {});
         return (response as ForegroundSessionInfo).sessionId;
     }
 
@@ -4003,11 +4226,8 @@ export class CopilotClient {
      * ```
      */
     async setForegroundSessionId(sessionId: string): Promise<void> {
-        if (!this.connection) {
-            throw new Error("Client not connected");
-        }
-
-        const response = await this.connection.sendRequest("session.setForeground", { sessionId });
+        const connection = await this.getStartedConnection();
+        const response = await connection.sendRequest("session.setForeground", { sessionId });
         const result = response as { success: boolean; error?: string };
 
         if (!result.success) {
@@ -4094,20 +4314,22 @@ export class CopilotClient {
         };
     }
 
+    private static normalizeEnvironment(
+        environment: Record<string, string | undefined>
+    ): Record<string, string | undefined> {
+        return process.platform === "win32"
+            ? Object.fromEntries(
+                  Object.entries(environment).map(([key, value]) => [key.toUpperCase(), value])
+              )
+            : { ...environment };
+    }
+
     /**
      * Builds runtime configuration for child processes and the per-host FFI snapshot.
      * Typed auth, home, keychain, and telemetry options override the effective env.
      */
     private buildRuntimeEnv(): Record<string, string | undefined> {
-        const env: Record<string, string | undefined> =
-            process.platform === "win32"
-                ? Object.fromEntries(
-                      Object.entries(this.resolvedEnv).map(([key, value]) => [
-                          key.toUpperCase(),
-                          value,
-                      ])
-                  )
-                : { ...this.resolvedEnv };
+        const env = CopilotClient.normalizeEnvironment(this.resolvedEnv);
         delete env.NODE_DEBUG;
 
         const test = this.options.internalTestOptions;
@@ -4192,9 +4414,9 @@ export class CopilotClient {
             }
 
             // Choose transport mode based on the resolved connection config.
-            if (this.connectionConfig.kind === "stdio") {
+            if (this.connectionConfig.kind === "spawned-stdio") {
                 args.push("--stdio");
-            } else if (this.connectionConfig.kind === "tcp") {
+            } else if (this.connectionConfig.kind === "spawned-tcp") {
                 const requestedPort = this.connectionConfig.port ?? 0;
                 if (requestedPort > 0) {
                     args.push("--port", requestedPort.toString());
@@ -4226,9 +4448,9 @@ export class CopilotClient {
             if (!this.resolvedCliPath) {
                 throw new Error(
                     "Path to Copilot CLI is required. Please supply it via " +
-                        "`RuntimeConnection.forStdio({ path })` or " +
-                        "`RuntimeConnection.forTcp({ path })`, set the COPILOT_CLI_PATH " +
-                        "environment variable, or use `RuntimeConnection.forUri(...)` to " +
+                        "`RuntimeConnection.forSpawnedStdio({ path })` or " +
+                        "`RuntimeConnection.forSpawnedTcp({ path })`, set the COPILOT_CLI_PATH " +
+                        "environment variable, or use `RuntimeConnection.forTcp(...)` to " +
                         "connect to an already-running runtime."
                 );
             }
@@ -4284,7 +4506,7 @@ export class CopilotClient {
             }
 
             const stdioConfig: ["pipe", "pipe", "pipe"] | ["ignore", "pipe", "pipe"] =
-                this.connectionConfig.kind === "stdio"
+                this.connectionConfig.kind === "spawned-stdio"
                     ? ["pipe", "pipe", "pipe"]
                     : ["ignore", "pipe", "pipe"];
 
@@ -4310,7 +4532,7 @@ export class CopilotClient {
             let resolved = false;
 
             // For stdio mode, we're ready immediately after spawn
-            if (this.connectionConfig.kind === "stdio") {
+            if (this.connectionConfig.kind === "spawned-stdio") {
                 resolved = true;
                 resolve();
             } else {
@@ -4416,18 +4638,17 @@ export class CopilotClient {
         switch (this.connectionConfig.kind) {
             case "parent-process":
                 return this.connectToParentProcessViaStdio();
-            case "stdio":
+            case "spawned-stdio":
                 return this.connectToChildProcessViaStdio();
             case "inprocess":
                 return this.connectViaFfi();
+            case "spawned-tcp":
+                return this.connectViaTcp();
             case "tcp":
+                // stop() clears runtimePort, so restore the attached endpoint on every start.
+                this.actualHost = this.connectionConfig.host;
+                this.runtimePort = this.connectionConfig.port;
                 return this.connectViaTcp();
-            case "uri": {
-                const { host, port } = this.parseCliUrl(this.connectionConfig.url);
-                this.actualHost = host;
-                this.runtimePort = port;
-                return this.connectViaTcp();
-            }
         }
     }
 
@@ -4707,7 +4928,7 @@ export class CopilotClient {
             }): Promise<UserInputResponse> => await this.handleUserInputRequest(params)
         );
 
-        this.connection.onRequest(
+        this.connection.onRequest<ShellAuthenticationResponse, unknown>(
             "shellAuthentication.request",
             async (
                 params: ShellAuthenticationRequest & { sessionId: string }
@@ -4870,7 +5091,7 @@ export class CopilotClient {
             }
         );
 
-        // Internal experimental callbacks backing `SessionConfigBase.skillProvider`.
+        // Internal experimental callbacks backing `SessionOptionsBase.skills.provider`.
         this.connection.onRequest(
             "skillProvider.list",
             async (params: { sessionId: string }, token: CancellationToken) =>

@@ -108,7 +108,8 @@ async def connected_peer() -> AsyncIterator[tuple[CopilotClient, Peer]]:
 
     server = await asyncio.start_server(accepted, "127.0.0.1", 0)
     client = CopilotClient(
-        connection=RuntimeConnection.for_uri(f"127.0.0.1:{server.sockets[0].getsockname()[1]}"),
+        mode="coding-agent",
+        runtime=RuntimeConnection.for_tcp("127.0.0.1", server.sockets[0].getsockname()[1]),
     )
     try:
         await client.start()
@@ -135,7 +136,7 @@ async def test_force_stop_rejects_acknowledged_plain_waits(
     peer.expected_sends = count
     peer.completion_supported = completion_supported
     session = await client.create_session(
-        session_id="retirement-session", on_permission_request=PermissionHandler.approve_all
+        session_id="retirement-session", permissions={"on_request": PermissionHandler.approve_all}
     )
     waits = [
         asyncio.create_task(session.send_and_wait("hold the response", timeout=float("inf")))
@@ -166,13 +167,13 @@ class Capture:
 async def captured_session(client: CopilotClient, kind: str):
     capture = Capture()
     reference = weakref.ref(capture)
-    options = {"on_permission_request": PermissionHandler.approve_all}
+    options = {"permissions": {"on_request": PermissionHandler.approve_all}}
     if kind == "permission":
-        options["on_permission_request"] = capture
+        options["permissions"] = {"on_request": capture}
     elif kind == "user_input":
-        options["on_user_input_request"] = capture
+        options["interaction"] = {"on_user_input_request": capture}
     elif kind == "hook":
-        options["hooks"] = {"on_session_end": capture}
+        options["hooks"] = {"handlers": {"on_session_end": capture}}
     session = await client.create_session(session_id="captured-session", **options)
     if kind == "event":
         session.on(capture)

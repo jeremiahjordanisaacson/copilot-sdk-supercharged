@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::{CustomAgentConfig, ResumeSessionConfig};
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::{CustomAgentConfig, ResumeSessionOptions};
 
 use super::support::{assert_uuid_like, assistant_message_content};
 
@@ -22,7 +22,7 @@ async fn should_load_and_apply_skill_from_skilldirectories() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_skill_directories([skills_dir]),
+                            .with_skills(|group| group.with_directories([skills_dir])),
                     )
                     .await
                     .expect("create session");
@@ -57,8 +57,8 @@ async fn should_not_apply_skill_when_disabled_via_disabledskills() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_skill_directories([skills_dir])
-                            .with_disabled_skills(["test-skill"]),
+                            .with_skills(|group| group.with_directories([skills_dir]))
+                            .with_skills(|group| group.with_disabled_skills(["test-skill"])),
                     )
                     .await
                     .expect("create session");
@@ -93,14 +93,16 @@ async fn should_allow_agent_with_skills_to_invoke_skill() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_skill_directories([skills_dir])
-                            .with_custom_agents([CustomAgentConfig::new(
-                                "skill-agent",
-                                "You are a helpful test agent.",
-                            )
-                            .with_description("An agent with access to test-skill")
-                            .with_skills(["test-skill"])])
-                            .with_agent("skill-agent"),
+                            .with_skills(|group| group.with_directories([skills_dir]))
+                            .with_agents(|group| {
+                                group.with_definitions([CustomAgentConfig::new(
+                                    "skill-agent",
+                                    "You are a helpful test agent.",
+                                )
+                                .with_description("An agent with access to test-skill")
+                                .with_skills(["test-skill"])])
+                            })
+                            .with_agents(|group| group.with_selected("skill-agent")),
                     )
                     .await
                     .expect("create session");
@@ -135,13 +137,15 @@ async fn should_not_provide_skills_to_agent_without_skills_field() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_skill_directories([skills_dir])
-                            .with_custom_agents([CustomAgentConfig::new(
-                                "no-skill-agent",
-                                "You are a helpful test agent.",
-                            )
-                            .with_description("An agent without skills access")])
-                            .with_agent("no-skill-agent"),
+                            .with_skills(|group| group.with_directories([skills_dir]))
+                            .with_agents(|group| {
+                                group.with_definitions([CustomAgentConfig::new(
+                                    "no-skill-agent",
+                                    "You are a helpful test agent.",
+                                )
+                                .with_description("An agent without skills access")])
+                            })
+                            .with_agents(|group| group.with_selected("no-skill-agent")),
                     )
                     .await
                     .expect("create session");
@@ -182,8 +186,8 @@ async fn should_reload_replaced_skill_and_replay_it_on_resume() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_enable_session_store(true)
-                            .with_skill_directories([skills_dir.clone()]),
+                            .with_state(|group| group.with_enable_cross_session_store(true))
+                            .with_skills(|group| group.with_directories([skills_dir.clone()])),
                     )
                     .await
                     .expect("create session");
@@ -227,7 +231,7 @@ async fn should_reload_replaced_skill_and_replay_it_on_resume() {
                 client
                     .rpc()
                     .sessions()
-                    .save(github_copilot_sdk::rpc::SessionsSaveRequest {
+                    .save(copilot_sdk::rpc::SessionsSaveRequest {
                         session_id: session_id.clone(),
                     })
                     .await
@@ -238,11 +242,15 @@ async fn should_reload_replaced_skill_and_replay_it_on_resume() {
 
                 let resumed = client
                     .resume_session(
-                        ResumeSessionConfig::new(session_id)
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
+                        ResumeSessionOptions::new(session_id)
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
                             .with_continue_pending_work(false)
-                            .with_skill_directories([skills_dir]),
+                            .with_skills(|group| group.with_directories([skills_dir])),
                     )
                     .await
                     .expect("resume session");
@@ -308,7 +316,7 @@ fn skill_contents(name: &str, description: &str, marker: &str) -> String {
 }
 
 fn assert_versioned_skill(
-    list: github_copilot_sdk::rpc::SkillList,
+    list: copilot_sdk::rpc::SkillList,
     name: &str,
     description: &str,
     path: &Path,

@@ -22,9 +22,9 @@ if ! output="$(cargo check --verbose --color never "$@" 2>&1)"; then
   printf '%s\n' "${output}" >&2
   exit 1
 fi
-if ! grep -Eq '^ *Fresh github-copilot-sdk v' <<<"${output}"; then
-  grep -E '^ *[A-Z][a-z]+ github-copilot-sdk v' <<<"${output}" >&2 || printf '%s\n' "${output}" >&2
-  echo "error: an unchanged rebuild did not keep github-copilot-sdk fresh" >&2
+if ! grep -Eq '^ *Fresh copilot-sdk v' <<<"${output}"; then
+  grep -E '^ *[A-Z][a-z]+ copilot-sdk v' <<<"${output}" >&2 || printf '%s\n' "${output}" >&2
+  echo "error: an unchanged rebuild did not keep copilot-sdk fresh" >&2
   exit 1
 fi
-echo "An unchanged rebuild kept github-copilot-sdk fresh."
+echo "An unchanged rebuild kept copilot-sdk fresh."

@@ -1,8 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
+use copilot_sdk::{RuntimeConnection, SpawnedProcessOptions, TcpRuntimeOptions};
 use std::path::PathBuf;
 
-use github_copilot_sdk::{CliProgram, Client, ClientOptions, ErrorKind, Transport};
+use copilot_sdk::{CliProgram, Client, ClientOptions, ErrorKind};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -60,7 +61,7 @@ async fn run_start(paths: Option<Vec<PathBuf>>) -> Vec<serde_json::Value> {
         write_result(
             &mut writer,
             &connect,
-            serde_json::json!({ "ok": true, "protocolVersion": 3, "version": "test" }),
+            serde_json::json!({ "ok": true, "protocolVersion": 4, "version": "test" }),
         )
         .await;
         requests.push(connect);
@@ -73,17 +74,24 @@ async fn run_start(paths: Option<Vec<PathBuf>>) -> Vec<serde_json::Value> {
         requests
     });
 
-    let mut options = ClientOptions::new()
-        .with_program(CliProgram::Path(std::env::current_exe().unwrap()))
-        .with_transport(Transport::External {
+    let mut options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_runtime(
+        RuntimeConnection::Tcp(TcpRuntimeOptions {
             host: address.ip().to_string(),
             port: address.port(),
             connection_token: None,
-        });
+        }),
+    );
     if let Some(paths) = paths {
-        options = options.with_builtin_plugin_directories(paths);
+        options = options.with_plugins(|group| group.with_builtin_directories(paths));
     }
     let client = Client::start(options).await.unwrap();
+    assert!(
+        client
+            .startup_timings()
+            .unwrap()
+            .program_resolve_ms
+            .is_none()
+    );
     let requests = server.await.unwrap();
     client.force_stop();
     requests
@@ -121,10 +129,12 @@ async fn configured_directories_call_rpc_once_before_start_completes() {
 
 #[tokio::test]
 async fn relative_directory_is_rejected() {
-    let options = ClientOptions::new()
-        .with_program(CliProgram::Path(std::env::current_exe().unwrap()))
-        .with_transport(Transport::Stdio)
-        .with_builtin_plugin_directories(["plugins/core"]);
+    let options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+        .with_runtime(RuntimeConnection::for_spawned_stdio(
+            SpawnedProcessOptions::new()
+                .with_program(CliProgram::Path(std::env::current_exe().unwrap())),
+        ))
+        .with_plugins(|group| group.with_builtin_directories(["plugins/core"]));
 
     let error = match Client::start(options).await {
         Ok(_) => panic!("relative path unexpectedly accepted"),

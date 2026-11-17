@@ -123,6 +123,7 @@ impl Peer {
         let (writer, output) = tokio::io::duplex(4096);
         let gate = Arc::new(WriteGate::default());
         let client = crate::Client::from_streams(
+            crate::ClientMode::CodingAgent,
             reader,
             GatedWriter {
                 writer,

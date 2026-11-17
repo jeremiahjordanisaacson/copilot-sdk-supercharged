@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use github_copilot_sdk::handler::{ApproveAllHandler, PermissionHandler, PermissionResult};
-use github_copilot_sdk::tool::ToolHandler;
-use github_copilot_sdk::{
-    Error, PermissionRequestData, RequestId, SessionConfig, SessionId, Tool, ToolInvocation,
+use copilot_sdk::handler::{ApproveAllHandler, PermissionHandler, PermissionResult};
+use copilot_sdk::tool::ToolHandler;
+use copilot_sdk::{
+    CreateSessionOptions, Error, PermissionRequestData, RequestId, SessionId, Tool, ToolInvocation,
     ToolResult, ToolSet,
 };
 use serde_json::json;
@@ -25,7 +25,7 @@ async fn string_schema_apply_patch_override_binds_patch_input() {
                 ctx.set_default_copilot_user();
                 let client = ctx.start_client().await;
                 let (tx, mut rx) = mpsc::unbounded_channel();
-                let tool = github_copilot_sdk::tool::define_tool::<String, _, _>(
+                let tool = copilot_sdk::tool::define_tool::<String, _, _>(
                     "apply_patch",
                     "Apply a patch",
                     move |_invocation, input| {
@@ -38,7 +38,7 @@ async fn string_schema_apply_patch_override_binds_patch_input() {
                 )
                 .with_overrides_built_in_tool(true);
                 let session = client
-                    .create_session(ctx.approve_all_session_config().with_tools(vec![tool]))
+                    .create_session(ctx.approve_all_session_config().with_tools(|group| group.with_definitions(vec![tool])))
                     .await
                     .expect("create session");
                 let response = session
@@ -111,11 +111,11 @@ async fn low_level_tool_definition() {
                 .into_vec();
             let session = client
                 .create_session(
-                    SessionConfig::default()
-                        .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                        .with_permission_handler(__perm)
-                        .with_tools(tools)
-                        .with_available_tools(available_tools),
+                    CreateSessionOptions::default()
+                        .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+                        .with_permissions(|group| group.with_on_request(__perm))
+                        .with_tools(|group| group.with_definitions(tools))
+                        .with_tools(|group| group.with_available_tools(available_tools)),
                 )
                 .await
                 .expect("create session");
@@ -150,10 +150,10 @@ async fn handles_tool_calling_errors() {
             let tools = vec![error_tool()];
             let session = client
                 .create_session(
-                    SessionConfig::default()
-                        .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                        .with_permission_handler(__perm)
-                        .with_tools(tools),
+                    CreateSessionOptions::default()
+                        .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+                        .with_permissions(|group| group.with_on_request(__perm))
+                        .with_tools(|group| group.with_definitions(tools)),
                 )
                 .await
                 .expect("create session");
@@ -199,10 +199,10 @@ async fn can_receive_and_return_complex_types() {
             let tools = vec![db_query_tool()];
             let session = client
                 .create_session(
-                    SessionConfig::default()
-                        .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                        .with_permission_handler(__perm)
-                        .with_tools(tools),
+                    CreateSessionOptions::default()
+                        .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+                        .with_permissions(|group| group.with_on_request(__perm))
+                        .with_tools(|group| group.with_definitions(tools)),
                 )
                 .await
                 .expect("create session");
@@ -242,10 +242,12 @@ async fn overrides_built_in_tool_with_custom_tool() {
                 let tools = vec![custom_grep_tool()];
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(__perm)
-                            .with_tools(tools),
+                        CreateSessionOptions::default()
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_permissions(|group| group.with_on_request(__perm))
+                            .with_tools(|group| group.with_definitions(tools)),
                     )
                     .await
                     .expect("create session");
@@ -284,10 +286,12 @@ async fn skippermission_sent_in_tool_definition() {
                 let tools = vec![safe_lookup_tool()];
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(__perm)
-                            .with_tools(tools),
+                        CreateSessionOptions::default()
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_permissions(|group| group.with_on_request(__perm))
+                            .with_tools(|group| group.with_definitions(tools)),
                     )
                     .await
                     .expect("create session");
@@ -335,10 +339,12 @@ async fn invokes_custom_tool_with_permission_handler() {
                 let tools = vec![encrypt_string_tool()];
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(__perm)
-                            .with_tools(tools),
+                        CreateSessionOptions::default()
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_permissions(|group| group.with_on_request(__perm))
+                            .with_tools(|group| group.with_definitions(tools)),
                     )
                     .await
                     .expect("create session");
@@ -380,10 +386,12 @@ async fn denies_custom_tool_when_permission_denied() {
                 let tools = vec![tracked_encrypt_string_tool(call_tx)];
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(__perm)
-                            .with_tools(tools),
+                        CreateSessionOptions::default()
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_permissions(|group| group.with_on_request(__perm))
+                            .with_tools(|group| group.with_definitions(tools)),
                     )
                     .await
                     .expect("create session");
@@ -425,10 +433,10 @@ async fn should_execute_multiple_custom_tools_in_parallel_single_turn() {
                 ];
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(__perm)
-                            .with_tools(tools),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| group.with_on_request(__perm))
+                            .with_tools(|group| group.with_definitions(tools)),
                     )
                     .await
                     .expect("create session");

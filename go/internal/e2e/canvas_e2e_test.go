@@ -5,9 +5,9 @@ import (
 	"sync"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestCanvasE2E(t *testing.T) {
@@ -39,11 +39,7 @@ func TestCanvasE2E(t *testing.T) {
 		}},
 	}
 
-	session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		Canvases:            []copilot.CanvasDeclaration{canvasDecl},
-		CanvasHandler:       handler,
-	})
+	session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Canvases: copilot.SessionCanvasOptions{Definitions: []copilot.CanvasDeclaration{canvasDecl}, Handler: handler}})
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}

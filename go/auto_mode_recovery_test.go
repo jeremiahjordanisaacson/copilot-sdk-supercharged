@@ -17,20 +17,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
-func autoModeRecoveryClient(t *testing.T, caps *SessionCapabilitiesWithAutoModeRecovery) (*Client, *jsonrpc2.Client, *requestRecorder) {
+func autoModeRecoveryClient(t *testing.T, caps *SessionCapabilities) (*Client, *jsonrpc2.Client, *requestRecorder) {
 	t.Helper()
 	client, server, requests, _ := autoModeRecoveryClientWithPeer(t, caps)
 	return client, server, requests
 }
 
-func autoModeRecoveryClientWithPeer(t *testing.T, caps *SessionCapabilitiesWithAutoModeRecovery) (*Client, *jsonrpc2.Client, *requestRecorder, net.Conn) {
+func autoModeRecoveryClientWithPeer(t *testing.T, caps *SessionCapabilities) (*Client, *jsonrpc2.Client, *requestRecorder, net.Conn) {
 	t.Helper()
 	transport, server, _, peer := newRuntimeShutdownRpcPairWithPeer(t)
-	client := NewClient(nil)
+	client := NewClient(&ClientOptions{Mode: ModeCodingAgent})
 	client.client = transport
 	client.RPC = rpc.NewServerRPC(transport)
 	client.state = stateConnected
@@ -65,66 +65,36 @@ func autoModeRecoveryClientWithPeer(t *testing.T, caps *SessionCapabilitiesWithA
 }
 
 func openAutoModeRecoverySession(ctx context.Context, client *Client, resume, enabled bool, handler AutoModeSwitchRequestHandler) (*Session, error) {
-	if enabled {
-		options := recoveryOptionsForLegacyTestHandler(handler)
-		if resume {
-			return client.ResumeSessionWithAutoModeRecovery(ctx, "session-1", &ResumeSessionConfig{
-				OnEvent: func(SessionEvent) {},
-			}, options)
-		}
-		return client.CreateSessionWithAutoModeRecovery(ctx, &SessionConfig{
-			OnEvent: func(SessionEvent) {},
-		}, options)
-	}
 	if resume {
-		return client.ResumeSession(ctx, "session-1", &ResumeSessionConfig{
-			OnAutoModeSwitchRequest: handler,
-			OnEvent:                 func(SessionEvent) {},
+		return client.ResumeSession(ctx, "session-1", &ResumeSessionOptions{
+			Interaction: SessionInteractionOptions{AutoModeRecovery: enabled, OnAutoModeSwitchRequest: handler},
+
+			Events: SessionEventOptions{OnEvent: func(SessionEvent) {}},
 		})
 	}
-	return client.CreateSession(ctx, &SessionConfig{
-		OnAutoModeSwitchRequest: handler,
-		OnEvent:                 func(SessionEvent) {},
+	return client.CreateSession(ctx, &CreateSessionOptions{
+		Interaction: SessionInteractionOptions{AutoModeRecovery: enabled, OnAutoModeSwitchRequest: handler},
+
+		Events: SessionEventOptions{OnEvent: func(SessionEvent) {}},
 	})
 }
 
-func openAutoModeRecoverySessionWithRecovery(ctx context.Context, client *Client, resume, enabled bool, handler AutoModeSwitchRequestHandlerWithAutoModeRecovery) (*Session, error) {
-	if !enabled {
-		var legacy AutoModeSwitchRequestHandler
-		if handler != nil {
-			legacy = func(request AutoModeSwitchRequest, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-				return handler(AutoModeSwitchRequestWithAutoModeRecovery{AutoModeSwitchRequest: request}, invocation)
-			}
-		}
-		return openAutoModeRecoverySession(ctx, client, resume, false, legacy)
+func createAutoModeRecoverySession(ctx context.Context, client *Client, config *CreateSessionOptions) (*Session, error) {
+	options := CreateSessionOptions{Interaction: SessionInteractionOptions{AutoModeRecovery: true}}
+	if config != nil {
+		options = *config
+		options.Interaction.AutoModeRecovery = true
 	}
-	options := &AutoModeRecoveryOptions{OnAutoModeSwitchRequest: handler}
-	if resume {
-		return client.ResumeSessionWithAutoModeRecovery(ctx, "session-1", &ResumeSessionConfig{
-			OnEvent: func(SessionEvent) {},
-		}, options)
-	}
-	return client.CreateSessionWithAutoModeRecovery(ctx, &SessionConfig{
-		OnEvent: func(SessionEvent) {},
-	}, options)
+	return client.CreateSession(ctx, &options)
 }
 
-func recoveryOptionsForLegacyTestHandler(handler AutoModeSwitchRequestHandler) *AutoModeRecoveryOptions {
-	options := &AutoModeRecoveryOptions{}
-	if handler != nil {
-		options.OnAutoModeSwitchRequest = func(request AutoModeSwitchRequestWithAutoModeRecovery, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-			return handler(request.AutoModeSwitchRequest, invocation)
-		}
+func resumeAutoModeRecoverySession(ctx context.Context, client *Client, sessionID string, config *ResumeSessionOptions) (*Session, error) {
+	options := ResumeSessionOptions{Interaction: SessionInteractionOptions{AutoModeRecovery: true}}
+	if config != nil {
+		options = *config
+		options.Interaction.AutoModeRecovery = true
 	}
-	return options
-}
-
-func createAutoModeRecoverySession(ctx context.Context, client *Client, config *SessionConfig) (*Session, error) {
-	return client.CreateSessionWithAutoModeRecovery(ctx, config, recoveryOptionsForLegacyTestHandler(config.OnAutoModeSwitchRequest))
-}
-
-func resumeAutoModeRecoverySession(ctx context.Context, client *Client, sessionID string, config *ResumeSessionConfig) (*Session, error) {
-	return client.ResumeSessionWithAutoModeRecovery(ctx, sessionID, config, recoveryOptionsForLegacyTestHandler(config.OnAutoModeSwitchRequest))
+	return client.ResumeSession(ctx, sessionID, &options)
 }
 
 func mockSessionPrefixLookup(t *testing.T, server *jsonrpc2.Client, canonicalID string) {
@@ -184,12 +154,9 @@ func TestAutoModeRecoveryPostCreateFailureRollsBackAssignedID(t *testing.T) {
 						return []byte(`{"success":true}`), nil
 					})
 					skip := true
-					config := &SessionConfig{
-						SessionID: "caller-owned", SkipCustomInstructions: &skip,
-						OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-							return AutoModeSwitchResponseNo, nil
-						},
-						OnMCPAuthRequest: func(MCPAuthRequest, MCPAuthInvocation) (*MCPAuthResult, error) { return nil, nil },
+					config := &CreateSessionOptions{SessionID: "caller-owned", Instructions: CreateSessionInstructionOptions{SkipCustomInstructions: &skip}, Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+						return AutoModeSwitchResponseNo, nil
+					}}, MCP: SessionMCPOptions{OnAuthRequest: func(MCPAuthRequest, MCPAuthInvocation) (*MCPAuthResult, error) { return nil, nil }},
 					}
 					if cloud {
 						config.SessionID = ""
@@ -246,15 +213,13 @@ func TestAutoModeRecoveryCloudSetupFencesAssignedID(t *testing.T) {
 	defer cancel()
 	created := make(chan error, 1)
 	go func() {
-		_, err := client.CreateSessionWithAutoModeRecovery(ctx, &SessionConfig{
+		_, err := client.CreateSession(ctx, &CreateSessionOptions{Interaction: SessionInteractionOptions{AutoModeRecovery: true, OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+			return AutoModeSwitchResponseNo, nil
+		}},
 			Cloud: &CloudSessionOptions{},
-			OnMCPAuthRequest: func(MCPAuthRequest, MCPAuthInvocation) (*MCPAuthResult, error) {
+			MCP: SessionMCPOptions{OnAuthRequest: func(MCPAuthRequest, MCPAuthInvocation) (*MCPAuthResult, error) {
 				return nil, nil
-			},
-		}, &AutoModeRecoveryOptions{
-			OnAutoModeSwitchRequest: func(AutoModeSwitchRequestWithAutoModeRecovery, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-				return AutoModeSwitchResponseNo, nil
-			},
+			}},
 		})
 		created <- err
 	}()
@@ -268,10 +233,9 @@ func TestAutoModeRecoveryCloudSetupFencesAssignedID(t *testing.T) {
 	client.sessionsMux.Unlock()
 	resumed := make(chan error, 1)
 	go func() {
-		_, err := resumeAutoModeRecoverySession(ctx, client, "cloud-session", &ResumeSessionConfig{
-			OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-				return AutoModeSwitchResponseNo, nil
-			},
+		_, err := resumeAutoModeRecoverySession(ctx, client, "cloud-session", &ResumeSessionOptions{Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+			return AutoModeSwitchResponseNo, nil
+		}},
 		})
 		resumed <- err
 	}()
@@ -325,10 +289,10 @@ func TestAutoModeRecoveryCloudSetupFencesAssignedID(t *testing.T) {
 }
 
 func TestAutoModeRecoveryPrefixLookupUsesConfiguredStorage(t *testing.T) {
-	client, server, requests := autoModeRecoveryClient(t, &SessionCapabilitiesWithAutoModeRecovery{UI: &UICapabilitiesWithAutoModeRecovery{AutoModeRecovery: true}})
+	client, server, requests := autoModeRecoveryClient(t, &SessionCapabilities{UI: &UICapabilities{AutoModeRecovery: true}})
 	canonical := "abcdef12-abcd-4123-8123-123456789abc"
 	server.SetRequestHandler("sessions.findByPrefix", func(params json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
-		var lookup rpc.SessionsFindByPrefixOptions
+		var lookup rpc.SessionsFindByPrefixRequest
 		if err := json.Unmarshal(params, &lookup); err != nil {
 			return nil, &jsonrpc2.Error{Code: -32602, Message: err.Error()}
 		}
@@ -337,11 +301,9 @@ func TestAutoModeRecoveryPrefixLookupUsesConfiguredStorage(t *testing.T) {
 		}
 		return json.RawMessage(`{"sessionId":"` + canonical + `"}`), nil
 	})
-	session, err := resumeAutoModeRecoverySession(t.Context(), client, "abcdef12", &ResumeSessionConfig{
-		ConfigDirectory: "configured-home",
-		OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-			return AutoModeSwitchResponseNo, nil
-		},
+	session, err := resumeAutoModeRecoverySession(t.Context(), client, "abcdef12", &ResumeSessionOptions{ConfigDirectory: "configured-home", Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+		return AutoModeSwitchResponseNo, nil
+	}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -350,7 +312,7 @@ func TestAutoModeRecoveryPrefixLookupUsesConfiguredStorage(t *testing.T) {
 		t.Fatalf("expected canonical ID %q, got %q", canonical, session.SessionID)
 	}
 	for _, request := range requests.snapshot() {
-		if request.Method == "session.resume" && request.Params["configDir"] != "configured-home" {
+		if request.Method == "session.resume" && request.Params["configDirectory"] != "configured-home" {
 			t.Fatalf("resume did not use configured storage: %+v", request.Params)
 		}
 	}
@@ -381,7 +343,7 @@ func TestAutoModeRecoverySessionIDsOverlapOnlyForUUIDAliases(t *testing.T) {
 }
 
 func TestAutoModeRecoveryResidentLookupPreservesCustomIDs(t *testing.T) {
-	client := NewClient(nil)
+	client := NewClient(&ClientOptions{Mode: ModeCodingAgent})
 	client.sessions["session-123"] = &Session{SessionID: "session-123"}
 	if actual := client.residentSessionID("session-1"); actual != "session-1" {
 		t.Fatalf("custom ID resolved to %q", actual)
@@ -396,7 +358,7 @@ func TestAutoModeRecoveryEnrollment(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			t.Run("requires-handler", func(t *testing.T) {
-				client := NewClient(nil)
+				client := NewClient(&ClientOptions{Mode: ModeCodingAgent})
 				_, err := openAutoModeRecoverySession(context.Background(), client, resume, true, nil)
 				if err == nil || !strings.Contains(err.Error(), "requires OnAutoModeSwitchRequest") {
 					t.Fatalf("expected configuration rejection, got %v", err)
@@ -405,11 +367,11 @@ func TestAutoModeRecoveryEnrollment(t *testing.T) {
 					t.Fatal("invalid enrollment started a transport")
 				}
 			})
-			for _, caps := range []*SessionCapabilitiesWithAutoModeRecovery{nil, {}, {UI: &UICapabilitiesWithAutoModeRecovery{}}} {
+			for _, caps := range []*SessionCapabilities{nil, {}, {UI: &UICapabilities{}}} {
 				t.Run("unsupported", func(t *testing.T) {
 					client, _, requests := autoModeRecoveryClient(t, caps)
-					_, err := openAutoModeRecoverySessionWithRecovery(context.Background(), client, resume, true,
-						func(AutoModeSwitchRequestWithAutoModeRecovery, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+					_, err := openAutoModeRecoverySession(context.Background(), client, resume, true,
+						func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
 							return AutoModeSwitchResponseNo, nil
 						})
 					if err == nil || !strings.Contains(err.Error(), "does not support AutoModeRecovery") {
@@ -423,11 +385,11 @@ func TestAutoModeRecoveryEnrollment(t *testing.T) {
 			}
 			for _, enabled := range []bool{false, true} {
 				t.Run("callback", func(t *testing.T) {
-					caps := &SessionCapabilitiesWithAutoModeRecovery{UI: &UICapabilitiesWithAutoModeRecovery{AutoModeRecovery: enabled}}
+					caps := &SessionCapabilities{UI: &UICapabilities{AutoModeRecovery: enabled}}
 					client, server, requests := autoModeRecoveryClient(t, caps)
-					received := make(chan AutoModeSwitchRequestWithAutoModeRecovery, 1)
-					session, err := openAutoModeRecoverySessionWithRecovery(context.Background(), client, resume, enabled,
-						func(request AutoModeSwitchRequestWithAutoModeRecovery, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+					received := make(chan AutoModeSwitchRequest, 1)
+					session, err := openAutoModeRecoverySession(context.Background(), client, resume, enabled,
+						func(request AutoModeSwitchRequest, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
 							if invocation.SessionID == "" {
 								t.Error("missing session identity")
 							}
@@ -438,14 +400,14 @@ func TestAutoModeRecoveryEnrollment(t *testing.T) {
 						t.Fatal(err)
 					}
 					params := requests.snapshot()[0].Params
-					if params["requestAutoModeSwitch"] != true || (params["requestAutoModeRecovery"] == true) != enabled {
+					if sessionWireGroup(params, "interaction")["requestAutoModeSwitch"] != true || (sessionWireGroup(params, "interaction")["requestAutoModeRecovery"] == true) != enabled {
 						t.Fatalf("wrong enrollment: %+v", params)
 					}
-					if session.CapabilitiesWithAutoModeRecovery().UI.AutoModeRecovery != enabled {
-						t.Fatalf("capability not surfaced: %+v", session.CapabilitiesWithAutoModeRecovery())
+					if session.Capabilities().UI.AutoModeRecovery != enabled {
+						t.Fatalf("capability not surfaced: %+v", session.Capabilities())
 					}
-					offer := AutoModeSwitchRequestWithAutoModeRecovery{
-						AutoModeSwitchRequest: AutoModeSwitchRequest{ErrorCode: ptr("model_overloaded"), RetryAfterSeconds: ptr(3.5)},
+					offer := AutoModeSwitchRequest{
+						ErrorCode: ptr("model_overloaded"), RetryAfterSeconds: ptr(3.5),
 					}
 					if enabled {
 						offer.AutoModeRecovery = &AutoModeRecoveryContext{
@@ -475,27 +437,19 @@ func TestAutoModeRecoveryEnrollment(t *testing.T) {
 	}
 }
 
-func TestAutoModeRecoveryEventSubscriptionsPreserveLegacyPayloads(t *testing.T) {
-	client, _, _, peer := autoModeRecoveryClientWithPeer(t, &SessionCapabilitiesWithAutoModeRecovery{
-		UI: &UICapabilitiesWithAutoModeRecovery{AutoModeRecovery: true},
+func TestAutoModeRecoveryEventSubscriptionsPreserveCapabilities(t *testing.T) {
+	client, _, _, peer := autoModeRecoveryClientWithPeer(t, &SessionCapabilities{
+		UI: &UICapabilities{AutoModeRecovery: true},
 	})
-	legacy := make(chan SessionEvent, 1)
-	aware := make(chan SessionEvent, 1)
-	session, err := client.CreateSessionWithAutoModeRecovery(t.Context(), &SessionConfig{
-		OnEvent: func(event SessionEvent) {
+	events := make(chan SessionEvent, 1)
+	session, err := client.CreateSession(t.Context(), &CreateSessionOptions{Interaction: SessionInteractionOptions{AutoModeRecovery: true, OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+		return AutoModeSwitchResponseNo, nil
+	}},
+		Events: SessionEventOptions{OnEvent: func(event SessionEvent) {
 			if event.ID == "recovery-capability-change" {
-				legacy <- event
+				events <- event
 			}
-		},
-	}, &AutoModeRecoveryOptions{
-		OnAutoModeSwitchRequest: func(AutoModeSwitchRequestWithAutoModeRecovery, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-			return AutoModeSwitchResponseNo, nil
-		},
-		OnEvent: func(event SessionEvent) {
-			if event.ID == "recovery-capability-change" {
-				aware <- event
-			}
-		},
+		}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -531,25 +485,17 @@ func TestAutoModeRecoveryEventSubscriptionsPreserveLegacyPayloads(t *testing.T) 
 		t.Fatal(err)
 	}
 	select {
-	case event := <-legacy:
+	case event := <-events:
 		data, ok := event.Data.(*CapabilitiesChangedData)
 		if !ok || data.UI == nil || data.UI.Elicitation == nil || !*data.UI.Elicitation ||
-			data.UI.MCPApps == nil || !*data.UI.MCPApps {
-			t.Fatalf("legacy subscriber received %T: %#v", event.Data, event.Data)
-		}
-	case <-ctx.Done():
-		t.Fatal("legacy subscriber did not receive the capability change")
-	}
-	select {
-	case event := <-aware:
-		data, ok := event.Data.(*CapabilitiesChangedDataWithAutoModeRecovery)
-		if !ok || data.UI == nil || data.UI.AutoModeRecovery == nil || *data.UI.AutoModeRecovery {
-			t.Fatalf("recovery subscriber received %T: %#v", event.Data, event.Data)
+			data.UI.MCPApps == nil || !*data.UI.MCPApps ||
+			data.UI.AutoModeRecovery == nil || *data.UI.AutoModeRecovery {
+			t.Fatalf("subscriber received %T: %#v", event.Data, event.Data)
 		}
 	case <-ctx.Done():
 		t.Fatal("recovery subscriber did not receive the capability change")
 	}
-	caps := session.CapabilitiesWithAutoModeRecovery()
+	caps := session.Capabilities()
 	if caps.UI == nil || caps.UI.AutoModeRecovery || !caps.UI.Elicitation || !caps.UI.MCPApps {
 		t.Fatalf("capability delta was not applied: %#v", caps)
 	}
@@ -558,11 +504,10 @@ func TestAutoModeRecoveryEventSubscriptionsPreserveLegacyPayloads(t *testing.T) 
 func TestAutoModeRecoveryOfferDoesNotReachLegacyHandler(t *testing.T) {
 	client, server, _ := autoModeRecoveryClient(t, nil)
 	var called atomic.Bool
-	session, err := client.CreateSession(t.Context(), &SessionConfig{
-		OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-			called.Store(true)
-			return AutoModeSwitchResponseYes, nil
-		},
+	session, err := client.CreateSession(t.Context(), &CreateSessionOptions{Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+		called.Store(true)
+		return AutoModeSwitchResponseYes, nil
+	}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -578,11 +523,11 @@ func TestAutoModeRecoveryOfferDoesNotReachLegacyHandler(t *testing.T) {
 	}
 }
 
-func TestAutoModeRecoveryComposesWithMCPAuthRuntimeRefresh(t *testing.T) {
+func TestAutoModeRecoveryComposesWithPermissionEnvelopeAndMCPAuthRuntimeRefresh(t *testing.T) {
 	for _, resume := range []bool{false, true} {
 		t.Run(fmt.Sprintf("resume-%t", resume), func(t *testing.T) {
-			client, server, _, peer := autoModeRecoveryClientWithPeer(t, &SessionCapabilitiesWithAutoModeRecovery{
-				UI: &UICapabilitiesWithAutoModeRecovery{AutoModeRecovery: true},
+			client, server, _, peer := autoModeRecoveryClientWithPeer(t, &SessionCapabilities{
+				UI: &UICapabilities{AutoModeRecovery: true},
 			})
 			server.SetRequestHandler("session.eventLog.registerInterest", func(json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
 				return []byte(`{}`), nil
@@ -596,26 +541,82 @@ func TestAutoModeRecoveryComposesWithMCPAuthRuntimeRefresh(t *testing.T) {
 				handled <- request
 				return []byte(`{}`), nil
 			})
-			options := &AutoModeRecoveryOptions{
-				OnAutoModeSwitchRequest: func(AutoModeSwitchRequestWithAutoModeRecovery, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-					return AutoModeSwitchResponseNo, nil
-				},
-				MCPAuthRuntimeRefreshHandler: func(request MCPAuthRequest, invocation MCPAuthInvocation, supported bool) (*MCPAuthResult, error) {
-					if request.RequestID != "refresh-request" || invocation.SessionID == "" || !supported {
-						t.Errorf("refresh callback lost its context: %#v, %#v, %v", request, invocation, supported)
-					}
-					return MCPAuthResultRuntimeRefresh(), nil
-				},
+			recoveryRequests := make(chan AutoModeSwitchRequest, 1)
+			recoveryHandler := func(request AutoModeSwitchRequest, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+				if invocation.SessionID != "session-1" {
+					t.Errorf("recovery callback lost its session: %+v", invocation)
+				}
+				recoveryRequests <- request
+				return AutoModeSwitchResponseNo, nil
+			}
+			var observedPermission *PermissionRequestEnvelope
+			permissionHandler := func(request *PermissionRequestEnvelope, invocation PermissionHandlerInvocation) (rpc.PermissionDecision, error) {
+				if invocation.SessionID != "session-1" {
+					t.Errorf("permission callback lost its session: %+v", invocation)
+				}
+				observedPermission = request
+				return &rpc.PermissionDecisionNoResult{}, nil
+			}
+			refreshHandler := func(request MCPAuthRequest, invocation MCPAuthInvocation, supported bool) (*MCPAuthResult, error) {
+				if request.RequestID != "refresh-request" || invocation.SessionID == "" || !supported {
+					t.Errorf("refresh callback lost its context: %#v, %#v, %v", request, invocation, supported)
+				}
+				return MCPAuthResultRuntimeRefresh(), nil
 			}
 			var session *Session
 			var err error
 			if resume {
-				session, err = client.ResumeSessionWithAutoModeRecovery(t.Context(), "session-1", nil, options)
+				session, err = client.ResumeSession(t.Context(), "session-1", &ResumeSessionOptions{
+					Interaction: SessionInteractionOptions{AutoModeRecovery: true, OnAutoModeSwitchRequest: recoveryHandler},
+
+					Permissions: SessionPermissionOptions{OnRequestWithEnvelope: permissionHandler},
+					MCP:         SessionMCPOptions{OnAuthRuntimeRefresh: refreshHandler},
+				})
 			} else {
-				session, err = client.CreateSessionWithAutoModeRecovery(t.Context(), nil, options)
+				session, err = client.CreateSession(t.Context(), &CreateSessionOptions{
+					SessionID:   "session-1",
+					Interaction: SessionInteractionOptions{AutoModeRecovery: true, OnAutoModeSwitchRequest: recoveryHandler},
+
+					Permissions: SessionPermissionOptions{OnRequestWithEnvelope: permissionHandler},
+					MCP:         SessionMCPOptions{OnAuthRuntimeRefresh: refreshHandler},
+				})
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			original := json.RawMessage(`{"kind":"read","intention":"Review a file","path":"/workspace/file.txt","futureDetails":9007199254740993}`)
+			var envelope PermissionRequestEnvelope
+			if err := json.Unmarshal(original, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := session.getPermissionHandler()(envelope.Request, PermissionInvocation{SessionID: session.SessionID}, nil, nil, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			permission, err := json.Marshal(observedPermission)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertOriginalPermissionRequest(t, permission, original)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			offer := &AutoModeRecoveryContext{RequestID: "recovery-offer", OriginalModel: "explicit-model"}
+			response, err := server.Request(ctx, "autoModeSwitch.request", autoModeSwitchRequest{
+				SessionID: session.SessionID, AutoModeRecovery: offer,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var recoveryResult autoModeSwitchResponse
+			if err := json.Unmarshal(response, &recoveryResult); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case request := <-recoveryRequests:
+				if recoveryResult.Response != AutoModeSwitchResponseNo || !reflect.DeepEqual(request.AutoModeRecovery, offer) {
+					t.Fatalf("recovery callback lost its context or result: %+v, %s", request, response)
+				}
+			case <-ctx.Done():
+				t.Fatal("recovery offer did not reach its handler")
 			}
 			notification, err := json.Marshal(map[string]any{
 				"jsonrpc": "2.0", "method": "session.event",
@@ -635,8 +636,6 @@ func TestAutoModeRecoveryComposesWithMCPAuthRuntimeRefresh(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
 			deadline, _ := ctx.Deadline()
 			if err := peer.SetWriteDeadline(deadline); err != nil {
 				t.Fatal(err)
@@ -692,25 +691,25 @@ func TestAutoModeRecoveryComposesWithPermissionEnvelope(t *testing.T) {
 						return &rpc.PermissionDecisionNoResult{}, nil
 					}
 				}
-				recoveryCalls := make(chan AutoModeSwitchRequestWithAutoModeRecovery, 1)
-				options := &AutoModeRecoveryOptions{
-					OnAutoModeSwitchRequest: func(request AutoModeSwitchRequestWithAutoModeRecovery, _ AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+				recoveryCalls := make(chan AutoModeSwitchRequest, 1)
+				options := &CreateSessionOptions{
+					Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(request AutoModeSwitchRequest, _ AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
 						recoveryCalls <- request
 						return AutoModeSwitchResponseYes, nil
-					},
+					}},
 				}
 				beforeOptions := *options
 				var session *Session
 				var err error
 				if resume {
-					config := &ResumeSessionConfig{OnPermissionRequest: legacy}
+					config := &ResumeSessionOptions{Permissions: SessionPermissionOptions{OnRequest: legacy, OnRequestWithEnvelope: handler}, Interaction: SessionInteractionOptions{AutoModeRecovery: true, OnAutoModeSwitchRequest: options.Interaction.OnAutoModeSwitchRequest}}
 					before := *config
-					session, err = client.ResumeSessionWithPermissionEnvelopeAndAutoModeRecovery(t.Context(), "review-session", config, handler, options)
+					session, err = client.ResumeSession(t.Context(), "review-session", config)
 					assertPermissionConfigUnchanged(t, before, *config)
 				} else {
-					config := &SessionConfig{SessionID: "review-session", OnPermissionRequest: legacy}
+					config := &CreateSessionOptions{SessionID: "review-session", Permissions: SessionPermissionOptions{OnRequest: legacy, OnRequestWithEnvelope: handler}, Interaction: SessionInteractionOptions{AutoModeRecovery: true, OnAutoModeSwitchRequest: options.Interaction.OnAutoModeSwitchRequest}}
 					before := *config
-					session, err = client.CreateSessionWithPermissionEnvelopeAndAutoModeRecovery(t.Context(), config, handler, options)
+					session, err = client.CreateSession(t.Context(), config)
 					assertPermissionConfigUnchanged(t, before, *config)
 				}
 				if err != nil {
@@ -740,7 +739,7 @@ func TestAutoModeRecoveryComposesWithPermissionEnvelope(t *testing.T) {
 					want = json.RawMessage(`{"kind":"read","intention":"Read a file","path":"/workspace/file.txt"}`)
 				}
 				assertOriginalPermissionRequest(t, <-forwarded, want)
-				offer := AutoModeSwitchRequestWithAutoModeRecovery{
+				offer := AutoModeSwitchRequest{
 					AutoModeRecovery: &AutoModeRecoveryContext{RequestID: "offer-1", OriginalModel: "explicit-model"},
 				}
 				response, err := rpcServer.Request(t.Context(), "autoModeSwitch.request", autoModeSwitchRequest{
@@ -787,13 +786,11 @@ func TestAutoModeRecoveryRejectedCloudCreateDeletesServerAssignedSession(t *test
 				}
 				return []byte(`{"success":true}`), nil
 			})
-			_, err := createAutoModeRecoverySession(t.Context(), client, &SessionConfig{
-				Cloud: &CloudSessionOptions{
-					Repository: &CloudSessionRepository{Owner: "github", Name: "copilot-sdk", Branch: "main"},
-				},
-				OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-					return AutoModeSwitchResponseNo, nil
-				},
+			_, err := createAutoModeRecoverySession(t.Context(), client, &CreateSessionOptions{Cloud: &CloudSessionOptions{
+				Repository: &CloudSessionRepository{Owner: "github", Name: "copilot-sdk", Branch: "main"},
+			}, Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+				return AutoModeSwitchResponseNo, nil
+			}},
 			})
 			if err == nil || !strings.Contains(err.Error(), "does not support AutoModeRecovery") {
 				t.Fatalf("expected unsupported enrollment, got %v", err)
@@ -809,10 +806,10 @@ func TestAutoModeRecoveryRejectedCloudCreateDeletesServerAssignedSession(t *test
 				t.Fatalf("missing cloud rollback error: %v", err)
 			}
 			if cleanupFailure {
-				if _, err := client.ResumeSession(t.Context(), "cloud-recovery-rejected", &ResumeSessionConfig{}); err == nil || !strings.Contains(err.Error(), "stop and restart") {
+				if _, err := client.ResumeSession(t.Context(), "cloud-recovery-rejected", &ResumeSessionOptions{}); err == nil || !strings.Contains(err.Error(), "stop and restart") {
 					t.Fatalf("same-ID resume bypassed failed cloud rollback: %v", err)
 				}
-				if _, err := client.CreateSession(t.Context(), &SessionConfig{SessionID: "cloud-recovery-rejected"}); err == nil || !strings.Contains(err.Error(), "stop and restart") {
+				if _, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "cloud-recovery-rejected"}); err == nil || !strings.Contains(err.Error(), "stop and restart") {
 					t.Fatalf("same-ID create bypassed failed cloud rollback: %v", err)
 				}
 			}
@@ -833,7 +830,7 @@ func TestAutoModeRecoveryRejectedCloudCreateDeletesServerAssignedSession(t *test
 					client.client = oldTransport
 					client.transportMux.Unlock()
 				}()
-				replacement, err := client.ResumeSession(t.Context(), "cloud-recovery-rejected", &ResumeSessionConfig{})
+				replacement, err := client.ResumeSession(t.Context(), "cloud-recovery-rejected", &ResumeSessionOptions{})
 				if err != nil {
 					t.Fatalf("old cleanup fence leaked into new connection: %v", err)
 				}
@@ -885,13 +882,11 @@ func TestAutoModeRecoveryCancelledCloudCreateKeepsReuseBehindDeletion(t *testing
 	defer cancel()
 	created := make(chan error, 1)
 	go func() {
-		_, err := createAutoModeRecoverySession(ctx, client, &SessionConfig{
-			Cloud: &CloudSessionOptions{
-				Repository: &CloudSessionRepository{Owner: "github", Name: "copilot-sdk", Branch: "main"},
-			},
-			OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-				return AutoModeSwitchResponseNo, nil
-			},
+		_, err := createAutoModeRecoverySession(ctx, client, &CreateSessionOptions{Cloud: &CloudSessionOptions{
+			Repository: &CloudSessionRepository{Owner: "github", Name: "copilot-sdk", Branch: "main"},
+		}, Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+			return AutoModeSwitchResponseNo, nil
+		}},
 		})
 		created <- err
 	}()
@@ -913,10 +908,10 @@ func TestAutoModeRecoveryCancelledCloudCreateKeepsReuseBehindDeletion(t *testing
 	}
 	reused := make(chan error, 1)
 	go func() {
-		_, err := client.ResumeSession(deadline, "cloud-recovery-rejected", &ResumeSessionConfig{})
+		_, err := client.ResumeSession(deadline, "cloud-recovery-rejected", &ResumeSessionOptions{})
 		reused <- err
 	}()
-	if _, err := client.CreateSession(deadline, &SessionConfig{SessionID: "unrelated"}); err != nil {
+	if _, err := client.CreateSession(deadline, &CreateSessionOptions{SessionID: "unrelated"}); err != nil {
 		t.Fatalf("cloud rollback blocked unrelated ID: %v", err)
 	}
 	release()
@@ -1029,7 +1024,7 @@ func TestAutoModeRecoveryUnsupportedEnrollmentDoesNotWaitForDetach(t *testing.T)
 					t.Fatal("unsupported enrollment did not retire its event consumer")
 				}
 				session.autoModeSwitchMu.Lock()
-				retainedHandler := session.autoModeSwitchHandler != nil || session.autoModeSwitchRecoveryHandler != nil
+				retainedHandler := session.autoModeSwitchHandler != nil
 				session.autoModeSwitchMu.Unlock()
 				if retainedHandler {
 					t.Fatal("unsupported enrollment retained its consent handler")
@@ -1042,20 +1037,20 @@ func TestAutoModeRecoveryUnsupportedEnrollmentDoesNotWaitForDetach(t *testing.T)
 func TestAutoModeRecoveryCapabilityChanges(t *testing.T) {
 	session, cleanup := newTestSession()
 	defer cleanup()
-	session.setCapabilities(&SessionCapabilitiesWithAutoModeRecovery{UI: &UICapabilitiesWithAutoModeRecovery{
-		UICapabilities: UICapabilities{Elicitation: true}, AutoModeRecovery: true,
+	session.setCapabilities(&SessionCapabilities{UI: &UICapabilities{
+		Elicitation: true, AutoModeRecovery: true,
 	}})
 	session.dispatchEvent(SessionEvent{Data: &CapabilitiesChangedData{
 		UI: &CapabilitiesChangedUI{Elicitation: ptr(false)},
 	}})
-	if caps := session.CapabilitiesWithAutoModeRecovery(); !caps.UI.AutoModeRecovery || caps.UI.Elicitation {
+	if caps := session.Capabilities(); !caps.UI.AutoModeRecovery || caps.UI.Elicitation {
 		t.Fatalf("partial update dropped recovery: %+v", caps.UI)
 	}
 
-	session.dispatchEvent(SessionEvent{Data: &CapabilitiesChangedDataWithAutoModeRecovery{
-		UI: &CapabilitiesChangedUIWithAutoModeRecovery{AutoModeRecovery: ptr(false)},
+	session.dispatchEvent(SessionEvent{Data: &CapabilitiesChangedData{
+		UI: &CapabilitiesChangedUI{AutoModeRecovery: ptr(false)},
 	}})
-	if session.CapabilitiesWithAutoModeRecovery().UI.AutoModeRecovery {
+	if session.Capabilities().UI.AutoModeRecovery {
 		t.Fatal("revocation was lost")
 	}
 }
@@ -1072,10 +1067,9 @@ func TestAutoModeRecoveryRejectedResumePreservesResidentSession(t *testing.T) {
 	server.SetRequestHandler("session.resume", func(json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
 		return nil, &jsonrpc2.Error{Code: -32000, Message: "resume rejected"}
 	})
-	_, err = resumeAutoModeRecoverySession(t.Context(), client, resident.SessionID, &ResumeSessionConfig{
-		OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-			return AutoModeSwitchResponseNo, nil
-		},
+	_, err = resumeAutoModeRecoverySession(t.Context(), client, resident.SessionID, &ResumeSessionOptions{Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+		return AutoModeSwitchResponseNo, nil
+	}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "resume rejected") {
 		t.Fatalf("expected resume RPC rejection, got %v", err)
@@ -1118,11 +1112,9 @@ func TestAutoModeRecoveryAbbreviatedResumeOwnership(t *testing.T) {
 				var previous *Session
 				var err error
 				if resident {
-					previous, err = client.CreateSession(t.Context(), &SessionConfig{
-						SessionID: canonicalID,
-						OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-							return AutoModeSwitchResponseYesAlways, nil
-						},
+					previous, err = client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: canonicalID, Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+						return AutoModeSwitchResponseYesAlways, nil
+					}},
 					})
 					if err != nil {
 						t.Fatal(err)
@@ -1157,11 +1149,10 @@ func TestAutoModeRecoveryAbbreviatedResumeOwnership(t *testing.T) {
 						return []byte(`{"success":true}`), nil
 					})
 				})
-				_, err = resumeAutoModeRecoverySession(t.Context(), client, "abcdef12", &ResumeSessionConfig{
-					OnAutoModeSwitchRequest: func(_ AutoModeSwitchRequest, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-						callbacks <- invocation.SessionID
-						return AutoModeSwitchResponseYes, nil
-					},
+				_, err = resumeAutoModeRecoverySession(t.Context(), client, "abcdef12", &ResumeSessionOptions{Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(_ AutoModeSwitchRequest, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+					callbacks <- invocation.SessionID
+					return AutoModeSwitchResponseYes, nil
+				}},
 				})
 				expectedError := "does not support AutoModeRecovery"
 				if rpcRejected {
@@ -1233,17 +1224,15 @@ func TestResumeUUIDPrefixCallbackOwnership(t *testing.T) {
 	for _, resident := range []bool{false, true} {
 		for _, outcome := range []string{"accepted", "lookup-rejected", "resume-rejected", "ambiguous"} {
 			t.Run(fmt.Sprintf("resident=%t/%s", resident, outcome), func(t *testing.T) {
-				client, server, requests := autoModeRecoveryClient(t, &SessionCapabilitiesWithAutoModeRecovery{UI: &UICapabilitiesWithAutoModeRecovery{AutoModeRecovery: true}})
+				client, server, requests := autoModeRecoveryClient(t, &SessionCapabilities{UI: &UICapabilities{AutoModeRecovery: true}})
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				var previous *Session
 				if resident {
 					var err error
-					previous, err = client.CreateSession(ctx, &SessionConfig{
-						SessionID: canonicalID,
-						OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-							return AutoModeSwitchResponseYesAlways, nil
-						},
+					previous, err = client.CreateSession(ctx, &CreateSessionOptions{SessionID: canonicalID, Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+						return AutoModeSwitchResponseYesAlways, nil
+					}},
 					})
 					if err != nil {
 						t.Fatal(err)
@@ -1306,13 +1295,12 @@ func TestResumeUUIDPrefixCallbackOwnership(t *testing.T) {
 					}
 					return []byte(`{"sessionId":"abcdef12-3456-4789-abcd-0123456789ab","capabilities":{"ui":{"autoModeRecovery":true}}}`), nil
 				})
-				session, err := resumeAutoModeRecoverySession(ctx, client, "ABCDEF12-3456", &ResumeSessionConfig{
-					OnAutoModeSwitchRequest: func(_ AutoModeSwitchRequest, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-						if invocation.SessionID != canonicalID {
-							t.Errorf("callback used alias identity: %q", invocation.SessionID)
-						}
-						return AutoModeSwitchResponseYes, nil
-					},
+				session, err := resumeAutoModeRecoverySession(ctx, client, "ABCDEF12-3456", &ResumeSessionOptions{Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(_ AutoModeSwitchRequest, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+					if invocation.SessionID != canonicalID {
+						t.Errorf("callback used alias identity: %q", invocation.SessionID)
+					}
+					return AutoModeSwitchResponseYes, nil
+				}},
 				})
 				if session != nil {
 					t.Cleanup(session.stopEventProcessing)
@@ -1381,7 +1369,7 @@ func TestResumeSessionPrefixLookupGuard(t *testing.T) {
 		{canonicalID + "0", false},
 	} {
 		t.Run(test.sessionID, func(t *testing.T) {
-			client, server, _ := autoModeRecoveryClient(t, &SessionCapabilitiesWithAutoModeRecovery{UI: &UICapabilitiesWithAutoModeRecovery{AutoModeRecovery: true}})
+			client, server, _ := autoModeRecoveryClient(t, &SessionCapabilities{UI: &UICapabilities{AutoModeRecovery: true}})
 			var lookups atomic.Int32
 			server.SetRequestHandler("sessions.findByPrefix", func(params json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
 				lookups.Add(1)
@@ -1415,10 +1403,9 @@ func TestResumeSessionPrefixLookupGuard(t *testing.T) {
 				}
 				return result, nil
 			})
-			session, err := resumeAutoModeRecoverySession(t.Context(), client, test.sessionID, &ResumeSessionConfig{
-				OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-					return AutoModeSwitchResponseNo, nil
-				},
+			session, err := resumeAutoModeRecoverySession(t.Context(), client, test.sessionID, &ResumeSessionOptions{Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+				return AutoModeSwitchResponseNo, nil
+			}},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1436,15 +1423,13 @@ func TestExactHexResumeSkipsHostLookup(t *testing.T) {
 	for _, test := range []struct{ provider, resident bool }{{false, false}, {true, false}, {true, true}} {
 		t.Run(fmt.Sprintf("provider=%t/resident=%t", test.provider, test.resident), func(t *testing.T) {
 			provider := test.provider
-			client, server, requests := autoModeRecoveryClient(t, &SessionCapabilitiesWithAutoModeRecovery{UI: &UICapabilitiesWithAutoModeRecovery{AutoModeRecovery: true}})
+			client, server, requests := autoModeRecoveryClient(t, &SessionCapabilities{UI: &UICapabilities{AutoModeRecovery: true}})
 			var previous *Session
 			if test.resident {
 				var err error
-				previous, err = client.CreateSession(t.Context(), &SessionConfig{
-					SessionID: "abcdef0",
-					OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-						return AutoModeSwitchResponseYesAlways, nil
-					},
+				previous, err = client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "abcdef0", Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+					return AutoModeSwitchResponseYesAlways, nil
+				}},
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -1455,16 +1440,16 @@ func TestExactHexResumeSkipsHostLookup(t *testing.T) {
 				t.Error("unexpected host lookup")
 				return nil, &jsonrpc2.Error{Code: -32601, Message: "legacy lookup"}
 			})
-			config := &ResumeSessionConfig{ConfigDirectory: "configured-home"}
+			config := &ResumeSessionOptions{ConfigDirectory: "configured-home"}
 			if provider {
 				client.options.SessionFS = &SessionFSConfig{
 					InitialWorkingDirectory: "/workspace", SessionStatePath: "/sessions",
 					Conventions: rpc.SessionFSSetProviderConventionsPosix,
 				}
-				config.OnAutoModeSwitchRequest = func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+				config.Interaction.OnAutoModeSwitchRequest = func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
 					return AutoModeSwitchResponseYes, nil
 				}
-				config.CreateSessionFSProvider = func(session *Session) SessionFSProvider {
+				config.State.CreateSessionFSProvider = func(session *Session) SessionFSProvider {
 					if session.SessionID != "abcdef0" {
 						t.Errorf("provider ID: %q", session.SessionID)
 					}
@@ -1495,7 +1480,7 @@ func TestExactHexResumeSkipsHostLookup(t *testing.T) {
 				if request.Method == "sessions.findByPrefix" {
 					t.Fatal("unexpected host lookup")
 				}
-				if request.Method == "session.resume" && (request.Params["sessionId"] != "abcdef0" || request.Params["configDir"] != "configured-home") {
+				if request.Method == "session.resume" && (request.Params["sessionId"] != "abcdef0" || request.Params["configDirectory"] != "configured-home") {
 					t.Errorf("resume changed exact ID/configured storage: %+v", request.Params)
 				}
 			}
@@ -1525,10 +1510,9 @@ func TestResumePrefixLookupCancellationReleasesCanonicalAdmission(t *testing.T) 
 	defer cancelLookup()
 	resumed := make(chan error, 1)
 	go func() {
-		_, err := resumeAutoModeRecoverySession(lookupCtx, client, "abcdef12", &ResumeSessionConfig{
-			OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-				return AutoModeSwitchResponseNo, nil
-			},
+		_, err := resumeAutoModeRecoverySession(lookupCtx, client, "abcdef12", &ResumeSessionOptions{Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+			return AutoModeSwitchResponseNo, nil
+		}},
 		})
 		resumed <- err
 	}()
@@ -1540,7 +1524,7 @@ func TestResumePrefixLookupCancellationReleasesCanonicalAdmission(t *testing.T) 
 	created := make(chan *Session, 1)
 	createErrors := make(chan error, 1)
 	go func() {
-		session, err := client.CreateSession(ctx, &SessionConfig{SessionID: canonicalID})
+		session, err := client.CreateSession(ctx, &CreateSessionOptions{SessionID: canonicalID})
 		created <- session
 		createErrors <- err
 	}()
@@ -1590,7 +1574,7 @@ func TestResumePrefixLookupCancellationReleasesCanonicalAdmission(t *testing.T) 
 }
 
 func TestAutoModeRecoveryAbbreviatedResumeFencesCanonicalInitialization(t *testing.T) {
-	client, server, _ := autoModeRecoveryClient(t, &SessionCapabilitiesWithAutoModeRecovery{UI: &UICapabilitiesWithAutoModeRecovery{AutoModeRecovery: true}})
+	client, server, _ := autoModeRecoveryClient(t, &SessionCapabilities{UI: &UICapabilities{AutoModeRecovery: true}})
 	const canonicalID = "abcdef12-3456-4789-abcd-0123456789ab"
 	mockSessionPrefixLookup(t, server, canonicalID)
 	patchEntered := make(chan struct{})
@@ -1616,11 +1600,9 @@ func TestAutoModeRecoveryAbbreviatedResumeFencesCanonicalInitialization(t *testi
 	defer cancel()
 	resumed := make(chan error, 1)
 	go func() {
-		session, err := resumeAutoModeRecoverySession(ctx, client, "abcdef12", &ResumeSessionConfig{
-			SkipCustomInstructions: Bool(true),
-			OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-				return AutoModeSwitchResponseYes, nil
-			},
+		session, err := resumeAutoModeRecoverySession(ctx, client, "abcdef12", &ResumeSessionOptions{Instructions: SessionInstructionOptions{SkipCustomInstructions: Bool(true)}, Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+			return AutoModeSwitchResponseYes, nil
+		}},
 		})
 		if session != nil {
 			t.Cleanup(session.stopEventProcessing)
@@ -1639,7 +1621,7 @@ func TestAutoModeRecoveryAbbreviatedResumeFencesCanonicalInitialization(t *testi
 	})
 	reused := make(chan error, 1)
 	go func() {
-		_, err := client.CreateSession(ctx, &SessionConfig{SessionID: canonicalID})
+		_, err := client.CreateSession(ctx, &CreateSessionOptions{SessionID: canonicalID})
 		reused <- err
 	}()
 	for {
@@ -1693,14 +1675,16 @@ func TestAutoModeRecoveryInFlightAliasCannotBeDetached(t *testing.T) {
 			var attached atomic.Bool
 			server.SetRequestHandler("session.resume", func(params json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
 				var input struct {
-					SessionID               string `json:"sessionId"`
-					RequestAutoModeRecovery bool   `json:"requestAutoModeRecovery"`
+					SessionID   string `json:"sessionId"`
+					Interaction struct {
+						RequestAutoModeRecovery bool `json:"requestAutoModeRecovery"`
+					} `json:"interaction"`
 				}
 				if err := json.Unmarshal(params, &input); err != nil {
 					return nil, &jsonrpc2.Error{Code: -32602, Message: err.Error()}
 				}
 				attached.Store(true)
-				recovery := input.RequestAutoModeRecovery
+				recovery := input.Interaction.RequestAutoModeRecovery
 				expectedID := test.aliasID
 				if recovery {
 					expectedID = canonicalID
@@ -1726,7 +1710,7 @@ func TestAutoModeRecoveryInFlightAliasCannotBeDetached(t *testing.T) {
 			ordinaryError := make(chan error, 1)
 			startOrdinary := func() {
 				go func() {
-					session, err := client.ResumeSession(ctx, test.aliasID, &ResumeSessionConfig{})
+					session, err := client.ResumeSession(ctx, test.aliasID, &ResumeSessionOptions{})
 					ordinaryResult <- session
 					ordinaryError <- err
 				}()
@@ -1734,10 +1718,9 @@ func TestAutoModeRecoveryInFlightAliasCannotBeDetached(t *testing.T) {
 			recoveryResult := make(chan error, 1)
 			startRecovery := func() {
 				go func() {
-					_, err := resumeAutoModeRecoverySession(ctx, client, canonicalID, &ResumeSessionConfig{
-						OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-							return AutoModeSwitchResponseNo, nil
-						},
+					_, err := resumeAutoModeRecoverySession(ctx, client, canonicalID, &ResumeSessionOptions{Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+						return AutoModeSwitchResponseNo, nil
+					}},
 					})
 					recoveryResult <- err
 				}()
@@ -1807,18 +1790,16 @@ func TestAutoModeRecoveryInFlightAliasCannotBeDetached(t *testing.T) {
 func TestAutoModeRecoveryPendingConsentAllowsIndependentSessionOperation(t *testing.T) {
 	for _, action := range []string{"resume", "delete"} {
 		t.Run(action, func(t *testing.T) {
-			client, server, _ := autoModeRecoveryClient(t, &SessionCapabilitiesWithAutoModeRecovery{UI: &UICapabilitiesWithAutoModeRecovery{AutoModeRecovery: true}})
+			client, server, _ := autoModeRecoveryClient(t, &SessionCapabilities{UI: &UICapabilities{AutoModeRecovery: true}})
 			entered := make(chan struct{})
 			release := make(chan struct{})
 			unblock := sync.OnceFunc(func() { close(release) })
 			defer unblock()
-			session, err := createAutoModeRecoverySession(t.Context(), client, &SessionConfig{
-				SessionID: "pending-consent",
-				OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-					close(entered)
-					<-release
-					return AutoModeSwitchResponseNo, nil
-				},
+			session, err := createAutoModeRecoverySession(t.Context(), client, &CreateSessionOptions{SessionID: "pending-consent", Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+				close(entered)
+				<-release
+				return AutoModeSwitchResponseNo, nil
+			}},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1831,7 +1812,7 @@ func TestAutoModeRecoveryPendingConsentAllowsIndependentSessionOperation(t *test
 			}()
 			<-entered
 			if action == "resume" {
-				replacement, err := client.ResumeSession(t.Context(), session.SessionID, &ResumeSessionConfig{})
+				replacement, err := client.ResumeSession(t.Context(), session.SessionID, &ResumeSessionOptions{})
 				if err != nil {
 					t.Fatalf("independent resume could not invalidate pending consent: %v", err)
 				}
@@ -1858,14 +1839,11 @@ func TestAutoModeRecoverySuccessfulResumeKeepsAcceptedOwnerWithoutAcknowledgment
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client, server, requests := autoModeRecoveryClient(t, nil)
-			resident, err := client.CreateSession(t.Context(), &SessionConfig{
-				SessionID: "session-1",
-				OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-					return AutoModeSwitchResponseYesAlways, nil
-				},
-				GitHubTokenProvider: func(GitHubTokenProviderArgs) (*GitHubTokenProviderResult, error) {
-					return GitHubTokenResult(&GitHubToken{AccessToken: "resident-token"}), nil
-				},
+			resident, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "session-1", Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+				return AutoModeSwitchResponseYesAlways, nil
+			}}, GitHub: SessionGitHubOptions{TokenProvider: func(GitHubTokenProviderArgs) (*GitHubTokenProviderResult, error) {
+				return GitHubTokenResult(&GitHubToken{AccessToken: "resident-token"}), nil
+			}},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1885,13 +1863,11 @@ func TestAutoModeRecoverySuccessfulResumeKeepsAcceptedOwnerWithoutAcknowledgment
 				}
 				return data, nil
 			})
-			_, err = resumeAutoModeRecoverySession(t.Context(), client, resident.SessionID, &ResumeSessionConfig{
-				OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-					return AutoModeSwitchResponseNo, nil
-				},
-				GitHubTokenProvider: func(GitHubTokenProviderArgs) (*GitHubTokenProviderResult, error) {
-					return GitHubTokenResult(&GitHubToken{AccessToken: "resumed-token"}), nil
-				},
+			_, err = resumeAutoModeRecoverySession(t.Context(), client, resident.SessionID, &ResumeSessionOptions{Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+				return AutoModeSwitchResponseNo, nil
+			}}, GitHub: SessionGitHubOptions{TokenProvider: func(GitHubTokenProviderArgs) (*GitHubTokenProviderResult, error) {
+				return GitHubTokenResult(&GitHubToken{AccessToken: "resumed-token"}), nil
+			}},
 			})
 			if err == nil || !strings.Contains(err.Error(), "does not support AutoModeRecovery") {
 				t.Fatalf("expected unsupported enrollment, got %v", err)
@@ -1902,9 +1878,9 @@ func TestAutoModeRecoverySuccessfulResumeKeepsAcceptedOwnerWithoutAcknowledgment
 				case "session.detach":
 					t.Fatal("missing acknowledgment detached the accepted resident attachment")
 				case "session.create":
-					residentRegistration, _ = request.Params["gitHubTokenProviderRegistrationId"].(string)
+					residentRegistration, _ = sessionWireGroup(request.Params, "github")["tokenProviderRegistrationId"].(string)
 				case "session.resume":
-					resumedRegistration, _ = request.Params["gitHubTokenProviderRegistrationId"].(string)
+					resumedRegistration, _ = sessionWireGroup(request.Params, "github")["tokenProviderRegistrationId"].(string)
 				}
 			}
 			client.sessionsMux.Lock()
@@ -1999,13 +1975,9 @@ func TestAutoModeRecoveryCancelledEnrollmentKeepsCallbacksUntilCleanupSettles(t 
 				}}
 				var err error
 				if test.resume {
-					_, err = resumeAutoModeRecoverySession(ctx, client, "session-1", &ResumeSessionConfig{
-						OnAutoModeSwitchRequest: handler, Hooks: hooks,
-					})
+					_, err = resumeAutoModeRecoverySession(ctx, client, "session-1", &ResumeSessionOptions{Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: handler}, Hooks: SessionHookOptions{Handlers: hooks}})
 				} else {
-					_, err = createAutoModeRecoverySession(ctx, client, &SessionConfig{
-						OnAutoModeSwitchRequest: handler, Hooks: hooks,
-					})
+					_, err = createAutoModeRecoverySession(ctx, client, &CreateSessionOptions{Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: handler}, Hooks: SessionHookOptions{Handlers: hooks}})
 				}
 				result <- err
 			}()
@@ -2054,7 +2026,7 @@ func TestAutoModeRecoveryCancelledEnrollmentKeepsCallbacksUntilCleanupSettles(t 
 				t.Fatalf("settled cleanup retained its teardown callback route: %v", err)
 			}
 			if test.cleanupFailure {
-				if _, err := client.ResumeSession(waitCtx, sessionID, &ResumeSessionConfig{}); err == nil {
+				if _, err := client.ResumeSession(waitCtx, sessionID, &ResumeSessionOptions{}); err == nil {
 					t.Fatal("uncertain cleanup released the same-ID fence")
 				}
 			}
@@ -2147,11 +2119,9 @@ func TestAutoModeRecoveryInitializationKeepsProvisionalOwner(t *testing.T) {
 	}
 	first := make(chan error, 1)
 	go func() {
-		_, err := createAutoModeRecoverySession(ctx, client, &SessionConfig{
-			SessionID: "session-1",
-			OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-				return AutoModeSwitchResponseNo, nil
-			},
+		_, err := createAutoModeRecoverySession(ctx, client, &CreateSessionOptions{SessionID: "session-1", Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+			return AutoModeSwitchResponseNo, nil
+		}},
 		})
 		first <- err
 	}()
@@ -2166,7 +2136,7 @@ func TestAutoModeRecoveryInitializationKeepsProvisionalOwner(t *testing.T) {
 	}
 	retry := make(chan error, 1)
 	go func() {
-		_, err := client.CreateSession(admission, &SessionConfig{SessionID: "session-1"})
+		_, err := client.CreateSession(admission, &CreateSessionOptions{SessionID: "session-1"})
 		retry <- err
 	}()
 	wait(admission.checked, "second create did not reach admission")
@@ -2249,7 +2219,7 @@ func TestAutoModeRecoveryCleanupFenceDuringStart(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { listener.Close() })
-			client := NewClient(&ClientOptions{Connection: URIConnection{URL: listener.Addr().String()}})
+			client := NewClient(&ClientOptions{Mode: ModeCodingAgent, Runtime: TCPConnection{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port}})
 			t.Cleanup(client.ForceStop)
 			startCtx, cancelStart := context.WithCancel(t.Context())
 			defer cancelStart()
@@ -2340,9 +2310,9 @@ func TestAutoModeRecoveryCleanupFencesSameIDReuse(t *testing.T) {
 				}
 				reuse := func(ctx context.Context) (*Session, error) {
 					if retryResume {
-						return client.ResumeSession(ctx, sessionID, &ResumeSessionConfig{})
+						return client.ResumeSession(ctx, sessionID, &ResumeSessionOptions{})
 					}
-					return client.CreateSession(ctx, &SessionConfig{SessionID: sessionID})
+					return client.CreateSession(ctx, &CreateSessionOptions{SessionID: sessionID})
 				}
 				retryCtx, cancelRetry := context.WithCancel(t.Context())
 				defer cancelRetry()
@@ -2404,18 +2374,15 @@ func TestRejectedRecoveryCleanupHookRejectsSameIDResume(t *testing.T) {
 		}
 		return []byte(`{"success":true}`), nil
 	})
-	_, err := createAutoModeRecoverySession(t.Context(), client, &SessionConfig{
-		SessionID: "cleanup-hook",
-		OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-			return AutoModeSwitchResponseNo, nil
-		},
-		Hooks: &SessionHooks{OnSessionEnd: func(SessionEndHookInput, HookInvocation) (*SessionEndHookOutput, error) {
-			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-			defer cancel()
-			_, err := client.ResumeSession(ctx, "cleanup-hook", &ResumeSessionConfig{})
-			nested <- err
-			return nil, nil
-		}},
+	_, err := createAutoModeRecoverySession(t.Context(), client, &CreateSessionOptions{SessionID: "cleanup-hook", Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+		return AutoModeSwitchResponseNo, nil
+	}}, Hooks: SessionHookOptions{Handlers: &SessionHooks{OnSessionEnd: func(SessionEndHookInput, HookInvocation) (*SessionEndHookOutput, error) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		_, err := client.ResumeSession(ctx, "cleanup-hook", &ResumeSessionOptions{})
+		nested <- err
+		return nil, nil
+	}}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not support AutoModeRecovery") {
 		t.Fatalf("expected rejected enrollment, got %v", err)
@@ -2426,7 +2393,7 @@ func TestRejectedRecoveryCleanupHookRejectsSameIDResume(t *testing.T) {
 	server.SetRequestHandler("session.detach", func(json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
 		return []byte(`{"success":true}`), nil
 	})
-	replacement, err := client.ResumeSession(t.Context(), "cleanup-hook", &ResumeSessionConfig{})
+	replacement, err := client.ResumeSession(t.Context(), "cleanup-hook", &ResumeSessionOptions{})
 	if err != nil {
 		t.Fatalf("callback scope survived cleanup settlement: %v", err)
 	}
@@ -2447,17 +2414,15 @@ func TestSessionFSCallbackRejectsSameIDInitialization(t *testing.T) {
 				Conventions:             rpc.SessionFSSetProviderConventionsPosix,
 			}
 			nested := make(chan error, 1)
-			config := &SessionConfig{SessionID: "reentry"}
-			config.CreateSessionFSProvider = func(*Session) SessionFSProvider {
+			config := &CreateSessionOptions{SessionID: "reentry"}
+			config.State.CreateSessionFSProvider = func(*Session) SessionFSProvider {
 				return reentrySessionFSProvider{write: func() error {
 					ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 					defer cancel()
 					var err error
 					switch action {
 					case "resume":
-						_, err = client.ResumeSession(ctx, "reentry", &ResumeSessionConfig{
-							CreateSessionFSProvider: config.CreateSessionFSProvider,
-						})
+						_, err = client.ResumeSession(ctx, "reentry", &ResumeSessionOptions{State: SessionStateOptions{CreateSessionFSProvider: config.State.CreateSessionFSProvider}})
 					case "create":
 						_, err = client.CreateSession(ctx, config)
 					case "delete":
@@ -2505,9 +2470,7 @@ func TestSessionFSCallbackAdmissionIsScopedAndCounted(t *testing.T) {
 			return nil
 		}}
 	}
-	session, err := client.CreateSession(t.Context(), &SessionConfig{
-		SessionID: "active", CreateSessionFSProvider: factory,
-	})
+	session, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "active", State: SessionStateOptions{CreateSessionFSProvider: factory}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2543,9 +2506,7 @@ func TestSessionFSCallbackAdmissionIsScopedAndCounted(t *testing.T) {
 	})
 	initialized := make(chan error, 1)
 	go func() {
-		replacement, err := client.CreateSession(t.Context(), &SessionConfig{
-			SessionID: "active", CreateSessionFSProvider: factory,
-		})
+		replacement, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "active", State: SessionStateOptions{CreateSessionFSProvider: factory}})
 		if replacement != nil {
 			t.Cleanup(replacement.stopEventProcessing)
 		}
@@ -2556,17 +2517,15 @@ func TestSessionFSCallbackAdmissionIsScopedAndCounted(t *testing.T) {
 		for _, resume := range []bool{false, true} {
 			var err error
 			if resume {
-				_, err = client.ResumeSession(t.Context(), "active", &ResumeSessionConfig{CreateSessionFSProvider: factory})
+				_, err = client.ResumeSession(t.Context(), "active", &ResumeSessionOptions{State: SessionStateOptions{CreateSessionFSProvider: factory}})
 			} else {
-				_, err = client.CreateSession(t.Context(), &SessionConfig{SessionID: "active", CreateSessionFSProvider: factory})
+				_, err = client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "active", State: SessionStateOptions{CreateSessionFSProvider: factory}})
 			}
 			if err == nil || !strings.Contains(err.Error(), "active session callback") {
 				t.Fatalf("%d callbacks active: expected independent same-ID rejection, got %v", remaining, err)
 			}
 		}
-		other, err := client.CreateSession(t.Context(), &SessionConfig{
-			SessionID: "other", CreateSessionFSProvider: factory,
-		})
+		other, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "other", State: SessionStateOptions{CreateSessionFSProvider: factory}})
 		if err != nil {
 			t.Fatalf("unrelated initialization failed: %v", err)
 		}
@@ -2580,7 +2539,7 @@ func TestSessionFSCallbackAdmissionIsScopedAndCounted(t *testing.T) {
 	if err := <-initialized; err != nil {
 		t.Fatal(err)
 	}
-	resumed, err := client.ResumeSession(t.Context(), "active", &ResumeSessionConfig{CreateSessionFSProvider: factory})
+	resumed, err := client.ResumeSession(t.Context(), "active", &ResumeSessionOptions{State: SessionStateOptions{CreateSessionFSProvider: factory}})
 	if err != nil {
 		t.Fatalf("initialization after callbacks failed: %v", err)
 	}
@@ -2609,19 +2568,16 @@ func TestCanonicalSessionFSCallbackRejectsWaitOnItsAliasPermit(t *testing.T) {
 		return []byte(`{"success":true}`), nil
 	})
 	nested := make(chan error, 1)
-	session, err := resumeAutoModeRecoverySession(t.Context(), client, "abcdef12", &ResumeSessionConfig{
-		SkipCustomInstructions: Bool(true),
-		OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
-			return AutoModeSwitchResponseNo, nil
-		},
-		CreateSessionFSProvider: func(*Session) SessionFSProvider {
-			return reentrySessionFSProvider{write: func() error {
-				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-				defer cancel()
-				nested <- client.DeleteSession(ctx, "abcdef12-9999-4789-abcd-0123456789ab")
-				return nil
-			}}
-		},
+	session, err := resumeAutoModeRecoverySession(t.Context(), client, "abcdef12", &ResumeSessionOptions{Instructions: SessionInstructionOptions{SkipCustomInstructions: Bool(true)}, Interaction: SessionInteractionOptions{OnAutoModeSwitchRequest: func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
+		return AutoModeSwitchResponseNo, nil
+	}}, State: SessionStateOptions{CreateSessionFSProvider: func(*Session) SessionFSProvider {
+		return reentrySessionFSProvider{write: func() error {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			nested <- client.DeleteSession(ctx, "abcdef12-9999-4789-abcd-0123456789ab")
+			return nil
+		}}
+	}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2673,13 +2629,9 @@ func TestSessionFSFactoryRejectsSameIDDeletion(t *testing.T) {
 				var session *Session
 				var err error
 				if resume {
-					session, err = client.ResumeSession(t.Context(), "factory", &ResumeSessionConfig{
-						CreateSessionFSProvider: factory,
-					})
+					session, err = client.ResumeSession(t.Context(), "factory", &ResumeSessionOptions{State: SessionStateOptions{CreateSessionFSProvider: factory}})
 				} else {
-					session, err = client.CreateSession(t.Context(), &SessionConfig{
-						SessionID: "factory", CreateSessionFSProvider: factory,
-					})
+					session, err = client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "factory", State: SessionStateOptions{CreateSessionFSProvider: factory}})
 				}
 				if session != nil {
 					defer session.stopEventProcessing()
@@ -2700,11 +2652,9 @@ func TestSessionFSFactoryRejectsSameIDDeletion(t *testing.T) {
 					t.Fatalf("post-factory deletion = %s", got)
 				}
 				client.options.SessionFS.Capabilities = nil
-				replacement, err := client.CreateSession(t.Context(), &SessionConfig{
-					SessionID: "factory",
-					CreateSessionFSProvider: func(*Session) SessionFSProvider {
-						return reentrySessionFSProvider{}
-					},
+				replacement, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "factory", State: SessionStateOptions{CreateSessionFSProvider: func(*Session) SessionFSProvider {
+					return reentrySessionFSProvider{}
+				}},
 				})
 				if err != nil {
 					t.Fatalf("initialization after factory completion: %v", err)
@@ -2742,9 +2692,7 @@ func TestSessionFSInitializationStillSerializesOutsideCallbacks(t *testing.T) {
 	factory := func(*Session) SessionFSProvider { return reentrySessionFSProvider{} }
 	results := make(chan error, 2)
 	create := func() {
-		session, err := client.CreateSession(t.Context(), &SessionConfig{
-			SessionID: "serialized", CreateSessionFSProvider: factory,
-		})
+		session, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "serialized", State: SessionStateOptions{CreateSessionFSProvider: factory}})
 		if session != nil {
 			session.stopEventProcessing()
 		}
@@ -2775,9 +2723,7 @@ func TestSessionFSInitializationStillSerializesOutsideCallbacks(t *testing.T) {
 		t.Fatalf("same-ID initialization rejected instead of waiting: %v", err)
 	default:
 	}
-	other, err := client.CreateSession(t.Context(), &SessionConfig{
-		SessionID: "other", CreateSessionFSProvider: factory,
-	})
+	other, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "other", State: SessionStateOptions{CreateSessionFSProvider: factory}})
 	if err != nil {
 		t.Fatal(err)
 	}

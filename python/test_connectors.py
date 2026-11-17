@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from copilot.generated.rpc import (
+from copilot.rpc import (
     AuthInfoType,
     ConnectorAccountRequest,
     ConnectorAvailability,
@@ -307,17 +307,6 @@ async def test_connector_catalog_presentation_metadata_is_optional():
     assert legacy.connectors[0].tier is None
     assert legacy.connectors[0].release_tag is None
     assert legacy.connectors[0].to_dict() == entry
-
-
-def test_connector_reconcile_request_keeps_published_positional_order():
-    request = ConnectorReconcileRequest("account-1", True)
-    assert request.refresh_catalog is True
-    assert request.force_connector_name is None
-    assert request.to_dict() == {"accountId": "account-1", "refreshCatalog": True}
-    targeted = ConnectorReconcileRequest("account-1", True, force_connector_name="mail")
-    assert targeted.force_connector_name == "mail"
-    with pytest.raises(TypeError):
-        ConnectorReconcileRequest("account-1", True, "mail")
 
 
 def connector_response(method, _params, **_kwargs):

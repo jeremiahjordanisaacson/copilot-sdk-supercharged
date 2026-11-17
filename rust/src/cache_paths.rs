@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
-const SDK_CACHE_DIR: &str = "github-copilot-sdk";
+const SDK_CACHE_DIR: &str = "copilot-sdk";
 #[cfg(test)]
 const CLI_CACHE_DIR: &str = "cli";
 const RUNTIME_CACHE_DIR: &str = "runtime";
@@ -48,7 +48,7 @@ pub(crate) fn platform_cache_root() -> io::Result<PathBuf> {
             error.kind(),
             format!(
                 "user cache unavailable; configure the platform user cache or an explicit \
-                 extraction directory (`bundled_cli_extract_dir` for bundled artifacts, \
+                 extraction directory (`bundled_cli_extract_directory` for bundled artifacts, \
                  `COPILOT_CLI_EXTRACT_DIR` for non-bundled artifacts): {error}"
             ),
         )

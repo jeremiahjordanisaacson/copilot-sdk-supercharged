@@ -30,9 +30,10 @@ Pass client info when you create the client:
 
 <!-- docs-validate: strict -->
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
+  mode: "coding-agent",
   clientInfo: {
     applicationName: "vscode",
     applicationVersion: "1.124.2",
@@ -54,6 +55,7 @@ await client.start();
 from copilot import CopilotClient
 
 client = CopilotClient(
+    mode="coding-agent",
     client_info={
         "application_name": "vscode",
         "application_version": "1.124.2",
@@ -76,13 +78,14 @@ package main
 import (
 	"context"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {}
 
 func start(ctx context.Context) error {
 client := copilot.NewClient(&copilot.ClientOptions{
+    Mode: copilot.ModeCodingAgent,
     ClientInfo: &copilot.ClientInfo{
         ApplicationName:    "vscode",
         ApplicationVersion: "1.124.2",
@@ -100,6 +103,7 @@ if err := client.Start(ctx); err != nil {
 
 ```go
 client := copilot.NewClient(&copilot.ClientOptions{
+    Mode: copilot.ModeCodingAgent,
     ClientInfo: &copilot.ClientInfo{
         ApplicationName:    "vscode",
         ApplicationVersion: "1.124.2",
@@ -118,19 +122,19 @@ if err := client.Start(ctx); err != nil {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 await using var client = new CopilotClient(new CopilotClientOptions
 {
+    Mode = CopilotClientMode.CodingAgent,
     ClientInfo = new CopilotClientInfo
     {
         ApplicationName = "vscode",
         ApplicationVersion = "1.124.2",
         IntegrationName = "copilot-chat",
         IntegrationVersion = "0.54.0",
-    },
+    }
 });
-
 await client.StartAsync();
 ```
 
@@ -140,15 +144,17 @@ await client.StartAsync();
 <summary><strong>Java</strong></summary>
 
 ```java
-var options = new CopilotClientOptions()
-    .setClientInfo(new ClientInfo()
-        .setApplicationName("vscode")
-        .setApplicationVersion("1.124.2")
-        .setIntegrationName("copilot-chat")
-        .setIntegrationVersion("0.54.0"));
+var options = new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+        .setClientInfo(new ClientInfo()
+                .setApplicationName("vscode")
+                .setApplicationVersion("1.124.2")
+                .setIntegrationName("copilot-chat")
+                .setIntegrationVersion("0.54.0"));
 
 var client = new CopilotClient(options);
-client.start().get();
+client
+        .start()
+        .get();
 ```
 
 </details>
@@ -157,10 +163,10 @@ client.start().get();
 <summary><strong>Rust</strong></summary>
 
 ```rust
-use github_copilot_sdk::{Client, ClientInfo, ClientOptions};
+use copilot_sdk::{Client, ClientInfo, ClientOptions};
 
 let client = Client::start(
-    ClientOptions::new().with_client_info(
+    ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_client_info(
         ClientInfo::new()
             .with_application_name("vscode")
             .with_application_version("1.124.2")

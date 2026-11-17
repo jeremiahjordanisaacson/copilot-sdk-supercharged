@@ -1,0 +1,215 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: api.schema.json
+
+package com.microsoft.copilot.generated.rpc;
+
+import com.microsoft.copilot.CopilotExperimental;
+import java.util.concurrent.CompletableFuture;
+import javax.annotation.processing.Generated;
+
+/**
+ * Typed client for server-level RPC methods.
+ * <p>
+ * Provides strongly-typed access to all server-level API namespaces.
+ * <p>
+ * Obtain an instance by calling {@code new ServerRpc(caller)}.
+ *
+ * @since 1.0.0
+ */
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+public final class ServerRpc {
+
+    private final RpcCaller caller;
+
+    /** API methods for the {@code providers} namespace. */
+    public final ServerProvidersApi providers;
+    /** API methods for the {@code localModels} namespace. */
+    public final ServerLocalModelsApi localModels;
+    /** API methods for the {@code sandbox} namespace. */
+    public final ServerSandboxApi sandbox;
+    /** API methods for the {@code persistence} namespace. */
+    final ServerPersistenceApi persistence;
+    /** API methods for the {@code user} namespace. */
+    public final ServerUserApi user;
+    /** API methods for the {@code repo} namespace. */
+    final ServerRepoApi repo;
+    /** API methods for the {@code featureFlags} namespace. */
+    final ServerFeatureFlagsApi featureFlags;
+    /** API methods for the {@code permissions} namespace. */
+    final ServerPermissionsApi permissions;
+    /** API methods for the {@code managedSettings} namespace. */
+    public final ServerManagedSettingsApi managedSettings;
+    /** API methods for the {@code environments} namespace. */
+    public final ServerEnvironmentsApi environments;
+    /** API methods for the {@code host} namespace. */
+    public final ServerHostApi host;
+    /** API methods for the {@code hooks} namespace. */
+    public final ServerHooksApi hooks;
+    /** API methods for the {@code models} namespace. */
+    public final ServerModelsApi models;
+    /** API methods for the {@code azureMl} namespace. */
+    public final ServerAzureMlApi azureMl;
+    /** API methods for the {@code decisions} namespace. */
+    public final ServerDecisionsApi decisions;
+    /** API methods for the {@code providersSource} namespace. */
+    final ServerProvidersSourceApi providersSource;
+    /** API methods for the {@code contentExclusion} namespace. */
+    public final ServerContentExclusionApi contentExclusion;
+    /** API methods for the {@code tools} namespace. */
+    public final ServerToolsApi tools;
+    /** API methods for the {@code account} namespace. */
+    public final ServerAccountApi account;
+    /** API methods for the {@code secrets} namespace. */
+    public final ServerSecretsApi secrets;
+    /** API methods for the {@code mcp} namespace. */
+    public final ServerMcpApi mcp;
+    /** API methods for the {@code extensions} namespace. */
+    public final ServerExtensionsApi extensions;
+    /** API methods for the {@code instructions} namespace. */
+    public final ServerInstructionsApi instructions;
+    /** API methods for the {@code skills} namespace. */
+    public final ServerSkillsApi skills;
+    /** API methods for the {@code plugins} namespace. */
+    public final ServerPluginsApi plugins;
+    /** API methods for the {@code catalog} namespace. */
+    public final ServerCatalogApi catalog;
+    /** API methods for the {@code agents} namespace. */
+    public final ServerAgentsApi agents;
+    /** API methods for the {@code globalState} namespace. */
+    final ServerGlobalStateApi globalState;
+    /** API methods for the {@code commands} namespace. */
+    public final ServerCommandsApi commands;
+    /** API methods for the {@code settings} namespace. */
+    final ServerSettingsApi settings;
+    /** API methods for the {@code gitHubRepository} namespace. */
+    final ServerGitHubRepositoryApi gitHubRepository;
+    /** API methods for the {@code gitHubOwners} namespace. */
+    final ServerGitHubOwnersApi gitHubOwners;
+    /** API methods for the {@code git} namespace. */
+    final ServerGitApi git;
+    /** API methods for the {@code runtime} namespace. */
+    public final ServerRuntimeApi runtime;
+    /** API methods for the {@code sessionFs} namespace. */
+    public final ServerSessionFsApi sessionFs;
+    /** API methods for the {@code llmInference} namespace. */
+    public final ServerLlmInferenceApi llmInference;
+    /** API methods for the {@code fetch} namespace. */
+    public final ServerFetchApi fetch;
+    /** API methods for the {@code network} namespace. */
+    public final ServerNetworkApi network;
+    /** API methods for the {@code sessions} namespace. */
+    public final ServerSessionsApi sessions;
+    /** API methods for the {@code shell} namespace. */
+    public final ServerShellApi shell;
+    /** API methods for the {@code agentRegistry} namespace. */
+    public final ServerAgentRegistryApi agentRegistry;
+    /** API methods for the {@code connectors} namespace. */
+    public final ServerConnectorsApi connectors;
+    /** API methods for the {@code lsp} namespace. */
+    public final ServerLspApi lsp;
+    /** API methods for the {@code taskAnalytics} namespace. */
+    public final ServerTaskAnalyticsApi taskAnalytics;
+    /** API methods for the {@code gitHubFetch} namespace. */
+    final ServerGitHubFetchApi gitHubFetch;
+    /** API methods for the {@code gitHubRelease} namespace. */
+    final ServerGitHubReleaseApi gitHubRelease;
+    /** API methods for the {@code cloudTasks} namespace. */
+    final ServerCloudTasksApi cloudTasks;
+    /** API methods for the {@code cafeMetrics} namespace. */
+    final ServerCafeMetricsApi cafeMetrics;
+
+    /**
+     * Creates a new server RPC client.
+     *
+     * @param caller the RPC transport function (e.g., {@code jsonRpcClient::invoke})
+     */
+    public ServerRpc(RpcCaller caller) {
+        this.caller = caller;
+        this.providers = new ServerProvidersApi(caller);
+        this.localModels = new ServerLocalModelsApi(caller);
+        this.sandbox = new ServerSandboxApi(caller);
+        this.persistence = new ServerPersistenceApi(caller);
+        this.user = new ServerUserApi(caller);
+        this.repo = new ServerRepoApi(caller);
+        this.featureFlags = new ServerFeatureFlagsApi(caller);
+        this.permissions = new ServerPermissionsApi(caller);
+        this.managedSettings = new ServerManagedSettingsApi(caller);
+        this.environments = new ServerEnvironmentsApi(caller);
+        this.host = new ServerHostApi(caller);
+        this.hooks = new ServerHooksApi(caller);
+        this.models = new ServerModelsApi(caller);
+        this.azureMl = new ServerAzureMlApi(caller);
+        this.decisions = new ServerDecisionsApi(caller);
+        this.providersSource = new ServerProvidersSourceApi(caller);
+        this.contentExclusion = new ServerContentExclusionApi(caller);
+        this.tools = new ServerToolsApi(caller);
+        this.account = new ServerAccountApi(caller);
+        this.secrets = new ServerSecretsApi(caller);
+        this.mcp = new ServerMcpApi(caller);
+        this.extensions = new ServerExtensionsApi(caller);
+        this.instructions = new ServerInstructionsApi(caller);
+        this.skills = new ServerSkillsApi(caller);
+        this.plugins = new ServerPluginsApi(caller);
+        this.catalog = new ServerCatalogApi(caller);
+        this.agents = new ServerAgentsApi(caller);
+        this.globalState = new ServerGlobalStateApi(caller);
+        this.commands = new ServerCommandsApi(caller);
+        this.settings = new ServerSettingsApi(caller);
+        this.gitHubRepository = new ServerGitHubRepositoryApi(caller);
+        this.gitHubOwners = new ServerGitHubOwnersApi(caller);
+        this.git = new ServerGitApi(caller);
+        this.runtime = new ServerRuntimeApi(caller);
+        this.sessionFs = new ServerSessionFsApi(caller);
+        this.llmInference = new ServerLlmInferenceApi(caller);
+        this.fetch = new ServerFetchApi(caller);
+        this.network = new ServerNetworkApi(caller);
+        this.sessions = new ServerSessionsApi(caller);
+        this.shell = new ServerShellApi(caller);
+        this.agentRegistry = new ServerAgentRegistryApi(caller);
+        this.connectors = new ServerConnectorsApi(caller);
+        this.lsp = new ServerLspApi(caller);
+        this.taskAnalytics = new ServerTaskAnalyticsApi(caller);
+        this.gitHubFetch = new ServerGitHubFetchApi(caller);
+        this.gitHubRelease = new ServerGitHubReleaseApi(caller);
+        this.cloudTasks = new ServerCloudTasksApi(caller);
+        this.cafeMetrics = new ServerCafeMetricsApi(caller);
+    }
+
+    /**
+     * Checks server responsiveness and returns protocol information.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<PingResult> ping(PingParams params) {
+        return caller.invoke("ping", params, PingResult.class);
+    }
+
+    /**
+     * Performs the SDK server connection handshake and validates the optional connection token. Marked internal because this is JSON-RPC transport plumbing invoked automatically by an SDK client's own `connect()` wrapper, not a user-facing method. Stays internal as long as the SDK client owns the handshake; would only become public if the SDK ever exposed the raw schema surface to consumers without a connection wrapper.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<ConnectResult> connect(ConnectParams params) {
+        return caller.invoke("connect", params, ConnectResult.class);
+    }
+
+    /**
+     * Registers the calling SDK client as the per-entrypoint extension launch provider. Call before creating any sessions. When omitted, the runtime uses its built-in extension launcher.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<Void> registerExtensionLaunchProvider() {
+        return caller.invoke("registerExtensionLaunchProvider", java.util.Map.of(), Void.class);
+    }
+
+}

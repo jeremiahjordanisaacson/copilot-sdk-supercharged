@@ -49,17 +49,18 @@ def _make_isolated_client(ctx: E2ETestContext) -> CopilotClient:
         "fake-token-for-e2e-tests" if os.environ.get("GITHUB_ACTIONS") == "true" else None
     )
     return CopilotClient(
-        connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-        working_directory=ctx.work_dir,
-        env=ctx.get_env(),
-        github_token=github_token,
+        mode="coding-agent",
+        runtime=RuntimeConnection.for_spawned_stdio(
+            path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+        ),
+        github={"token": github_token},
     )
 
 
 class TestClientLifecycle:
     async def test_should_return_last_session_id_after_sending_a_message(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         try:
             await session.send_and_wait("Say hello")
@@ -74,7 +75,7 @@ class TestClientLifecycle:
         unsubscribe = ctx.client.on_lifecycle(events.put_nowait)
         try:
             session = await ctx.client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             try:
                 await session.send_and_wait("Say hello")
@@ -98,7 +99,7 @@ class TestClientLifecycle:
         unsubscribe = ctx.client.on_lifecycle(handler)
         try:
             session = await ctx.client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             try:
                 event = await asyncio.wait_for(created, 10.0)
@@ -120,7 +121,7 @@ class TestClientLifecycle:
         unsubscribe = ctx.client.on_lifecycle("session.created", handler)
         try:
             session = await ctx.client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             try:
                 event = await asyncio.wait_for(created, 10.0)
@@ -151,7 +152,7 @@ class TestClientLifecycle:
         )
         try:
             session = await ctx.client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             try:
                 event = await asyncio.wait_for(active_event, 10.0)
@@ -181,7 +182,7 @@ class TestClientLifecycle:
         updated: asyncio.Future = loop.create_future()
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         def handler(event):
@@ -210,7 +211,7 @@ class TestClientLifecycle:
         deleted: asyncio.Future = loop.create_future()
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session.session_id
 

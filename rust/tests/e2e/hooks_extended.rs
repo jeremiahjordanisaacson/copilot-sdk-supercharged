@@ -2,16 +2,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::hooks::{
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::hooks::{
     AgentStopInput, AgentStopOutput, ErrorOccurredInput, ErrorOccurredOutput, HookContext,
     PostToolUseFailureInput, PostToolUseFailureOutput, PostToolUseInput, PostToolUseOutput,
     PreToolUseInput, PreToolUseOutput, SessionEndInput, SessionEndOutput, SessionHooks,
     SessionStartInput, SessionStartOutput, UserPromptSubmittedInput, UserPromptSubmittedOutput,
     UserPromptTransformedInput, UserPromptTransformedOutput,
 };
-use github_copilot_sdk::tool::ToolHandler;
-use github_copilot_sdk::{Error, SessionConfig, Tool, ToolInvocation, ToolResult};
+use copilot_sdk::tool::ToolHandler;
+use copilot_sdk::{CreateSessionOptions, Error, Tool, ToolInvocation, ToolResult};
 use serde_json::json;
 use tokio::sync::mpsc;
 
@@ -29,10 +29,9 @@ async fn should_invoke_onsessionstart_hook_on_new_session() {
                 let (tx, mut rx) = mpsc::unbounded_channel();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(
-                        ctx.approve_all_session_config()
-                            .with_hooks(Arc::new(RecordingHooks::session_start(tx, None))),
-                    )
+                    .create_session(ctx.approve_all_session_config().with_hooks(|group| {
+                        group.with_handlers(Arc::new(RecordingHooks::session_start(tx, None)))
+                    }))
                     .await
                     .expect("create session");
 
@@ -62,10 +61,9 @@ async fn should_invoke_onuserpromptsubmitted_hook_when_sending_a_message() {
                 let (tx, mut rx) = mpsc::unbounded_channel();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(
-                        ctx.approve_all_session_config()
-                            .with_hooks(Arc::new(RecordingHooks::user_prompt(tx, None))),
-                    )
+                    .create_session(ctx.approve_all_session_config().with_hooks(|group| {
+                        group.with_handlers(Arc::new(RecordingHooks::user_prompt(tx, None)))
+                    }))
                     .await
                     .expect("create session");
 
@@ -95,10 +93,9 @@ async fn should_invoke_onsessionend_hook_when_session_is_disconnected() {
                 let (tx, mut rx) = mpsc::unbounded_channel();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(
-                        ctx.approve_all_session_config()
-                            .with_hooks(Arc::new(RecordingHooks::session_end(tx, None))),
-                    )
+                    .create_session(ctx.approve_all_session_config().with_hooks(|group| {
+                        group.with_handlers(Arc::new(RecordingHooks::session_end(tx, None)))
+                    }))
                     .await
                     .expect("create session");
 
@@ -127,8 +124,8 @@ async fn should_invoke_userpromptsubmitted_hook_and_modify_prompt() {
                 let (tx, mut rx) = mpsc::unbounded_channel();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(ctx.approve_all_session_config().with_hooks(Arc::new(
-                        RecordingHooks::user_prompt(
+                    .create_session(ctx.approve_all_session_config().with_hooks(|group| {
+                        group.with_handlers(Arc::new(RecordingHooks::user_prompt(
                             tx,
                             Some(UserPromptSubmittedOutput {
                                 modified_prompt: Some(
@@ -136,8 +133,8 @@ async fn should_invoke_userpromptsubmitted_hook_and_modify_prompt() {
                                 ),
                                 ..UserPromptSubmittedOutput::default()
                             }),
-                        ),
-                    )))
+                        )))
+                    }))
                     .await
                     .expect("create session");
 
@@ -170,10 +167,9 @@ async fn should_invoke_userprompttransformed_hook_and_modify_transformed_prompt(
                 let (tx, mut rx) = mpsc::unbounded_channel();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(
-                        ctx.approve_all_session_config()
-                            .with_hooks(Arc::new(UserPromptTransformedHooks { tx })),
-                    )
+                    .create_session(ctx.approve_all_session_config().with_hooks(|group| {
+                        group.with_handlers(Arc::new(UserPromptTransformedHooks { tx }))
+                    }))
                     .await
                     .expect("create session");
 
@@ -214,12 +210,12 @@ async fn should_invoke_agentstop_hook_and_apply_block_response() {
                 let (tx, mut rx) = mpsc::unbounded_channel();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(ctx.approve_all_session_config().with_hooks(Arc::new(
-                        AgentStopHooks {
+                    .create_session(ctx.approve_all_session_config().with_hooks(|group| {
+                        group.with_handlers(Arc::new(AgentStopHooks {
                             tx,
                             call_count: AtomicUsize::new(0),
-                        },
-                    )))
+                        }))
+                    }))
                     .await
                     .expect("create session");
 
@@ -258,11 +254,17 @@ async fn should_allow_pretooluse_to_return_modifiedargs_and_suppressoutput() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_tools(vec![echo_value_tool()])
-                            .with_hooks(Arc::new(RecordingHooks::pre_tool(tx))),
+                        CreateSessionOptions::default()
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_tools(|group| group.with_definitions(vec![echo_value_tool()]))
+                            .with_hooks(|group| {
+                                group.with_handlers(Arc::new(RecordingHooks::pre_tool(tx)))
+                            }),
                     )
                     .await
                     .expect("create session");

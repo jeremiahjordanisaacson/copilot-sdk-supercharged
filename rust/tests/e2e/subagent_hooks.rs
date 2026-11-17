@@ -2,12 +2,12 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::hooks::{
+use copilot_sdk::hooks::{
     HookContext, PostToolUseInput, PostToolUseOutput, PreToolUseInput, PreToolUseOutput,
     SessionHooks, SubagentStartInput, SubagentStartOutput, SubagentStopInput, SubagentStopOutput,
 };
-use github_copilot_sdk::session_events::SessionEventType;
-use github_copilot_sdk::{
+use copilot_sdk::session_events::SessionEventType;
+use copilot_sdk::{
     CopilotHttpRequest, CopilotHttpResponse, CopilotRequestContext, CopilotRequestError,
     CopilotRequestHandler, forward_http,
 };
@@ -48,14 +48,14 @@ async fn should_apply_subagent_lifecycle_hook_outputs() {
                     .start_llm_client(Arc::clone(&request_log))
                     .await;
 
-                let config = ctx.approve_all_session_config().with_hooks(Arc::new(
+                let config = ctx.approve_all_session_config().with_hooks(|group| group.with_handlers(Arc::new(
                     RecordingHooks {
                         log: Arc::clone(&hook_log),
                         parent_reply_observed,
                         subagent_starts: Arc::clone(&subagent_starts),
                         subagent_stops: Arc::clone(&subagent_stops),
                     },
-                ));
+                )));
                 let session = client
                     .create_session(config)
                     .await

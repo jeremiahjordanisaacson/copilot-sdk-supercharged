@@ -2,10 +2,10 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class RuntimeWrapperIsolationCollection
@@ -29,10 +29,12 @@ public sealed class RuntimeWrapperTests
         try
         {
             AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", emptyBaseDirectory);
+            var connection = RuntimeConnection.ForSpawnedStdio();
+            connection.Environment = new Dictionary<string, string>();
             await using var client = new CopilotClient(new CopilotClientOptions
             {
-                Connection = RuntimeConnection.ForStdio(),
-                Environment = new Dictionary<string, string>(),
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = connection,
             });
 
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => client.StartAsync());
@@ -53,10 +55,12 @@ public sealed class RuntimeWrapperTests
         var explicitPath = Path.Combine(
             Path.GetTempPath(),
             $"missing-explicit-copilot-{Guid.NewGuid():N}");
+        var connection = RuntimeConnection.ForSpawnedStdio(path: explicitPath);
+        connection.Environment = new Dictionary<string, string>();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(path: explicitPath),
-            Environment = new Dictionary<string, string>(),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = connection,
         });
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(() => client.StartAsync());
@@ -70,10 +74,12 @@ public sealed class RuntimeWrapperTests
         var explicitPath = Path.Combine(
             Path.GetTempPath(),
             $"missing-environment-copilot-{Guid.NewGuid():N}");
+        var connection = RuntimeConnection.ForSpawnedStdio();
+        connection.Environment = new Dictionary<string, string> { ["COPILOT_CLI_PATH"] = explicitPath };
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(),
-            Environment = new Dictionary<string, string> { ["COPILOT_CLI_PATH"] = explicitPath },
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = connection,
         });
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(() => client.StartAsync());
@@ -81,13 +87,51 @@ public sealed class RuntimeWrapperTests
         Assert.DoesNotContain("runtime.node", exception.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Copilot_Cli_Path_Uses_Platform_Key_Casing()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"missing-copilot-{Guid.NewGuid():N}");
+        var upper = Path.Combine(directory, "uppercase-copilot");
+        var lower = Path.Combine(directory, "lowercase-copilot");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(upper, string.Empty);
+            var connection = RuntimeConnection.ForSpawnedStdio();
+            connection.Environment = new SortedDictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["COPILOT_CLI_PATH"] = upper,
+                ["copilot_cli_path"] = lower,
+            };
+            await using var client = new CopilotClient(new CopilotClientOptions
+            {
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = connection,
+            });
+
+            var exception = await Assert.ThrowsAsync<System.ComponentModel.Win32Exception>(() => client.StartAsync());
+
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.Equal(2, exception.NativeErrorCode);
+            }
+            else
+            {
+                Assert.NotEqual(2, exception.NativeErrorCode);
+            }
+        }
+        finally
+        {
+            File.Delete(upper);
+            Directory.Delete(directory);
+        }
+    }
+
 #if !NETFRAMEWORK
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task Empty_Copilot_Cli_Path_Uses_Bundled_Runtime(bool tcp, bool environmentOnConnection)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Empty_Copilot_Cli_Path_Uses_Bundled_Runtime(bool tcp)
     {
         var originalBaseDirectory = AppContext.GetData("APP_CONTEXT_BASE_DIRECTORY");
         var emptyBaseDirectory = Path.Combine(
@@ -95,11 +139,8 @@ public sealed class RuntimeWrapperTests
             $"empty-cli-path-copilot-{Guid.NewGuid():N}");
         Directory.CreateDirectory(emptyBaseDirectory);
         var environment = new Dictionary<string, string> { ["COPILOT_CLI_PATH"] = string.Empty };
-        ChildProcessRuntimeConnection connection = tcp ? RuntimeConnection.ForTcp() : RuntimeConnection.ForStdio();
-        if (environmentOnConnection)
-        {
-            connection.Environment = environment;
-        }
+        ChildProcessRuntimeConnection connection = tcp ? RuntimeConnection.ForSpawnedTcp() : RuntimeConnection.ForSpawnedStdio();
+        connection.Environment = environment;
         var originalCliPath = System.Environment.GetEnvironmentVariable("COPILOT_CLI_PATH");
 
         try
@@ -111,8 +152,8 @@ public sealed class RuntimeWrapperTests
                 Path.Combine(emptyBaseDirectory, "inherited-copilot"));
             await using var client = new CopilotClient(new CopilotClientOptions
             {
-                Connection = connection,
-                Environment = environmentOnConnection ? null : environment,
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = connection,
             });
 
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => client.StartAsync());
@@ -134,10 +175,12 @@ public sealed class RuntimeWrapperTests
         var explicitPath = Path.Combine(
             Path.GetTempPath(),
             $"missing-environment-copilot-{Guid.NewGuid():N}");
+        var connection = RuntimeConnection.ForSpawnedStdio();
+        connection.Environment = new Dictionary<string, string> { ["COPILOT_CLI_PATH"] = explicitPath };
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(),
-            Environment = new Dictionary<string, string> { ["COPILOT_CLI_PATH"] = explicitPath },
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = connection,
         });
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(() => client.StartAsync());
@@ -164,10 +207,12 @@ public sealed class RuntimeWrapperTests
         try
         {
             AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", baseDirectory);
+            var connection = RuntimeConnection.ForSpawnedStdio();
+            connection.Environment = new Dictionary<string, string>();
             await using var client = new CopilotClient(new CopilotClientOptions
             {
-                Connection = RuntimeConnection.ForStdio(),
-                Environment = new Dictionary<string, string>(),
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = connection,
             });
 
             var exception = await Assert.ThrowsAnyAsync<Exception>(() => client.StartAsync());

@@ -178,7 +178,9 @@ async def test_client_stop_closes_transport_with_blocked_write():
     process.stdin = Output()
     rpc = JsonRpcClient(process)
     rpc._loop = loop
-    client = copilot.CopilotClient(connection=copilot.RuntimeConnection.for_uri("127.0.0.1:12345"))
+    client = copilot.CopilotClient(
+        mode="coding-agent", runtime=copilot.RuntimeConnection.for_tcp("127.0.0.1", 12345)
+    )
     client._client = rpc
     client._process = process
     client._state = "connected"

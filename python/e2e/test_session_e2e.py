@@ -18,6 +18,7 @@ from .testharness import (
     get_next_event_of_type,
     wait_for_condition,
 )
+from .testharness.provider_options import byok_inference
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -25,7 +26,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="module")
 class TestSessions:
     async def test_should_create_and_disconnect_sessions(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, model="claude-sonnet-5"
+            model="claude-sonnet-5", permissions={"on_request": PermissionHandler.approve_all}
         )
         assert session.session_id
 
@@ -48,7 +49,7 @@ class TestSessions:
 
     async def test_should_have_stateful_conversation(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         assistant_message = await session.send_and_wait("What is 1+1?")
@@ -64,8 +65,8 @@ class TestSessions:
     ):
         system_message_suffix = "End each response with the phrase 'Have a nice day!'"
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             system_message={"mode": "append", "content": system_message_suffix},
+            permissions={"on_request": PermissionHandler.approve_all},
         )
 
         assistant_message = await session.send_and_wait("What is your full name?", timeout=10.0)
@@ -84,8 +85,8 @@ class TestSessions:
     ):
         test_system_message = "You are an assistant called Testy McTestface. Reply succinctly."
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             system_message={"mode": "replace", "content": test_system_message},
+            permissions={"on_request": PermissionHandler.approve_all},
         )
 
         assistant_message = await session.send_and_wait("What is your full name?", timeout=10.0)
@@ -104,7 +105,6 @@ class TestSessions:
         custom_tone = "Respond in a warm, professional tone. Be thorough in explanations."
         appended_content = "Always mention quarterly earnings."
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             system_message={
                 "mode": "customize",
                 "sections": {
@@ -113,6 +113,7 @@ class TestSessions:
                 },
                 "content": appended_content,
             },
+            permissions={"on_request": PermissionHandler.approve_all},
         )
 
         try:
@@ -129,8 +130,8 @@ class TestSessions:
 
     async def test_should_create_a_session_with_availableTools(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            available_tools=["view", "edit"],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"available_tools": ["view", "edit"]},
         )
 
         try:
@@ -148,7 +149,8 @@ class TestSessions:
 
     async def test_should_create_a_session_with_excludedTools(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, excluded_tools=["view"]
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"excluded_tools": ["view"]},
         )
 
         try:
@@ -178,9 +180,9 @@ class TestSessions:
         )
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[secret_tool],
-            default_agent={"excluded_tools": ["secret_tool"]},
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [secret_tool]},
+            agents={"default": {"excluded_tools": ["secret_tool"]}},
         )
 
         try:
@@ -203,9 +205,9 @@ class TestSessions:
         import asyncio
 
         s1, s2, s3 = await asyncio.gather(
-            ctx.client.create_session(on_permission_request=PermissionHandler.approve_all),
-            ctx.client.create_session(on_permission_request=PermissionHandler.approve_all),
-            ctx.client.create_session(on_permission_request=PermissionHandler.approve_all),
+            ctx.client.create_session(permissions={"on_request": PermissionHandler.approve_all}),
+            ctx.client.create_session(permissions={"on_request": PermissionHandler.approve_all}),
+            ctx.client.create_session(permissions={"on_request": PermissionHandler.approve_all}),
         )
 
         # All sessions should have unique IDs
@@ -227,7 +229,7 @@ class TestSessions:
 
     async def test_should_resume_a_session_using_the_same_client(self, ctx: E2ETestContext):
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session1.session_id
         answer = await session1.send_and_wait("What is 1+1?")
@@ -236,7 +238,7 @@ class TestSessions:
 
         # Resume using the same client
         session2 = await ctx.client.resume_session(
-            session_id, on_permission_request=PermissionHandler.approve_all
+            session_id, permissions={"on_request": PermissionHandler.approve_all}
         )
         assert session2.session_id == session_id
         # The completed turn's assistant message is durable; session.idle is not.
@@ -253,7 +255,7 @@ class TestSessions:
 
     async def test_should_resume_a_session_using_a_new_client(self, ctx: E2ETestContext):
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session1.session_id
         answer = await session1.send_and_wait("What is 1+1?")
@@ -265,15 +267,16 @@ class TestSessions:
             "fake-token-for-e2e-tests" if os.environ.get("GITHUB_ACTIONS") == "true" else None
         )
         new_client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=github_token,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+            ),
+            github={"token": github_token},
         )
 
         try:
             session2 = await new_client.resume_session(
-                session_id, on_permission_request=PermissionHandler.approve_all
+                session_id, permissions={"on_request": PermissionHandler.approve_all}
             )
             assert session2.session_id == session_id
 
@@ -296,8 +299,8 @@ class TestSessions:
             return {"kind": "cancelled"}
 
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            on_mcp_auth_request=on_mcp_auth_request,
+            permissions={"on_request": PermissionHandler.approve_all},
+            mcp={"on_auth_request": on_mcp_auth_request},
         )
         session_id = session1.session_id
         answer = await session1.send_and_wait("What is 1+1?")
@@ -306,17 +309,18 @@ class TestSessions:
 
         github_token = DEFAULT_GITHUB_TOKEN if os.environ.get("GITHUB_ACTIONS") == "true" else None
         new_client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=github_token,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+            ),
+            github={"token": github_token},
         )
 
         try:
             session2 = await new_client.resume_session(
                 session_id,
-                on_permission_request=PermissionHandler.approve_all,
-                on_mcp_auth_request=on_mcp_auth_request,
+                permissions={"on_request": PermissionHandler.approve_all},
+                mcp={"on_auth_request": on_mcp_auth_request},
             )
             assert session2.session_id == session_id
             await session2.disconnect()
@@ -330,15 +334,15 @@ class TestSessions:
         github_token = DEFAULT_GITHUB_TOKEN if os.environ.get("GITHUB_ACTIONS") == "true" else None
 
         client1 = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=github_token,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+            ),
+            github={"token": github_token},
         )
         try:
             session1 = await client1.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                session_id=session_id,
+                session_id=session_id, permissions={"on_request": PermissionHandler.approve_all}
             )
             assert session1.session_id == session_id
 
@@ -354,14 +358,15 @@ class TestSessions:
             await client1.force_stop()
 
         client2 = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=github_token,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+            ),
+            github={"token": github_token},
         )
         try:
             session2 = await client2.resume_session(
-                session_id, on_permission_request=PermissionHandler.approve_all
+                session_id, permissions={"on_request": PermissionHandler.approve_all}
             )
             assert session2.session_id == session_id
 
@@ -377,17 +382,17 @@ class TestSessions:
     async def test_should_throw_error_resuming_nonexistent_session(self, ctx: E2ETestContext):
         with pytest.raises(Exception):
             await ctx.client.resume_session(
-                "non-existent-session-id", on_permission_request=PermissionHandler.approve_all
+                "non-existent-session-id", permissions={"on_request": PermissionHandler.approve_all}
             )
 
     async def test_should_list_sessions(self, ctx: E2ETestContext):
         # Create a couple of sessions and send messages to persist them
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await session1.send_and_wait("Say hello")
         session2 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await session2.send_and_wait("Say goodbye")
 
@@ -434,7 +439,7 @@ class TestSessions:
     async def test_should_delete_session(self, ctx: E2ETestContext):
         # Create a session and send a message to persist it
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await session.send_and_wait("Hello")
         session_id = session.session_id
@@ -466,13 +471,13 @@ class TestSessions:
         # Verify we cannot resume the deleted session
         with pytest.raises(Exception):
             await ctx.client.resume_session(
-                session_id, on_permission_request=PermissionHandler.approve_all
+                session_id, permissions={"on_request": PermissionHandler.approve_all}
             )
 
     async def test_should_get_session_metadata(self, ctx: E2ETestContext):
         # Create a session and send a message to persist it
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await session.send_and_wait("Say hello")
 
@@ -508,7 +513,7 @@ class TestSessions:
     async def test_should_get_last_session_id(self, ctx: E2ETestContext):
         # Create a session and send a message to persist it
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await session.send_and_wait("Say hello")
 
@@ -539,19 +544,21 @@ class TestSessions:
             )
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[
-                Tool(
-                    name="get_secret_number",
-                    description="Gets the secret number",
-                    handler=get_secret_number_handler,
-                    parameters={
-                        "type": "object",
-                        "properties": {"key": {"type": "string", "description": "Key"}},
-                        "required": ["key"],
-                    },
-                )
-            ],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={
+                "definitions": [
+                    Tool(
+                        name="get_secret_number",
+                        description="Gets the secret number",
+                        handler=get_secret_number_handler,
+                        parameters={
+                            "type": "object",
+                            "properties": {"key": {"type": "string", "description": "Key"}},
+                            "required": ["key"],
+                        },
+                    )
+                ]
+            },
         )
 
         answer = await session.send_and_wait("What is the secret number for key ALPHA?")
@@ -560,44 +567,64 @@ class TestSessions:
 
     async def test_should_create_session_with_custom_provider(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            provider={
-                "type": "openai",
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "fake-key",
+            model="claude-sonnet-5",
+            permissions={"on_request": PermissionHandler.approve_all},
+            inference={
+                **byok_inference(
+                    {
+                        "type": "openai",
+                        "base_url": "https://api.openai.com/v1",
+                        "api_key": "fake-key",
+                    },
+                    None,
+                )
             },
+            github={"capi": {"enabled": False}},
         )
         assert session.session_id
 
     async def test_should_create_session_with_azure_provider(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            provider={
-                "type": "azure",
-                "base_url": "https://my-resource.openai.azure.com",
-                "api_key": "fake-key",
-                "azure": {
-                    "api_version": "2024-02-15-preview",
-                },
+            model="claude-sonnet-5",
+            permissions={"on_request": PermissionHandler.approve_all},
+            inference={
+                **byok_inference(
+                    {
+                        "type": "azure",
+                        "base_url": "https://my-resource.openai.azure.com",
+                        "api_key": "fake-key",
+                        "azure": {
+                            "api_version": "2024-02-15-preview",
+                        },
+                    },
+                    None,
+                )
             },
+            github={"capi": {"enabled": False}},
         )
         assert session.session_id
 
     async def test_should_resume_session_with_custom_provider(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session.session_id
 
         # Resume the session with a provider
         session2 = await ctx.client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            provider={
-                "type": "openai",
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "fake-key",
+            permissions={"on_request": PermissionHandler.approve_all},
+            inference={
+                **byok_inference(
+                    {
+                        "type": "openai",
+                        "base_url": "https://api.openai.com/v1",
+                        "api_key": "fake-key",
+                    },
+                    None,
+                )
             },
+            github={"capi": {"enabled": False}},
         )
 
         assert session2.session_id == session_id
@@ -606,7 +633,7 @@ class TestSessions:
         import asyncio
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         # Set up event listeners BEFORE sending to avoid race conditions
@@ -660,8 +687,8 @@ class TestSessions:
                 session_start_event.set()
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            on_event=capture_early,
+            permissions={"on_request": PermissionHandler.approve_all},
+            events={"on_event": capture_early},
         )
 
         try:
@@ -709,7 +736,8 @@ class TestSessions:
 
         custom_config_dir = os.path.join(ctx.home_dir, "custom-config")
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, config_directory=custom_config_dir
+            permissions={"on_request": PermissionHandler.approve_all},
+            config_directory=custom_config_dir,
         )
 
         assert session.session_id
@@ -723,7 +751,7 @@ class TestSessions:
         import asyncio
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         received_events = []
@@ -770,7 +798,7 @@ class TestSessions:
                 "session", "should_set_model_with_reasoningeffort"
             )
             session = await isolated_ctx.client.create_session(
-                on_permission_request=PermissionHandler.approve_all
+                permissions={"on_request": PermissionHandler.approve_all}
             )
 
             model_change_event = asyncio.get_event_loop().create_future()
@@ -806,7 +834,7 @@ class TestSessions:
             f.write(base64.b64decode(pixel_png))
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         await session.send_and_wait(
@@ -831,7 +859,7 @@ class TestSessions:
             f.write("FILE_ATTACHMENT_SENTINEL")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         await session.send_and_wait(
@@ -870,7 +898,7 @@ class TestSessions:
             f.write("DIRECTORY_ATTACHMENT_SENTINEL")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         await session.send_and_wait(
@@ -904,7 +932,7 @@ class TestSessions:
             f.write('class C { string Value = "SELECTION_SENTINEL"; }')
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         await session.send_and_wait(
@@ -943,7 +971,7 @@ class TestSessions:
 
     async def test_should_send_with_custom_requestheaders(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         await session.send_and_wait(
@@ -964,7 +992,7 @@ class TestSessions:
         import asyncio
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await session.send_and_wait("Say OK.")
 
@@ -996,7 +1024,7 @@ class TestSessions:
         import asyncio
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await session.send_and_wait("Say hello")
 
@@ -1033,8 +1061,8 @@ class TestSessions:
             await release_tool.wait()
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            hooks={"on_pre_tool_use": hold_tool},
+            permissions={"on_request": PermissionHandler.approve_all},
+            hooks={"handlers": {"on_pre_tool_use": hold_tool}},
         )
         events = []
 
@@ -1078,7 +1106,7 @@ class TestSessions:
         import asyncio
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         events: list[str] = []
         ordering: list[str] = []
@@ -1116,7 +1144,7 @@ class TestSessions:
     async def test_sendandwait_throws_on_timeout(self, ctx: E2ETestContext):
         """`send_and_wait` raises TimeoutError when the session does not become idle."""
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         try:
@@ -1138,7 +1166,7 @@ class TestSessions:
         import asyncio
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         tool_start_task = get_next_event_of_type(session, "tool.execution_start", timeout=60.0)
@@ -1174,7 +1202,7 @@ class TestSessions:
         import asyncio
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         model_change_event: asyncio.Future[SessionModelChangeData] = (
@@ -1202,7 +1230,7 @@ class TestSessions:
         import asyncio
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         event_count = 0
@@ -1238,7 +1266,7 @@ class TestSessions:
         import asyncio
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         disposed = asyncio.Event()
@@ -1276,7 +1304,7 @@ class TestSessions:
         )
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         await session.send_and_wait(

@@ -8,12 +8,12 @@ using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using GitHub.Copilot;
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot;
+using Microsoft.Copilot.Rpc;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public class CanvasTests
 {
@@ -30,7 +30,7 @@ public class CanvasTests
     private static CopilotSession CreateSession()
     {
         var options = GetSerializerOptions();
-        var rpcType = typeof(CopilotClient).Assembly.GetType("GitHub.Copilot.JsonRpc");
+        var rpcType = typeof(CopilotClient).Assembly.GetType("Microsoft.Copilot.JsonRpc");
         Assert.NotNull(rpcType);
 
         var inputStream = new MemoryStream();
@@ -62,7 +62,7 @@ public class CanvasTests
         Assert.NotNull(ctor);
         try
         {
-            return (CopilotSession)ctor!.Invoke(["session-1", rpc, logger, new CopilotClient(), null]);
+            return (CopilotSession)ctor!.Invoke(["session-1", rpc, logger, new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent }), null]);
         }
         catch
         {
@@ -145,45 +145,11 @@ public class CanvasTests
         var session = CreateSession();
 
         DispatchEvent(session, new SessionCanvasOpenedEvent
-        {
-            Id = Guid.NewGuid(),
-            Timestamp = DateTimeOffset.UtcNow,
-            Data = new SessionCanvasOpenedData
-            {
-                CanvasId = "",
-                ExtensionId = "project:counter",
-                InstanceId = "missing-canvas-id",
-            }
-        });
+        { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Data = new SessionCanvasOpenedData { CanvasId = "", ExtensionId = "project:counter", InstanceId = "missing-canvas-id", } });
         DispatchEvent(session, new SessionCanvasOpenedEvent
-        {
-            Id = Guid.NewGuid(),
-            Timestamp = DateTimeOffset.UtcNow,
-            Data = new SessionCanvasOpenedData
-            {
-                CanvasId = "counter",
-                ExtensionId = "project:counter",
-                ExtensionName = "Counter Provider",
-                InstanceId = "counter-1",
-                Title = "Counter",
-                Icon = "beaker",
-                Status = "ready",
-                Url = "https://example.test/counter",
-                Input = JsonDocument.Parse("""{"seed":1}""").RootElement.Clone(),
-            }
-        });
+        { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Data = new SessionCanvasOpenedData { CanvasId = "counter", ExtensionId = "project:counter", ExtensionName = "Counter Provider", InstanceId = "counter-1", Title = "Counter", Icon = "beaker", Status = "ready", Url = "https://example.test/counter", Input = JsonDocument.Parse("""{"seed":1}""").RootElement.Clone(), } });
         DispatchEvent(session, new SessionCanvasOpenedEvent
-        {
-            Id = Guid.NewGuid(),
-            Timestamp = DateTimeOffset.UtcNow,
-            Data = new SessionCanvasOpenedData
-            {
-                CanvasId = "logs",
-                ExtensionId = "project:logs",
-                InstanceId = "logs-1",
-                Title = "Logs",
-            }
-        });
+        { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Data = new SessionCanvasOpenedData { CanvasId = "logs", ExtensionId = "project:logs", InstanceId = "logs-1", Title = "Logs", } });
 
         Assert.Collection(
             session.OpenCanvases,
@@ -191,22 +157,7 @@ public class CanvasTests
             canvas => Assert.Equal("logs-1", canvas.InstanceId));
 
         DispatchEvent(session, new SessionCanvasOpenedEvent
-        {
-            Id = Guid.NewGuid(),
-            Timestamp = DateTimeOffset.UtcNow,
-            Data = new SessionCanvasOpenedData
-            {
-                CanvasId = "counter",
-                ExtensionId = "project:counter",
-                ExtensionName = "Counter Provider",
-                InstanceId = "counter-1",
-                Title = "Counter Updated",
-                Icon = "beaker-filled",
-                Status = "reconnected",
-                Url = "https://example.test/counter-updated",
-                Input = JsonDocument.Parse("""{"seed":2}""").RootElement.Clone(),
-            }
-        });
+        { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Data = new SessionCanvasOpenedData { CanvasId = "counter", ExtensionId = "project:counter", ExtensionName = "Counter Provider", InstanceId = "counter-1", Title = "Counter Updated", Icon = "beaker-filled", Status = "reconnected", Url = "https://example.test/counter-updated", Input = JsonDocument.Parse("""{"seed":2}""").RootElement.Clone(), } });
 
         Assert.Collection(
             session.OpenCanvases,
@@ -228,29 +179,9 @@ public class CanvasTests
         var session = CreateSession();
 
         DispatchEvent(session, new SessionCanvasOpenedEvent
-        {
-            Id = Guid.NewGuid(),
-            Timestamp = DateTimeOffset.UtcNow,
-            Data = new SessionCanvasOpenedData
-            {
-                CanvasId = "counter",
-                ExtensionId = "project:counter",
-                InstanceId = "counter-1",
-                Title = "Counter",
-            }
-        });
+        { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Data = new SessionCanvasOpenedData { CanvasId = "counter", ExtensionId = "project:counter", InstanceId = "counter-1", Title = "Counter", } });
         DispatchEvent(session, new SessionCanvasOpenedEvent
-        {
-            Id = Guid.NewGuid(),
-            Timestamp = DateTimeOffset.UtcNow,
-            Data = new SessionCanvasOpenedData
-            {
-                CanvasId = "logs",
-                ExtensionId = "project:logs",
-                InstanceId = "logs-1",
-                Title = "Logs",
-            }
-        });
+        { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Data = new SessionCanvasOpenedData { CanvasId = "logs", ExtensionId = "project:logs", InstanceId = "logs-1", Title = "Logs", } });
 
         Assert.Collection(
             session.OpenCanvases,
@@ -259,16 +190,7 @@ public class CanvasTests
 
         // Closing one instance removes it; the other remains.
         DispatchEvent(session, new SessionCanvasClosedEvent
-        {
-            Id = Guid.NewGuid(),
-            Timestamp = DateTimeOffset.UtcNow,
-            Data = new SessionCanvasClosedData
-            {
-                CanvasId = "counter",
-                ExtensionId = "project:counter",
-                InstanceId = "counter-1",
-            }
-        });
+        { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Data = new SessionCanvasClosedData { CanvasId = "counter", ExtensionId = "project:counter", InstanceId = "counter-1", } });
 
         Assert.Collection(
             session.OpenCanvases,
@@ -276,29 +198,11 @@ public class CanvasTests
 
         // Closing an absent instance is a no-op (idempotent).
         DispatchEvent(session, new SessionCanvasClosedEvent
-        {
-            Id = Guid.NewGuid(),
-            Timestamp = DateTimeOffset.UtcNow,
-            Data = new SessionCanvasClosedData
-            {
-                CanvasId = "counter",
-                ExtensionId = "project:counter",
-                InstanceId = "counter-1",
-            }
-        });
+        { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Data = new SessionCanvasClosedData { CanvasId = "counter", ExtensionId = "project:counter", InstanceId = "counter-1", } });
 
         // A closed event with an empty instance id leaves the snapshot intact.
         DispatchEvent(session, new SessionCanvasClosedEvent
-        {
-            Id = Guid.NewGuid(),
-            Timestamp = DateTimeOffset.UtcNow,
-            Data = new SessionCanvasClosedData
-            {
-                CanvasId = "logs",
-                ExtensionId = "project:logs",
-                InstanceId = "",
-            }
-        });
+        { Id = Guid.NewGuid(), Timestamp = DateTimeOffset.UtcNow, Data = new SessionCanvasClosedData { CanvasId = "logs", ExtensionId = "project:logs", InstanceId = "", } });
 
         Assert.Collection(
             session.OpenCanvases,
@@ -367,56 +271,94 @@ public class CanvasTests
     {
         var handler = new TestHandler();
         var declaration = new CanvasDeclaration { Id = "c1", DisplayName = "C", Description = "d" };
-        var config = new SessionConfig
+        var config = new CreateSessionOptions
         {
-            Canvases = new[] { declaration },
-            RequestCanvasRenderer = true,
-            RequestExtensions = true,
-            ExtensionInfo = new ExtensionInfo { Source = "github-app", Name = "demo" },
-            CanvasProvider = new CanvasProviderIdentity { Id = "app:builtin:window-1", Name = "Built-in" },
-            CanvasHandler = handler
+            Canvases = new SessionCanvasOptions
+            {
+                Definitions = new[]
+        {
+            declaration
+        },
+                RequestRenderer = true,
+                Provider = new CanvasProviderIdentity
+                {
+                    Id = "app:builtin:window-1",
+                    Name = "Built-in"
+                },
+                Handler = handler
+            },
+            Extensions = new SessionExtensionOptions
+            {
+                Enabled = true,
+                Identity = new ExtensionInfo
+                {
+                    Source = "github-app",
+                    Name = "demo"
+                }
+            }
         };
 
         var clone = config.Clone();
 
-        Assert.NotNull(clone.Canvases);
-        Assert.Single(clone.Canvases!);
-        Assert.Equal("c1", clone.Canvases![0].Id);
-        Assert.True(clone.RequestCanvasRenderer);
-        Assert.True(clone.RequestExtensions);
-        Assert.NotNull(clone.ExtensionInfo);
-        Assert.Equal("github-app", clone.ExtensionInfo!.Source);
-        Assert.NotNull(clone.CanvasProvider);
-        Assert.Equal("app:builtin:window-1", clone.CanvasProvider!.Id);
-        Assert.Same(handler, clone.CanvasHandler);
+        Assert.NotNull(clone.Canvases.Definitions);
+        Assert.Single(clone.Canvases.Definitions!);
+        Assert.Equal("c1", clone.Canvases.Definitions![0].Id);
+        Assert.True(clone.Canvases.RequestRenderer);
+        Assert.True(clone.Extensions.Enabled);
+        Assert.NotNull(clone.Extensions.Identity);
+        Assert.Equal("github-app", clone.Extensions.Identity!.Source);
+        Assert.NotNull(clone.Canvases.Provider);
+        Assert.Equal("app:builtin:window-1", clone.Canvases.Provider!.Id);
+        Assert.Same(handler, clone.Canvases.Handler);
 
         // Mutating the clone's list does not affect the original.
-        clone.Canvases!.Add(new CanvasDeclaration { Id = "c2", DisplayName = "C2", Description = "d2" });
-        Assert.Single(config.Canvases!);
+        clone.Canvases.Definitions!.Add(new CanvasDeclaration { Id = "c2", DisplayName = "C2", Description = "d2" });
+        Assert.Single(config.Canvases.Definitions!);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesCanvasFields()
     {
         var handler = new TestHandler();
-        var config = new ResumeSessionConfig
+        var config = new ResumeSessionOptions
         {
-            Canvases = new[] { new CanvasDeclaration { Id = "c1", DisplayName = "C", Description = "d" } },
-            RequestCanvasRenderer = true,
-            ExtensionInfo = new ExtensionInfo { Source = "s", Name = "n" },
-            CanvasProvider = new CanvasProviderIdentity { Id = "app:builtin:window-2" },
-            CanvasHandler = handler
+            Canvases = new ResumeSessionCanvasOptions
+            {
+                Definitions = new[]
+        {
+            new CanvasDeclaration
+            {
+                Id = "c1",
+                DisplayName = "C",
+                Description = "d"
+            }
+        },
+                RequestRenderer = true,
+                Provider = new CanvasProviderIdentity
+                {
+                    Id = "app:builtin:window-2"
+                },
+                Handler = handler
+            },
+            Extensions = new SessionExtensionOptions
+            {
+                Identity = new ExtensionInfo
+                {
+                    Source = "s",
+                    Name = "n"
+                }
+            }
         };
 
         var clone = config.Clone();
 
-        Assert.NotNull(clone.Canvases);
-        Assert.Single(clone.Canvases!);
-        Assert.True(clone.RequestCanvasRenderer);
-        Assert.NotNull(clone.ExtensionInfo);
-        Assert.NotNull(clone.CanvasProvider);
-        Assert.Equal("app:builtin:window-2", clone.CanvasProvider!.Id);
-        Assert.Same(handler, clone.CanvasHandler);
+        Assert.NotNull(clone.Canvases.Definitions);
+        Assert.Single(clone.Canvases.Definitions!);
+        Assert.True(clone.Canvases.RequestRenderer);
+        Assert.NotNull(clone.Extensions.Identity);
+        Assert.NotNull(clone.Canvases.Provider);
+        Assert.Equal("app:builtin:window-2", clone.Canvases.Provider!.Id);
+        Assert.Same(handler, clone.Canvases.Handler);
     }
 
     private sealed class TestHandler : CanvasHandlerBase

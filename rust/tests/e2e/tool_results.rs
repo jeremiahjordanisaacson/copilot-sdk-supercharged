@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::session_events::{SessionEventType, ToolExecutionCompleteData};
-use github_copilot_sdk::tool::ToolHandler;
-use github_copilot_sdk::{
-    Error, SessionConfig, Tool, ToolInvocation, ToolResult, ToolResultExpanded,
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::session_events::{SessionEventType, ToolExecutionCompleteData};
+use copilot_sdk::tool::ToolHandler;
+use copilot_sdk::{
+    CreateSessionOptions, Error, Tool, ToolInvocation, ToolResult, ToolResultExpanded,
 };
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -164,16 +164,16 @@ async fn should_handle_tool_result_with_denied_resulttype() {
 
 async fn create_tool_session(
     _ctx: &super::support::E2eContext,
-    client: &github_copilot_sdk::Client,
+    client: &copilot_sdk::Client,
     tool: Tool,
-) -> github_copilot_sdk::session::Session {
+) -> copilot_sdk::session::Session {
     let __perm = Arc::new(ApproveAllHandler);
     client
         .create_session(
-            SessionConfig::default()
-                .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                .with_permission_handler(__perm)
-                .with_tools(vec![tool]),
+            CreateSessionOptions::default()
+                .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+                .with_permissions(|group| group.with_on_request(__perm))
+                .with_tools(|group| group.with_definitions(vec![tool])),
         )
         .await
         .expect("create session")

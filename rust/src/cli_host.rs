@@ -6,7 +6,7 @@
 //!
 #![cfg_attr(
     not(copilot_cli_host),
-    doc = "```compile_fail\nuse github_copilot_sdk::native_cli::start;\n```"
+    doc = "```compile_fail\nuse copilot_sdk::native_cli::start;\n```"
 )]
 
 use crate::Client;

@@ -1,8 +1,8 @@
-module github.com/github/copilot-sdk/go/samples
+module github.com/microsoft/copilot-sdk/go/v2/samples
 
 go 1.26.0
 
-require github.com/github/copilot-sdk/go v0.0.0
+require github.com/microsoft/copilot-sdk/go/v2 v2.0.0
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -19,4 +19,4 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 )
 
-replace github.com/github/copilot-sdk/go => ../
+replace github.com/microsoft/copilot-sdk/go/v2 => ../

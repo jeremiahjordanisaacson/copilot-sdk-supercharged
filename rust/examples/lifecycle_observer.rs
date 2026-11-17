@@ -20,29 +20,29 @@
 //! producer.
 //!
 //! ```sh
-//! cargo run -p github-copilot-sdk --example lifecycle_observer
+//! cargo run -p copilot-sdk --example lifecycle_observer
 //! ```
 //!
-//! [`Client::subscribe_lifecycle`]: github_copilot_sdk::Client::subscribe_lifecycle
-//! [`LifecycleSubscription`]: github_copilot_sdk::LifecycleSubscription
-//! [`Session::subscribe`]: github_copilot_sdk::session::Session::subscribe
-//! [`EventSubscription`]: github_copilot_sdk::EventSubscription
-//! [`Client::get_session_metadata`]: github_copilot_sdk::Client::get_session_metadata
-//! [`Client::force_stop`]: github_copilot_sdk::Client::force_stop
-//! [`RecvErrorKind::Lagged`]: github_copilot_sdk::subscription::RecvErrorKind::Lagged
+//! [`Client::subscribe_lifecycle`]: copilot_sdk::Client::subscribe_lifecycle
+//! [`LifecycleSubscription`]: copilot_sdk::LifecycleSubscription
+//! [`Session::subscribe`]: copilot_sdk::session::Session::subscribe
+//! [`EventSubscription`]: copilot_sdk::EventSubscription
+//! [`Client::get_session_metadata`]: copilot_sdk::Client::get_session_metadata
+//! [`Client::force_stop`]: copilot_sdk::Client::force_stop
+//! [`RecvErrorKind::Lagged`]: copilot_sdk::subscription::RecvErrorKind::Lagged
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::subscription::RecvErrorKind;
-use github_copilot_sdk::types::{MessageOptions, SessionConfig, SessionLifecycleEventType};
-use github_copilot_sdk::{Client, ClientOptions};
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::subscription::RecvErrorKind;
+use copilot_sdk::types::{CreateSessionOptions, MessageOptions, SessionLifecycleEventType};
+use copilot_sdk::{Client, ClientOptions};
 
 #[tokio::main]
-async fn main() -> Result<(), github_copilot_sdk::Error> {
-    let client = Client::start(ClientOptions::default()).await?;
+async fn main() -> Result<(), copilot_sdk::Error> {
+    let client = Client::start(ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)).await?;
     println!("[client] started, pid: {:?}", client.pid());
 
     // Wildcard lifecycle subscriber: see every session.lifecycle event,
@@ -73,7 +73,8 @@ async fn main() -> Result<(), github_copilot_sdk::Error> {
         }
     });
 
-    let config = SessionConfig::default().with_permission_handler(Arc::new(ApproveAllHandler));
+    let config = CreateSessionOptions::default()
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)));
     let session = client.create_session(config).await?;
     println!("[client] session created: {}", session.id());
 

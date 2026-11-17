@@ -1,14 +1,14 @@
-﻿/*---------------------------------------------------------------------------------------------
+/*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "session_fs", output)
@@ -28,11 +28,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         {
             await using var client = CreateSessionFsClient(providerRoot);
 
-            var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-            {
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot),
-            });
+            var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+            { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, State = new SessionStateOptions { CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot) } });
 
             var msg = await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 100 + 200?" });
             Assert.Contains("300", msg?.Data.Content ?? string.Empty);
@@ -63,11 +60,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         {
             await using var client = CreateSessionFsClient(providerRoot, binary: true);
             TestSessionFsHandler? provider = null;
-            var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-            {
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                CreateSessionFsProvider = s => provider = new TestSessionFsHandler(s.SessionId, providerRoot),
-            });
+            var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+            { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, State = new SessionStateOptions { CreateSessionFsProvider = s => provider = new TestSessionFsHandler(s.SessionId, providerRoot) } });
             var storedPath = GetStoredPath(providerRoot, session.SessionId, imagePath);
             Directory.CreateDirectory(Path.GetDirectoryName(storedPath)!);
             await File.WriteAllBytesAsync(storedPath, imageBytes);
@@ -100,11 +94,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             await using var client = CreateSessionFsClient(providerRoot);
             Func<CopilotSession, SessionFsProvider> createSessionFsHandler = s => new TestSessionFsHandler(s.SessionId, providerRoot);
 
-            var session1 = await Ctx.CreateSessionAsync(client, new SessionConfig
-            {
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                CreateSessionFsProvider = createSessionFsHandler,
-            });
+            var session1 = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+            { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, State = new SessionStateOptions { CreateSessionFsProvider = createSessionFsHandler } });
             var sessionId = session1.SessionId;
 
             var msg = await session1.SendAndWaitAsync(new MessageOptions { Prompt = "What is 50 + 50?" });
@@ -114,11 +105,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             var eventsPath = GetStoredPath(providerRoot, sessionId, $"{SessionFsConfig.SessionStatePath}/events.jsonl");
             await WaitForConditionAsync(() => File.Exists(eventsPath));
 
-            var session2 = await Ctx.ResumeSessionAsync(client, sessionId, new ResumeSessionConfig
-            {
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                CreateSessionFsProvider = createSessionFsHandler,
-            });
+            var session2 = await Ctx.ResumeSessionAsync(client, sessionId, new ResumeSessionOptions
+            { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, State = new SessionStateOptions { CreateSessionFsProvider = createSessionFsHandler } });
 
             var msg2 = await session2.SendAndWaitAsync(new MessageOptions { Prompt = "What is that times 3?" });
             Assert.Contains("300", msg2?.Data.Content ?? string.Empty);
@@ -139,11 +127,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             await using var client1 = CreateSessionFsClient(providerRoot, useStdio: false, tcpConnectionToken: "session-fs-shared-token");
             var createSessionFsHandler = (Func<CopilotSession, SessionFsProvider>)(s => new TestSessionFsHandler(s.SessionId, providerRoot));
 
-            _ = await Ctx.CreateSessionAsync(client1, new SessionConfig
-            {
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                CreateSessionFsProvider = createSessionFsHandler,
-            });
+            _ = await Ctx.CreateSessionAsync(client1, new CreateSessionOptions
+            { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, State = new SessionStateOptions { CreateSessionFsProvider = createSessionFsHandler } });
 
             var port = client1.RuntimePort
                 ?? throw new InvalidOperationException("Client1 is not using TCP mode; RuntimePort is null");
@@ -151,9 +136,9 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             var client2 = Ctx.CreateClient(
                 options: new CopilotClientOptions
                 {
-                    LogLevel = CopilotLogLevel.Error,
+                    Mode = CopilotClientMode.CodingAgent,
                     SessionFs = SessionFsConfig,
-                    Connection = RuntimeConnection.ForUri($"localhost:{port}", connectionToken: "session-fs-shared-token"),
+                    Runtime = RuntimeConnection.ForTcp("localhost", port, connectionToken: "session-fs-shared-token")
                 });
 
             try
@@ -369,15 +354,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             var suppliedFileContent = new string('x', largeContentSize);
 
             await using var client = CreateSessionFsClient(providerRoot);
-            var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-            {
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot),
-                Tools =
-                [
-                    AIFunctionFactory.Create(() => suppliedFileContent, "get_big_string", "Returns a large string")
-                ],
-            });
+            var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+            { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, State = new SessionStateOptions { CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot) }, Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(() => suppliedFileContent, "get_big_string", "Returns a large string")] } });
 
             await session.SendAndWaitAsync(new MessageOptions
             {
@@ -413,11 +391,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         try
         {
             await using var client = CreateSessionFsClient(providerRoot);
-            var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-            {
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot),
-            });
+            var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+            { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, State = new SessionStateOptions { CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot) } });
 
             await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 2+2?" });
 
@@ -444,11 +419,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         try
         {
             await using var client = CreateSessionFsClient(providerRoot);
-            var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-            {
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot),
-            });
+            var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+            { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, State = new SessionStateOptions { CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot) } });
 
             var msg = await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 7 * 8?" });
             Assert.Contains("56", msg?.Data.Content ?? string.Empty);
@@ -477,11 +449,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         try
         {
             await using var client = CreateSessionFsClient(providerRoot);
-            var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-            {
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot),
-            });
+            var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+            { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, State = new SessionStateOptions { CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot) } });
 
             // Write a plan via the session RPC
             await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 2 + 3?" });
@@ -504,23 +473,27 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     private CopilotClient CreateSessionFsClient(string providerRoot, bool useStdio = true, string? tcpConnectionToken = null, bool binary = false)
     {
         RuntimeConnection connection = useStdio
-            ? RuntimeConnection.ForStdio()
-            : RuntimeConnection.ForTcp(connectionToken: tcpConnectionToken);
+            ? RuntimeConnection.ForSpawnedStdio()
+            : RuntimeConnection.ForSpawnedTcp(connectionToken: tcpConnectionToken);
 
         Directory.CreateDirectory(providerRoot);
         return Ctx.CreateClient(
             options: new CopilotClientOptions
             {
-                SessionFs = binary
-                    ? new SessionFsConfig
+                Mode = CopilotClientMode.CodingAgent,
+                SessionFs = binary ? new SessionFsConfig
+                {
+                    InitialWorkingDirectory = SessionFsConfig.InitialWorkingDirectory,
+                    SessionStatePath = SessionFsConfig.SessionStatePath,
+                    Conventions = SessionFsConfig.Conventions,
+                    Capabilities = new SessionFsSetProviderCapabilities
                     {
-                        InitialWorkingDirectory = SessionFsConfig.InitialWorkingDirectory,
-                        SessionStatePath = SessionFsConfig.SessionStatePath,
-                        Conventions = SessionFsConfig.Conventions,
-                        Capabilities = new SessionFsSetProviderCapabilities { Binary = true },
-                    }
-                    : SessionFsConfig,
-                Connection = connection,
+                        Binary = true
+                    },
+                }
+
+    : SessionFsConfig,
+                Runtime = connection
             });
     }
 

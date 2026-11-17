@@ -1,0 +1,162 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+package com.microsoft.copilot;
+
+import com.microsoft.copilot.generated.rpc.HostDisposeParams;
+import com.microsoft.copilot.generated.rpc.HostListSessionsParams;
+import com.microsoft.copilot.generated.rpc.HostListSessionsResult;
+import com.microsoft.copilot.generated.rpc.HostPublishSessionParams;
+import com.microsoft.copilot.generated.rpc.HostPublishSessionResult;
+import com.microsoft.copilot.generated.rpc.HostStartResult;
+import com.microsoft.copilot.generated.rpc.HostSetSessionCreationPolicyParams;
+import com.microsoft.copilot.generated.rpc.HostUnpublishSessionParams;
+import com.microsoft.copilot.generated.rpc.HostUnpublishSessionResult;
+import com.microsoft.copilot.generated.rpc.RpcCaller;
+import com.microsoft.copilot.generated.rpc.ServerHostApi;
+import java.util.LinkedHashMap;
+import java.util.concurrent.CompletableFuture;
+
+/**
+ * A ready, connection-owned AHP listener. The handle remains bound to its
+ * original transport across client reconnects. Disposal never deletes
+ * application sessions.
+ */
+@CopilotExperimental
+public final class AhpHost implements AutoCloseable {
+    private final HostStartResult info;
+    private final ServerHostApi rpc;
+    private final RpcCaller rpcCaller;
+
+    AhpHost(HostStartResult info, ServerHostApi rpc, RpcCaller rpcCaller) {
+        this.info = info;
+        this.rpc = rpc;
+        this.rpcCaller = rpcCaller;
+    }
+
+    /**
+     * Gets the listener identity.
+     *
+     * @return the listener identity
+     */
+    public String getHostId() {
+        return info.hostId();
+    }
+
+    /**
+     * Gets the bound address.
+     *
+     * @return the actual bound WebSocket URL, or {@code null} without a local
+     *         server
+     */
+    public String getUrl() {
+        return info.url();
+    }
+
+    /**
+     * Gets the secret token.
+     *
+     * @return the token, or {@code null} without an authenticated local server
+     */
+    public String getToken() {
+        return info.token();
+    }
+
+    /**
+     * Gets the legacy process ID.
+     *
+     * @return the process ID, or {@code null} for in-process hosting
+     */
+    public Long getPid() {
+        return info.pid();
+    }
+
+    /**
+     * Gets the GitHub Mission Control environment identity.
+     *
+     * @return the environment ID, or {@code null} without a GitHub environment
+     */
+    public String getEnvironmentId() {
+        return info.environmentId();
+    }
+
+    /**
+     * Stops the listener and joins runtime cleanup. Every call reaches the runtime,
+     * including concurrent and repeated disposal calls.
+     *
+     * @return completion of listener cleanup
+     */
+    public CompletableFuture<Void> dispose() {
+        return rpc.dispose(HostDisposeParams.builder().hostId(info.hostId()).build());
+    }
+
+    /**
+     * Durably advertises an exact attached session in the compute-scoped catalog,
+     * without invoking a factory or transferring session ownership.
+     *
+     * @param sessionId
+     *            resident session identity
+     * @return the published AHP session identity
+     */
+    public CompletableFuture<HostPublishSessionResult> publishSession(String sessionId) {
+        if (sessionId == null) {
+            // The generated builder rejects null, but the established wire contract
+            // sends the request with the absent property and reports runtime validation
+            // through the returned future.
+            var params = new LinkedHashMap<String, Object>();
+            params.put("hostId", info.hostId());
+            return rpcCaller.invoke("host.publishSession", params, HostPublishSessionResult.class);
+        }
+        return rpc
+                .publishSession(HostPublishSessionParams.builder().hostId(info.hostId()).sessionId(sessionId).build());
+    }
+
+    /**
+     * Withdraws a live or dormant application publication and revokes AHP
+     * attachments. Preserves local history, worktrees and ongoing work. Rejects
+     * nonapplication publications without stopping the host.
+     *
+     * @param sessionId
+     *            canonical application session identity
+     * @return whether a publication was removed; false when already absent
+     */
+    public CompletableFuture<HostUnpublishSessionResult> unpublishSession(String sessionId) {
+        if (sessionId == null) {
+            // Preserve the pre-builder omitted sessionId payload.
+            var params = new LinkedHashMap<String, Object>();
+            params.put("hostId", info.hostId());
+            return rpcCaller.invoke("host.unpublishSession", params, HostUnpublishSessionResult.class);
+        }
+        return rpc.unpublishSession(
+                HostUnpublishSessionParams.builder().hostId(info.hostId()).sessionId(sessionId).build());
+    }
+
+    /**
+     * Lists all live and dormant catalog sessions advertised by this host.
+     *
+     * @return the advertised host sessions
+     */
+    public CompletableFuture<HostListSessionsResult> listSessions() {
+        return rpc.listSessions(HostListSessionsParams.builder().hostId(info.hostId()).build());
+    }
+
+    /**
+     * Changes subsequent remote admissions without disconnecting clients.
+     * Already-admitted creation may finish.
+     *
+     * @param allowed
+     *            whether remote creation is allowed
+     * @return acknowledgement that the policy was applied
+     */
+    public CompletableFuture<Void> setAllowCreatingNewSessions(boolean allowed) {
+        return rpc.setSessionCreationPolicy(HostSetSessionCreationPolicyParams.builder().hostId(info.hostId())
+                .allowCreatingNewSessions(allowed).build());
+    }
+
+    /** Disposes the listener and waits for acknowledged cleanup. */
+    @Override
+    public void close() {
+        dispose().join();
+    }
+}

@@ -5,7 +5,7 @@
 //! response tokens print to stdout incrementally as they arrive.
 //!
 //! ```sh
-//! cargo run -p github-copilot-sdk --example chat
+//! cargo run -p copilot-sdk --example chat
 //! ```
 
 use std::io::{self, BufRead, Write};
@@ -13,11 +13,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::{ApproveAllHandler, UserInputHandler, UserInputResponse};
-use github_copilot_sdk::types::{
-    MessageOptions, RequestId, SessionConfig, SessionEvent, SessionId,
+use copilot_sdk::handler::{ApproveAllHandler, UserInputHandler, UserInputResponse};
+use copilot_sdk::types::{
+    CreateSessionOptions, MessageOptions, RequestId, SessionEvent, SessionId,
 };
-use github_copilot_sdk::{Client, ClientOptions};
+use copilot_sdk::{Client, ClientOptions};
 
 /// User input handler that prompts on stdin.
 struct StdinUserInputHandler;
@@ -80,14 +80,16 @@ fn read_line() -> Option<String> {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), github_copilot_sdk::Error> {
-    let client = Client::start(ClientOptions::default()).await?;
+async fn main() -> Result<(), copilot_sdk::Error> {
+    let client = Client::start(ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)).await?;
 
     let config = {
-        let mut cfg = SessionConfig::default()
-            .with_permission_handler(Arc::new(ApproveAllHandler))
-            .with_user_input_handler(Arc::new(StdinUserInputHandler));
-        cfg.streaming = Some(true);
+        let mut cfg = CreateSessionOptions::default()
+            .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+            .with_interaction(|group| {
+                group.with_on_user_input_request(Arc::new(StdinUserInputHandler))
+            });
+        cfg.events.streaming = Some(true);
         cfg
     };
     let session = client.create_session(config).await?;

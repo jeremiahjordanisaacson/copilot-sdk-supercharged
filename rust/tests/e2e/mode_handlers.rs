@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::{
+use copilot_sdk::handler::{
     AutoModeSwitchHandler, AutoModeSwitchResponse as HandlerAutoModeSwitchResponse,
     ExitPlanModeHandler, ExitPlanModeResult,
 };
-use github_copilot_sdk::rpc::ModeSetRequest;
-use github_copilot_sdk::session_events::{
+use copilot_sdk::rpc::ModeSetRequest;
+use copilot_sdk::session_events::{
     AutoModeSwitchCompletedData, AutoModeSwitchRequestedData,
     AutoModeSwitchResponse as EventAutoModeSwitchResponse, ExitPlanModeAction,
     ExitPlanModeCompletedData, ExitPlanModeRequestedData, SessionEventType, SessionMode,
     SessionModelChangeData,
 };
-use github_copilot_sdk::{ExitPlanModeData, RequestId, SessionConfig, SessionId};
+use copilot_sdk::{CreateSessionOptions, ExitPlanModeData, RequestId, SessionId};
 use tokio::sync::mpsc;
 
 use super::support::{recv_with_timeout, wait_for_event, wait_for_event_allowing_rate_limit};
@@ -78,12 +78,14 @@ async fn should_invoke_exit_plan_mode_handler_when_model_uses_tool() {
                 let (request_tx, mut request_rx) = mpsc::unbounded_channel();
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(MODE_HANDLER_TOKEN)
-                            .with_exit_plan_mode_handler(Arc::new(ModeHandler {
-                                requests: request_tx,
-                            }))
-                            .approve_all_permissions(),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(MODE_HANDLER_TOKEN))
+                            .with_interaction(|group| {
+                                group.with_on_exit_plan_mode_request(Arc::new(ModeHandler {
+                                    requests: request_tx,
+                                }))
+                            })
+                            .with_permissions(|group| group.approve_all_permissions()),
                     )
                     .await
                     .expect("create session");
@@ -197,12 +199,14 @@ async fn should_invoke_auto_mode_switch_handler_when_rate_limited() {
                 let (request_tx, mut request_rx) = mpsc::unbounded_channel();
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(MODE_HANDLER_TOKEN)
-                            .with_auto_mode_switch_handler(Arc::new(AutoModeHandler {
-                                requests: request_tx,
-                            }))
-                            .approve_all_permissions(),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(MODE_HANDLER_TOKEN))
+                            .with_interaction(|group| {
+                                group.with_on_auto_mode_switch_request(Arc::new(AutoModeHandler {
+                                    requests: request_tx,
+                                }))
+                            })
+                            .with_permissions(|group| group.approve_all_permissions()),
                     )
                     .await
                     .expect("create session");

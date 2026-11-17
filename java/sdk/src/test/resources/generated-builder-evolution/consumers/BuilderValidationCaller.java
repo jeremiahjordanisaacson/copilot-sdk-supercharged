@@ -1,7 +1,7 @@
 package fixture;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.copilot.generated.rpc.ValidationSubmitParams;
+import com.microsoft.copilot.generated.rpc.ValidationSubmitParams;
 import java.util.List;
 
 public final class BuilderValidationCaller {

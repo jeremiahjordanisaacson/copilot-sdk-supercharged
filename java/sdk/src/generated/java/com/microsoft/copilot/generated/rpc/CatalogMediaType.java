@@ -1,0 +1,43 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: api.schema.json
+
+package com.microsoft.copilot.generated.rpc;
+
+import javax.annotation.processing.Generated;
+
+/**
+ * Media type a catalog card is interpreted as
+ *
+ * @since 1.0.0
+ */
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+public enum CatalogMediaType {
+    /** The {@code application/mcp-server-card+json} variant. */
+    APPLICATION_MCP_SERVER_CARD_JSON("application/mcp-server-card+json"),
+    /** The {@code application/mcp-server+json} variant. */
+    APPLICATION_MCP_SERVER_JSON("application/mcp-server+json"),
+    /** The {@code application/ai-skill} variant. */
+    APPLICATION_AI_SKILL("application/ai-skill"),
+    /** The {@code application/vnd.github.copilot-plugin} variant. */
+    APPLICATION_VND_GITHUB_COPILOT_PLUGIN("application/vnd.github.copilot-plugin"),
+    /** The {@code application/vnd.anthropic.claude-plugin+json} variant. */
+    APPLICATION_VND_ANTHROPIC_CLAUDE_PLUGIN_JSON("application/vnd.anthropic.claude-plugin+json"),
+    /** The {@code application/agent-plugin+json} variant. */
+    APPLICATION_AGENT_PLUGIN_JSON("application/agent-plugin+json");
+
+    private final String value;
+    CatalogMediaType(String value) { this.value = value; }
+    @com.fasterxml.jackson.annotation.JsonValue
+    public String getValue() { return value; }
+    @com.fasterxml.jackson.annotation.JsonCreator
+    public static CatalogMediaType fromValue(String value) {
+        for (CatalogMediaType v : values()) {
+            if (v.value.equals(value)) return v;
+        }
+        throw new IllegalArgumentException("Unknown CatalogMediaType value: " + value);
+    }
+}

@@ -252,6 +252,7 @@ async fn client_stop_releases_owner_even_when_rpc_is_closed() {
     let directory = tempfile::tempdir().unwrap();
     let transport = fixture.host(Some(Behavior::Accept)).start().await.unwrap();
     let client = crate::Client::from_streams(
+        crate::ClientMode::CodingAgent,
         tokio::io::empty(),
         tokio::io::sink(),
         directory.path().to_owned(),
@@ -421,9 +422,11 @@ fn missing_auth_owner_export_is_required_only_for_owner_startup() {
 
 #[tokio::test]
 async fn auth_owner_rejects_a_conflicting_client_token() {
-    let mut options = crate::ClientOptions::new().with_transport(crate::Transport::InProcess);
-    options.in_process_auth_owner = Some(Arc::new(|_, _| Ok(())));
-    options.github_token = Some("ghs_independent_client_token".to_owned());
+    let mut inprocess = crate::InProcessRuntimeOptions::new();
+    inprocess.auth_owner = Some(Arc::new(|_, _| Ok(())));
+    let options = crate::ClientOptions::new(crate::ClientMode::CodingAgent)
+        .with_runtime(crate::RuntimeConnection::for_in_process(inprocess))
+        .with_github(|group| group.with_token("ghs_independent_client_token"));
     let error = crate::Client::start(options).await.unwrap_err();
     assert!(
         error
@@ -431,56 +434,4 @@ async fn auth_owner_rejects_a_conflicting_client_token() {
             .contains("a live auth owner cannot be combined with github_token"),
         "{error}"
     );
-}
-
-#[tokio::test]
-async fn auth_owner_requires_unattached_in_process_transport() {
-    use crate::{Client, ClientOptions, Transport};
-
-    for transport in [
-        Transport::Default,
-        Transport::Stdio,
-        Transport::Tcp {
-            port: 0,
-            connection_token: None,
-        },
-        Transport::External {
-            host: "127.0.0.1".into(),
-            port: 0,
-            connection_token: None,
-        },
-    ] {
-        let mut options = ClientOptions::new()
-            .with_transport(transport)
-            .with_env([("COPILOT_SDK_DEFAULT_CONNECTION", "stdio")]);
-        options.in_process_auth_owner = Some(Arc::new(|_, _| Ok(())));
-        let error = Client::start(options).await.unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("a live auth owner requires SDK-owned in-process startup"),
-            "{error}"
-        );
-    }
-
-    for borrowed_session in [false, true] {
-        let mut options = ClientOptions::new().with_transport(Transport::InProcess);
-        options.in_process_auth_owner = Some(Arc::new(|_, _| Ok(())));
-        if borrowed_session {
-            options.in_process_session_binding = Some(crate::InProcessSessionBinding {
-                parent_connection_id: 1,
-                native_session_id: "borrowed".into(),
-                registration_token: "registration".into(),
-            });
-        } else {
-            options.in_process_server_id = Some(1);
-        }
-        let error = Client::start(options).await.unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("a live auth owner requires SDK-owned in-process startup"),
-            "{error}"
-        );
-    }
 }

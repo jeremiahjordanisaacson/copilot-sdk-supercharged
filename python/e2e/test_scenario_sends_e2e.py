@@ -32,7 +32,7 @@ class TestScenarioSends:
         try:
             session = await client.create_session(
                 session_id="scenario-session",
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all},
             )
             try:
                 message_id = await session.send(
@@ -128,7 +128,7 @@ class TestScenarioSends:
         try:
             session = await client.create_session(
                 session_id="scenario-session",
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all},
             )
             try:
                 send_task = asyncio.create_task(
@@ -153,8 +153,7 @@ class TestScenarioSends:
     ):
         client, capture_path = create_scenario_client(ctx, "send-fail")
         session = await client.create_session(
-            session_id="scenario-session",
-            on_permission_request=PermissionHandler.approve_all,
+            session_id="scenario-session", permissions={"on_request": PermissionHandler.approve_all}
         )
         try:
             with pytest.raises(Exception) as exc_info:

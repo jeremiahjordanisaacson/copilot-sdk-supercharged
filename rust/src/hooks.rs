@@ -718,8 +718,8 @@ impl HookOutput {
 ///    shared dispatch logic.
 ///
 /// Hooks only fire when hooks are enabled on the session (via
-/// [`SessionConfig::hooks = Some(true)`](crate::types::SessionConfig::hooks),
-/// which [`SessionConfig::with_hooks`](crate::types::SessionConfig::with_hooks)
+/// [`SessionHookOptions::handlers`](crate::types::SessionHookOptions::handlers),
+/// which [`SessionHookOptions::with_handlers`](crate::types::SessionHookOptions::with_handlers)
 /// sets automatically).
 #[async_trait]
 pub trait SessionHooks: Send + Sync + 'static {

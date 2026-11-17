@@ -17,6 +17,62 @@ import (
 	"testing"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestDetectCLIVersionFromV2Consumer(t *testing.T) {
+	bundlerDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sdkDir := filepath.ToSlash(filepath.Clean(filepath.Join(bundlerDir, "..", "..")))
+	for _, tc := range []struct {
+		version, ref, runtime string
+	}{
+		{"v2.0.0", "v2.0.0", "1.2.3"},
+		{"v2.1.0-preview.4", "v2.1.0-preview.4", "1.2.3-4"},
+		{"v2.0.1-0.20261116120000-abcdef123456", "abcdef123456", "1.2.3-4.unstable.r123.gabcdef0"},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			consumer := t.TempDir()
+			manifest := fmt.Sprintf("module example.com/consumer\n\ngo 1.26.0\n\nrequire github.com/microsoft/copilot-sdk/go/v2 %s\n\nreplace github.com/microsoft/copilot-sdk/go/v2 => %q\n", tc.version, sdkDir)
+			if err := os.WriteFile(filepath.Join(consumer, "go.mod"), []byte(manifest), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Chdir(consumer)
+			t.Setenv("GOWORK", "off")
+			t.Setenv("GOFLAGS", "")
+			t.Setenv("GOPROXY", "off")
+			t.Setenv("GOSUMDB", "off")
+			original := http.DefaultClient
+			t.Cleanup(func() { http.DefaultClient = original })
+			requests := 0
+			http.DefaultClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				requests++
+				want := "https://raw.githubusercontent.com/microsoft/copilot-sdk/" + tc.ref + "/nodejs/package.json"
+				if got := request.URL.String(); got != want {
+					t.Errorf("metadata URL = %q, want %q", got, want)
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(fmt.Sprintf(`{"copilotCliVersion":%q}`, tc.runtime))),
+					Header:     make(http.Header),
+				}, nil
+			})}
+			got, err := detectCLIVersion()
+			if err != nil || got != tc.runtime {
+				t.Fatalf("detected runtime = %q, %v; want %q", got, err, tc.runtime)
+			}
+			if requests != 1 {
+				t.Fatalf("metadata requests = %d, want 1", requests)
+			}
+		})
+	}
+}
+
 func TestCreateRuntimeAssetsArchiveRetainsUnknownAssetsAndFiltersCLIContent(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "package.tgz")
@@ -112,20 +168,20 @@ func TestDownloadCLIBinaryUsesVerifiedReleasePackage(t *testing.T) {
 
 func TestReleaseDownloadURL(t *testing.T) {
 	for _, tc := range []struct{ version, repository, tag string }{
-		{"1.2.3", "copilot-cli", "v1.2.3"},
-		{"1.2.3-4", "copilot-cli", "v1.2.3-4"},
-		{"1.2.3-unstable.r123.gabcdef0", "copilot-sdk", "runtime-1.2.3-unstable.r123.gabcdef0"},
-		{"1.2.3-4.unstable.r123.gabcdef0", "copilot-sdk", "runtime-1.2.3-4.unstable.r123.gabcdef0"},
-		{"0.0.0-0.unstable.r1.g0000000", "copilot-sdk", "runtime-0.0.0-0.unstable.r1.g0000000"},
-		{"01.2.3-unstable.r123.gabcdef0", "copilot-cli", "v01.2.3-unstable.r123.gabcdef0"},
-		{"1.02.3-unstable.r123.gabcdef0", "copilot-cli", "v1.02.3-unstable.r123.gabcdef0"},
-		{"1.2.03-unstable.r123.gabcdef0", "copilot-cli", "v1.2.03-unstable.r123.gabcdef0"},
-		{"1.2.3-04.unstable.r123.gabcdef0", "copilot-cli", "v1.2.3-04.unstable.r123.gabcdef0"},
+		{"1.2.3", "github/copilot-cli", "v1.2.3"},
+		{"1.2.3-4", "github/copilot-cli", "v1.2.3-4"},
+		{"1.2.3-unstable.r123.gabcdef0", "microsoft/copilot-sdk", "runtime-1.2.3-unstable.r123.gabcdef0"},
+		{"1.2.3-4.unstable.r123.gabcdef0", "microsoft/copilot-sdk", "runtime-1.2.3-4.unstable.r123.gabcdef0"},
+		{"0.0.0-0.unstable.r1.g0000000", "microsoft/copilot-sdk", "runtime-0.0.0-0.unstable.r1.g0000000"},
+		{"01.2.3-unstable.r123.gabcdef0", "github/copilot-cli", "v01.2.3-unstable.r123.gabcdef0"},
+		{"1.02.3-unstable.r123.gabcdef0", "github/copilot-cli", "v1.02.3-unstable.r123.gabcdef0"},
+		{"1.2.03-unstable.r123.gabcdef0", "github/copilot-cli", "v1.2.03-unstable.r123.gabcdef0"},
+		{"1.2.3-04.unstable.r123.gabcdef0", "github/copilot-cli", "v1.2.3-04.unstable.r123.gabcdef0"},
 	} {
 		t.Run(tc.version, func(t *testing.T) {
 			t.Setenv(cliDownloadBaseURLEnvironment, "")
 			for _, asset := range []string{"SHA256SUMS.txt", releaseAssetName(tc.version, "linux-x64")} {
-				want := "https://github.com/github/" + tc.repository + "/releases/download/" + tc.tag + "/" + asset
+				want := "https://github.com/" + tc.repository + "/releases/download/" + tc.tag + "/" + asset
 				if got := releaseDownloadURL(tc.version, asset); got != want {
 					t.Fatalf("releaseDownloadURL() = %q, want %q", got, want)
 				}
@@ -391,5 +447,10 @@ func TestGenerateGoFileEmbedsRuntimeWrapperPair(t *testing.T) {
 	}
 	if _, err := parser.ParseFile(token.NewFileSet(), "zcopilot_inprocess_linux_amd64.go", inProcessSource, parser.AllErrors); err != nil {
 		t.Fatalf("in-process generated source is invalid: %v", err)
+	}
+	for _, source := range [][]byte{defaultSource, inProcessSource} {
+		if !bytes.Contains(source, []byte(`"github.com/microsoft/copilot-sdk/go/v2/embeddedcli"`)) {
+			t.Fatal("generated source does not import the V2 embedded runtime installer")
+		}
 	}
 }

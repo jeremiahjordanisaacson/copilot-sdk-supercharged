@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 const expectedMCPOAuthToken = "sdk-host-token"
@@ -32,11 +32,9 @@ func TestMCPOAuthE2E(t *testing.T) {
 	t.Run("uses CIMD URL instead of dynamic registration", func(t *testing.T) {
 		baseURL := startOAuthMCPServer(t, true)
 		serverName := "oauth-cimd-mcp"
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			AuthClientIDMetadataURL: "https://github.com/copilot/cli/client-metadata.json",
-			MCPServers: map[string]copilot.MCPServerConfig{
-				serverName: copilot.MCPHTTPServerConfig{URL: baseURL + "/mcp", Tools: []string{"*"}},
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{MCP: copilot.SessionMCPOptions{AuthClientIDMetadataURL: "https://github.com/copilot/cli/client-metadata.json", Servers: map[string]copilot.MCPServerConfig{
+			serverName: copilot.MCPHTTPServerConfig{URL: baseURL + "/mcp", Tools: []string{"*"}},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -72,15 +70,7 @@ func TestMCPOAuthE2E(t *testing.T) {
 		var observedRequest copilot.MCPAuthRequest
 		var observedRuntimeRefreshSupported bool
 
-		session, err := client.CreateSessionWithMCPAuthRuntimeRefresh(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			MCPServers: map[string]copilot.MCPServerConfig{
-				serverName: copilot.MCPHTTPServerConfig{
-					URL:   baseURL + "/mcp",
-					Tools: []string{"*"},
-				},
-			},
-		}, func(request copilot.MCPAuthRequest, _ copilot.MCPAuthInvocation, supported bool) (*copilot.MCPAuthResult, error) {
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{MCP: copilot.SessionMCPOptions{OnAuthRuntimeRefresh: func(request copilot.MCPAuthRequest, _ copilot.MCPAuthInvocation, supported bool) (*copilot.MCPAuthResult, error) {
 			observedRequest = request
 			observedRuntimeRefreshSupported = supported
 			return copilot.MCPAuthResultToken(&copilot.MCPAuthToken{
@@ -88,6 +78,13 @@ func TestMCPOAuthE2E(t *testing.T) {
 				TokenType:   &tokenType,
 				ExpiresIn:   &expiresIn,
 			}), nil
+		}, Servers: map[string]copilot.MCPServerConfig{
+			serverName: copilot.MCPHTTPServerConfig{
+				URL:   baseURL + "/mcp",
+				Tools: []string{"*"},
+			},
+		}},
+			Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -153,52 +150,47 @@ func TestMCPOAuthE2E(t *testing.T) {
 		var observedReasons []copilot.MCPOauthRequestReason
 		refreshCount := 0
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			EnableMCPApps:       true,
-			FeatureFlags:        map[string]bool{"MCP_APPS": true},
-			OnMCPAuthRequest: func(request copilot.MCPAuthRequest, _ copilot.MCPAuthInvocation) (*copilot.MCPAuthResult, error) {
-				mu.Lock()
-				observedReasons = append(observedReasons, request.Reason)
-				refreshOrdinal := 0
-				if request.Reason == copilot.MCPOauthRequestReasonRefresh {
-					refreshCount++
-					refreshOrdinal = refreshCount
-				}
-				mu.Unlock()
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, MCP: copilot.SessionMCPOptions{EnableApps: true, OnAuthRequest: func(request copilot.MCPAuthRequest, _ copilot.MCPAuthInvocation) (*copilot.MCPAuthResult, error) {
+			mu.Lock()
+			observedReasons = append(observedReasons, request.Reason)
+			refreshOrdinal := 0
+			if request.Reason == copilot.MCPOauthRequestReasonRefresh {
+				refreshCount++
+				refreshOrdinal = refreshCount
+			}
+			mu.Unlock()
 
-				token := expectedMCPOAuthToken
-				switch request.Reason {
-				case copilot.MCPOauthRequestReasonRefresh:
-					if request.WwwAuthenticateParams == nil ||
-						request.WwwAuthenticateParams.ResourceMetadataURL != nil ||
-						stringValue(request.WwwAuthenticateParams.Error) != "invalid_token" {
-						t.Fatalf("Unexpected refresh WWW-Authenticate params: %#v", request.WwwAuthenticateParams)
-					}
-					if refreshOrdinal > 1 {
-						return copilot.MCPAuthResultCancelled(), nil
-					}
-					token = refreshMCPOAuthToken
-				case copilot.MCPOauthRequestReasonUpscope:
-					token = upscopeMCPOAuthToken
-					if request.WwwAuthenticateParams == nil ||
-						request.WwwAuthenticateParams.ResourceMetadataURL == nil ||
-						*request.WwwAuthenticateParams.ResourceMetadataURL != baseURL+"/.well-known/oauth-protected-resource" ||
-						stringValue(request.WwwAuthenticateParams.Scope) != "mcp.read mcp.write" ||
-						stringValue(request.WwwAuthenticateParams.Error) != "insufficient_scope" {
-						t.Fatalf("Unexpected upscope WWW-Authenticate params: %#v", request.WwwAuthenticateParams)
-					}
-				case copilot.MCPOauthRequestReasonReauth:
-					token = reauthMCPOAuthToken
+			token := expectedMCPOAuthToken
+			switch request.Reason {
+			case copilot.MCPOauthRequestReasonRefresh:
+				if request.WwwAuthenticateParams == nil ||
+					request.WwwAuthenticateParams.ResourceMetadataURL != nil ||
+					stringValue(request.WwwAuthenticateParams.Error) != "invalid_token" {
+					t.Fatalf("Unexpected refresh WWW-Authenticate params: %#v", request.WwwAuthenticateParams)
 				}
-				return copilot.MCPAuthResultToken(&copilot.MCPAuthToken{AccessToken: token}), nil
+				if refreshOrdinal > 1 {
+					return copilot.MCPAuthResultCancelled(), nil
+				}
+				token = refreshMCPOAuthToken
+			case copilot.MCPOauthRequestReasonUpscope:
+				token = upscopeMCPOAuthToken
+				if request.WwwAuthenticateParams == nil ||
+					request.WwwAuthenticateParams.ResourceMetadataURL == nil ||
+					*request.WwwAuthenticateParams.ResourceMetadataURL != baseURL+"/.well-known/oauth-protected-resource" ||
+					stringValue(request.WwwAuthenticateParams.Scope) != "mcp.read mcp.write" ||
+					stringValue(request.WwwAuthenticateParams.Error) != "insufficient_scope" {
+					t.Fatalf("Unexpected upscope WWW-Authenticate params: %#v", request.WwwAuthenticateParams)
+				}
+			case copilot.MCPOauthRequestReasonReauth:
+				token = reauthMCPOAuthToken
+			}
+			return copilot.MCPAuthResultToken(&copilot.MCPAuthToken{AccessToken: token}), nil
+		}, Servers: map[string]copilot.MCPServerConfig{
+			serverName: copilot.MCPHTTPServerConfig{
+				URL:   baseURL + "/mcp",
+				Tools: []string{"*"},
 			},
-			MCPServers: map[string]copilot.MCPServerConfig{
-				serverName: copilot.MCPHTTPServerConfig{
-					URL:   baseURL + "/mcp",
-					Tools: []string{"*"},
-				},
-			},
+		}}, Experiments: copilot.SessionExperimentOptions{Flags: map[string]bool{"MCP_APPS": true}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -246,21 +238,18 @@ func TestMCPOAuthE2E(t *testing.T) {
 		serverName := "oauth-cancelled-mcp"
 		requestSeen := make(chan copilot.MCPAuthRequest, 1)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnMCPAuthRequest: func(request copilot.MCPAuthRequest, _ copilot.MCPAuthInvocation) (*copilot.MCPAuthResult, error) {
-				select {
-				case requestSeen <- request:
-				default:
-				}
-				return copilot.MCPAuthResultCancelled(), nil
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, MCP: copilot.SessionMCPOptions{OnAuthRequest: func(request copilot.MCPAuthRequest, _ copilot.MCPAuthInvocation) (*copilot.MCPAuthResult, error) {
+			select {
+			case requestSeen <- request:
+			default:
+			}
+			return copilot.MCPAuthResultCancelled(), nil
+		}, Servers: map[string]copilot.MCPServerConfig{
+			serverName: copilot.MCPHTTPServerConfig{
+				URL:   baseURL + "/mcp",
+				Tools: []string{"*"},
 			},
-			MCPServers: map[string]copilot.MCPServerConfig{
-				serverName: copilot.MCPHTTPServerConfig{
-					URL:   baseURL + "/mcp",
-					Tools: []string{"*"},
-				},
-			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)

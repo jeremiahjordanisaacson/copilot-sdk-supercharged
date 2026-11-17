@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use github_copilot_sdk::ResumeSessionConfig;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::session_events::SessionEventType;
+use copilot_sdk::ResumeSessionOptions;
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::session_events::SessionEventType;
 
 use super::support::{
     DEFAULT_TEST_TOKEN, assistant_message_content, collect_until_idle, event_types,
@@ -112,9 +112,11 @@ async fn should_persist_a_session_named_at_create_without_a_turn() {
                 let cold_client = ctx.start_client().await;
                 let resumed = cold_client
                     .resume_session(
-                        ResumeSessionConfig::new(named_id.clone())
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(DEFAULT_TEST_TOKEN),
+                        ResumeSessionOptions::new(named_id.clone())
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN)),
                     )
                     .await
                     .expect("resume named session");

@@ -4,11 +4,11 @@
 
 using System.Diagnostics;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 internal static class TelemetryHelpers
 {
-    private static readonly ActivitySource s_activitySource = new("github.copilot");
+    private static readonly ActivitySource s_activitySource = new("microsoft.copilot");
 
     internal static (string? Traceparent, string? Tracestate) GetTraceContext()
     {
@@ -23,7 +23,7 @@ internal static class TelemetryHelpers
     /// Dispose the returned <see cref="Activity"/> to restore the previous <see cref="Activity.Current"/>.
     /// </summary>
     /// <remarks>
-    /// Listeners for <c>github.copilot</c> can sample and export this activity so child
+    /// Listeners for <c>microsoft.copilot</c> can sample and export this activity so child
     /// spans have an observable parent. Without a listener, or when sampling returns
     /// <see cref="ActivitySamplingResult.None"/>, a propagation-only activity preserves
     /// the remote context without recording data.

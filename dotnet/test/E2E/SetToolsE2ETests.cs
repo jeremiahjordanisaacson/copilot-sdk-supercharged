@@ -2,15 +2,15 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#pragma warning disable GHCP001 // Live tool replacement is intentionally experimental.
+#pragma warning disable MCPSDK001 // Live tool replacement is intentionally experimental.
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.ComponentModel;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class SetToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "set_tools", output)
 {
@@ -24,11 +24,8 @@ public class SetToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
         var originalLookups = new List<int>();
         var replacementLookups = new List<int>();
         var vegetableLookups = new List<int>();
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [LookupFruit("apple", originalLookups), RetiredLookup()],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [LookupFruit("apple", originalLookups), RetiredLookup()] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var first = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions { Prompt = FruitPrompt });
         Assert.Contains("apple", first?.Data.Content ?? string.Empty);
@@ -66,11 +63,8 @@ public class SetToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
     public async Task Replaces_Tools_On_A_Resumed_Session()
     {
         var createdLookups = new List<int>();
-        var created = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [LookupFruit("apple", createdLookups)],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var created = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [LookupFruit("apple", createdLookups)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         var sessionId = created.SessionId;
         var first = await TestHelper.SendAndGetFinalAssistantMessageAsync(created, new MessageOptions { Prompt = FruitPrompt });
         Assert.Contains("apple", first?.Data.Content ?? string.Empty);
@@ -79,11 +73,8 @@ public class SetToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
 
         var fruitLookups = new List<int>();
         var vegetableLookups = new List<int>();
-        var resumed = await Ctx.ResumeSessionAsync(Client, sessionId, new ResumeSessionConfig
-        {
-            Tools = [LookupFruit("apple", fruitLookups)],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var resumed = await Ctx.ResumeSessionAsync(Client, sessionId, new ResumeSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [LookupFruit("apple", fruitLookups)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         await resumed.SetToolsAsync([LookupVegetable(vegetableLookups)]);
 
         var answer = await TestHelper.SendAndGetFinalAssistantMessageAsync(resumed, new MessageOptions { Prompt = VegetablePrompt });
@@ -107,11 +98,8 @@ public class SetToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
     {
         var originalLookups = new List<int>();
         var replacementLookups = new List<int>();
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [LookupFruit("apple", originalLookups)],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [LookupFruit("apple", originalLookups)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         await Assert.ThrowsAnyAsync<Exception>(() => session.SetToolsAsync([
             LookupFruit("dragonfruit", replacementLookups),
@@ -180,4 +168,4 @@ public class SetToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
     }
 }
 
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001

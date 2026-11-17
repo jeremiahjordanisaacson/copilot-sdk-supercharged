@@ -1347,6 +1347,11 @@ pub struct NamedProviderConfig {
     /// Static API key used to authenticate provider requests.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    /// Command run before each request to acquire a fresh API key. Failure
+    /// fails the request without static-key or anonymous fallback. Bearer
+    /// authentication takes precedence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_command: Option<String>,
     /// Azure authentication configuration for the provider.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub azure: Option<ProviderConfigAzure>,
@@ -1517,6 +1522,12 @@ pub struct CapiSessionOptions {
     /// Routing preference for sessions whose model is `auto`. On create or cold resume, this establishes the preference sent as `tier` on CAPI `/auto` requests; when omitted on cold resume, the runtime restores the last committed preference. On resident resume, a different value requests a safe switch after resume succeeds and cannot change an in-flight turn. Successful switches are persisted for later cold resume. When no preference is supplied or restored, CAPI default routing is used. `fast` is an integrator-only latency preset, not a first-party GitHub Copilot product preference. For Copilot Fusion, prefer `fusionTier`: the `balance`, `hydrafusion` and `hydrafusion-max` identifiers it replaces remain accepted but are deprecated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_tier: Option<AutoTier>,
+    /// Enables the session's built-in Copilot model catalog, authentication and
+    /// inference, including subagent and ancillary model work. Defaults to true
+    /// on create; omission on resume preserves the policy. Does not disable
+    /// GitHub identity, tools, MCP, managed settings or separate telemetry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     /// Whether to use WebSocket transport for the CAPI Responses API. Enabled by default when the model advertises `ws:/responses` support; set to `false` to force the HTTP Responses transport in environments where WebSockets are blocked (e.g. behind a proxy). Setting this to `false` is equivalent to the `COPILOT_CLI_DISABLE_WEBSOCKET_RESPONSES` environment variable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_web_socket_responses: Option<bool>,
@@ -3764,11 +3775,6 @@ pub struct McpFailedServer {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpFilteredServer {
-    /// Deprecated. This field is no longer populated.
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enterprise_name: Option<String>,
     /// Filtered server name
     pub name: String,
     /// Human-readable filter reason
@@ -4345,11 +4351,6 @@ pub struct ModelBillingPromo {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelBillingTokenPricesLongContext {
-    /// Use cacheReadPrice instead. AI Credits cost per billing batch of cached tokens
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_price: Option<f64>,
     /// AI Credits cost per billing batch of cached (read) tokens
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_read_price: Option<f64>,
@@ -4359,11 +4360,6 @@ pub struct ModelBillingTokenPricesLongContext {
     /// AI Credits cost per billing batch of cache-write (cache creation) tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_write_price: Option<f64>,
-    /// Use maxPromptTokens instead. Prompt token budget for the long context tier. The total context window is this value plus the model's max_output_tokens.
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_max: Option<i64>,
     /// AI Credits cost per billing batch of input tokens
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_price: Option<f64>,
@@ -4389,12 +4385,7 @@ pub struct ModelBillingTokenPrices {
     /// Number of tokens per standard billing batch
     #[serde(skip_serializing_if = "Option::is_none")]
     pub batch_size: Option<i64>,
-    /// Use cacheReadPrice when available. Cost per billing batch of cached tokens in the unit reported by models.listTokenPriceUnits.
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_price: Option<f64>,
-    /// AI Credits cost per billing batch of cached (read) tokens
+    /// Cost per billing batch of cached (read) tokens. The unit is reported by models.listTokenPriceUnits.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_read_price: Option<f64>,
     /// AI Credits cost per billing batch of 1-hour cache-write (cache creation) tokens.
@@ -4403,11 +4394,6 @@ pub struct ModelBillingTokenPrices {
     /// AI Credits cost per billing batch of cache-write (cache creation) tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_write_price: Option<f64>,
-    /// Use maxPromptTokens instead. Prompt token budget for the default tier. The total context window is this value plus the model's max_output_tokens.
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_max: Option<i64>,
     /// Cost per billing batch of input tokens. The unit is reported by models.listTokenPriceUnits.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_price: Option<f64>,
@@ -5081,38 +5067,6 @@ pub struct SandboxCredentialsConfig {
     pub env_vars: HashMap<String, SandboxMaskedEnvVar>,
 }
 
-/// macOS seatbelt experimental options.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SandboxConfigUserPolicyExperimentalSeatbelt {
-    /// Whether the macOS seatbelt profile may access the keychain.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub keychain_access: Option<bool>,
-}
-
-/// Platform-specific experimental policy fields.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SandboxConfigUserPolicyExperimental {
-    /// macOS seatbelt experimental options.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub seatbelt: Option<SandboxConfigUserPolicyExperimentalSeatbelt>,
-}
-
 /// Filesystem rules to merge into the base policy.
 ///
 /// <div class="warning">
@@ -5214,9 +5168,6 @@ pub struct SandboxConfigUserPolicySeatbelt {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxConfigUserPolicy {
-    /// Deprecated legacy location for `seatbelt`; read only when the top-level `seatbelt` is absent.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub experimental: Option<SandboxConfigUserPolicyExperimental>,
     /// Filesystem rules to merge into the base policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filesystem: Option<SandboxConfigUserPolicyFilesystem>,
@@ -5730,16 +5681,6 @@ pub struct WorkflowAgentSummary {
     /// Requested and resolved reasoning-effort observations, when available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<WorkflowAgentReasoningEffortObservation>,
-    /// Deprecated compatibility alias for model.requested.
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub requested_model: Option<String>,
-    /// Deprecated compatibility alias for model.resolved.
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolved_model: Option<String>,
     /// Owning workflow run identifier.
     pub run_id: String,
     /// Epoch milliseconds when the agent started.

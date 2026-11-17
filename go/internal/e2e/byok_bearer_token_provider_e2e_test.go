@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 // Fake BYOK provider base URLs. These hosts are never actually dialed: the
@@ -127,12 +127,7 @@ func TestBYOKBearerTokenProvider(t *testing.T) {
 	// runtime has already sent the token-bearing request, which is all the test
 	// asserts on, so the resulting error is expected and swallowed.
 	runTurn := func(providers []copilot.NamedProviderConfig, models []copilot.ProviderModelConfig, selectionID, prompt string) {
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               selectionID,
-			Providers:           providers,
-			Models:              models,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: selectionID, Inference: copilot.SessionInferenceOptions{Providers: providers, Models: models}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}

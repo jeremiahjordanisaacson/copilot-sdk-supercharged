@@ -1,6 +1,6 @@
 # Authentication
 
-The GitHub Copilot SDK supports multiple authentication methods to fit different use cases. Choose the method that best matches your deployment scenario.
+The Microsoft Copilot SDK supports multiple authentication methods to fit different use cases. Choose the method that best matches your deployment scenario.
 
 ## Authentication methods
 
@@ -27,10 +27,10 @@ This is the default authentication method when running the Copilot CLI interacti
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 // Default: uses logged-in user credentials
-await using CopilotClient client = new();
+await using CopilotClient client = new(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
 ```
 
 </details>
@@ -42,21 +42,23 @@ await using CopilotClient client = new();
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
 
 func main() {
 	// Default: uses logged-in user credentials
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 	_ = client
 }
 ```
 <!-- /docs-validate: hidden -->
 
 ```go
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
+
 
 // Default: uses logged-in user credentials
-client := copilot.NewClient(nil)
+client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+
 ```
 
 </details>
@@ -65,10 +67,12 @@ client := copilot.NewClient(nil)
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.CopilotClient;
 
 // Default: uses logged-in user credentials
-var client = new CopilotClient();
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT));
 client.start().get();
 ```
 
@@ -81,7 +85,7 @@ client.start().get();
 from copilot import CopilotClient
 
 # Default: uses logged-in user credentials
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
 await client.start()
 ```
 
@@ -91,10 +95,10 @@ await client.start()
 <summary><strong>Rust</strong></summary>
 
 ```rust
-use github_copilot_sdk::{Client, ClientOptions};
+use copilot_sdk::{Client, ClientOptions};
 
 // Default: uses logged-in user credentials
-let client = Client::start(ClientOptions::default()).await?;
+let client = Client::start(ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)).await?;
 ```
 
 </details>
@@ -103,10 +107,10 @@ let client = Client::start(ClientOptions::default()).await?;
 <summary><strong>TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 // Default: uses logged-in user credentials
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 ```
 
 </details>
@@ -132,24 +136,32 @@ Use an OAuth GitHub App to authenticate users through your application and pass 
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 var userAccessToken = "token";
 await using CopilotClient client = new(new CopilotClientOptions
 {
-    GitHubToken = userAccessToken,
-    UseLoggedInUser = false,
+    Mode = CopilotClientMode.CodingAgent,
+    GitHub = new ClientGitHubOptions
+    {
+        Token = userAccessToken,
+        UseLoggedInUser = false
+    }
 });
 ```
 <!-- /docs-validate: hidden -->
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 await using var client = new CopilotClient(new CopilotClientOptions
 {
-    GitHubToken = userAccessToken,     // Token from OAuth flow
-    UseLoggedInUser = false,           // Don't use stored CLI credentials
+    Mode = CopilotClientMode.CodingAgent,
+    GitHub = new ClientGitHubOptions
+    {
+        Token = userAccessToken,
+        UseLoggedInUser = false
+    }
 });
 ```
 
@@ -162,13 +174,16 @@ await using var client = new CopilotClient(new CopilotClientOptions
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
 
 func main() {
 	userAccessToken := "token"
 	client := copilot.NewClient(&copilot.ClientOptions{
-		GitHubToken:     userAccessToken,
-		UseLoggedInUser: copilot.Bool(false),
+		Mode: copilot.ModeCodingAgent,
+		GitHub: copilot.ClientGitHubOptions{
+			Token:           userAccessToken,
+			UseLoggedInUser: copilot.Bool(false),
+		},
 	})
 	_ = client
 }
@@ -176,12 +191,19 @@ func main() {
 <!-- /docs-validate: hidden -->
 
 ```go
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
+
 
 client := copilot.NewClient(&copilot.ClientOptions{
-    GitHubToken:       userAccessToken,      // Token from OAuth flow
-    UseLoggedInUser:   copilot.Bool(false),  // Don't use stored CLI credentials
+	Mode: copilot.ModeCodingAgent,
+	GitHub: copilot.ClientGitHubOptions{
+		Token: userAccessToken,
+		UseLoggedInUser:// Token from OAuth flow
+		copilot.Bool(false),
+	},
+	// Don't use stored CLI credentials
 })
+
 ```
 
 </details>
@@ -191,14 +213,17 @@ client := copilot.NewClient(&copilot.ClientOptions{
 
 <!-- docs-validate: skip -->
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 
-var client = new CopilotClient(new CopilotClientOptions()
-    .setGitHubToken(userAccessToken)  // Token from OAuth flow
-    .setUseLoggedInUser(false)        // Don't use stored CLI credentials
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+        .setGitHub(new ClientGitHubOptions()
+                .setToken(userAccessToken)
+                .setUseLoggedInUser(false)) // Don't use stored CLI credentials
 );
-client.start().get();
+client
+        .start()
+        .get();
 ```
 
 </details>
@@ -211,10 +236,7 @@ import os
 from copilot import CopilotClient
 
 user_access_token = os.environ["GITHUB_TOKEN"]  # Token from OAuth flow
-client = CopilotClient(
-    github_token=user_access_token,
-    use_logged_in_user=False,  # Don't use stored CLI credentials
-)
+client = CopilotClient(mode="coding-agent", github={"token": user_access_token, "use_logged_in_user": False})
 await client.start()
 ```
 
@@ -227,24 +249,26 @@ await client.start()
 ```rust
 let user_access_token = String::new();
 
-use github_copilot_sdk::{Client, ClientOptions};
+use copilot_sdk::{Client, ClientOptions};
 
 let client = Client::start(
-    ClientOptions::default()
-        .with_github_token(user_access_token)
-        .with_use_logged_in_user(false),
-).await?;
+    ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+        .with_github(|__sdk_group| __sdk_group.with_token(user_access_token))
+        .with_github(|__sdk_group| __sdk_group.with_use_logged_in_user(false)),
+)
+.await?;
 ```
 <!-- /docs-validate: hidden -->
 
 ```rust
-use github_copilot_sdk::{Client, ClientOptions};
+use copilot_sdk::{Client, ClientOptions};
 
 let client = Client::start(
-    ClientOptions::default()
-        .with_github_token(user_access_token)
-        .with_use_logged_in_user(false),
-).await?;
+    ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+        .with_github(|__sdk_group| __sdk_group.with_token(user_access_token))
+        .with_github(|__sdk_group| __sdk_group.with_use_logged_in_user(false)),
+)
+.await?;
 ```
 
 </details>
@@ -253,11 +277,15 @@ let client = Client::start(
 <summary><strong>TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-    gitHubToken: userAccessToken,  // Token from OAuth flow
-    useLoggedInUser: false,        // Don't use stored CLI credentials
+    mode: "coding-agent",
+    github: {
+        token: userAccessToken,
+        // Token from OAuth flow
+        useLoggedInUser: false,
+    },
 });
 ```
 
@@ -290,13 +318,15 @@ Return a tagged token result or an explicit cancellation. Every token result mus
 <!-- docs-validate: skip -->
 ```typescript
 const session = await client.createSession({
-    gitHubTokenProvider: async ({ host, sessionId, reason }) => {
-        const token = await acquireGitHubToken({ host, sessionId, reason });
-        return {
-            kind: "token",
-            accessToken: token.value,
-            expiresIn: token.secondsRemaining,
-        };
+    github: {
+        tokenProvider: async ({ host, sessionId, reason }) => {
+            const token = await acquireGitHubToken({ host, sessionId, reason });
+            return {
+                kind: "token",
+                accessToken: token.value,
+                expiresIn: token.secondsRemaining,
+            };
+        },
     },
 });
 ```
@@ -320,7 +350,7 @@ async def provide_github_token(args):
     }
 
 
-session = await client.create_session(github_token_provider=provide_github_token)
+session = await client.create_session(github={"token_provider": provide_github_token})
 ```
 
 </details>
@@ -329,18 +359,21 @@ session = await client.create_session(github_token_provider=provide_github_token
 
 <!-- docs-validate: skip -->
 ```go
-session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-	GitHubTokenProvider: func(args copilot.GitHubTokenProviderArgs) (*copilot.GitHubTokenProviderResult, error) {
-		token, secondsRemaining, err := acquireGitHubToken(args.Host, args.SessionID, args.Reason)
-		if err != nil {
-			return nil, err
-		}
-		return copilot.GitHubTokenResult(&copilot.GitHubToken{
-			AccessToken: token,
-			ExpiresIn:   secondsRemaining,
-		}), nil
+session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	GitHub: copilot.SessionGitHubOptions{
+		TokenProvider: func(args copilot.GitHubTokenProviderArgs) (*copilot.GitHubTokenProviderResult, error) {
+			token, secondsRemaining, err := acquireGitHubToken(args.Host, args.SessionID, args.Reason)
+			if err != nil {
+				return nil, err
+			}
+			return copilot.GitHubTokenResult(&copilot.GitHubToken{
+				AccessToken: token,
+				ExpiresIn:   secondsRemaining,
+			}), nil
+		},
 	},
 })
+
 ```
 
 </details>
@@ -349,17 +382,20 @@ session, err := client.CreateSession(ctx, &copilot.SessionConfig{
 
 <!-- docs-validate: skip -->
 ```csharp
-await using var session = await client.CreateSessionAsync(new SessionConfig
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    GitHubTokenProvider = async args =>
+    GitHub = new SessionGitHubOptions
     {
-        var token = await AcquireGitHubTokenAsync(args.Host, args.SessionId, args.Reason);
-        return GitHubTokenProviderResult.FromToken(new GitHubToken
+        TokenProvider = async args =>
         {
-            AccessToken = token.Value,
-            ExpiresIn = token.SecondsRemaining,
-        });
-    },
+            var token = await AcquireGitHubTokenAsync(args.Host, args.SessionId, args.Reason);
+            return GitHubTokenProviderResult.FromToken(new GitHubToken
+            {
+                AccessToken = token.Value,
+                ExpiresIn = token.SecondsRemaining,
+            });
+        }
+    }
 });
 ```
 
@@ -369,13 +405,23 @@ await using var session = await client.CreateSessionAsync(new SessionConfig
 
 <!-- docs-validate: skip -->
 ```java
-var session = client.createSession(new SessionConfig()
-    .setGitHubTokenProvider(args ->
-        acquireGitHubToken(args.host(), args.sessionId(), args.reason())
-            .thenApply(token -> GitHubTokenProviderResult.token(
-                token.value(), token.secondsRemaining())))
-    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-).get();
+var session = client
+        .createSession(new CreateSessionOptions()
+                .setGitHub(new SessionGitHubOptions()
+                        .setTokenProvider(args -> acquireGitHubToken(args
+                                .host(),
+                                args
+                                        .sessionId(),
+                                args
+                                        .reason())
+                                .thenApply(token -> GitHubTokenProviderResult
+                                        .token(token
+                                                .value(),
+                                                token
+                                                        .secondsRemaining()))))
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL)))
+        .get();
 ```
 
 </details>
@@ -393,7 +439,10 @@ let provider = Arc::new(|args: GitHubTokenProviderArgs| async move {
 });
 
 let session = client
-    .create_session(SessionConfig::default().with_github_token_provider(provider))
+    .create_session(
+        CreateSessionOptions::default()
+            .with_github(|__sdk_group| __sdk_group.with_token_provider(provider)),
+    )
     .await?;
 ```
 
@@ -426,10 +475,10 @@ No code changes needed—the SDK automatically detects environment variables:
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 // Token is read from environment variable automatically
-await using CopilotClient client = new();
+await using CopilotClient client = new(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
 ```
 
 </details>
@@ -441,21 +490,23 @@ await using CopilotClient client = new();
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
 
 func main() {
 	// Token is read from environment variable automatically
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 	_ = client
 }
 ```
 <!-- /docs-validate: hidden -->
 
 ```go
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
+
 
 // Token is read from environment variable automatically
-client := copilot.NewClient(nil)
+client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+
 ```
 
 </details>
@@ -464,10 +515,12 @@ client := copilot.NewClient(nil)
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.CopilotClient;
 
 // Token is read from environment variable automatically
-var client = new CopilotClient();
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT));
 client.start().get();
 ```
 
@@ -480,7 +533,7 @@ client.start().get();
 from copilot import CopilotClient
 
 # Token is read from environment variable automatically
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
 await client.start()
 ```
 
@@ -490,10 +543,10 @@ await client.start()
 <summary><strong>Rust</strong></summary>
 
 ```rust
-use github_copilot_sdk::{Client, ClientOptions};
+use copilot_sdk::{Client, ClientOptions};
 
 // Token is read from environment variable automatically
-let client = Client::start(ClientOptions::default()).await?;
+let client = Client::start(ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)).await?;
 ```
 
 </details>
@@ -502,10 +555,10 @@ let client = Client::start(ClientOptions::default()).await?;
 <summary><strong>TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 // Token is read from environment variable automatically
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 ```
 
 </details>
@@ -554,7 +607,11 @@ To prevent the SDK from automatically using stored credentials or `gh` CLI auth,
 ```csharp
 await using var client = new CopilotClient(new CopilotClientOptions
 {
-    UseLoggedInUser = false,  // Only use explicit tokens
+    Mode = CopilotClientMode.CodingAgent,
+    GitHub = new ClientGitHubOptions
+    {
+        UseLoggedInUser = false
+    }
 });
 ```
 
@@ -567,11 +624,14 @@ await using var client = new CopilotClient(new CopilotClientOptions
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
 
 func main() {
 	client := copilot.NewClient(&copilot.ClientOptions{
-		UseLoggedInUser: copilot.Bool(false),
+		Mode: copilot.ModeCodingAgent,
+		GitHub: copilot.ClientGitHubOptions{
+			UseLoggedInUser: copilot.Bool(false),
+		},
 	})
 	_ = client
 }
@@ -580,8 +640,12 @@ func main() {
 
 ```go
 client := copilot.NewClient(&copilot.ClientOptions{
-    UseLoggedInUser: copilot.Bool(false),  // Only use explicit tokens
-})
+	Mode: copilot.ModeCodingAgent,
+	GitHub: copilot.ClientGitHubOptions{
+		UseLoggedInUser: copilot.Bool(false),
+	},
+}) // Only use explicit tokens
+
 ```
 
 </details>
@@ -590,13 +654,16 @@ client := copilot.NewClient(&copilot.ClientOptions{
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 
-var client = new CopilotClient(new CopilotClientOptions()
-    .setUseLoggedInUser(false)  // Only use explicit tokens
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+        .setGitHub(new ClientGitHubOptions()
+                .setUseLoggedInUser(false)) // Only use explicit tokens
 );
-client.start().get();
+client
+        .start()
+        .get();
 ```
 
 </details>
@@ -608,12 +675,12 @@ client.start().get();
 ```python
 from copilot import CopilotClient
 
-client = CopilotClient(use_logged_in_user=False)
+client = CopilotClient(mode="coding-agent", github={"use_logged_in_user": False})
 ```
 <!-- /docs-validate: hidden -->
 
 ```python
-client = CopilotClient(use_logged_in_user=False)  # Only use explicit tokens
+client = CopilotClient(mode="coding-agent", github={"use_logged_in_user": False})  # Only use explicit tokens
 ```
 
 </details>
@@ -622,11 +689,13 @@ client = CopilotClient(use_logged_in_user=False)  # Only use explicit tokens
 <summary><strong>Rust</strong></summary>
 
 ```rust
-use github_copilot_sdk::{Client, ClientOptions};
+use copilot_sdk::{Client, ClientOptions};
 
 let client = Client::start(
-    ClientOptions::default().with_use_logged_in_user(false),
-).await?;
+    ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+        .with_github(|__sdk_group| __sdk_group.with_use_logged_in_user(false)),
+)
+.await?;
 ```
 
 </details>
@@ -636,7 +705,10 @@ let client = Client::start(
 
 ```typescript
 const client = new CopilotClient({
-    useLoggedInUser: false,  // Only use explicit tokens
+    mode: "coding-agent",
+    github: {
+        useLoggedInUser: false,
+    },
 });
 ```
 

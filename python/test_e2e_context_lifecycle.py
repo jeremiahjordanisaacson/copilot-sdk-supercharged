@@ -25,7 +25,9 @@ def shared_context(tmp_path, monkeypatch):
     Path(ctx.home_dir).mkdir()
     Path(ctx.work_dir).mkdir()
     ctx._proxy = Mock(configure=AsyncMock())
-    ctx._client = CopilotClient(connection=RuntimeConnection.for_stdio(path=sys.executable))
+    ctx._client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=sys.executable)
+    )
     ctx._client._client = Mock(request=AsyncMock(return_value={"success": True}))
     return ctx
 

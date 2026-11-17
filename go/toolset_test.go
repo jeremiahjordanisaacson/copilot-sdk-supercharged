@@ -5,6 +5,7 @@
 package copilot
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -102,29 +103,39 @@ func TestNewClient_modeEmptyRejectsWithoutStorage(t *testing.T) {
 }
 
 func TestNewClient_modeEmptyAcceptsBaseDirectory(t *testing.T) {
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
+	if c.options.Mode != ModeEmpty {
+		t.Errorf("expected ModeEmpty, got %q", c.options.Mode)
+	}
+}
+
+func TestNewClient_modeEmptyAcceptsTCPConnection(t *testing.T) {
 	c := NewClient(&ClientOptions{
-		Mode:          ModeEmpty,
-		BaseDirectory: t.TempDir(),
+		Mode:    ModeEmpty,
+		Runtime: TCPConnection{Host: "localhost", Port: 8080},
 	})
 	if c.options.Mode != ModeEmpty {
 		t.Errorf("expected ModeEmpty, got %q", c.options.Mode)
 	}
 }
 
-func TestNewClient_modeEmptyAcceptsURIConnection(t *testing.T) {
-	c := NewClient(&ClientOptions{
-		Mode:       ModeEmpty,
-		Connection: URIConnection{URL: "8080"},
-	})
-	if c.options.Mode != ModeEmpty {
-		t.Errorf("expected ModeEmpty, got %q", c.options.Mode)
+func TestNewClient_requiresExplicitMode(t *testing.T) {
+	for _, opts := range []*ClientOptions{nil, {}, {Mode: "copilot-cli"}, {Mode: "invalid"}} {
+		t.Run(fmt.Sprintf("%v", opts), func(t *testing.T) {
+			defer func() {
+				if got := recover(); got != "ClientOptions.Mode is required and must be ModeCodingAgent or ModeEmpty" {
+					t.Errorf("expected explicit-mode panic, got %v", got)
+				}
+			}()
+			NewClient(opts)
+		})
 	}
 }
 
-func TestNewClient_modeCopilotCliIsDefault(t *testing.T) {
-	c := NewClient(nil)
-	if c.options.Mode != "" && c.options.Mode != ModeCopilotCli {
-		t.Errorf("expected default mode to be empty/copilot-cli, got %q", c.options.Mode)
+func TestNewClient_modeCodingAgent(t *testing.T) {
+	c := NewClient(&ClientOptions{Mode: ModeCodingAgent})
+	if c.options.Mode != ModeCodingAgent {
+		t.Errorf("expected coding-agent mode, got %q", c.options.Mode)
 	}
 }
 
@@ -145,7 +156,7 @@ func TestValidateToolFilterList_allowsSourceQualifiedWildcards(t *testing.T) {
 }
 
 func TestResolveToolFilterOptions_emptyModeRequiresAvailableTools(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
 	_, _, err := c.resolveToolFilterOptions(nil, nil)
 	if err == nil {
 		t.Fatal("expected error in empty mode without available tools")
@@ -153,7 +164,7 @@ func TestResolveToolFilterOptions_emptyModeRequiresAvailableTools(t *testing.T) 
 }
 
 func TestResolveToolFilterOptions_preservesBothLists(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeCopilotCli})
+	c := NewClient(&ClientOptions{Mode: ModeCodingAgent})
 	avail, excl, err := c.resolveToolFilterOptions([]string{"builtin:*"}, []string{"builtin:bash"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -167,7 +178,7 @@ func TestResolveToolFilterOptions_preservesBothLists(t *testing.T) {
 }
 
 func TestSystemMessageForMode_emptyModeStripsEnvContextWhenNil(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
 	got := c.systemMessageForMode(nil)
 	if got == nil || got.Mode != "customize" {
 		t.Fatalf("expected customize mode, got %+v", got)
@@ -178,7 +189,7 @@ func TestSystemMessageForMode_emptyModeStripsEnvContextWhenNil(t *testing.T) {
 }
 
 func TestSystemMessageForMode_emptyModePromotesAppendToCustomize(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
 	got := c.systemMessageForMode(&SystemMessageConfig{Mode: "append", Content: "extra"})
 	if got.Mode != "customize" {
 		t.Errorf("expected customize, got %q", got.Mode)
@@ -192,7 +203,7 @@ func TestSystemMessageForMode_emptyModePromotesAppendToCustomize(t *testing.T) {
 }
 
 func TestSystemMessageForMode_emptyModePreservesReplace(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
 	in := &SystemMessageConfig{Mode: "replace", Content: "whole prompt"}
 	got := c.systemMessageForMode(in)
 	if got != in {
@@ -201,7 +212,7 @@ func TestSystemMessageForMode_emptyModePreservesReplace(t *testing.T) {
 }
 
 func TestSystemMessageForMode_emptyModeRespectsCallerSection(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
 	in := &SystemMessageConfig{
 		Mode: "customize",
 		Sections: map[string]SectionOverride{
@@ -214,8 +225,8 @@ func TestSystemMessageForMode_emptyModeRespectsCallerSection(t *testing.T) {
 	}
 }
 
-func TestSystemMessageForMode_copilotCliPassthrough(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeCopilotCli})
+func TestSystemMessageForMode_codingAgentPassthrough(t *testing.T) {
+	c := NewClient(&ClientOptions{Mode: ModeCodingAgent})
 	in := &SystemMessageConfig{Mode: "append", Content: "x"}
 	got := c.systemMessageForMode(in)
 	if got != in {
@@ -224,8 +235,8 @@ func TestSystemMessageForMode_copilotCliPassthrough(t *testing.T) {
 }
 
 func TestApplyConfigDefaultsForMode_emptyDefaultsTelemetryFalse(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
-	cfg := &SessionConfig{}
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
+	cfg := (&CreateSessionOptions{}).normalize()
 	c.applyConfigDefaultsForMode(cfg)
 	if cfg.EnableSessionTelemetry == nil || *cfg.EnableSessionTelemetry != false {
 		t.Errorf("expected telemetry default false in empty mode, got %v", cfg.EnableSessionTelemetry)
@@ -233,17 +244,17 @@ func TestApplyConfigDefaultsForMode_emptyDefaultsTelemetryFalse(t *testing.T) {
 }
 
 func TestApplyConfigDefaultsForMode_emptyDefaultsExperimentalModeFalse(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
-	cfg := &SessionConfig{}
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
+	cfg := (&CreateSessionOptions{}).normalize()
 	c.applyConfigDefaultsForMode(cfg)
 	if cfg.EnableExperimentalMode == nil || *cfg.EnableExperimentalMode != false {
 		t.Errorf("expected experimental mode default false in empty mode, got %v", cfg.EnableExperimentalMode)
 	}
 }
 
-func TestApplyConfigDefaultsForMode_copilotCliLeavesExperimentalModeNil(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeCopilotCli})
-	cfg := &SessionConfig{}
+func TestApplyConfigDefaultsForMode_codingAgentLeavesExperimentalModeNil(t *testing.T) {
+	c := NewClient(&ClientOptions{Mode: ModeCodingAgent})
+	cfg := (&CreateSessionOptions{}).normalize()
 	c.applyConfigDefaultsForMode(cfg)
 	if cfg.EnableExperimentalMode != nil {
 		t.Errorf("non-empty mode must not default experimental mode")
@@ -251,18 +262,18 @@ func TestApplyConfigDefaultsForMode_copilotCliLeavesExperimentalModeNil(t *testi
 }
 
 func TestApplyConfigDefaultsForMode_emptyHonorsCallerTelemetry(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
 	trueVal := true
-	cfg := &SessionConfig{EnableSessionTelemetry: &trueVal}
+	cfg := (&CreateSessionOptions{GitHub: SessionGitHubOptions{TelemetryEnabled: &trueVal}}).normalize()
 	c.applyConfigDefaultsForMode(cfg)
 	if cfg.EnableSessionTelemetry == nil || *cfg.EnableSessionTelemetry != true {
 		t.Errorf("caller-supplied telemetry must win")
 	}
 }
 
-func TestApplyConfigDefaultsForMode_copilotCliLeavesNil(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeCopilotCli})
-	cfg := &SessionConfig{}
+func TestApplyConfigDefaultsForMode_codingAgentLeavesNil(t *testing.T) {
+	c := NewClient(&ClientOptions{Mode: ModeCodingAgent})
+	cfg := (&CreateSessionOptions{}).normalize()
 	c.applyConfigDefaultsForMode(cfg)
 	if cfg.EnableSessionTelemetry != nil {
 		t.Errorf("non-empty mode must not default telemetry")
@@ -270,8 +281,8 @@ func TestApplyConfigDefaultsForMode_copilotCliLeavesNil(t *testing.T) {
 }
 
 func TestApplyConfigDefaultsForMode_emptyDefaultsGranularFlags(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
-	cfg := &SessionConfig{}
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
+	cfg := (&CreateSessionOptions{}).normalize()
 	c.applyConfigDefaultsForMode(cfg)
 	if cfg.SkipEmbeddingRetrieval == nil || *cfg.SkipEmbeddingRetrieval != true {
 		t.Errorf("expected SkipEmbeddingRetrieval=true in empty mode, got %v", cfg.SkipEmbeddingRetrieval)
@@ -303,20 +314,10 @@ func TestApplyConfigDefaultsForMode_emptyDefaultsGranularFlags(t *testing.T) {
 }
 
 func TestApplyConfigDefaultsForMode_emptyHonorsCallerGranularFlags(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
 	falseVal := false
 	trueVal := true
-	cfg := &SessionConfig{
-		SkipEmbeddingRetrieval:             &falseVal,
-		EmbeddingCacheStorage:              String("persistent"),
-		EnableOnDemandInstructionDiscovery: &trueVal,
-		EnableFileHooks:                    &trueVal,
-		EnableHostGitOperations:            &trueVal,
-		EnableSessionStore:                 &trueVal,
-		EnableSkills:                       &trueVal,
-		Memory:                             &MemoryConfiguration{Enabled: true},
-		CustomAgentsLocalOnly:              &falseVal,
-	}
+	cfg := (&CreateSessionOptions{State: SessionStateOptions{SkipEmbeddingRetrieval: &falseVal, EmbeddingCacheStorage: String("persistent"), EnableCrossSessionStore: &trueVal, Memory: &MemoryConfiguration{Enabled: true}}, Instructions: CreateSessionInstructionOptions{OnDemandDiscovery: &trueVal}, Hooks: SessionHookOptions{EnableRepositoryHooks: &trueVal}, Git: SessionGitOptions{EnableHostGitOperations: &trueVal}, Skills: SessionSkillOptions{Enabled: &trueVal}, Agents: SessionAgentOptions{LocalDiscoveryOnly: &falseVal}}).normalize()
 	c.applyConfigDefaultsForMode(cfg)
 	if *cfg.SkipEmbeddingRetrieval != false {
 		t.Errorf("caller-supplied SkipEmbeddingRetrieval must win")
@@ -347,9 +348,9 @@ func TestApplyConfigDefaultsForMode_emptyHonorsCallerGranularFlags(t *testing.T)
 	}
 }
 
-func TestApplyConfigDefaultsForMode_copilotCliLeavesGranularFlagsNil(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeCopilotCli})
-	cfg := &SessionConfig{}
+func TestApplyConfigDefaultsForMode_codingAgentLeavesGranularFlagsNil(t *testing.T) {
+	c := NewClient(&ClientOptions{Mode: ModeCodingAgent})
+	cfg := (&CreateSessionOptions{}).normalize()
 	c.applyConfigDefaultsForMode(cfg)
 	if cfg.SkipEmbeddingRetrieval != nil {
 		t.Errorf("non-empty mode must not default SkipEmbeddingRetrieval")
@@ -378,15 +379,15 @@ func TestApplyConfigDefaultsForMode_copilotCliLeavesGranularFlagsNil(t *testing.
 }
 
 func TestApplyResumeDefaultsForMode_customAgentsLocalOnly(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
 
-	cfg := &ResumeSessionConfig{}
+	cfg := (&ResumeSessionOptions{}).normalize()
 	c.applyResumeDefaultsForMode(cfg)
 	if cfg.CustomAgentsLocalOnly == nil || !*cfg.CustomAgentsLocalOnly {
 		t.Errorf("expected CustomAgentsLocalOnly=true in empty mode, got %v", cfg.CustomAgentsLocalOnly)
 	}
 
-	cfg = &ResumeSessionConfig{CustomAgentsLocalOnly: Bool(false)}
+	cfg = (&ResumeSessionOptions{Agents: SessionAgentOptions{LocalDiscoveryOnly: Bool(false)}}).normalize()
 	c.applyResumeDefaultsForMode(cfg)
 	if cfg.CustomAgentsLocalOnly == nil || *cfg.CustomAgentsLocalOnly {
 		t.Errorf("caller-supplied CustomAgentsLocalOnly must win")
@@ -394,8 +395,8 @@ func TestApplyResumeDefaultsForMode_customAgentsLocalOnly(t *testing.T) {
 }
 
 func TestApplyConfigDefaultsForMode_emptyDefaultsMCPOAuthTokenStorage(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
-	cfg := &SessionConfig{}
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
+	cfg := (&CreateSessionOptions{}).normalize()
 	c.applyConfigDefaultsForMode(cfg)
 	if cfg.MCPOAuthTokenStorage != "in-memory" {
 		t.Errorf("expected MCPOAuthTokenStorage 'in-memory' in empty mode, got %q", cfg.MCPOAuthTokenStorage)
@@ -403,17 +404,17 @@ func TestApplyConfigDefaultsForMode_emptyDefaultsMCPOAuthTokenStorage(t *testing
 }
 
 func TestApplyConfigDefaultsForMode_emptyHonorsCallerMCPOAuthTokenStorage(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
-	cfg := &SessionConfig{MCPOAuthTokenStorage: "persistent"}
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
+	cfg := (&CreateSessionOptions{MCP: SessionMCPOptions{OAuthTokenStorage: "persistent"}}).normalize()
 	c.applyConfigDefaultsForMode(cfg)
 	if cfg.MCPOAuthTokenStorage != "persistent" {
 		t.Errorf("caller-supplied MCPOAuthTokenStorage must win, got %q", cfg.MCPOAuthTokenStorage)
 	}
 }
 
-func TestApplyConfigDefaultsForMode_copilotCliLeavesMCPOAuthTokenStorageEmpty(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeCopilotCli})
-	cfg := &SessionConfig{}
+func TestApplyConfigDefaultsForMode_codingAgentLeavesMCPOAuthTokenStorageEmpty(t *testing.T) {
+	c := NewClient(&ClientOptions{Mode: ModeCodingAgent})
+	cfg := (&CreateSessionOptions{}).normalize()
 	c.applyConfigDefaultsForMode(cfg)
 	if cfg.MCPOAuthTokenStorage != "" {
 		t.Errorf("non-empty mode must not default MCPOAuthTokenStorage, got %q", cfg.MCPOAuthTokenStorage)
@@ -421,17 +422,17 @@ func TestApplyConfigDefaultsForMode_copilotCliLeavesMCPOAuthTokenStorageEmpty(t 
 }
 
 func TestApplyResumeDefaultsForMode_emptyDefaultsExperimentalModeFalse(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeEmpty, BaseDirectory: t.TempDir()})
-	cfg := &ResumeSessionConfig{}
+	c := NewClient(&ClientOptions{Mode: ModeEmpty, Runtime: SpawnedStdioConnection{BaseDirectory: t.TempDir()}})
+	cfg := (&ResumeSessionOptions{}).normalize()
 	c.applyResumeDefaultsForMode(cfg)
 	if cfg.EnableExperimentalMode == nil || *cfg.EnableExperimentalMode != false {
 		t.Errorf("expected experimental mode default false in empty mode, got %v", cfg.EnableExperimentalMode)
 	}
 }
 
-func TestApplyResumeDefaultsForMode_copilotCliLeavesExperimentalModeNil(t *testing.T) {
-	c := NewClient(&ClientOptions{Mode: ModeCopilotCli})
-	cfg := &ResumeSessionConfig{}
+func TestApplyResumeDefaultsForMode_codingAgentLeavesExperimentalModeNil(t *testing.T) {
+	c := NewClient(&ClientOptions{Mode: ModeCodingAgent})
+	cfg := (&ResumeSessionOptions{}).normalize()
 	c.applyResumeDefaultsForMode(cfg)
 	if cfg.EnableExperimentalMode != nil {
 		t.Errorf("non-empty mode must not default experimental mode")

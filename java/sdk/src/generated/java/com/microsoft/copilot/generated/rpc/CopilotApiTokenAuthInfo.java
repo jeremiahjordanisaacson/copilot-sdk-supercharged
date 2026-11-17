@@ -1,0 +1,98 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: api.schema.json
+
+package com.microsoft.copilot.generated.rpc;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import javax.annotation.processing.Generated;
+
+/**
+ * Authentication-info variant for direct Copilot API token auth sourced from environment variables, with public GitHub host.
+ *
+ * @since 1.0.0
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+@JsonInclude(JsonInclude.Include.NON_NULL)
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+public final class CopilotApiTokenAuthInfo extends AuthInfo {
+
+    @JsonProperty("type")
+    private final String type = "copilot-api-token";
+
+    @Override
+    public String getType() { return type; }
+
+    /** Authentication host (always the public GitHub host). */
+    @JsonProperty("host")
+    private String host;
+
+    /** Snapshot of the authenticated user's Copilot subscription info, if known. Mirrors the GitHub API `/copilot_internal/v2/token` user response shape — the runtime trusts this verbatim and does not re-fetch when set. */
+    @JsonProperty("copilotUser")
+    private CopilotUserResponse copilotUser;
+
+    public String getHost() { return host; }
+    public void setHost(String host) { this.host = host; }
+
+    public CopilotUserResponse getCopilotUser() { return copilotUser; }
+    public void setCopilotUser(CopilotUserResponse copilotUser) { this.copilotUser = copilotUser; }
+
+
+    /**
+     * Returns a named builder.
+     * @return a new builder
+     * @since 2.0.0
+     */
+    public static Builder builder() { return new Builder(); }
+
+    /**
+     * Named construction for this record.
+     * @since 2.0.0
+     */
+    public static final class Builder {
+        private Builder() {}
+        private String host;
+        private CopilotUserResponse copilotUser;
+
+        /**
+         * Sets the {@code host} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder host(String value) {
+            this.host = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code copilotUser} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder copilotUser(CopilotUserResponse value) {
+            this.copilotUser = value;
+            return this;
+        }
+
+        /**
+         * Builds a variant after checking required property presence.
+         * @return a new variant
+         * @throws IllegalStateException if a required property is missing
+         * @since 2.0.0
+         */
+        public CopilotApiTokenAuthInfo build() {
+            if (host == null) throw new IllegalStateException("Missing required property: host");
+            CopilotApiTokenAuthInfo instance = new CopilotApiTokenAuthInfo();
+            instance.setHost(host);
+            instance.setCopilotUser(copilotUser);
+            return instance;
+        }
+    }
+}

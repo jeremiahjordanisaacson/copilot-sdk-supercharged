@@ -2,17 +2,17 @@
 
 Use a specific CLI binary instead of the SDK's automatic CLI management. This is an advanced option—you supply the CLI path explicitly, and you are responsible for ensuring version compatibility with the SDK.
 
-**Use when:** You need to pin a specific CLI version, or work with the Go SDK (which does not include a CLI automatically).
+**Use when:** You need an explicit subprocess using a specific compatible CLI version.
 
 ## How it works
 
-By default, the Node.js and .NET SDKs include their own CLI dependency, and the Python SDK downloads one on first use (see [Default Setup](./bundled-cli.md)). If you need to override this—for example, to use a system-installed CLI—you can use the `Connection` option.
+SDK v2 defaults to [in-process native hosting](./bundled-cli.md). To use a system-installed CLI in a subprocess instead, select a stdio `Connection` explicitly.
 
 ```mermaid
 flowchart LR
     subgraph YourMachine["Your Machine"]
         App["Your App"] --> SDK["SDK Client"]
-        SDK -- "RuntimeConnection.forStdio(path)" --> CLI["Copilot CLI<br/>(your own binary)"]
+        SDK -- "RuntimeConnection.forSpawnedStdio(path)" --> CLI["Copilot CLI<br/>(your own binary)"]
         CLI --> Keychain["🔐 System Keychain<br/>(stored credentials)"]
     end
     CLI -- "API calls" --> Copilot["☁️ GitHub Copilot"]
@@ -21,10 +21,11 @@ flowchart LR
 ```
 
 **Key characteristics:**
-* You explicitly provide the CLI binary path
-* You are responsible for CLI version compatibility with the SDK
-* Authentication uses the signed-in user's credentials from the system keychain (or env vars)
-* Communication happens over stdio
+
+- You explicitly provide the CLI binary path
+- You are responsible for CLI version compatibility with the SDK
+- Authentication uses the signed-in user's credentials from the system keychain (or env vars)
+- Communication happens over stdio
 
 ## Configuration
 
@@ -34,11 +35,13 @@ flowchart LR
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 <!-- docs-validate: strict -->
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-    connection: RuntimeConnection.forStdio({ path: "/usr/local/bin/copilot" }),
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forSpawnedStdio({ path: "/usr/local/bin/copilot" }),
 });
 
 const session = await client.createSession({ model: "auto" });
@@ -59,11 +62,14 @@ from copilot.session_events import AssistantMessageData
 from copilot.session import PermissionHandler
 
 client = CopilotClient(
-    connection=RuntimeConnection.for_stdio(path="/usr/local/bin/copilot"),
+    mode="coding-agent",
+    runtime=RuntimeConnection.for_spawned_stdio(path="/usr/local/bin/copilot"),
 )
 await client.start()
 
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all, model="auto")
+session = await client.create_session(
+    model="auto", permissions={"on_request": PermissionHandler.approve_all}
+)
 response = await session.send_and_wait("Hello!")
 if response:
     match response.data:
@@ -79,32 +85,38 @@ await client.stop()
 <summary><strong>Go</strong></summary>
 
 > [!NOTE]
-> The Go SDK does not ship a CLI automatically, and it does not look up `copilot` on `PATH`. Set the `COPILOT_CLI_PATH` environment variable, embed a CLI with the [bundler tool](../../go/README.md#distributing-your-application-with-an-embedded-github-copilot-cli), or point `StdioConnection.Path` at an installed binary.
+> The Go SDK does not ship runtime assets automatically. Use the [bundler tool](../../go/README.md#distributing-your-application-with-an-embedded-github-copilot-cli), or point `SpawnedStdioConnection.Path` at an installed compatible binary as shown here.
 
 <!-- docs-validate: hidden -->
+
 ```go
 package main
 
 import (
 	"context"
 	"fmt"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 	"log"
-	copilot "github.com/github/copilot-sdk/go"
 )
 
 func main() {
 	ctx := context.Background()
 
 	client := copilot.NewClient(&copilot.ClientOptions{
-		Connection: copilot.StdioConnection{Path: "/usr/local/bin/copilot"},
+		Mode: copilot.ModeCodingAgent,
+		Runtime: copilot.SpawnedStdioConnection{Path: "/usr/local/bin/copilot"},
 	})
 	if err := client.Start(ctx); err != nil {
 		log.Fatal(err)
 	}
 	defer client.Stop()
 
-	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{Model: "auto"})
-	response, _ := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: "Hello!"})
+	session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Model: "auto",
+	})
+	response, _ := session.SendAndWait(ctx, copilot.MessageOptions{
+		Prompt: "Hello!",
+	})
 	if response != nil {
 		if d, ok := response.Data.(*copilot.AssistantMessageData); ok {
 			fmt.Println(d.Content)
@@ -112,24 +124,31 @@ func main() {
 	}
 }
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```go
 client := copilot.NewClient(&copilot.ClientOptions{
-    Connection: copilot.StdioConnection{Path: "/usr/local/bin/copilot"},
+    Mode: copilot.ModeCodingAgent,
+    Runtime: copilot.SpawnedStdioConnection{Path: "/usr/local/bin/copilot"},
 })
 if err := client.Start(ctx); err != nil {
-    log.Fatal(err)
+	log.Fatal(err)
 }
 defer client.Stop()
 
-session, _ := client.CreateSession(ctx, &copilot.SessionConfig{Model: "auto"})
-response, _ := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: "Hello!"})
+session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	Model: "auto",
+})
+response, _ := session.SendAndWait(ctx, copilot.MessageOptions{
+	Prompt: "Hello!",
+})
 if response != nil {
-    if d, ok := response.Data.(*copilot.AssistantMessageData); ok {
-        fmt.Println(d.Content)
-    }
+	if d, ok := response.Data.(*copilot.AssistantMessageData); ok {
+		fmt.Println(d.Content)
+	}
 }
+
 ```
 
 </details>
@@ -140,14 +159,17 @@ if response != nil {
 ```csharp
 var client = new CopilotClient(new CopilotClientOptions
 {
-    Connection = RuntimeConnection.ForStdio(path: "/usr/local/bin/copilot"),
+    Mode = CopilotClientMode.CodingAgent,
+    Runtime = RuntimeConnection.ForSpawnedStdio(path: "/usr/local/bin/copilot")
 });
-
-await using var session = await client.CreateSessionAsync(
-    new SessionConfig { Model = "auto" });
-
-var response = await session.SendAndWaitAsync(
-    new MessageOptions { Prompt = "Hello!" });
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+{
+    Model = "auto"
+});
+var response = await session.SendAndWaitAsync(new MessageOptions
+{
+    Prompt = "Hello!"
+});
 Console.WriteLine(response?.Data.Content);
 ```
 
@@ -156,21 +178,22 @@ Console.WriteLine(response?.Data.Content);
 ## Additional options
 
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-    connection: RuntimeConnection.forStdio({
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forSpawnedStdio({
         path: "/usr/local/bin/copilot",
 
         // Pass extra CLI arguments
         args: ["--log-dir=/tmp/copilot-logs"],
+
+        // Set the spawned process working directory
+        workingDirectory: "/path/to/project",
     }),
-
-    // Set log level for debugging
-    logLevel: "debug",
-
-    // Set working directory
-    workingDirectory: "/path/to/project",
+    observability: {
+        logLevel: "debug",
+    },
 });
 ```
 
@@ -192,6 +215,7 @@ The SDK picks these up automatically—no code changes needed.
 A session is saved to disk once it handles a message and can be resumed by its ID. To choose the ID instead of using the generated one, provide your own session ID:
 
 <!-- docs-validate: strict -->
+
 ```typescript
 // Create a named session
 const session = await client.createSession({
@@ -207,15 +231,15 @@ Session state is stored locally at `~/.copilot/session-state/{sessionId}/`.
 
 ## Limitations
 
-| Limitation | Details |
-|------------|---------|
+| Limitation                | Details                                                     |
+| ------------------------- | ----------------------------------------------------------- |
 | **Version compatibility** | You must ensure your CLI version is compatible with the SDK |
-| **Single user** | Credentials are tied to whoever signed in to the CLI |
-| **Local only** | The CLI runs on the same machine as your app |
-| **No multi-tenant** | Can't serve multiple users from one CLI instance |
+| **Single user**           | Credentials are tied to whoever signed in to the CLI        |
+| **Local only**            | The CLI runs on the same machine as your app                |
+| **No multi-tenant**       | Can't serve multiple users from one CLI instance            |
 
 ## Next steps
 
-* **[Default Setup](./bundled-cli.md)**: Use the SDK's built-in CLI (recommended for most use cases)
-* **[Getting Started tutorial](../getting-started.md)**: Build a complete interactive app
-* **[Authentication docs](../auth/authenticate.md)**: All auth methods in detail
+- **[Default Setup](./bundled-cli.md)**: Use the SDK's built-in CLI (recommended for most use cases)
+- **[Getting Started tutorial](../getting-started.md)**: Build a complete interactive app
+- **[Authentication docs](../auth/authenticate.md)**: All auth methods in detail

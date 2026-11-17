@@ -6,7 +6,7 @@
 using System.Text.Json;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -24,7 +24,7 @@ public sealed partial class ClientSessionLifetimeTests
     private static async Task<JsonElement?> InvokeHookWithPayloadAsync(string hookType, string shape)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var hooks = new SessionHooks
         {
             OnPreToolUse = (_, _) => Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput
@@ -37,7 +37,7 @@ public sealed partial class ClientSessionLifetimeTests
                 ModifiedResult = CreateHookPayload(shape),
             }),
         };
-        await using var session = await client.CreateSessionAsync(new SessionConfig { Hooks = hooks });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions { Hooks = new SessionHookOptions { Handlers = hooks } });
         var input = new Dictionary<string, object?>
         {
             ["sessionId"] = session.SessionId,

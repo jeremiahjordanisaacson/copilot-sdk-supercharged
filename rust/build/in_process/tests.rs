@@ -73,7 +73,7 @@ fn release(sdk: bool) -> Release {
     Release::new(
         VERSION.into(),
         sdk.then_some(format!(
-            "https://github.com/github/copilot-sdk/releases/download/runtime-{VERSION}"
+            "https://github.com/microsoft/copilot-sdk/releases/download/runtime-{VERSION}"
         ))
         .as_deref(),
     )
@@ -85,7 +85,7 @@ fn legacy_and_unstable_snapshots_resolve_every_asset_and_checksums_consistently(
     for sdk in [false, true] {
         let release = release(sdk);
         let base = if sdk {
-            format!("https://github.com/github/copilot-sdk/releases/download/runtime-{VERSION}")
+            format!("https://github.com/microsoft/copilot-sdk/releases/download/runtime-{VERSION}")
         } else {
             format!("https://github.com/github/copilot-cli/releases/download/v{VERSION}")
         };
@@ -194,7 +194,7 @@ fn source_checkouts_without_snapshots_resolve_canonical_unstable_releases() {
         assert_eq!(release.version, version);
         assert_eq!(hash, None);
         let base = if sdk_release {
-            format!("https://github.com/github/copilot-sdk/releases/download/runtime-{version}")
+            format!("https://github.com/microsoft/copilot-sdk/releases/download/runtime-{version}")
         } else {
             format!("https://github.com/github/copilot-cli/releases/download/v{version}")
         };
@@ -229,7 +229,7 @@ fn source_checkouts_still_prefer_snapshots_and_preserve_legacy_locations() {
     let version = "1.2.3-4.unstable.r123.gabcdef0";
     for sdk_release in [false, true] {
         let base = if sdk_release {
-            format!("https://github.com/github/copilot-sdk/releases/download/runtime-{version}")
+            format!("https://github.com/microsoft/copilot-sdk/releases/download/runtime-{version}")
         } else {
             format!("https://github.com/github/copilot-cli/releases/download/v{version}")
         };
@@ -256,10 +256,10 @@ fn source_checkouts_still_prefer_snapshots_and_preserve_legacy_locations() {
 #[test]
 fn snapshots_reject_mismatched_versions_untrusted_locations_and_invalid_hashes() {
     for url in [
-        "https://github.com/github/copilot-sdk/releases/download/runtime-9.9.9",
-        "https://github.com/github/copilot-sdk/releases/latest",
+        "https://github.com/microsoft/copilot-sdk/releases/download/runtime-9.9.9",
+        "https://github.com/microsoft/copilot-sdk/releases/latest",
         "https://github.com/github/docs/releases/download/runtime-1.2.3",
-        "https://token@github.com/github/copilot-sdk/releases/download/runtime-1.2.3",
+        "https://token@github.com/microsoft/copilot-sdk/releases/download/runtime-1.2.3",
         "https://github.com/github/copilot-cli/releases/download/v1.2.3/",
         "https://github.com/github/copilot-cli/releases/download/v1.2.3?token=secret",
         "http://github.com/github/copilot-cli/releases/download/v1.2.3",
@@ -395,7 +395,7 @@ impl Fixture {
         ] {
             let location = if sdk {
                 format!(
-                    "release-url=https://github.com/github/copilot-sdk/releases/download/runtime-{VERSION}\n"
+                    "release-url=https://github.com/microsoft/copilot-sdk/releases/download/runtime-{VERSION}\n"
                 )
             } else {
                 String::new()
@@ -616,7 +616,7 @@ fn consumer_sdk_packages(
         .unwrap();
     let manifest = format!(
         "[package]\nname = \"sdk-consumer-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
-         [workspace]\n[dependencies]\ngithub-copilot-sdk = {{ path = {}, default-features = false, features = {} }}\n",
+         [workspace]\n[dependencies]\ncopilot-sdk = {{ path = {}, default-features = false, features = {} }}\n",
         serde_json::to_string(&sdk.to_string_lossy()).unwrap(),
         serde_json::to_string(features).unwrap()
     );
@@ -628,7 +628,7 @@ fn consumer_sdk_packages(
     command.current_dir(root.path()).args([
         "tree",
         "--package",
-        "github-copilot-sdk",
+        "copilot-sdk",
         "--edges",
         edges,
         "--prefix",
@@ -666,9 +666,7 @@ fn consumer_sdk_packages(
         })
         .collect();
     assert!(
-        packages
-            .iter()
-            .any(|package| package == "github-copilot-sdk"),
+        packages.iter().any(|package| package == "copilot-sdk"),
         "{tree}"
     );
     packages
@@ -889,7 +887,7 @@ fn builds_reject_inconsistent_snapshot_versions_and_locations_before_acquisition
             contents.replace(VERSION, "9.9.9")
         } else {
             contents.replace(
-                &format!("release-url=https://github.com/github/copilot-sdk/releases/download/runtime-{VERSION}\n"),
+                &format!("release-url=https://github.com/microsoft/copilot-sdk/releases/download/runtime-{VERSION}\n"),
                 ""
             )
         };

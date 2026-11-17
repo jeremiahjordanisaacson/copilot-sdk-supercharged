@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 type sqliteCall struct {
@@ -346,10 +346,7 @@ func TestSessionFSSqliteE2E(t *testing.T) {
 	t.Run("should route sql queries through the sessionfs sqlite handler", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest:     copilot.PermissionHandler.ApproveAll,
-			CreateSessionFSProvider: createSessionFSHandler,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, State: copilot.SessionStateOptions{CreateSessionFSProvider: createSessionFSHandler}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -383,10 +380,7 @@ func TestSessionFSSqliteE2E(t *testing.T) {
 	t.Run("should allow subagents to use sql tool via inherited sessionfs", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest:     copilot.PermissionHandler.ApproveAll,
-			CreateSessionFSProvider: createSessionFSHandler,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, State: copilot.SessionStateOptions{CreateSessionFSProvider: createSessionFSHandler}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}

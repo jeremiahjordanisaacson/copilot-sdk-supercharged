@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::hooks::{
+use copilot_sdk::hooks::{
     HookContext, PostToolUseInput, PreToolUseInput, PreToolUseOutput, SessionHooks,
 };
 use tokio::sync::mpsc;
@@ -23,13 +23,13 @@ async fn should_invoke_posttooluse_hook_after_model_runs_a_tool() {
                 let (post_tx, mut post_rx) = mpsc::unbounded_channel();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(ctx.approve_all_session_config().with_hooks(Arc::new(
-                        RecordingHooks {
+                    .create_session(ctx.approve_all_session_config().with_hooks(|group| {
+                        group.with_handlers(Arc::new(RecordingHooks {
                             pre_tx: None,
                             post_tx: Some(post_tx),
                             deny: false,
-                        },
-                    )))
+                        }))
+                    }))
                     .await
                     .expect("create session");
 
@@ -65,13 +65,13 @@ async fn should_invoke_both_pretooluse_and_posttooluse_hooks_for_single_tool_cal
                 let (post_tx, mut post_rx) = mpsc::unbounded_channel();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(ctx.approve_all_session_config().with_hooks(Arc::new(
+                    .create_session(ctx.approve_all_session_config().with_hooks(|group| group.with_handlers(Arc::new(
                         RecordingHooks {
                             pre_tx: Some(pre_tx),
                             post_tx: Some(post_tx),
                             deny: false,
                         },
-                    )))
+                    ))))
                     .await
                     .expect("create session");
 
@@ -121,13 +121,13 @@ async fn should_deny_tool_execution_when_pretooluse_returns_deny() {
                 let (pre_tx, mut pre_rx) = mpsc::unbounded_channel();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(ctx.approve_all_session_config().with_hooks(Arc::new(
-                        RecordingHooks {
+                    .create_session(ctx.approve_all_session_config().with_hooks(|group| {
+                        group.with_handlers(Arc::new(RecordingHooks {
                             pre_tx: Some(pre_tx),
                             post_tx: None,
                             deny: true,
-                        },
-                    )))
+                        }))
+                    }))
                     .await
                     .expect("create session");
 
@@ -152,8 +152,8 @@ async fn should_deny_tool_execution_when_pretooluse_returns_deny() {
 }
 
 struct RecordingHooks {
-    pre_tx: Option<mpsc::UnboundedSender<(github_copilot_sdk::SessionId, String)>>,
-    post_tx: Option<mpsc::UnboundedSender<(github_copilot_sdk::SessionId, String, bool)>>,
+    pre_tx: Option<mpsc::UnboundedSender<(copilot_sdk::SessionId, String)>>,
+    post_tx: Option<mpsc::UnboundedSender<(copilot_sdk::SessionId, String, bool)>>,
     deny: bool,
 }
 
@@ -177,7 +177,7 @@ impl SessionHooks for RecordingHooks {
         &self,
         input: PostToolUseInput,
         ctx: HookContext,
-    ) -> Option<github_copilot_sdk::hooks::PostToolUseOutput> {
+    ) -> Option<copilot_sdk::hooks::PostToolUseOutput> {
         if let Some(post_tx) = &self.post_tx {
             let _ = post_tx.send((
                 ctx.session_id,

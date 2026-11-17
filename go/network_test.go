@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 type networkServer struct {
-	url              string
+	port             int
 	connected        chan *jsonrpc2.Client
 	sessionRequested chan struct{}
 	failing          chan struct{}
@@ -44,7 +44,7 @@ func newNetworkServer(t *testing.T, holdConnect bool) *networkServer {
 		t.Fatalf("listen: %v", err)
 	}
 	s := &networkServer{
-		url:              listener.Addr().String(),
+		port:             listener.Addr().(*net.TCPAddr).Port,
 		connected:        make(chan *jsonrpc2.Client, 1),
 		sessionRequested: make(chan struct{}),
 		failing:          make(chan struct{}),
@@ -64,7 +64,7 @@ func newNetworkServer(t *testing.T, holdConnect bool) *networkServer {
 				case <-time.After(500 * time.Millisecond):
 				}
 			}
-			return []byte(`{"ok":true,"protocolVersion":3,"version":"test"}`), nil
+			return []byte(`{"ok":true,"protocolVersion":4,"version":"test"}`), nil
 		})
 		var failingOnce sync.Once
 		respond := func(method string) (json.RawMessage, *jsonrpc2.Error) {
@@ -142,7 +142,7 @@ func (unusedExtensionLaunchProvider) Resolve(*rpc.ExtensionLaunchProviderResolve
 func startNetworkClient(t *testing.T, network *NetworkConfig) (*networkServer, *jsonrpc2.Client) {
 	t.Helper()
 	server := newNetworkServer(t, false)
-	client := NewClient(&ClientOptions{Connection: URIConnection{URL: server.url}, Network: network})
+	client := NewClient(&ClientOptions{Mode: ModeCodingAgent, Network: network, Runtime: TCPConnection{Host: "127.0.0.1", Port: server.port}})
 	t.Cleanup(client.ForceStop)
 	if err := client.Start(t.Context()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -156,7 +156,7 @@ func newNetworkPeer(t *testing.T, network *NetworkConfig) (*Client, *installatio
 	t.Helper()
 	clientConn, serverConn := net.Pipe()
 	rpcClient := jsonrpc2.NewClient(clientConn, clientConn)
-	client := NewClient(&ClientOptions{Network: network})
+	client := NewClient(&ClientOptions{Mode: ModeCodingAgent, Network: network})
 	client.client, client.RPC, client.state = rpcClient, rpc.NewServerRPC(rpcClient), stateConnected
 	client.setupNotificationHandler()
 	rpcClient.Start()
@@ -359,7 +359,7 @@ func TestClient_Network(t *testing.T) {
 	t.Run("registers the configuration NewClient received", func(t *testing.T) {
 		server := newNetworkServer(t, false)
 		network := &NetworkConfig{ResolveProxy: resolveProxy}
-		client := NewClient(&ClientOptions{Connection: URIConnection{URL: server.url}, Network: network})
+		client := NewClient(&ClientOptions{Mode: ModeCodingAgent, Network: network, Runtime: TCPConnection{Host: "127.0.0.1", Port: server.port}})
 		t.Cleanup(client.ForceStop)
 		*network = NetworkConfig{Scope: NetworkScopeRuntime, AuthenticateNegotiate: authenticateNegotiate}
 
@@ -374,10 +374,7 @@ func TestClient_Network(t *testing.T) {
 
 	t.Run("registers before sessions requested during startup", func(t *testing.T) {
 		server := newNetworkServer(t, true)
-		client := NewClient(&ClientOptions{
-			Connection: URIConnection{URL: server.url},
-			Network:    &NetworkConfig{AuthenticateNegotiate: authenticateNegotiate},
-		})
+		client := NewClient(&ClientOptions{Mode: ModeCodingAgent, Network: &NetworkConfig{AuthenticateNegotiate: authenticateNegotiate}, Runtime: TCPConnection{Host: "127.0.0.1", Port: server.port}})
 		t.Cleanup(client.ForceStop)
 
 		started := make(chan error, 1)
@@ -590,10 +587,7 @@ func TestClient_Network(t *testing.T) {
 		// For example, another connection already holds the runtime scope.
 		server := newNetworkServer(t, false)
 		server.failRequest("network.setProvider", false)
-		client := NewClient(&ClientOptions{
-			Connection: URIConnection{URL: server.url},
-			Network:    &NetworkConfig{Scope: NetworkScopeRuntime, ResolveProxy: resolveProxy},
-		})
+		client := NewClient(&ClientOptions{Mode: ModeCodingAgent, Network: &NetworkConfig{Scope: NetworkScopeRuntime, ResolveProxy: resolveProxy}, Runtime: TCPConnection{Host: "127.0.0.1", Port: server.port}})
 		t.Cleanup(client.ForceStop)
 
 		err := client.Start(t.Context())
@@ -624,14 +618,14 @@ func TestClient_Network(t *testing.T) {
 			method  string
 			options ClientOptions
 		}{
-			{"registerExtensionLaunchProvider", ClientOptions{ExtensionLaunchProvider: unusedExtensionLaunchProvider{}}},
-			{"plugins.builtin.set", ClientOptions{BuiltinPluginDirectories: []string{pluginDirectory}}},
-			{"sessionFs.setProvider", ClientOptions{SessionFS: &SessionFSConfig{
+			{"registerExtensionLaunchProvider", ClientOptions{Mode: ModeCodingAgent, Extensions: ClientExtensionOptions{LaunchProvider: unusedExtensionLaunchProvider{}}}},
+			{"plugins.builtin.set", ClientOptions{Mode: ModeCodingAgent, Plugins: ClientPluginOptions{BuiltinDirectories: []string{pluginDirectory}}}},
+			{"sessionFs.setProvider", ClientOptions{Mode: ModeCodingAgent, SessionFS: &SessionFSConfig{
 				InitialWorkingDirectory: "/",
 				SessionStatePath:        "/state",
 				Conventions:             rpc.SessionFSSetProviderConventionsPosix,
 			}}},
-			{"llmInference.setProvider", ClientOptions{RequestHandler: &CopilotRequestHandler{}}},
+			{"llmInference.setProvider", ClientOptions{Mode: ModeCodingAgent, Models: ClientModelOptions{RequestHandler: &CopilotRequestHandler{}}}},
 		}
 		for _, step := range steps {
 			for _, cancelled := range []bool{false, true} {
@@ -644,7 +638,7 @@ func TestClient_Network(t *testing.T) {
 					server := newNetworkServer(t, false)
 					server.failRequest(step.method, cancelled)
 					options := step.options
-					options.Connection = URIConnection{URL: server.url}
+					options.Runtime = TCPConnection{Host: "127.0.0.1", Port: server.port}
 					options.Network = &NetworkConfig{Scope: NetworkScopeRuntime, AuthenticateNegotiate: authenticateNegotiate}
 					client := NewClient(&options)
 					t.Cleanup(client.ForceStop)

@@ -72,33 +72,40 @@ class TestTelemetryExport:
             "fake-token-for-e2e-tests" if os.environ.get("GITHUB_ACTIONS") == "true" else None
         )
         client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=github_token,
-            telemetry=TelemetryConfig(
-                file_path=str(telemetry_path),
-                exporter_type="file",
-                source_name=source_name,
-                capture_content=True,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
             ),
+            github={"token": github_token},
+            observability={
+                "telemetry": TelemetryConfig(
+                    file_path=str(telemetry_path),
+                    exporter_type="file",
+                    source_name=source_name,
+                    capture_content=True,
+                )
+            },
         )
 
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                tools=[
-                    Tool(
-                        name=tool_name,
-                        description="Echoes a marker string for telemetry validation.",
-                        parameters={
-                            "type": "object",
-                            "properties": {"value": {"type": "string", "description": "Marker"}},
-                            "required": ["value"],
-                        },
-                        handler=echo,
-                    )
-                ],
+                permissions={"on_request": PermissionHandler.approve_all},
+                tools={
+                    "definitions": [
+                        Tool(
+                            name=tool_name,
+                            description="Echoes a marker string for telemetry validation.",
+                            parameters={
+                                "type": "object",
+                                "properties": {
+                                    "value": {"type": "string", "description": "Marker"}
+                                },
+                                "required": ["value"],
+                            },
+                            handler=echo,
+                        )
+                    ]
+                },
             )
             session_id = session.session_id
 
@@ -170,22 +177,27 @@ class TestTelemetryExport:
             "SUBAGENT_OTEL_FILE_CONTENT", encoding="utf-8"
         )
         client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token="fake-token-for-e2e-tests"
-            if os.environ.get("GITHUB_ACTIONS") == "true"
-            else None,
-            telemetry=TelemetryConfig(
-                file_path=str(telemetry_path),
-                exporter_type="file",
-                source_name=source_name,
-                capture_content=True,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
             ),
+            github={
+                "token": "fake-token-for-e2e-tests"
+                if os.environ.get("GITHUB_ACTIONS") == "true"
+                else None
+            },
+            observability={
+                "telemetry": TelemetryConfig(
+                    file_path=str(telemetry_path),
+                    exporter_type="file",
+                    source_name=source_name,
+                    capture_content=True,
+                )
+            },
         )
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             session_id = session.session_id
             try:

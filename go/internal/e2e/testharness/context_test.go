@@ -8,10 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
-	"strings"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func TestScopedClientsPreserveProcessState(t *testing.T) {
@@ -31,16 +30,16 @@ func TestScopedClientsPreserveProcessState(t *testing.T) {
 				inProcess: inProcess,
 			}
 			client := fixture.NewClient()
-			config := &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll}
+			config := &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}}
 			got := client.sessionConfig(config)
 			if got.WorkingDirectory != fixture.WorkDir || config.WorkingDirectory != "" {
 				t.Fatalf("Scoped config = %+v; original = %+v", got, config)
 			}
-			explicit := &copilot.SessionConfig{WorkingDirectory: "explicit"}
+			explicit := &copilot.CreateSessionOptions{WorkingDirectory: "explicit"}
 			if client.sessionConfig(explicit) != explicit || client.sessionConfig(nil) != nil {
 				t.Fatal("Explicit directory or invalid nil config was changed")
 			}
-			cloud := &copilot.SessionConfig{Cloud: &copilot.CloudSessionOptions{}}
+			cloud := &copilot.CreateSessionOptions{Cloud: &copilot.CloudSessionOptions{}}
 			if client.sessionConfig(cloud) != cloud {
 				t.Fatal("Cloud session was assigned a local directory")
 			}
@@ -57,7 +56,7 @@ func TestScopedClientsPreserveProcessState(t *testing.T) {
 			}
 			virtualClient.ForceStop()
 			observer := fixture.NewClient(func(options *copilot.ClientOptions) {
-				options.Connection = copilot.URIConnection{URL: "localhost:12345"}
+				options.Runtime = copilot.TCPConnection{Host: "localhost", Port: 12345}
 			})
 			if observer.sessionConfig(config) != config {
 				t.Fatal("Existing runtime was assigned the observer's local directory")
@@ -71,7 +70,7 @@ func TestScopedClientsPreserveProcessState(t *testing.T) {
 	}
 }
 
-func TestInProcessClientRejectsExplicitFixtureEnvironment(t *testing.T) {
+func TestExplicitFixtureProcessOptionsKeepSpawnedConnection(t *testing.T) {
 	t.Parallel()
 	fixture := &TestContext{
 		CLIPath:   "copilot-runtime",
@@ -80,15 +79,16 @@ func TestInProcessClientRejectsExplicitFixtureEnvironment(t *testing.T) {
 		proxy:     NewCapiProxy(),
 		inProcess: true,
 	}
-	defer func() {
-		message, ok := recover().(string)
-		if !ok || !strings.Contains(message, "environment overrides") {
-			t.Errorf("Expected explicit environment overrides to be rejected, got %q", message)
+	for _, connection := range []copilot.SpawnedStdioConnection{
+		{Path: fixture.CLIPath, Env: []string{"EXPLICIT_FIXTURE_ENV=value"}},
+		{Path: fixture.CLIPath, Env: []string{}},
+		{Path: fixture.CLIPath, WorkingDirectory: fixture.WorkDir},
+	} {
+		options := &copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: connection}
+		if fixture.shouldUseInProcess(options) {
+			t.Fatalf("Explicit process settings must keep the spawned connection: %+v", connection)
 		}
-	}()
-	fixture.NewClient(func(options *copilot.ClientOptions) {
-		options.Env = append(options.Env, "EXPLICIT_FIXTURE_ENV=value")
-	}).ForceStop()
+	}
 }
 
 func TestWithoutSigningKeys(t *testing.T) {

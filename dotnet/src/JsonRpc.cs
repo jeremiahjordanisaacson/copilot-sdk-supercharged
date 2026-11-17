@@ -15,7 +15,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Text.Unicode;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>
 /// A lightweight JSON-RPC 2.0 implementation covering only the features used
@@ -154,7 +154,9 @@ internal sealed partial class JsonRpc : IDisposable
                 Id = id,
                 Method = method,
                 Params = CreateRequestParameters(args),
-            }, JsonRpcWireContext.Default.JsonRpcRequest, cancellationToken).ConfigureAwait(false);
+            }, method is "session.create" or "session.resume"
+                ? GroupedSessionWireContext.JsonRpcRequest
+                : JsonRpcWireContext.Default.JsonRpcRequest, cancellationToken).ConfigureAwait(false);
 
             var result = await pending.Task.ConfigureAwait(false);
             LogInvokeTiming(LogLevel.Debug, null, method, id, "Succeeded", timingTimestamp);
@@ -343,6 +345,9 @@ internal sealed partial class JsonRpc : IDisposable
             _completionSource.TrySetResult();
         }
     }
+
+    private static readonly JsonRpcWireContext GroupedSessionWireContext = new(
+        new JsonSerializerOptions(JsonRpcWireContext.Default.Options) { MaxDepth = 65 });
 
     private async Task SendMessageAsync<T>(T message, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken)
     {
@@ -1054,6 +1059,13 @@ internal sealed partial class JsonRpc : IDisposable
             // Session configuration can contain custom JSON nodes that need root-level depth.
             if (arg is CopilotClient.CreateSessionRequest or CopilotClient.ResumeSessionRequest)
             {
+                // Feature groups add one level without reducing the depth available
+                // to caller-supplied JSON compared with the previous wire contract.
+                var sessionOptions = new JsonSerializerOptions(_serializerOptions)
+                {
+                    MaxDepth = (_serializerOptions.MaxDepth == 0 ? 64 : _serializerOptions.MaxDepth) + 1
+                };
+                typeInfo = sessionOptions.GetTypeInfo(arg.GetType());
                 return new RequestParameters(JsonSerializer.SerializeToElement(arg, typeInfo), null);
             }
             return new RequestParameters(arg, typeInfo);
@@ -1398,8 +1410,8 @@ internal sealed class ConnectionLostException() : IOException("The JSON-RPC conn
 /// Thrown when the remote side returns a JSON-RPC error response.
 /// </summary>
 /// <remarks>
-/// Client RPC calls wrap this exception in an <see cref="IOException"/>.
-/// Inspect its <see cref="Exception.InnerException"/> to access the remote error.
+/// Client RPC calls propagate this exception with the remote error code and data.
+/// Transport failures are reported separately as <see cref="IOException"/>.
 /// </remarks>
 /// <param name="message">The remote error message.</param>
 /// <param name="errorCode">The numeric JSON-RPC error code.</param>

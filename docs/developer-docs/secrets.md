@@ -54,7 +54,7 @@ The runtime repository's `sdk-publish-release.yml` configures `actions/setup-jav
 
 ## Rust publishing secret
 
-* **`CARGO_REGISTRY_TOKEN`**: Authentication token for publishing the Rust SDK crate to crates.io.
+* **`COPILOT_SDK_CARGO_TOKEN`**: Authentication token for publishing the Rust SDK crate to crates.io.
   * Workflows: `publish.yml`
 
 ## Secrets not managed in this repository

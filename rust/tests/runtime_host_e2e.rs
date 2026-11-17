@@ -15,9 +15,10 @@ mod callbacks;
 use std::time::Duration;
 
 use ahp_ws::WebSocketTransport;
-use github_copilot_sdk::rpc::{HostDisposeRequest, HostExitReason, HostLocalServerOptions};
-use github_copilot_sdk::{
-    AhpHostAuthentication, AhpHostOptions, Client, ResumeSessionConfig, SessionId, Transport,
+use copilot_sdk::rpc::{HostDisposeRequest, HostExitReason, HostLocalServerOptions};
+use copilot_sdk::{
+    AhpHostAuthentication, AhpHostOptions, Client, ResumeSessionOptions, RuntimeConnection,
+    TcpRuntimeOptions,
 };
 use host_support::*;
 use serde_json::{Value, json};
@@ -33,7 +34,7 @@ async fn streams_real_ahp_turn_beside_sdk_session_on_same_runtime() {
                 .create_session(
                     ctx.approve_all_session_config()
                         .with_model("claude-sonnet-5")
-                        .with_streaming(true),
+                        .with_events(|group| group.with_streaming(true)),
                 )
                 .await
                 .unwrap();
@@ -95,9 +96,11 @@ async fn streams_real_ahp_turn_beside_sdk_session_on_same_runtime() {
             );
             let observer = owner
                 .resume_session(
-                    ResumeSessionConfig::new(id.clone()).with_permission_handler(
-                        std::sync::Arc::new(github_copilot_sdk::handler::ApproveAllHandler),
-                    ),
+                    ResumeSessionOptions::new(id.clone()).with_permissions(|group| {
+                        group.with_on_request(std::sync::Arc::new(
+                            copilot_sdk::handler::ApproveAllHandler,
+                        ))
+                    }),
                 )
                 .await
                 .unwrap();
@@ -229,13 +232,13 @@ async fn same_catalog_and_other_owner_rejected_disconnect_cleans_up_without_stop
                 .create_session(ctx.approve_all_session_config())
                 .await
                 .unwrap();
-            // Startup resolves the program before selecting the external transport;
-            // use the attested artifact, not ambient CLI discovery.
-            let other = Client::start(options(ctx).with_transport(Transport::External {
-                host: "127.0.0.1".into(),
-                port,
-                connection_token: Some(RUNTIME_TOKEN.into()),
-            }))
+            let other = Client::start(ctx.client_options_with_transport(RuntimeConnection::Tcp(
+                TcpRuntimeOptions {
+                    host: "127.0.0.1".into(),
+                    port,
+                    connection_token: Some(RUNTIME_TOKEN.into()),
+                },
+            )))
             .await
             .unwrap();
             let (options, exits) = exit_observer();

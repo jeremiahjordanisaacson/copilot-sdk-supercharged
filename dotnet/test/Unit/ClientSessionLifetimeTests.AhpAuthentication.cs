@@ -4,20 +4,20 @@
 
 #if NET8_0_OR_GREATER
 using System.Text.Json;
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
     [Theory]
-    [InlineData(CopilotClientMode.CopilotCli)]
+    [InlineData(CopilotClientMode.CodingAgent)]
     [InlineData(CopilotClientMode.Empty)]
     public async Task Ahp_Requires_Authentication_Before_Connecting_In_Every_Mode(CopilotClientMode mode)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url), Mode = mode });
+        await using var client = new CopilotClient(new() { Runtime = RuntimeConnection.ForTcp(server.Host, server.Port), Mode = mode });
         await Assert.ThrowsAsync<ArgumentException>(() => client.StartAhpHostAsync(new() { LocalServer = new() }));
         await Assert.ThrowsAsync<ArgumentException>(() => client.StartAhpHostAsync(new()
         {
@@ -38,16 +38,16 @@ public sealed partial class ClientSessionLifetimeTests
     }
 
     [Theory]
-    [InlineData("github", CopilotClientMode.CopilotCli)]
-    [InlineData("none", CopilotClientMode.CopilotCli)]
-    [InlineData("custom", CopilotClientMode.CopilotCli)]
+    [InlineData("github", CopilotClientMode.CodingAgent)]
+    [InlineData("none", CopilotClientMode.CodingAgent)]
+    [InlineData("custom", CopilotClientMode.CodingAgent)]
     [InlineData("github", CopilotClientMode.Empty)]
     [InlineData("none", CopilotClientMode.Empty)]
     [InlineData("custom", CopilotClientMode.Empty)]
     public async Task Ahp_Serializes_Only_Admission_Policy_And_Preserves_Listener_Secret(string mode, CopilotClientMode clientMode)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url), Mode = clientMode });
+        await using var client = new CopilotClient(new() { Runtime = RuntimeConnection.ForTcp(server.Host, server.Port), Mode = clientMode });
         AhpHostAuthentication policy = mode switch
         {
             "github" => new AhpHostAuthentication.GitHub(),
@@ -80,7 +80,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Authentication_Validates_Decrypted_Token_And_Fails_Closed(string outcome)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var expires = DateTimeOffset.UtcNow.AddMinutes(5).ToString("O");
         var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var host = await client.StartAhpHostAsync(new()
@@ -131,7 +131,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Authentication_Cancellation_And_Disconnect_Fence_Late_Results(bool disconnect)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var validation = new TaskCompletionSource<AhpAuthenticationResult?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -172,7 +172,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Passes_Trusted_Identity_Outside_Create_And_Resume_Config(bool resume)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         CopilotSession? original = null;
         HostSessionAuthentication? authentication = null;
         await using var host = await client.StartAhpHostAsync(new()
@@ -215,7 +215,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Rejects_Trusted_Authentication_That_Does_Not_Match_Host_Policy(string policy, string mode, string? identity)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var invoked = false;
         await using var host = await client.StartAhpHostAsync(new()
         {

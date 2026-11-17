@@ -8,6 +8,7 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 
+use copilot_sdk::{OwnedRuntimeOptions, RuntimeConnection, SpawnedProcessOptions};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -15,16 +16,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use github_copilot_sdk::extension_launch_provider::{
+use copilot_sdk::extension_launch_provider::{
     ExtensionLaunchProfile, ExtensionLaunchProvider, ExtensionLaunchProviderResolveRequest,
     ExtensionLaunchProviderResolveResult,
 };
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::rpc::{
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::rpc::{
     ExtensionSource, ExtensionStatus, ExtensionsDisableRequest, ExtensionsEnableRequest,
     ToolResult, ToolResultType, ToolsExecuteRequest,
 };
-use github_copilot_sdk::{CliProgram, Client, ClientOptions, SessionConfig, Transport};
+use copilot_sdk::{CliProgram, Client, ClientOptions, CreateSessionOptions};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
@@ -43,7 +44,7 @@ impl ExtensionLaunchProvider for RecordingProvider {
     async fn resolve(
         &self,
         request: ExtensionLaunchProviderResolveRequest,
-    ) -> github_copilot_sdk::Result<ExtensionLaunchProviderResolveResult> {
+    ) -> copilot_sdk::Result<ExtensionLaunchProviderResolveResult> {
         self.requests.send(request.clone()).unwrap();
         Ok(ExtensionLaunchProviderResolveResult {
             launch: Some(ExtensionLaunchProfile {
@@ -99,27 +100,31 @@ async fn real_wrapper_installs_and_runs_hostless_extensions() {
     let state_path = home.path().join("extension-state.jsonl");
     let (request_tx, mut request_rx) = mpsc::unbounded_channel();
 
-    let options = ClientOptions::new()
-        .with_program(CliProgram::Path(runtime_path))
-        .with_transport(Transport::Stdio)
-        .with_cwd(workspace.path())
-        .with_base_directory(home.path())
-        .with_use_logged_in_user(false)
-        .with_env_remove(["COPILOT_CLI_DIST_DIR"])
-        .with_extension_launch_provider(RecordingProvider {
-            executable: PathBuf::from(env!("CARGO_BIN_EXE_copilot-extension-test-fixture"))
-                .canonicalize()
-                .unwrap(),
-            state_path: state_path.clone(),
-            requests: request_tx,
+    let options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+        .with_runtime(RuntimeConnection::for_spawned_stdio(
+            SpawnedProcessOptions::new()
+                .with_program(CliProgram::Path(runtime_path))
+                .with_working_directory(workspace.path())
+                .with_env_remove(["COPILOT_CLI_DIST_DIR"])
+                .with_owned(|_| OwnedRuntimeOptions::new().with_base_directory(home.path())),
+        ))
+        .with_github(|group| group.with_use_logged_in_user(false))
+        .with_extensions(|group| {
+            group.with_launch_provider(RecordingProvider {
+                executable: PathBuf::from(env!("CARGO_BIN_EXE_copilot-extension-test-fixture"))
+                    .canonicalize()
+                    .unwrap(),
+                state_path: state_path.clone(),
+                requests: request_tx,
+            })
         });
     let client = Client::start(options).await.unwrap();
     let session = client
         .create_session(
-            SessionConfig::default()
-                .with_request_extensions(true)
-                .with_extension_sdk_path(sdk_path.to_string_lossy())
-                .with_permission_handler(Arc::new(ApproveAllHandler)),
+            CreateSessionOptions::default()
+                .with_extensions(|group| group.with_enabled(true))
+                .with_extensions(|group| group.with_sdk_path(sdk_path.to_string_lossy()))
+                .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler))),
         )
         .await
         .unwrap();

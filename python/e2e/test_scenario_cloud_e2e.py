@@ -38,8 +38,8 @@ class TestScenarioCloud:
         try:
             session = await client.create_session(
                 session_id="scenario-session",
-                on_event=on_event,
-                on_permission_request=PermissionHandler.approve_all,
+                events={"on_event": on_event},
+                permissions={"on_request": PermissionHandler.approve_all},
             )
             try:
                 await session.rpc.remote.notify_steerable_changed(
@@ -92,8 +92,8 @@ class TestScenarioCloud:
                         branch="scenario-branch",
                     )
                 ),
-                on_event=on_event,
-                on_permission_request=PermissionHandler.approve_all,
+                events={"on_event": on_event},
+                permissions={"on_request": PermissionHandler.approve_all},
             )
             try:
                 await asyncio.wait_for(session_start_received.wait(), timeout=5)
@@ -118,8 +118,7 @@ class TestScenarioCloud:
                 ConnectRemoteSessionParams(session_id="remote-resource-id")
             )
             session = await client.resume_session(
-                connection.session_id,
-                on_permission_request=PermissionHandler.approve_all,
+                connection.session_id, permissions={"on_request": PermissionHandler.approve_all}
             )
             try:
                 assert connection.session_id == "runtime-session-id"

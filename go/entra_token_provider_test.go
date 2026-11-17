@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func entraHarness(t *testing.T, provider EntraTokenProvider) (*Client, *installationConfirmationPeer) {
@@ -22,7 +22,7 @@ func entraHarness(t *testing.T, provider EntraTokenProvider) (*Client, *installa
 	transport := jsonrpc2.NewClient(local, local)
 	client := &Client{
 		client:               transport,
-		options:              ClientOptions{Entra: &EntraAuthOptions{ClientID: "host-client", TokenProvider: provider}},
+		options:              *(&ClientOptions{Mode: ModeCodingAgent, Entra: &EntraAuthOptions{ClientID: "host-client", TokenProvider: provider}}).normalize(),
 		sessions:             make(map[string]*Session),
 		gitHubTokenProviders: make(map[string]GitHubTokenProvider),
 		state:                stateConnected,

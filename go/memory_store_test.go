@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
 )
 
 func TestMemoryStoreRegisteredBeforeOpen(t *testing.T) {
@@ -47,9 +47,9 @@ func TestMemoryStoreRegisteredBeforeOpen(t *testing.T) {
 			var session *Session
 			var err error
 			if method == "session.create" {
-				session, err = client.CreateSession(t.Context(), &SessionConfig{Memory: memory, StoreMemory: storeMemory})
+				session, err = client.CreateSession(t.Context(), &CreateSessionOptions{State: SessionStateOptions{Memory: memory, StoreMemory: storeMemory}})
 			} else {
-				session, err = client.ResumeSession(t.Context(), "memory-resume", &ResumeSessionConfig{Memory: memory, StoreMemory: storeMemory})
+				session, err = client.ResumeSession(t.Context(), "memory-resume", &ResumeSessionOptions{State: SessionStateOptions{Memory: memory, StoreMemory: storeMemory}})
 			}
 			if err != nil {
 				t.Fatalf("%s failed: %v", method, err)
@@ -59,10 +59,10 @@ func TestMemoryStoreRegisteredBeforeOpen(t *testing.T) {
 			if err := json.Unmarshal(<-openParams, &payload); err != nil {
 				t.Fatal(err)
 			}
-			if payload["hasMemoryStore"] != true {
-				t.Fatalf("hasMemoryStore = %v, want true", payload["hasMemoryStore"])
+			if sessionWireGroup(payload, "state")["hasMemoryStore"] != true {
+				t.Fatalf("hasMemoryStore = %v, want true", sessionWireGroup(payload, "state")["hasMemoryStore"])
 			}
-			wire, _ := json.Marshal(payload["memory"])
+			wire, _ := json.Marshal(sessionWireGroup(payload, "state")["memory"])
 			if string(wire) != `{"enabled":true}` {
 				t.Fatalf("memory on the wire = %s, want only enabled", wire)
 			}
@@ -78,10 +78,10 @@ func TestMemoryStoreRequiresEnabledBeforeConnect(t *testing.T) {
 	const want = "StoreMemory requires Memory.Enabled to be true."
 
 	client := &Client{}
-	if _, err := client.CreateSession(t.Context(), &SessionConfig{StoreMemory: storeMemory}); err == nil || err.Error() != want {
+	if _, err := client.CreateSession(t.Context(), &CreateSessionOptions{State: SessionStateOptions{StoreMemory: storeMemory}}); err == nil || err.Error() != want {
 		t.Fatalf("CreateSession error = %v, want %q", err, want)
 	}
-	if _, err := client.ResumeSession(t.Context(), "memory-resume", &ResumeSessionConfig{Memory: &MemoryConfiguration{}, StoreMemory: storeMemory}); err == nil || err.Error() != want {
+	if _, err := client.ResumeSession(t.Context(), "memory-resume", &ResumeSessionOptions{State: SessionStateOptions{Memory: &MemoryConfiguration{}, StoreMemory: storeMemory}}); err == nil || err.Error() != want {
 		t.Fatalf("ResumeSession error = %v, want %q", err, want)
 	}
 	if client.client != nil {
@@ -91,11 +91,7 @@ func TestMemoryStoreRequiresEnabledBeforeConnect(t *testing.T) {
 
 func TestMemoryStoreRejectsCloudBeforeConnect(t *testing.T) {
 	client := &Client{}
-	_, err := client.CreateSession(t.Context(), &SessionConfig{
-		Cloud:       &CloudSessionOptions{},
-		Memory:      &MemoryConfiguration{Enabled: true},
-		StoreMemory: func(context.Context, StoredMemory) error { return nil },
-	})
+	_, err := client.CreateSession(t.Context(), &CreateSessionOptions{Cloud: &CloudSessionOptions{}, State: SessionStateOptions{Memory: &MemoryConfiguration{Enabled: true}, StoreMemory: func(context.Context, StoredMemory) error { return nil }}})
 	if err == nil || err.Error() != "Memory stores are not supported for cloud sessions." {
 		t.Fatalf("CreateSession error = %v", err)
 	}

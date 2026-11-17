@@ -8,9 +8,9 @@ using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
-#pragma warning disable GHCP001 // The LLM inference surface is intentionally experimental.
+#pragma warning disable MCPSDK001 // The LLM inference surface is intentionally experimental.
 
 /// <summary>
 /// A <see cref="CopilotRequestHandler"/> subclass for e2e tests that records every

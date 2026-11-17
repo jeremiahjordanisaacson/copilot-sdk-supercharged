@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 // TestSessionEventLoopLeakE2E is a regression test for the goroutine leak fixed
@@ -34,10 +34,7 @@ func TestSessionEventLoopLeakE2E(t *testing.T) {
 		t.Cleanup(func() { client.ForceStop() })
 
 		createFailing := func() {
-			if _, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-				OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-				GitHubToken:         "invalid-token",
-			}); err == nil {
+			if _, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Token: "invalid-token"}}); err == nil {
 				t.Fatal("expected CreateSession to fail with an invalid token")
 			}
 		}
@@ -56,9 +53,7 @@ func TestSessionEventLoopLeakE2E(t *testing.T) {
 		t.Cleanup(func() { client.ForceStop() })
 
 		resumeNonExistent := func() {
-			if _, err := client.ResumeSession(t.Context(), "non-existent-leak-check-session", &copilot.ResumeSessionConfig{
-				OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			}); err == nil {
+			if _, err := client.ResumeSession(t.Context(), "non-existent-leak-check-session", &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}}); err == nil {
 				t.Fatal("expected ResumeSession for a non-existent session to fail")
 			}
 		}

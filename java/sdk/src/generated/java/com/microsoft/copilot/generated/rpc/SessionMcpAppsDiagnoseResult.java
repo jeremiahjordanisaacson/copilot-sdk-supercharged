@@ -1,0 +1,89 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: api.schema.json
+
+package com.microsoft.copilot.generated.rpc;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.microsoft.copilot.CopilotExperimental;
+import javax.annotation.processing.Generated;
+
+/**
+ * Diagnostic snapshot of MCP Apps wiring for the named server.
+ *
+ * @apiNote This method is experimental and may change in a future version.
+ * @since 1.0.0
+ */
+@CopilotExperimental
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+@JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonIgnoreProperties(ignoreUnknown = true)
+public record SessionMcpAppsDiagnoseResult(
+    /** Capability negotiation snapshot */
+    @JsonProperty("capability") McpAppsDiagnoseCapability capability,
+    /** What the server returned for this session */
+    @JsonProperty("server") McpAppsDiagnoseServer server
+) {
+
+    /**
+     * Creates a record positionally.
+     * Use {@link #builder()} for named construction.
+     */
+    public SessionMcpAppsDiagnoseResult {}
+
+    /**
+     * Returns a named builder.
+     * @return a new builder
+     * @since 2.0.0
+     */
+    public static Builder builder() { return new Builder(); }
+
+    /**
+     * Named construction for this record.
+     * @since 2.0.0
+     */
+    public static final class Builder {
+        private Builder() {}
+        private McpAppsDiagnoseCapability capability;
+        private McpAppsDiagnoseServer server;
+
+        /**
+         * Sets the {@code capability} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder capability(McpAppsDiagnoseCapability value) {
+            this.capability = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code server} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder server(McpAppsDiagnoseServer value) {
+            this.server = value;
+            return this;
+        }
+
+        /**
+         * Builds a record after checking required property presence.
+         * @return a new record
+         * @throws IllegalStateException if a required property is missing
+         * @since 2.0.0
+         */
+        public SessionMcpAppsDiagnoseResult build() {
+            if (capability == null) throw new IllegalStateException("Missing required property: capability");
+            if (server == null) throw new IllegalStateException("Missing required property: server");
+            return new SessionMcpAppsDiagnoseResult(capability, server);
+        }
+    }
+}

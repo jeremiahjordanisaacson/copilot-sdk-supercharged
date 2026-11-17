@@ -12,19 +12,27 @@ Set `maxAiCredits` to the AI Credits soft cap for the session's current accounti
 <!-- docs-validate: strict -->
 <!-- docs-validate: hidden -->
 ```typescript
-import { approveAll } from "@github/copilot-sdk";
+import { approveAll } from "@microsoft/copilot-sdk";
 
 const session = await client.createSession({
-    onPermissionRequest: approveAll,
-    sessionLimits: {
-        maxAiCredits: 30,
+    permissions: {
+        onRequest: approveAll,
+    },
+    execution: {
+        limits: {
+            maxAiCredits: 30,
+        },
     },
 });
 
 const resumed = await client.resumeSession(session.sessionId, {
-    onPermissionRequest: approveAll,
-    sessionLimits: {
-        maxAiCredits: 30,
+    permissions: {
+        onRequest: approveAll,
+    },
+    execution: {
+        limits: {
+            maxAiCredits: 30,
+        },
     },
 });
 ```
@@ -32,16 +40,24 @@ const resumed = await client.resumeSession(session.sessionId, {
 
 ```typescript
 const session = await client.createSession({
-    onPermissionRequest: approveAll,
-    sessionLimits: {
-        maxAiCredits: 30,
+    permissions: {
+        onRequest: approveAll,
+    },
+    execution: {
+        limits: {
+            maxAiCredits: 30,
+        },
     },
 });
 
 const resumed = await client.resumeSession(session.sessionId, {
-    onPermissionRequest: approveAll,
-    sessionLimits: {
-        maxAiCredits: 30,
+    permissions: {
+        onRequest: approveAll,
+    },
+    execution: {
+        limits: {
+            maxAiCredits: 30,
+        },
     },
 });
 ```
@@ -55,19 +71,24 @@ const resumed = await client.resumeSession(session.sessionId, {
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
+
 async def main(client: CopilotClient):
     session = await client.create_session(
-        on_permission_request=PermissionHandler.approve_all,
-        session_limits={
-            "max_ai_credits": 30,
+        permissions={"on_request": PermissionHandler.approve_all},
+        execution={
+            "limits": {
+                "max_ai_credits": 30,
+            }
         },
     )
 
     resumed = await client.resume_session(
         session.session_id,
-        on_permission_request=PermissionHandler.approve_all,
-        session_limits={
-            "max_ai_credits": 30,
+        permissions={"on_request": PermissionHandler.approve_all},
+        execution={
+            "limits": {
+                "max_ai_credits": 30,
+            }
         },
     )
 ```
@@ -75,17 +96,21 @@ async def main(client: CopilotClient):
 
 ```python
 session = await client.create_session(
-    on_permission_request=PermissionHandler.approve_all,
-    session_limits={
-        "max_ai_credits": 30,
+    permissions={"on_request": PermissionHandler.approve_all},
+    execution={
+        "limits": {
+            "max_ai_credits": 30,
+        }
     },
 )
 
 resumed = await client.resume_session(
     session.session_id,
-    on_permission_request=PermissionHandler.approve_all,
-    session_limits={
-        "max_ai_credits": 30,
+    permissions={"on_request": PermissionHandler.approve_all},
+    execution={
+        "limits": {
+            "max_ai_credits": 30,
+        }
     },
 )
 ```
@@ -101,25 +126,33 @@ package main
 import (
 	"context"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func main() {
 	ctx := context.Background()
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		SessionLimits: &rpc.SessionLimitsConfig{
-			MaxAiCredits: copilot.Float64(30),
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: copilot.PermissionHandler.ApproveAll,
+		},
+		Execution: copilot.SessionExecutionOptions{
+			Limits: &rpc.SessionLimitsConfig{
+				MaxAiCredits: copilot.Float64(30),
+			},
 		},
 	})
 
-	resumed, err := client.ResumeSession(ctx, session.SessionID, &copilot.ResumeSessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		SessionLimits: &rpc.SessionLimitsConfig{
-			MaxAiCredits: copilot.Float64(30),
+	resumed, err := client.ResumeSession(ctx, session.SessionID, &copilot.ResumeSessionOptions{
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: copilot.PermissionHandler.ApproveAll,
+		},
+		Execution: copilot.SessionExecutionOptions{
+			Limits: &rpc.SessionLimitsConfig{
+				MaxAiCredits: copilot.Float64(30),
+			},
 		},
 	})
 	_, _ = resumed, err
@@ -128,19 +161,28 @@ func main() {
 <!-- /docs-validate: hidden -->
 
 ```go
-session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-	OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	SessionLimits: &rpc.SessionLimitsConfig{
-		MaxAiCredits: copilot.Float64(30),
+session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	Permissions: copilot.SessionPermissionOptions{
+		OnRequest: copilot.PermissionHandler.ApproveAll,
+	},
+	Execution: copilot.SessionExecutionOptions{
+		Limits: &rpc.SessionLimitsConfig{
+			MaxAiCredits: copilot.Float64(30),
+		},
 	},
 })
 
-resumed, err := client.ResumeSession(ctx, session.SessionID, &copilot.ResumeSessionConfig{
-	OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	SessionLimits: &rpc.SessionLimitsConfig{
-		MaxAiCredits: copilot.Float64(30),
+resumed, err := client.ResumeSession(ctx, session.SessionID, &copilot.ResumeSessionOptions{
+	Permissions: copilot.SessionPermissionOptions{
+		OnRequest: copilot.PermissionHandler.ApproveAll,
+	},
+	Execution: copilot.SessionExecutionOptions{
+		Limits: &rpc.SessionLimitsConfig{
+			MaxAiCredits: copilot.Float64(30),
+		},
 	},
 })
+
 ```
 
 </details>
@@ -149,51 +191,74 @@ resumed, err := client.ResumeSession(ctx, session.SessionID, &copilot.ResumeSess
 
 <!-- docs-validate: hidden -->
 ```csharp
-await using var client = new CopilotClient();
+await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+#pragma warning disable MCPSDK001 // Session limits are experimental.
 
-#pragma warning disable GHCP001 // Session limits are experimental.
-var session = await client.CreateSessionAsync(new SessionConfig
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    OnPermissionRequest = PermissionHandler.ApproveAll,
-    SessionLimits = new SessionLimitsConfig
+    Permissions = new SessionPermissionOptions
     {
-        MaxAiCredits = 30,
+        OnRequest = PermissionHandler.ApproveAll
     },
+    Execution = new SessionExecutionOptions
+    {
+        Limits = new SessionLimitsConfig
+        {
+            MaxAiCredits = 30,
+        }
+    }
 });
-
-var resumed = await client.ResumeSessionAsync(session.SessionId, new ResumeSessionConfig
+var resumed = await client.ResumeSessionAsync(session.SessionId, new ResumeSessionOptions
 {
-    OnPermissionRequest = PermissionHandler.ApproveAll,
-    SessionLimits = new SessionLimitsConfig
+    Permissions = new SessionPermissionOptions
     {
-        MaxAiCredits = 30,
+        OnRequest = PermissionHandler.ApproveAll
     },
+    Execution = new SessionExecutionOptions
+    {
+        Limits = new SessionLimitsConfig
+        {
+            MaxAiCredits = 30,
+        }
+    }
 });
 ```
 <!-- /docs-validate: hidden -->
 
 ```csharp
-#pragma warning disable GHCP001 // Session limits are experimental.
-var session = await client.CreateSessionAsync(new SessionConfig
-{
-    OnPermissionRequest = PermissionHandler.ApproveAll,
-    SessionLimits = new SessionLimitsConfig
-    {
-        MaxAiCredits = 30,
-    },
-});
+#pragma warning disable MCPSDK001 // Session limits are experimental.
 
-var resumed = await client.ResumeSessionAsync(session.SessionId, new ResumeSessionConfig
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    OnPermissionRequest = PermissionHandler.ApproveAll,
-    SessionLimits = new SessionLimitsConfig
+    Permissions = new SessionPermissionOptions
     {
-        MaxAiCredits = 30,
+        OnRequest = PermissionHandler.ApproveAll
     },
+    Execution = new SessionExecutionOptions
+    {
+        Limits = new SessionLimitsConfig
+        {
+            MaxAiCredits = 30,
+        }
+    }
+});
+var resumed = await client.ResumeSessionAsync(session.SessionId, new ResumeSessionOptions
+{
+    Permissions = new SessionPermissionOptions
+    {
+        OnRequest = PermissionHandler.ApproveAll
+    },
+    Execution = new SessionExecutionOptions
+    {
+        Limits = new SessionLimitsConfig
+        {
+            MaxAiCredits = 30,
+        }
+    }
 });
 ```
 
-The .NET `SessionLimits` property raises the `GHCP001` experimental diagnostic. Suppress it with `#pragma warning disable GHCP001` or a project-level `<NoWarn>GHCP001</NoWarn>`.
+The .NET `SessionLimits` property raises the `MCPSDK001` experimental diagnostic. Suppress it with `#pragma warning disable MCPSDK001` or a project-level `<NoWarn>MCPSDK001</NoWarn>`.
 
 </details>
 <details>
@@ -201,26 +266,40 @@ The .NET `SessionLimits` property raises the `GHCP001` experimental diagnostic. 
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.CopilotSession;
-import com.github.copilot.generated.rpc.SessionLimitsConfig;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.CopilotSession;
+import com.microsoft.copilot.generated.rpc.SessionLimitsConfig;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
+import com.microsoft.copilot.rpc.PermissionHandler;
+import com.microsoft.copilot.rpc.ResumeSessionOptions;
+import com.microsoft.copilot.rpc.SessionExecutionOptions;
+import com.microsoft.copilot.rpc.SessionPermissionOptions;
 
 public class SessionLimitsExample {
     public static void main(String[] args) throws Exception {
-        try (var client = new CopilotClient()) {
-            client.start().get();
+        try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
+            client
+                    .start()
+                    .get();
 
             CopilotSession session = client
-                    .createSession(new SessionConfig()
-                            .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                            .setSessionLimits(new SessionLimitsConfig(30.0)))
+                    .createSession(new CreateSessionOptions()
+                            .setPermissions(new SessionPermissionOptions()
+                                    .setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setExecution(new SessionExecutionOptions()
+                                    .setLimits(new SessionLimitsConfig(30.0))))
                     .get();
 
             CopilotSession resumed = client
-                    .resumeSession(session.getSessionId(), new ResumeSessionConfig()
-                            .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                            .setSessionLimits(new SessionLimitsConfig(30.0)))
+                    .resumeSession(session
+                            .getSessionId(),
+                            new ResumeSessionOptions()
+                                    .setPermissions(new SessionPermissionOptions()
+                                            .setOnRequest(PermissionHandler.APPROVE_ALL))
+                                    .setExecution(new SessionExecutionOptions()
+                                            .setLimits(new SessionLimitsConfig(30.0))))
                     .get();
         }
     }
@@ -229,18 +308,29 @@ public class SessionLimitsExample {
 <!-- /docs-validate: hidden -->
 
 ```java
-import com.github.copilot.generated.rpc.SessionLimitsConfig;
+import com.microsoft.copilot.generated.rpc.SessionLimitsConfig;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
+import com.microsoft.copilot.rpc.PermissionHandler;
+import com.microsoft.copilot.rpc.ResumeSessionOptions;
+import com.microsoft.copilot.rpc.SessionExecutionOptions;
+import com.microsoft.copilot.rpc.SessionPermissionOptions;
 
 CopilotSession session = client
-        .createSession(new SessionConfig()
-                .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                .setSessionLimits(new SessionLimitsConfig(30.0)))
+        .createSession(new CreateSessionOptions()
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL))
+                .setExecution(new SessionExecutionOptions()
+                        .setLimits(new SessionLimitsConfig(30.0))))
         .get();
 
 CopilotSession resumed = client
-        .resumeSession(session.getSessionId(), new ResumeSessionConfig()
-                .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                .setSessionLimits(new SessionLimitsConfig(30.0)))
+        .resumeSession(session
+                .getSessionId(),
+                new ResumeSessionOptions()
+                        .setPermissions(new SessionPermissionOptions()
+                                .setOnRequest(PermissionHandler.APPROVE_ALL))
+                        .setExecution(new SessionExecutionOptions()
+                                .setLimits(new SessionLimitsConfig(30.0))))
         .get();
 ```
 
@@ -255,17 +345,17 @@ let limits = SessionLimitsConfig {
 
 let session = client
     .create_session(
-        SessionConfig::default()
-            .approve_all_permissions()
-            .with_session_limits(limits.clone()),
+        CreateSessionOptions::default()
+            .with_permissions(|__sdk_group| __sdk_group.approve_all_permissions())
+            .with_execution(|__sdk_group| __sdk_group.with_limits(limits.clone())),
     )
     .await?;
 
 let resumed = client
     .resume_session(
-        ResumeSessionConfig::new(session.id().clone())
-            .approve_all_permissions()
-            .with_session_limits(limits),
+        ResumeSessionOptions::new(session.id().clone())
+            .with_permissions(|__sdk_group| __sdk_group.approve_all_permissions())
+            .with_execution(|__sdk_group| __sdk_group.with_limits(limits)),
     )
     .await?;
 ```
@@ -292,9 +382,13 @@ Use the generated event types for the SDK language you are using. For example, T
 <!-- docs-validate: strict -->
 <!-- docs-validate: hidden -->
 ```typescript
-import { approveAll } from "@github/copilot-sdk";
+import { approveAll } from "@microsoft/copilot-sdk";
 
-const session = await client.createSession({ onPermissionRequest: approveAll });
+const session = await client.createSession({
+    permissions: {
+        onRequest: approveAll,
+    },
+});
 
 await session.rpc.eventLog.registerInterest({
     eventType: "session_limits_exhausted.requested",

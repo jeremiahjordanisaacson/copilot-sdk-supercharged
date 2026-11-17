@@ -84,8 +84,7 @@ class TestSkillProviders:
             ]
         )
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            skill_provider=provider,
+            permissions={"on_request": PermissionHandler.approve_all}, skills={"provider": provider}
         )
 
         try:
@@ -139,9 +138,8 @@ class TestSkillProviders:
             ]
         )
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            skill_directories=[skills_dir],
-            skill_provider=provider,
+            permissions={"on_request": PermissionHandler.approve_all},
+            skills={"directories": [skills_dir], "provider": provider},
         )
 
         try:
@@ -187,8 +185,7 @@ class TestSkillProviders:
             ]
         )
         first = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            skill_provider=original,
+            permissions={"on_request": PermissionHandler.approve_all}, skills={"provider": original}
         )
         session_id = first.session_id
         try:
@@ -203,8 +200,8 @@ class TestSkillProviders:
 
         session = await ctx.client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            skill_provider=replacement,
+            permissions={"on_request": PermissionHandler.approve_all},
+            skills={"provider": replacement},
         )
 
         try:
@@ -243,9 +240,9 @@ class TestSkillProviders:
         )
         events: list[SessionEvent] = []
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            skill_provider=provider,
-            on_event=events.append,
+            permissions={"on_request": PermissionHandler.approve_all},
+            skills={"provider": provider},
+            events={"on_event": events.append},
         )
 
         try:
@@ -279,9 +276,9 @@ class TestSkillProviders:
         )
         events: list[SessionEvent] = []
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            skill_provider=provider,
-            on_event=events.append,
+            permissions={"on_request": PermissionHandler.approve_all},
+            skills={"provider": provider},
+            events={"on_event": events.append},
         )
 
         try:
@@ -308,9 +305,8 @@ class TestSkillProviders:
             [skill("dormant-lookup", "Never listed.", "Never read.\n")]
         )
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            enable_skills=False,
-            skill_provider=provider,
+            permissions={"on_request": PermissionHandler.approve_all},
+            skills={"enabled": False, "provider": provider},
         )
 
         try:
@@ -327,8 +323,7 @@ class TestSkillProviders:
             [skill("unbound-lookup", "Reports the unbound lookup word.", "Unbound.\n")]
         )
         first = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            skill_provider=provider,
+            permissions={"on_request": PermissionHandler.approve_all}, skills={"provider": provider}
         )
         before = await first.rpc.skills.list()
         assert any(s.name == "unbound-lookup" for s in before.skills)
@@ -336,8 +331,7 @@ class TestSkillProviders:
 
         # Resume while the provider is still bound so the unbind is observable.
         session = await ctx.client.resume_session(
-            first.session_id,
-            on_permission_request=PermissionHandler.approve_all,
+            first.session_id, permissions={"on_request": PermissionHandler.approve_all}
         )
 
         try:
@@ -369,8 +363,8 @@ class TestSkillProviders:
                 return None
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            skill_provider=BlockingSkillProvider(),
+            permissions={"on_request": PermissionHandler.approve_all},
+            skills={"provider": BlockingSkillProvider()},
         )
 
         # The list RPC fails once the binding is removed; only the provider's
@@ -391,9 +385,9 @@ class TestSkillProviders:
             ValueError, match="Skill providers are not supported for cloud sessions."
         ):
             await ctx.client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
                 cloud=CloudSessionOptions(),
-                skill_provider=provider,
+                permissions={"on_request": PermissionHandler.approve_all},
+                skills={"provider": provider},
             )
 
         assert provider.calls == []

@@ -1,17 +1,18 @@
+use copilot_sdk::{RuntimeConnection, SpawnedTcpRuntimeOptions, TcpRuntimeOptions};
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::rpc::HandlePendingToolCallRequest;
-use github_copilot_sdk::session_events::{
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::rpc::HandlePendingToolCallRequest;
+use copilot_sdk::session_events::{
     AssistantMessageData, ExternalToolRequestedData, SessionEventType, SessionResumeData,
 };
-use github_copilot_sdk::tool::ToolHandler;
-use github_copilot_sdk::{
-    Client, Error, ResumeSessionConfig, SessionConfig, SessionId, Tool, ToolInvocation, ToolResult,
-    Transport,
+use copilot_sdk::tool::ToolHandler;
+use copilot_sdk::{
+    Client, CreateSessionOptions, Error, ResumeSessionOptions, SessionId, Tool, ToolInvocation,
+    ToolResult,
 };
 use serde_json::json;
 use tokio::sync::{Mutex, mpsc, oneshot};
@@ -52,12 +53,12 @@ async fn should_continue_pending_external_tool_request_after_resume() {
                 phase("create first session");
                 let session1 = suspended_client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_tools(vec![
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+                            .with_tools(|group| group.with_definitions(vec![
                                 BlockingExternalTool::definition().with_handler(router),
-                            ]),
+                            ])),
                     )
                     .await
                     .expect("create session");
@@ -212,27 +213,34 @@ async fn should_report_continuependingwork_true_in_resume_event() {
     .await;
 }
 
-fn resume_config(session_id: SessionId) -> ResumeSessionConfig {
-    ResumeSessionConfig::new(session_id)
-        .with_github_token(DEFAULT_TEST_TOKEN)
-        .with_permission_handler(Arc::new(ApproveAllHandler))
+fn resume_config(session_id: SessionId) -> ResumeSessionOptions {
+    ResumeSessionOptions::new(session_id)
+        .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
 }
 
 async fn start_tcp_server(ctx: &E2eContext, port: u16) -> Client {
-    Client::start(ctx.client_options_with_transport(Transport::Tcp {
-        port,
-        connection_token: Some(SHARED_TOKEN.to_string()),
-    }))
+    Client::start(
+        ctx.client_options_with_transport(RuntimeConnection::SpawnedTcp(
+            SpawnedTcpRuntimeOptions {
+                process: Default::default(),
+                port,
+                connection_token: Some(SHARED_TOKEN.to_string()),
+            },
+        )),
+    )
     .await
     .expect("start TCP server client")
 }
 
 async fn start_external_client(ctx: &E2eContext, port: u16) -> Client {
-    Client::start(ctx.client_options_with_transport(Transport::External {
-        host: "127.0.0.1".to_string(),
-        port,
-        connection_token: Some(SHARED_TOKEN.to_string()),
-    }))
+    Client::start(
+        ctx.client_options_with_transport(RuntimeConnection::Tcp(TcpRuntimeOptions {
+            host: "127.0.0.1".to_string(),
+            port,
+            connection_token: Some(SHARED_TOKEN.to_string()),
+        })),
+    )
     .await
     .expect("start external client")
 }

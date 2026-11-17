@@ -24,7 +24,7 @@ const PANICKED_HANDLER_MESSAGE: &str = "Extension launch provider panicked";
 /// Resolves process launch profiles for extension entrypoints discovered by the runtime.
 ///
 /// Configure an implementation with
-/// [`ClientOptions::with_extension_launch_provider`](crate::ClientOptions::with_extension_launch_provider).
+/// [`ClientExtensionOptions::with_launch_provider`](crate::ClientExtensionOptions::with_launch_provider).
 /// The SDK registers the provider before [`Client::start`](crate::Client::start)
 /// returns, so extension resolution cannot race session creation.
 ///

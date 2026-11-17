@@ -1,0 +1,60 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: api.schema.json
+
+package com.microsoft.copilot.generated.rpc;
+
+import com.microsoft.copilot.CopilotExperimental;
+import java.util.concurrent.CompletableFuture;
+import javax.annotation.processing.Generated;
+
+/**
+ * API methods for the {@code completions} namespace.
+ *
+ * @since 1.0.0
+ */
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+public final class SessionCompletionsApi {
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = RpcMapper.INSTANCE;
+
+    private final RpcCaller caller;
+    private final String sessionId;
+
+    /** @param caller the RPC transport function */
+    SessionCompletionsApi(RpcCaller caller, String sessionId) {
+        this.caller = caller;
+        this.sessionId = sessionId;
+    }
+
+    /**
+     * Gets the characters that should trigger host-driven completions for the session. Empty disables host-driven completions (e.g. local sessions, or a relay host that does not advertise them).
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SessionCompletionsGetTriggerCharactersResult> getTriggerCharacters() {
+        return caller.invoke("session.completions.getTriggerCharacters", java.util.Map.of("sessionId", this.sessionId), SessionCompletionsGetTriggerCharactersResult.class);
+    }
+
+    /**
+     * Requests host-driven completion items for the current composer input. Returns an empty list when the host has no items or does not support completions.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SessionCompletionsRequestResult> request(SessionCompletionsRequestParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.completions.request", _p, SessionCompletionsRequestResult.class);
+    }
+
+}

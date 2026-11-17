@@ -1,4 +1,4 @@
-module github.com/github/copilot-sdk/go
+module github.com/microsoft/copilot-sdk/go/v2
 
 go 1.26.0
 

@@ -48,8 +48,13 @@ async def test_typed_identity_and_resource_acquisition_does_not_serialize_callba
             access_token="host-resource-token",
         )
 
-    options = EntraAuthOptions("host-client", provider, mats_app_name=mats_app_name)
-    expected = {"clientId": "host-client"}
+    options = EntraAuthOptions(
+        "host-client",
+        provider,
+        mats_app_name=mats_app_name,
+        one_auth_application_id="host-native-descriptor",
+    )
+    expected = {"clientId": "host-client", "oneAuthApplicationId": "host-native-descriptor"}
     if mats_app_name is not None:
         expected["matsAppName"] = mats_app_name
     assert options.to_dict() == expected

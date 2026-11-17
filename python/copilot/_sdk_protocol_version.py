@@ -6,7 +6,7 @@ SDK Protocol Version for the Copilot SDK.
 This must match the version expected by the Copilot runtime server.
 """
 
-SDK_PROTOCOL_VERSION = 3
+SDK_PROTOCOL_VERSION = 4
 
 
 def get_sdk_protocol_version() -> int:

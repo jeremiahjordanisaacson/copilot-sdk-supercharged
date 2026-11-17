@@ -2,7 +2,7 @@
 
 # Rust SDK
 
-This directory contains the independent `github-copilot-sdk` crate. Paths and
+This directory contains the independent `copilot-sdk` crate. Paths and
 Cargo commands below are relative to this directory, and this crate's own
 lockfile and toolchain apply. The runtime CLI consumes the same sources through
 the Bazel integration described under Development. The runtime's N-API
@@ -23,15 +23,15 @@ architecture does not otherwise govern this crate.
 ## Extension points and session lifetime
 
 - Use the per-request traits in [src/handler.rs](src/handler.rs), such as
-  `PermissionHandler` with `SessionConfig::with_permission_handler`, and retain
+  `PermissionHandler` with `SessionPermissionOptions::with_on_request`, and retain
   their declared `Send + Sync + 'static` contracts.
 - Implement `SessionHooks` in [src/hooks.rs](src/hooks.rs) for lifecycle hooks.
-  Prefer its per-hook methods; `with_hooks` enables hooks on the session.
+  Prefer its per-hook methods; `SessionHookOptions::with_handlers` enables hooks.
 - Implement `SystemMessageTransform` in [src/transforms.rs](src/transforms.rs)
   with `section_ids` and `transform_section`, and register it through
   `with_system_message_transform`.
 - Attach a `ToolHandler` to a `Tool` with `with_handler`, then register tools
-  with `with_tools`. The `derive` feature exposes `define_tool` and `schema_for`
+  with `SessionToolOptions::with_definitions`. The `derive` feature exposes `define_tool` and `schema_for`
   for typed tool parameters. Use the current examples in
   [src/tool.rs](src/tool.rs), not hand-built JSON wire payloads.
 - `EventSubscription` and `LifecycleSubscription` are streams; dropping a
@@ -63,7 +63,7 @@ refreshes the selected schemas and Rust projection and requests a current host
 CLI before running the tests. Direct Cargo commands bypass those prerequisites
 and the facade's environment applies only to its child process; it does not
 persist for later shell commands. The CLI consumes this crate through the
-same-checkout `//src/sdk/rust:github-copilot-sdk-local-runtime` Bazel target,
+same-checkout `//src/sdk/rust:copilot-sdk-local-runtime` Bazel target,
 with default features disabled. That `local-runtime` mode enables in-process
 transport without SDK-managed acquisition because the CLI supplies its loaded
 `runtime.node`; `bundled-cli` takes precedence in all-feature builds.

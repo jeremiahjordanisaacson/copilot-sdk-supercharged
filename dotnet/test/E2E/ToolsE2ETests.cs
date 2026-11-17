@@ -2,8 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -16,7 +16,7 @@ using System.Text.Json.Serialization;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "tools", output)
 {
@@ -30,10 +30,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             Path.Combine(Ctx.WorkDir, "README.md"),
             "# ELIZA, the only chatbot you'll ever need");
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
@@ -47,11 +45,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     [Fact]
     public async Task Invokes_Custom_Tool()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(EncryptString, "encrypt_string")],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(EncryptString, "encrypt_string")] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
@@ -71,24 +66,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         string currentPhase = string.Empty;
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools =
-            [
-                AIFunctionFactory.Create(SetCurrentPhase, new AIFunctionFactoryOptions
-                {
-                    Name = "set_current_phase",
-                    Description = "Sets the current phase of the agent",
-                }),
-                AIFunctionFactory.Create(SearchItems, new AIFunctionFactoryOptions
-                {
-                    Name = "search_items",
-                    Description = "Search for items by keyword",
-                }),
-            ],
-            AvailableTools = new ToolSet().AddCustom("*").AddBuiltIn("web_fetch"),
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(SetCurrentPhase, new AIFunctionFactoryOptions { Name = "set_current_phase", Description = "Sets the current phase of the agent", }), AIFunctionFactory.Create(SearchItems, new AIFunctionFactoryOptions { Name = "search_items", Description = "Search for items by keyword", }),], AvailableTools = new ToolSet().AddCustom("*").AddBuiltIn("web_fetch") }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
@@ -123,11 +102,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var getUserLocation = AIFunctionFactory.Create(
             () => { throw new Exception("Melbourne"); }, "get_user_location", "Gets the user's location");
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [getUserLocation],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [getUserLocation] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var answer = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions { Prompt = "What is my location? If you can't find out, just say 'unknown'." });
 
@@ -164,11 +140,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     public async Task Can_Receive_And_Return_Complex_Types()
     {
         ToolInvocation? receivedInvocation = null;
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(PerformDbQuery, "db_query", serializerOptions: ToolsTestsJsonContext.Default.Options)],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(PerformDbQuery, "db_query", serializerOptions: ToolsTestsJsonContext.Default.Options)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
@@ -210,16 +183,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     [Fact]
     public async Task Overrides_Built_In_Tool_With_Custom_Tool()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create((Delegate)CustomGrep, new AIFunctionFactoryOptions
-            {
-                Name = "grep",
-                AdditionalProperties = new ReadOnlyDictionary<string, object?>(
-                    new Dictionary<string, object?> { ["is_override"] = true })
-            })],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create((Delegate)CustomGrep, new AIFunctionFactoryOptions { Name = "grep", AdditionalProperties = new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?> { ["is_override"] = true }) })] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
@@ -249,8 +214,9 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             var handler = new ApplyPatchOverrideRequestHandler(useCustomToolCall);
             await using var client = Ctx.CreateClient(options: new CopilotClientOptions
             {
-                Connection = RuntimeConnection.ForStdio(),
-                RequestHandler = handler,
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = RuntimeConnection.ForSpawnedStdio(),
+                Models = new ClientModelOptions { RequestHandler = handler }
             });
             await client.StartAsync();
 
@@ -282,22 +248,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
                     Description = "Host-implemented apply_patch",
                 });
 
-            await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-            {
-                Model = "gpt-4o-mini",
-                Provider = new ProviderConfig
-                {
-                    Type = "openai",
-                    WireApi = "completions",
-                    BaseUrl = "https://apply-patch.invalid/v1",
-                    ApiKey = "test-key",
-                    ModelId = "gpt-4o-mini",
-                    WireModel = "gpt-4o-mini",
-                },
-                Streaming = true,
-                Tools = [tool],
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-            });
+            await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+            { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "gpt-4o-mini", Inference = ByokTestOptions.Inference(new ProviderConfig { Type = "openai", WireApi = "completions", BaseUrl = "https://apply-patch.invalid/v1", ApiKey = "test-key", ModelId = "gpt-4o-mini", WireModel = "gpt-4o-mini", }, new SessionInferenceOptions { }), Events = new SessionEventOptions { Streaming = true }, Tools = new SessionToolOptions { Definitions = [tool] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
             var message = await session.SendAndWaitAsync(new MessageOptions { Prompt = "Use apply_patch" });
 
@@ -331,8 +283,9 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var handler = new ApplyPatchOverrideRequestHandler(useCustomToolCall);
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(),
-            RequestHandler = handler,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(),
+            Models = new ClientModelOptions { RequestHandler = handler }
         });
         await client.StartAsync();
 
@@ -349,22 +302,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var tool = new StringSchemaApplyPatchTool(inner);
         Assert.Equal("string", tool.JsonSchema.GetProperty("type").GetString());
 
-        await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            Model = "gpt-4o-mini",
-            Provider = new ProviderConfig
-            {
-                Type = "openai",
-                WireApi = "completions",
-                BaseUrl = "https://apply-patch.invalid/v1",
-                ApiKey = "test-key",
-                ModelId = "gpt-4o-mini",
-                WireModel = "gpt-4o-mini",
-            },
-            Streaming = true,
-            Tools = [tool],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "gpt-4o-mini", Inference = ByokTestOptions.Inference(new ProviderConfig { Type = "openai", WireApi = "completions", BaseUrl = "https://apply-patch.invalid/v1", ApiKey = "test-key", ModelId = "gpt-4o-mini", WireModel = "gpt-4o-mini", }, new SessionInferenceOptions { }), Events = new SessionEventOptions { Streaming = true }, Tools = new SessionToolOptions { Definitions = [tool] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var message = await session.SendAndWaitAsync(new MessageOptions { Prompt = "Use apply_patch" });
 
@@ -395,13 +334,16 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         });
 
         var didRunPermissionRequest = false;
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Tools = [tool],
-            OnPermissionRequest = (_, _) =>
+            Tools = new SessionToolOptions { Definitions = [tool] },
+            Permissions = new SessionPermissionOptions
             {
-                didRunPermissionRequest = true;
-                return Task.FromResult<PermissionDecision>(PermissionDecision.NoResult());
+                OnRequest = (_, _) =>
+        {
+            didRunPermissionRequest = true;
+            return Task.FromResult<PermissionDecision>(PermissionDecision.NoResult());
+        }
             }
         });
 
@@ -418,11 +360,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     [Fact(Skip = "Behaves as if no content was in the result. Likely that binary results aren't fully implemented yet.")]
     public async Task Can_Return_Binary_Result()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(GetImage, "get_image")],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(GetImage, "get_image")] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
@@ -450,14 +389,17 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         var permissionRequests = new List<PermissionRequest>();
 
-        var session = await Ctx.CreateSessionAsync(Client, new SessionConfig
+        var session = await Ctx.CreateSessionAsync(Client, new CreateSessionOptions
         {
-            Tools = [AIFunctionFactory.Create(EncryptStringForPermission, "encrypt_string")],
-            OnPermissionRequest = (request, invocation) =>
+            Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(EncryptStringForPermission, "encrypt_string")] },
+            Permissions = new SessionPermissionOptions
             {
-                permissionRequests.Add(request);
-                return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
-            },
+                OnRequest = (request, invocation) =>
+        {
+            permissionRequests.Add(request);
+            return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
+        }
+            }
         });
 
         var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
@@ -483,11 +425,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         var toolHandlerCalled = false;
 
-        var session = await Ctx.CreateSessionAsync(Client, new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(EncryptStringDenied, "encrypt_string")],
-            OnPermissionRequest = async (request, invocation) => PermissionDecision.Reject(),
-        });
+        var session = await Ctx.CreateSessionAsync(Client, new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(EncryptStringDenied, "encrypt_string")] }, Permissions = new SessionPermissionOptions { OnRequest = async (request, invocation) => PermissionDecision.Reject() } });
 
         await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
@@ -511,15 +450,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var toolACalled = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var toolBCalled = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools =
-            [
-                AIFunctionFactory.Create(LookupCity, "lookup_city"),
-                AIFunctionFactory.Create(LookupCountry, "lookup_country"),
-            ],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(LookupCity, "lookup_city"), AIFunctionFactory.Create(LookupCountry, "lookup_country"),] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var assistantMessageTask = TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
@@ -558,17 +490,8 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         bool excludedToolCalled = false;
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools =
-            [
-                AIFunctionFactory.Create(AllowedTool, "allowed_tool"),
-                AIFunctionFactory.Create(ExcludedTool, "excluded_tool"),
-            ],
-            AvailableTools = ["allowed_tool", "excluded_tool"],
-            ExcludedTools = ["excluded_tool"],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(AllowedTool, "allowed_tool"), AIFunctionFactory.Create(ExcludedTool, "excluded_tool"),], AvailableTools = ["allowed_tool", "excluded_tool"], ExcludedTools = ["excluded_tool"] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var result = await session.SendAndWaitAsync(new MessageOptions
         {

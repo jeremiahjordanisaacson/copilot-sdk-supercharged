@@ -4,7 +4,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>Why the runtime is requesting a GitHub token.</summary>
 [Experimental(Diagnostics.Experimental)]

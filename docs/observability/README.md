@@ -1,6 +1,6 @@
 # Observability
 
-Monitor and debug your GitHub Copilot SDK applications.
+Monitor and debug your Microsoft Copilot SDK applications.
 
 * [OpenTelemetry instrumentation](./opentelemetry.md): built-in TelemetryConfig and trace context propagation
 

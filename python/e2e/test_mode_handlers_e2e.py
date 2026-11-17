@@ -70,9 +70,9 @@ class TestModeHandlers:
             }
 
         session = await mode_ctx.client.create_session(
-            github_token=MODE_HANDLER_TOKEN,
-            on_permission_request=PermissionHandler.approve_all,
-            on_exit_plan_mode_request=on_exit_plan_mode_request,
+            github={"token": MODE_HANDLER_TOKEN},
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_exit_plan_mode_request": on_exit_plan_mode_request},
         )
 
         requested_event = wait_for_event(
@@ -129,9 +129,9 @@ class TestModeHandlers:
             return "yes"
 
         session = await mode_ctx.client.create_session(
-            github_token=MODE_HANDLER_TOKEN,
-            on_permission_request=PermissionHandler.approve_all,
-            on_auto_mode_switch_request=on_auto_mode_switch_request,
+            github={"token": MODE_HANDLER_TOKEN},
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_auto_mode_switch_request": on_auto_mode_switch_request},
         )
 
         requested_event = wait_for_event(

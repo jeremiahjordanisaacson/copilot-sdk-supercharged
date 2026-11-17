@@ -251,10 +251,6 @@ pub enum SessionEventType {
     ToolUserRequested,
     #[serde(rename = "tool.execution_start")]
     ToolExecutionStart,
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(rename = "tool.execution_partial_result")]
-    ToolExecutionPartialResult,
     #[serde(rename = "tool.shell_output")]
     ToolShellOutput,
     #[serde(rename = "tool.execution_progress")]
@@ -851,10 +847,6 @@ pub enum SessionEventData {
     ToolUserRequested(ToolUserRequestedData),
     #[serde(rename = "tool.execution_start")]
     ToolExecutionStart(ToolExecutionStartData),
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(rename = "tool.execution_partial_result")]
-    ToolExecutionPartialResult(ToolExecutionPartialResultData),
     #[serde(rename = "tool.shell_output")]
     ToolShellOutput(ToolShellOutputData),
     #[serde(rename = "tool.execution_progress")]
@@ -1424,6 +1416,9 @@ pub struct SessionStartData {
     /// Provider of selectedModel at creation time, when explicitly selected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    /// Credential-free effective model routing policy restored on cold resume.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_routing: Option<serde_json::Value>,
     /// Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
@@ -1489,6 +1484,9 @@ pub struct SessionResumeData {
     /// Provider of selectedModel at resume time, when explicitly selected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    /// Credential-free effective model routing policy restored on cold resume.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_routing: Option<serde_json::Value>,
     /// Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
@@ -1691,10 +1689,14 @@ pub struct SessionInfoData {
     pub info_type: String,
     /// Human-readable informational message for display in the timeline
     pub message: String,
+    /// Credential-free provider routing policy applied at this configuration boundary.
+    #[doc(hidden)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) provider_routing: Option<serde_json::Value>,
     /// Reasoning configuration consumed at this conversation boundary. Present on reasoning_effort updates; preserves the original request baseline and applied effort without creating a user message.
     #[doc(hidden)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub responses_reasoning: Option<ResponsesReasoning>,
+    pub(crate) responses_reasoning: Option<ResponsesReasoning>,
     /// Optional actionable tip displayed with this message
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tip: Option<String>,
@@ -1845,6 +1847,9 @@ pub struct SessionModelChangeData {
     /// Provider selected for newModel. Omitted for legacy or unattributed selections; never inferred from a later selection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    /// Credential-free provider routing policy and selected-model registration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_routing: Option<serde_json::Value>,
     /// Reasoning effort level after the model change, if applicable
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
@@ -4429,11 +4434,6 @@ pub struct AssistantMessageData {
     /// Output tokens this message adds to replayed context, for token accounting: the API response's completion_tokens, plus reasoning tokens a wire replays as input but reports separately, shared across the response's message chunks. Use assistant.usage for billed usage.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<i64>,
-    /// Tool call ID of the parent tool invocation when this event originates from a sub-agent
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_tool_call_id: Option<String>,
     /// Generation phase for phased-output models (e.g., thinking vs. response phases)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phase: Option<String>,
@@ -4491,11 +4491,6 @@ pub struct AssistantMessageDeltaData {
     pub delta_content: String,
     /// Message ID this delta belongs to, matching the corresponding assistant.message event
     pub message_id: String,
-    /// Tool call ID of the parent tool invocation when this event originates from a sub-agent
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_tool_call_id: Option<String>,
 }
 
 /// Session event "assistant.turn_end". Turn completion metadata including the turn identifier
@@ -4752,11 +4747,6 @@ pub struct AssistantUsageData {
     /// Time to first observable model output in milliseconds. Includes text, reasoning, and tool-call output; only available for streaming requests that produce observable output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_ttft_ms: Option<f64>,
-    /// Parent tool call ID when this usage originates from a sub-agent
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_tool_call_id: Option<String>,
     /// Bucket of AI credits the session had billed before this call, for the adaptive Anthropic prompt-cache policy. Omitted outside the adaptive TTL experiment.
     #[doc(hidden)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5338,11 +5328,6 @@ pub struct ToolExecutionStartData {
     /// Model identifier that generated this tool call
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Tool call ID of the parent tool invocation when this event originates from a sub-agent
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_tool_call_id: Option<String>,
     /// Whether the selected tool descriptor explicitly classifies this call as read-only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_only: Option<bool>,
@@ -5365,18 +5350,6 @@ pub struct ToolExecutionStartData {
     /// Identifier for the agent loop turn this tool was invoked in, matching the corresponding assistant.turn_start event
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
-}
-
-/// Session event "tool.execution_partial_result". Deprecated merged replacement snapshot of shell output. Use tool.shell_output for append-only, stream-tagged output instead.
-#[doc(hidden)]
-#[deprecated]
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolExecutionPartialResultData {
-    /// Merged replacement snapshot from the running shell, not an append-only chunk
-    pub partial_output: String,
-    /// Tool call ID this partial result belongs to
-    pub tool_call_id: String,
 }
 
 /// Session event "tool.shell_output". Live, append-only shell output. Not persisted or replayed to late subscribers. Text is decoded and redacted per chunk; chunks need not contain complete lines.
@@ -5561,24 +5534,6 @@ pub struct ToolExecutionCompleteContentText {
     pub text: String,
     /// Content block type discriminator
     pub r#type: ToolExecutionCompleteContentTextType,
-}
-
-/// Deprecated for shell command exit metadata. Use ToolExecutionCompleteContentShellExit instead.
-#[doc(hidden)]
-#[deprecated]
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolExecutionCompleteContentTerminal {
-    /// Working directory where the command was executed
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    /// Process exit code, if the command has completed
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub exit_code: Option<i64>,
-    /// Terminal/shell output text
-    pub text: String,
-    /// Content block type discriminator
-    pub r#type: ToolExecutionCompleteContentTerminalType,
 }
 
 /// Shell command exit metadata with optional output preview
@@ -6025,11 +5980,6 @@ pub struct ToolExecutionCompleteData {
     /// Model identifier that generated this tool call
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Tool call ID of the parent tool invocation when this event originates from a sub-agent
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_tool_call_id: Option<String>,
     /// Tool execution result on success
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<ToolExecutionCompleteResult>,
@@ -9324,6 +9274,9 @@ pub struct CommandsChangedData {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilitiesChangedUI {
+    /// Whether a recovery-aware Auto-switch responder is registered. This does not imply current eligibility or override model policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_mode_recovery: Option<bool>,
     /// Whether canvas rendering is now supported
     #[serde(skip_serializing_if = "Option::is_none")]
     pub canvases: Option<bool>,
@@ -11930,14 +11883,6 @@ pub enum ToolExecutionCompleteContentTextType {
 
 /// Content block type discriminator
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ToolExecutionCompleteContentTerminalType {
-    #[serde(rename = "terminal")]
-    #[default]
-    Terminal,
-}
-
-/// Content block type discriminator
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToolExecutionCompleteContentShellExitType {
     #[serde(rename = "shell_exit")]
     #[default]
@@ -12004,7 +11949,6 @@ pub enum ToolExecutionCompleteContentResourceType {
 #[serde(untagged)]
 pub enum ToolExecutionCompleteContent {
     Text(ToolExecutionCompleteContentText),
-    Terminal(ToolExecutionCompleteContentTerminal),
     ShellExit(ToolExecutionCompleteContentShellExit),
     Image(ToolExecutionCompleteContentImage),
     Audio(ToolExecutionCompleteContentAudio),

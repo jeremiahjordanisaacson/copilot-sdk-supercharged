@@ -4,7 +4,8 @@
 //! In-process mode inherits host settings. Set `COPILOT_GITHUB_TELEMETRY_DISABLED=true`,
 //! `COPILOT_TELEMETRY_DISABLED=true`, and `DO_NOT_TRACK=1` before running it.
 
-use github_copilot_sdk::{Client, ClientOptions, GetStatusResponse, Result, Transport};
+use copilot_sdk::RuntimeConnection;
+use copilot_sdk::{Client, ClientOptions, GetStatusResponse, Result, SpawnedProcessOptions};
 
 async fn demonstrate(client: &Client) -> Result<()> {
     let pending = client.begin_call("status.get", None)?;
@@ -20,24 +21,25 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let home = tempfile::tempdir()?;
     let in_process = std::env::args().any(|arg| arg == "--in-process");
     let transport = if in_process {
-        Transport::InProcess
+        RuntimeConnection::for_in_process(Default::default())
     } else {
-        Transport::Stdio
+        RuntimeConnection::for_spawned_stdio(SpawnedProcessOptions::new().with_env(
+            std::env::vars_os().chain([
+                ("COPILOT_GITHUB_TELEMETRY_DISABLED".into(), "true".into()),
+                ("COPILOT_TELEMETRY_DISABLED".into(), "true".into()),
+                ("DO_NOT_TRACK".into(), "1".into()),
+            ]),
+        ))
     };
-    let options = ClientOptions::new()
-        .with_transport(transport)
-        .with_base_directory(home.path())
-        .with_github_token("")
-        .with_use_logged_in_user(false);
-    let options = if in_process {
-        options
-    } else {
-        options.with_env([
-            ("COPILOT_GITHUB_TELEMETRY_DISABLED", "true"),
-            ("COPILOT_TELEMETRY_DISABLED", "true"),
-            ("DO_NOT_TRACK", "1"),
-        ])
-    };
+    let mut runtime = transport;
+    runtime
+        .owned_options_mut()
+        .expect("owned runtime")
+        .base_directory = Some(home.path().to_owned());
+    let options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+        .with_runtime(runtime)
+        .with_github(|group| group.with_token("").with_use_logged_in_user(false))
+        .with_observability(|group| group.with_disable_client_telemetry(true));
     let client = Client::start(options).await?;
     println!("Runtime started through the SDK");
     println!("In-process server ID: {:?}", client.in_process_server_id());

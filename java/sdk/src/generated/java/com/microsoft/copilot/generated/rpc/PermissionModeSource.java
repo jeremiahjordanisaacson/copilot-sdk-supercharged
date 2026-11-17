@@ -1,0 +1,47 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: api.schema.json
+
+package com.microsoft.copilot.generated.rpc;
+
+import com.microsoft.copilot.CopilotExperimental;
+import javax.annotation.processing.Generated;
+
+/**
+ * Optional source for permission-mode telemetry. `organization_targeting` is reserved for startup selection after the authenticated account matches an organization targeting policy; SDK callers default to `rpc` and cannot claim targeting provenance.
+ *
+ * @apiNote This type is experimental and may change in a future version.
+ *
+ * @since 1.0.0
+ */
+@CopilotExperimental
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+public enum PermissionModeSource {
+    /** The {@code cli_flag} variant. */
+    CLI_FLAG("cli_flag"),
+    /** The {@code slash_command} variant. */
+    SLASH_COMMAND("slash_command"),
+    /** The {@code autopilot_confirmation} variant. */
+    AUTOPILOT_CONFIRMATION("autopilot_confirmation"),
+    /** The {@code user_setting} variant. */
+    USER_SETTING("user_setting"),
+    /** The {@code organization_targeting} variant. */
+    ORGANIZATION_TARGETING("organization_targeting"),
+    /** The {@code rpc} variant. */
+    RPC("rpc");
+
+    private final String value;
+    PermissionModeSource(String value) { this.value = value; }
+    @com.fasterxml.jackson.annotation.JsonValue
+    public String getValue() { return value; }
+    @com.fasterxml.jackson.annotation.JsonCreator
+    public static PermissionModeSource fromValue(String value) {
+        for (PermissionModeSource v : values()) {
+            if (v.value.equals(value)) return v;
+        }
+        throw new IllegalArgumentException("Unknown PermissionModeSource value: " + value);
+    }
+}

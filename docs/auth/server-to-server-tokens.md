@@ -8,17 +8,17 @@ For workflows in an organization-owned repository, grant the built-in token perm
 
 ```yaml
 permissions:
-  contents: read
-  copilot-requests: write
+    contents: read
+    copilot-requests: write
 
 jobs:
-  copilot:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - run: your-application
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    copilot:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+            - run: your-application
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 The organization's **Allow use of Copilot CLI billed to the organization** policy must be enabled. This approach needs no GitHub App or stored authentication secret. For details, see [Using Copilot CLI in GitHub Actions with GITHUB_TOKEN](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli-in-actions).
@@ -31,15 +31,15 @@ For services outside GitHub Actions:
 1. Install it on the organization that usage should be attributed and billed to.
 1. [Create an installation access token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app) with the Copilot permission:
 
-   ```json
-   {
-     "permissions": {
-       "organization_copilot_requests": "read"
-     }
-   }
-   ```
+    ```json
+    {
+        "permissions": {
+            "organization_copilot_requests": "read"
+        }
+    }
+    ```
 
-1. Pass the resulting `ghs_` token to the SDK's `gitHubToken`, `github_token`, or equivalent option. For an existing runtime URI, set it as `COPILOT_GITHUB_TOKEN` on the runtime process instead.
+1. Pass the resulting `ghs_` token to the SDK's `gitHubToken`, `github_token`, or equivalent option. For an existing TCP runtime, set it as `COPILOT_GITHUB_TOKEN` on the runtime process instead.
 
 The organization must be enabled for Copilot requests from GitHub App installations. Installation tokens expire after one hour.
 
@@ -48,22 +48,25 @@ The organization must be enabled for Copilot requests from GitHub App installati
 
 ## Configure the runtime
 
-The following examples assume the minted token is in `INSTALLATION_TOKEN`. They pass it only to the child runtime and disable fallback to stored user credentials.
+The following examples assume the minted token is in `INSTALLATION_TOKEN`. They pass it to the runtime and disable fallback to stored user credentials.
 
 <details open>
 <summary><strong>TypeScript</strong></summary>
 
 <!-- docs-validate: strict -->
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 const token = process.env.INSTALLATION_TOKEN;
 if (!token) throw new Error("INSTALLATION_TOKEN is required");
 
 const client = new CopilotClient({
-    connection: RuntimeConnection.forStdio(),
-    gitHubToken: token,
-    useLoggedInUser: false,
+    mode: "coding-agent",
+    github: {
+        token: token,
+        useLoggedInUser: false,
+    },
 });
 ```
 
@@ -74,12 +77,11 @@ const client = new CopilotClient({
 ```python
 import os
 
-from copilot import CopilotClient, RuntimeConnection
+from copilot import CopilotClient
 
 client = CopilotClient(
-    connection=RuntimeConnection.for_stdio(),
-    github_token=os.environ["INSTALLATION_TOKEN"],
-    use_logged_in_user=False,
+    mode="coding-agent",
+    github={"token": os.environ["INSTALLATION_TOKEN"], "use_logged_in_user": False},
 )
 ```
 
@@ -94,7 +96,7 @@ import (
 	"log"
 	"os"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
@@ -103,9 +105,12 @@ func main() {
 		log.Fatal("INSTALLATION_TOKEN is required")
 	}
 	client := copilot.NewClient(&copilot.ClientOptions{
-		Connection:      copilot.StdioConnection{},
-		GitHubToken:     token,
-		UseLoggedInUser: copilot.Bool(false),
+		Mode: copilot.ModeCodingAgent,
+		GitHub: copilot.ClientGitHubOptions{
+			Token:           token,
+			UseLoggedInUser: copilot.Bool(false),
+		},
+		Runtime: copilot.SpawnedStdioConnection{},
 	})
 	_ = client
 }
@@ -116,14 +121,13 @@ func main() {
 <summary><strong>Rust</strong></summary>
 
 ```rust
-use github_copilot_sdk::{ClientOptions, Transport};
+use copilot_sdk::ClientOptions;
 
 fn main() {
     let token = std::env::var("INSTALLATION_TOKEN").expect("INSTALLATION_TOKEN is required");
-    let options = ClientOptions::new()
-        .with_transport(Transport::Stdio)
-        .with_github_token(token)
-        .with_use_logged_in_user(false);
+    let options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+        .with_github(|__sdk_group| __sdk_group.with_token(token))
+        .with_github(|__sdk_group| __sdk_group.with_use_logged_in_user(false));
     drop(options);
 }
 ```
@@ -133,16 +137,17 @@ fn main() {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
-var token = Environment.GetEnvironmentVariable("INSTALLATION_TOKEN")
-    ?? throw new InvalidOperationException("INSTALLATION_TOKEN is required");
-
+var token = Environment.GetEnvironmentVariable("INSTALLATION_TOKEN") ?? throw new InvalidOperationException("INSTALLATION_TOKEN is required");
 await using var client = new CopilotClient(new CopilotClientOptions
 {
-    Connection = RuntimeConnection.ForStdio(),
-    GitHubToken = token,
-    UseLoggedInUser = false,
+    Mode = CopilotClientMode.CodingAgent,
+    GitHub = new ClientGitHubOptions
+    {
+        Token = token,
+        UseLoggedInUser = false
+    }
 });
 ```
 
@@ -151,23 +156,27 @@ await using var client = new CopilotClient(new CopilotClientOptions
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
 import java.util.Objects;
+import com.microsoft.copilot.rpc.ClientGitHubOptions;
 
-var token = Objects.requireNonNull(
-    System.getenv("INSTALLATION_TOKEN"), "INSTALLATION_TOKEN is required");
+var token = Objects
+        .requireNonNull(System
+                .getenv("INSTALLATION_TOKEN"), "INSTALLATION_TOKEN is required");
 
-try (var client = new CopilotClient(new CopilotClientOptions()
-        .setGitHubToken(token)
-        .setUseLoggedInUser(false))) {
+try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+        .setGitHub(new ClientGitHubOptions()
+                .setToken(token)
+                .setUseLoggedInUser(false)))) {
     // Use the client.
 }
 ```
 
 </details>
 
-For in-process FFI, use the same token option; environment variable tokens in the host process are ignored when `useLoggedInUser` is false. For an existing runtime URI, set `COPILOT_GITHUB_TOKEN` on that runtime process.
+For in-process FFI, use the same token option; environment variable tokens in the host process are ignored when `useLoggedInUser` is false. For an existing TCP runtime, set `COPILOT_GITHUB_TOKEN` on that runtime process.
 
 ## Refresh tokens
 
@@ -179,16 +188,16 @@ Usage is attributed and billed to the organization that owns the GitHub App inst
 
 ## Troubleshooting
 
-| Symptom | Check |
-|---|---|
-| `401 Unauthorized` | The token may be expired or invalid. Mint a new installation token. |
-| `403` stating that Copilot requests with GitHub App installation access tokens are not enabled | Confirm the organization supports GitHub App installation authentication for Copilot. |
-| `No GitHub OAuth token or Copilot HMAC key provided` or `Not authenticated` | Confirm the installation token is passed through the SDK's explicit token option. With `useLoggedInUser: false`, the runtime ignores `COPILOT_GITHUB_TOKEN` and other environment variable tokens. |
-| `403 Forbidden` from the Copilot API | Confirm the installation has the organization **Copilot Requests** permission, then mint a new token. |
-| Requested model is unavailable | Confirm the organization's Copilot policy allows the model and the bundled runtime supports it. |
-| Wrong account billed | Confirm the installation belongs to the intended organization. |
+| Symptom                                                                                        | Check                                                                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `401 Unauthorized`                                                                             | The token may be expired or invalid. Mint a new installation token.                                                                                                                                |
+| `403` stating that Copilot requests with GitHub App installation access tokens are not enabled | Confirm the organization supports GitHub App installation authentication for Copilot.                                                                                                              |
+| `No GitHub OAuth token or Copilot HMAC key provided` or `Not authenticated`                    | Confirm the installation token is passed through the SDK's explicit token option. With `useLoggedInUser: false`, the runtime ignores `COPILOT_GITHUB_TOKEN` and other environment variable tokens. |
+| `403 Forbidden` from the Copilot API                                                           | Confirm the installation has the organization **Copilot Requests** permission, then mint a new token.                                                                                              |
+| Requested model is unavailable                                                                 | Confirm the organization's Copilot policy allows the model and the bundled runtime supports it.                                                                                                    |
+| Wrong account billed                                                                           | Confirm the installation belongs to the intended organization.                                                                                                                                     |
 
 ## Further reading
 
-* [Authenticate Copilot SDK](./authenticate.md): other authentication methods and priority
-* [Generating an installation access token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app): GitHub App token creation
+- [Authenticate Copilot SDK](./authenticate.md): other authentication methods and priority
+- [Generating an installation access token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app): GitHub App token creation

@@ -12,7 +12,11 @@ import type {
     HostGitHubEnvironmentOptions,
 } from "./generated/rpc.js";
 import type { CopilotSession } from "./session.js";
-import type { SessionConfig, ResumeSessionConfig } from "./types.js";
+import type {
+    CreateSessionOptions,
+    ResumeSessionOptions,
+    SessionPermissionOptions,
+} from "./types.js";
 
 /** Verified host admission identity, independent of inference authentication. @experimental */
 export type AhpSessionAuthentication =
@@ -41,7 +45,9 @@ export interface AhpSessionCreateRequest {
     /** Trusted admission context supplied by the host, not by the connecting client. */
     authentication: AhpSessionAuthentication;
     /** Pass these settings to createSession, adding your prompt, tools and callbacks. */
-    config: Omit<SessionConfig, "onPermissionRequest">;
+    config: Omit<CreateSessionOptions, "permissions"> & {
+        permissions?: Omit<SessionPermissionOptions, "onRequest">;
+    };
     /** Aborted when participation ends, including timeout or owner disconnection. */
     signal: AbortSignal;
 }
@@ -52,7 +58,9 @@ export interface AhpSessionResumeRequest {
     authentication: AhpSessionAuthentication;
     sessionId: string;
     /** Pass to resumeSession, adding application tools, hooks and callbacks. */
-    config: Omit<ResumeSessionConfig, "onPermissionRequest">;
+    config: Omit<ResumeSessionOptions, "permissions"> & {
+        permissions?: Omit<SessionPermissionOptions, "onRequest">;
+    };
     /** Aborted when participation ends; late results are still released exactly once. */
     signal: AbortSignal;
 }
@@ -72,7 +80,7 @@ export type AhpHostExit = HostExitedNotification;
  * @experimental
  */
 export interface AhpHostOptions {
-    /** Required even in copilot-cli client mode. Anonymous access must be explicitly selected. */
+    /** Required even in coding-agent client mode. Anonymous access must be explicitly selected. */
     authentication: AhpHostAuthentication;
     /** Stable catalog identity; must agree with githubEnvironment.computeId when both are supplied. */
     computeId?: string;

@@ -6,7 +6,7 @@
 using System.Text.Json;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -17,8 +17,8 @@ public sealed partial class ClientSessionLifetimeTests
         var argumentsJson = string.Concat(Enumerable.Repeat("""{"n":""", levels)) + "42" + new string('}', levels);
         using var arguments = JsonDocument.Parse(argumentsJson, new JsonDocumentOptions { MaxDepth = levels });
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var delivered = new TaskCompletionSource<ToolExecutionStartEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var subscription = session.On<ToolExecutionStartEvent>(evt => delivered.TrySetResult(evt));
 
@@ -46,7 +46,7 @@ public sealed partial class ClientSessionLifetimeTests
         var argumentsJson = string.Concat(Enumerable.Repeat("""{"n":""", levels)) + "42" + new string('}', levels);
         using var arguments = JsonDocument.Parse(argumentsJson, new JsonDocumentOptions { MaxDepth = levels });
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         JsonElement? received = null;
         var hooks = new SessionHooks
         {
@@ -61,7 +61,7 @@ public sealed partial class ClientSessionLifetimeTests
                 return Task.FromResult<PostToolUseHookOutput?>(null);
             },
         };
-        await using var session = await client.CreateSessionAsync(new SessionConfig { Hooks = hooks });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions { Hooks = new SessionHookOptions { Handlers = hooks } });
 
         await server.SendRequestAsync("hooks.invoke", new()
         {

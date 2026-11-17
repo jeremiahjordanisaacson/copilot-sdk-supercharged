@@ -3,10 +3,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::tool::ToolHandler;
-use github_copilot_sdk::{
-    Client, Error, OtelExporterType, SessionConfig, TelemetryConfig, Tool, ToolInvocation,
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::tool::ToolHandler;
+use copilot_sdk::{
+    Client, CreateSessionOptions, Error, OtelExporterType, TelemetryConfig, Tool, ToolInvocation,
     ToolResult,
 };
 use serde_json::json;
@@ -15,8 +15,7 @@ use super::support::{assistant_message_content, with_e2e_context};
 
 #[tokio::test]
 async fn should_export_file_telemetry_for_sdk_interactions() {
-    // Telemetry lowers to environment variables the in-process worker cannot receive
-    // per-client; covered by the default (stdio) transport. See issue #1934.
+    // This replay test currently runs in the explicit stdio matrix cell. See issue #1934.
     if super::support::skip_inprocess("telemetry configuration is not honored in-process") {
         return;
     }
@@ -34,13 +33,13 @@ async fn should_export_file_telemetry_for_sdk_interactions() {
                     "Use the {tool_name} tool with value '{marker}', then respond with TELEMETRY_E2E_DONE."
                 );
 
-                let client = Client::start(ctx.client_options().with_telemetry(
+                let client = Client::start(ctx.client_options().with_observability(|group| group.with_telemetry(
                     TelemetryConfig::new()
                         .with_file_path(&telemetry_path)
                         .with_exporter_type(OtelExporterType::File)
                         .with_source_name(source_name)
                         .with_capture_content(true),
-                ))
+                )))
                 .await
                 .expect("start client");
                 let echo_tool = Tool::new(tool_name)
@@ -55,10 +54,10 @@ async fn should_export_file_telemetry_for_sdk_interactions() {
                     .with_handler(Arc::new(EchoTelemetryTool));
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_tools(vec![echo_tool]),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+                            .with_tools(|group| group.with_definitions(vec![echo_tool])),
                     )
                     .await
                     .expect("create session");
@@ -169,20 +168,20 @@ async fn should_export_per_request_subagent_chat_spans() {
                 std::fs::write(ctx.work_dir().join("subagent-otel.txt"), "SUBAGENT_OTEL_FILE_CONTENT")
                     .expect("write child file");
 
-                let client = Client::start(ctx.client_options().with_telemetry(
+                let client = Client::start(ctx.client_options().with_observability(|group| group.with_telemetry(
                     TelemetryConfig::new()
                         .with_file_path(&telemetry_path)
                         .with_exporter_type(OtelExporterType::File)
                         .with_source_name(source_name)
                         .with_capture_content(true),
-                ))
+                )))
                 .await
                 .expect("start client");
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(ApproveAllHandler)),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler))),
                     )
                     .await
                     .expect("create session");

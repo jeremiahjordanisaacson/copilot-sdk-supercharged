@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func shellAuthenticationTestRequest() shellAuthenticationRequest {
@@ -540,13 +540,13 @@ func TestClient_RequestsShellAuthenticationOnlyWithAHandler(t *testing.T) {
 		return cancelledShellAuthentication(), nil
 	}
 
-	if _, err := client.CreateSession(t.Context(), &SessionConfig{SessionID: "secret-create", OnShellAuthenticationRequest: handler}); err != nil {
+	if _, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "secret-create", Interaction: SessionInteractionOptions{OnShellAuthenticationRequest: handler}}); err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
-	if _, err := client.ResumeSession(t.Context(), "secret-resume", &ResumeSessionConfig{OnShellAuthenticationRequest: handler}); err != nil {
+	if _, err := client.ResumeSession(t.Context(), "secret-resume", &ResumeSessionOptions{Interaction: SessionInteractionOptions{OnShellAuthenticationRequest: handler}}); err != nil {
 		t.Fatalf("ResumeSession failed: %v", err)
 	}
-	if _, err := client.CreateSession(t.Context(), &SessionConfig{SessionID: "plain-create"}); err != nil {
+	if _, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "plain-create"}); err != nil {
 		t.Fatalf("CreateSession without a handler failed: %v", err)
 	}
 	if _, err := client.ResumeSession(t.Context(), "plain-resume", nil); err != nil {
@@ -558,7 +558,7 @@ func TestClient_RequestsShellAuthenticationOnlyWithAHandler(t *testing.T) {
 		if err := json.Unmarshal(receiveWithin(t, sent, "a session request"), &params); err != nil {
 			t.Fatal(err)
 		}
-		if got := params["requestShellAuthentication"]; got != want {
+		if got := sessionWireGroup(params, "interaction")["requestShellAuthentication"]; got != want {
 			t.Fatalf("requestShellAuthentication = %v, want %v", got, want)
 		}
 	}

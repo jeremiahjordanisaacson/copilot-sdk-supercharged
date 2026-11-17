@@ -1,10 +1,10 @@
 package embeddedcli
 
-import "github.com/github/copilot-sdk/go/internal/embeddedcli"
+import "github.com/microsoft/copilot-sdk/go/v2/internal/embeddedcli"
 
 // Config defines the inputs used to install and locate the embedded Copilot CLI.
 //
-// Cli and CliHash are required. If Dir is empty, the CLI is installed into the
+// Cli and CliHash are required. If Directory is empty, the CLI is installed into the
 // per-user cache directory or a protected fallback cache.
 // When Version is set, the CLI and runtime library are
 // installed into a version-specific child directory so multiple versions can

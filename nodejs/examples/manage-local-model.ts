@@ -66,8 +66,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         );
     } else {
         const client = new CopilotClient({
-            connection: RuntimeConnection.forStdio(),
-            baseDirectory: root,
+            mode: "coding-agent",
+            runtime: {
+                ...RuntimeConnection.forSpawnedStdio(),
+                baseDirectory: root,
+            },
         });
         try {
             await client.start();

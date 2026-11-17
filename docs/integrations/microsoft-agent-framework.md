@@ -1,10 +1,10 @@
 # Microsoft agent framework integration
 
-Use the Copilot SDK as an agent provider inside the [Microsoft Agent Framework](https://devblogs.microsoft.com/semantic-kernel/build-ai-agents-with-github-copilot-sdk-and-microsoft-agent-framework/) (MAF) to compose multi-agent workflows alongside Azure OpenAI, Anthropic, and other providers.
+The [Microsoft Agent Framework](https://devblogs.microsoft.com/semantic-kernel/build-ai-agents-with-github-copilot-sdk-and-microsoft-agent-framework/) (MAF) composes multi-agent workflows across providers such as Azure OpenAI and Anthropic.
 
 ## Overview
 
-The Microsoft Agent Framework is the unified successor to Semantic Kernel and AutoGen. It provides a standard interface for building, orchestrating, and deploying AI agents. Dedicated integration packages let you wrap a Copilot SDK client as a first-class MAF agent—interchangeable with any other agent provider in the framework.
+The Microsoft Agent Framework is the unified successor to Semantic Kernel and AutoGen. It provides a standard interface for building, orchestrating, and deploying AI agents.
 
 | Concept | Description |
 |---------|-------------|
@@ -13,8 +13,10 @@ The Microsoft Agent Framework is the unified successor to Semantic Kernel and Au
 | **Orchestrator** | A MAF component that coordinates agents in sequential, concurrent, or handoff workflows |
 | **A2A protocol** | Agent-to-Agent communication standard supported by the framework |
 
-> [!NOTE]
-> MAF integration packages are available for **.NET** and **Python**. For TypeScript, Go, Java, and Rust, use the Copilot SDK directly—the standard SDK APIs already provide tool calling, streaming, and custom agents.
+> [!WARNING]
+> **SDK V2:** The .NET and Python MAF adapters are not yet compatible with Microsoft Copilot SDK. `Microsoft.Agents.AI.GitHub.Copilot` depends on `GitHub.Copilot.SDK`, and `agent-framework-github-copilot` requires `github-copilot-sdk<2.0`.
+>
+> Do not install these adapters alongside V2. The .NET adapter requires the old SDK types; the Python distributions share the `copilot` import and install overlapping files. MAF installation and usage examples are unavailable until compatible adapters are published. The examples below use the standalone SDK, not MAF.
 
 ## Prerequisites
 
@@ -26,29 +28,7 @@ Before you begin, ensure you have:
 
 ## Installation
 
-Install the Copilot SDK alongside the MAF integration package for your language:
-
-<details open>
-<summary><strong>.NET</strong></summary>
-
-```shell
-dotnet add package GitHub.Copilot.SDK
-dotnet add package Microsoft.Agents.AI.GitHub.Copilot --prerelease
-# Only for the multi-agent workflow examples below
-dotnet add package Microsoft.Agents.AI.Workflows
-dotnet add package Microsoft.Agents.AI.OpenAI
-```
-
-</details>
-
-<details>
-<summary><strong>Python</strong></summary>
-
-```shell
-pip install github-copilot-sdk agent-framework-github-copilot
-```
-
-</details>
+Install the standalone Copilot SDK using the [getting started guide](../getting-started.md). For the Java examples below:
 
 <details>
 <summary><strong>Java</strong></summary>
@@ -60,8 +40,8 @@ pip install github-copilot-sdk agent-framework-github-copilot
 <!-- Maven -->
 <!-- Set copilot.sdk.version to the version published in java/README.md / Maven Central -->
 <dependency>
-    <groupId>com.github</groupId>
-    <artifactId>copilot-sdk-java</artifactId>
+    <groupId>com.microsoft</groupId>
+    <artifactId>copilot-sdk</artifactId>
     <version>${copilot.sdk.version}</version>
 </dependency>
 ```
@@ -70,139 +50,53 @@ pip install github-copilot-sdk agent-framework-github-copilot
 
 ## Basic usage
 
-Wrap the Copilot SDK client as a MAF agent with a single method call. The resulting agent conforms to the framework's standard interface and can be used anywhere a MAF agent is expected.
-
-<details open>
-<summary><strong>.NET</strong></summary>
-
-<!-- docs-validate: skip -->
-```csharp
-using GitHub.Copilot;
-using Microsoft.Agents.AI;
-
-await using var copilotClient = new CopilotClient();
-await copilotClient.StartAsync();
-
-// Wrap as a MAF agent
-AIAgent agent = copilotClient.AsAIAgent(new SessionConfig { Model = "auto" });
-
-// Use the standard MAF interface
-AgentResponse response = await agent.RunAsync("Explain how dependency injection works in ASP.NET Core");
-Console.WriteLine(response.Text);
-```
-
-</details>
-
-<details>
-<summary><strong>Python</strong></summary>
-
-<!-- docs-validate: skip -->
-```python
-from agent_framework.github import GitHubCopilotAgent
-
-async def main():
-    agent = GitHubCopilotAgent(
-        instructions="You are a helpful coding assistant.",
-    )
-
-    async with agent:
-        result = await agent.run("Explain how dependency injection works in FastAPI")
-        print(result)
-```
-
-</details>
+Use the Copilot SDK client directly to create a session and send a prompt:
 
 <details>
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 
-var client = new CopilotClient();
-client.start().get();
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT));
+client
+        .start()
+        .get();
 
-var session = client.createSession(new SessionConfig()
-    .setModel("auto")
-    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-).get();
+var session = client
+        .createSession(new CreateSessionOptions()
+                .setModel("auto")
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL)))
+        .get();
 
-var response = session.sendAndWait(new MessageOptions()
-    .setPrompt("Explain how dependency injection works in Spring Boot")).get();
-System.out.println(response.getData().content());
+var response = session
+        .sendAndWait(new MessageOptions()
+                .setPrompt("Explain how dependency injection works in Spring Boot"))
+        .get();
+System.out
+        .println(response
+                .getData()
+                .content());
 
-client.stop().get();
+client
+        .stop()
+        .get();
 ```
 
 </details>
 
 ## Adding custom tools
 
-Extend your Copilot agent with custom function tools. Tools defined through the standard Copilot SDK are automatically available when the agent runs inside MAF.
-
-<details open>
-<summary><strong>.NET</strong></summary>
-
-<!-- docs-validate: skip -->
-```csharp
-using GitHub.Copilot;
-using Microsoft.Extensions.AI;
-using Microsoft.Agents.AI;
-
-// Define a custom tool
-AIFunction weatherTool = CopilotTool.DefineTool(
-    (string location) => $"The weather in {location} is sunny with a high of 25°C.",
-    factoryOptions: new AIFunctionFactoryOptions
-    {
-        Name = "GetWeather",
-        Description = "Get the current weather for a given location.",
-    }
-);
-
-await using var copilotClient = new CopilotClient();
-await copilotClient.StartAsync();
-
-// Create agent with tools
-AIAgent agent = copilotClient.AsAIAgent(tools: [weatherTool]);
-
-AgentResponse response = await agent.RunAsync("What's the weather like in Seattle?");
-Console.WriteLine(response.Text);
-```
-
-</details>
-
-<details>
-<summary><strong>Python</strong></summary>
-
-<!-- docs-validate: skip -->
-```python
-from agent_framework.github import GitHubCopilotAgent
-
-def get_weather(location: str) -> str:
-    """Get the current weather for a given location."""
-    return f"The weather in {location} is sunny with a high of 25°C."
-
-async def main():
-    agent = GitHubCopilotAgent(
-        instructions="You are a helpful assistant with access to weather data.",
-        tools=[get_weather],
-    )
-
-    async with agent:
-        result = await agent.run("What's the weather like in Seattle?")
-        print(result)
-```
-
-</details>
-
-You can also use Copilot SDK's native tool definition alongside MAF tools:
+Extend your Copilot agent with custom function tools using the standalone SDK:
 
 <details open>
 <summary><strong>Node.js / TypeScript (standalone SDK)</strong></summary>
 
 <!-- docs-validate: strict -->
 ```typescript
-import { CopilotClient, defineTool } from "@github/copilot-sdk";
+import { CopilotClient, defineTool } from "@microsoft/copilot-sdk";
 
 const getWeather = defineTool("GetWeather", {
     description: "Get the current weather for a given location.",
@@ -217,11 +111,15 @@ const getWeather = defineTool("GetWeather", {
         `The weather in ${location} is sunny, 25°C.`,
 });
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 const session = await client.createSession({
     model: "auto",
-    tools: [getWeather],
-    onPermissionRequest: async () => ({ kind: "approve-once" }),
+    tools: {
+        definitions: [getWeather],
+    },
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 
 await session.sendAndWait({ prompt: "What's the weather like in Seattle?" });
@@ -233,37 +131,46 @@ await session.sendAndWait({ prompt: "What's the weather like in Seattle?" });
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-var getWeather = ToolDefinition.create(
-    "GetWeather",
-    "Get the current weather for a given location.",
-    Map.of(
-        "type", "object",
-        "properties", Map.of(
-            "location", Map.of("type", "string", "description", "City name")),
-        "required", List.of("location")),
-    invocation -> {
-        var location = (String) invocation.getArguments().get("location");
-        return CompletableFuture.completedFuture(
-            "The weather in " + location + " is sunny, 25°C.");
-    });
+var getWeather = ToolDefinition
+        .create("GetWeather", "Get the current weather for a given location.", Map
+                .of("type", "object", "properties", Map
+                        .of("location", Map
+                                .of("type", "string", "description", "City name")),
+                        "required", List
+                                .of("location")),
+                invocation -> {
+                    var location = (String) invocation
+                            .getArguments()
+                            .get("location");
+                    return CompletableFuture
+                            .completedFuture("The weather in " + location + " is sunny, 25°C.");
+                });
 
-try (var client = new CopilotClient()) {
-    client.start().get();
+try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
+    client
+            .start()
+            .get();
 
-    var session = client.createSession(new SessionConfig()
-        .setModel("auto")
-        .setTools(List.of(getWeather))
-        .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-    ).get();
+    var session = client
+            .createSession(new CreateSessionOptions()
+                    .setModel("auto")
+                    .setTools(new SessionToolOptions()
+                            .setDefinitions(List
+                                    .of(getWeather)))
+                    .setPermissions(new SessionPermissionOptions()
+                            .setOnRequest(PermissionHandler.APPROVE_ALL)))
+            .get();
 
-    session.sendAndWait(new MessageOptions()
-        .setPrompt("What's the weather like in Seattle?")).get();
+    session
+            .sendAndWait(new MessageOptions()
+                    .setPrompt("What's the weather like in Seattle?"))
+            .get();
 }
 ```
 
@@ -271,118 +178,60 @@ try (var client = new CopilotClient()) {
 
 ## Multi-agent workflows
 
-The primary benefit of MAF integration is composing Copilot alongside other agent providers in orchestrated workflows. Use the framework's built-in orchestrators to create pipelines where different agents handle different steps.
+The standalone SDK can coordinate sessions sequentially or concurrently without MAF.
 
 ### Sequential workflow
 
 Run agents one after another, passing output from one to the next:
 
-<details open>
-<summary><strong>.NET</strong></summary>
-
-<!-- docs-validate: skip -->
-```csharp
-using GitHub.Copilot;
-using Microsoft.Agents.AI;
-using Microsoft.Agents.AI.Workflows;
-using OpenAI;
-using OpenAI.Chat;
-
-await using var copilotClient = new CopilotClient();
-await copilotClient.StartAsync();
-
-// Copilot agent for code review
-AIAgent reviewer = copilotClient.AsAIAgent(
-    name: "reviewer",
-    instructions: "You review code for bugs, security issues, and best practices. Be thorough.");
-
-// OpenAI agent for generating documentation
-AIAgent documentor = new OpenAIClient(Environment.GetEnvironmentVariable("OPENAI_API_KEY")!)
-    .GetChatClient("gpt-5.4")
-    .AsAIAgent(
-        name: "documentor",
-        instructions: "You write clear, concise documentation for code changes.");
-
-// Compose in a sequential pipeline and use it as a single agent
-Workflow workflow = AgentWorkflowBuilder.BuildSequential(reviewer, documentor);
-AIAgent pipeline = workflow.AsAIAgent();
-
-AgentResponse result = await pipeline.RunAsync(
-    "Review and document this pull request: added retry logic to the HTTP client"
-);
-Console.WriteLine(result.Text);
-```
-
-</details>
-
-<details>
-<summary><strong>Python</strong></summary>
-
-This example also needs the OpenAI and orchestration packages: `pip install agent-framework-openai agent-framework-orchestrations`.
-
-<!-- docs-validate: skip -->
-```python
-from agent_framework import Agent
-from agent_framework.github import GitHubCopilotAgent
-from agent_framework.openai import OpenAIChatClient
-from agent_framework.orchestrations import SequentialBuilder
-
-async def main():
-    # Copilot agent for code review
-    reviewer = GitHubCopilotAgent(
-        instructions="You review code for bugs, security issues, and best practices.",
-    )
-
-    # OpenAI agent for documentation
-    documentor = Agent(
-        client=OpenAIChatClient(model="gpt-5.4"),
-        instructions="You write clear, concise documentation for code changes.",
-    )
-
-    # Compose in a sequential pipeline
-    workflow = SequentialBuilder(participants=[reviewer, documentor]).build()
-
-    async with reviewer:
-        result = await workflow.run(
-            "Review and document this PR: added retry logic to the HTTP client"
-        )
-        print(result.get_outputs())
-```
-
-</details>
-
 <details>
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 
 // Java uses the standard SDK directly — no MAF orchestrator needed
-var client = new CopilotClient();
-client.start().get();
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT));
+client
+        .start()
+        .get();
 
 // Step 1: Code review session
-var reviewer = client.createSession(new SessionConfig()
-    .setModel("auto")
-    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-).get();
+var reviewer = client
+        .createSession(new CreateSessionOptions()
+                .setModel("auto")
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL)))
+        .get();
 
-var review = reviewer.sendAndWait(new MessageOptions()
-    .setPrompt("Review this PR for bugs, security issues, and best practices: "
-        + "added retry logic to the HTTP client")).get();
+var review = reviewer
+        .sendAndWait(new MessageOptions()
+                .setPrompt("Review this PR for bugs, security issues, and best practices: " + "added retry logic to the HTTP client"))
+        .get();
 
 // Step 2: Documentation session using review output
-var documentor = client.createSession(new SessionConfig()
-    .setModel("auto")
-    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-).get();
+var documentor = client
+        .createSession(new CreateSessionOptions()
+                .setModel("auto")
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL)))
+        .get();
 
-var docs = documentor.sendAndWait(new MessageOptions()
-    .setPrompt("Write documentation for these changes: " + review.getData().content())).get();
-System.out.println(docs.getData().content());
+var docs = documentor
+        .sendAndWait(new MessageOptions()
+                .setPrompt("Write documentation for these changes: " + review
+                        .getData()
+                        .content()))
+        .get();
+System.out
+        .println(docs
+                .getData()
+                .content());
 
-client.stop().get();
+client
+        .stop()
+        .get();
 ```
 
 </details>
@@ -391,134 +240,84 @@ client.stop().get();
 
 Run multiple agents in parallel and aggregate their results:
 
-<details open>
-<summary><strong>.NET</strong></summary>
-
-<!-- docs-validate: skip -->
-```csharp
-using GitHub.Copilot;
-using Microsoft.Agents.AI;
-using Microsoft.Agents.AI.Workflows;
-
-await using var copilotClient = new CopilotClient();
-await copilotClient.StartAsync();
-
-AIAgent securityReviewer = copilotClient.AsAIAgent(
-    name: "security",
-    instructions: "Focus exclusively on security vulnerabilities and risks.");
-
-AIAgent performanceReviewer = copilotClient.AsAIAgent(
-    name: "performance",
-    instructions: "Focus exclusively on performance bottlenecks and optimization opportunities.");
-
-// Run both reviews concurrently
-Workflow workflow = AgentWorkflowBuilder.BuildConcurrent([securityReviewer, performanceReviewer]);
-AIAgent concurrent = workflow.AsAIAgent();
-
-AgentResponse combinedResult = await concurrent.RunAsync(
-    "Analyze this database query module for issues"
-);
-Console.WriteLine(combinedResult.Text);
-```
-
-</details>
-
 <details>
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 // Java uses CompletableFuture for concurrent execution
-var client = new CopilotClient();
-client.start().get();
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT));
+client
+        .start()
+        .get();
 
-var securitySession = client.createSession(new SessionConfig()
-    .setModel("auto")
-    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-).get();
+var securitySession = client
+        .createSession(new CreateSessionOptions()
+                .setModel("auto")
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL)))
+        .get();
 
-var perfSession = client.createSession(new SessionConfig()
-    .setModel("auto")
-    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-).get();
+var perfSession = client
+        .createSession(new CreateSessionOptions()
+                .setModel("auto")
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL)))
+        .get();
 
 // Run both reviews concurrently
-var securityFuture = securitySession.sendAndWait(new MessageOptions()
-    .setPrompt("Focus on security vulnerabilities in this database query module"));
-var perfFuture = perfSession.sendAndWait(new MessageOptions()
-    .setPrompt("Focus on performance bottlenecks in this database query module"));
+var securityFuture = securitySession
+        .sendAndWait(new MessageOptions()
+                .setPrompt("Focus on security vulnerabilities in this database query module"));
+var perfFuture = perfSession
+        .sendAndWait(new MessageOptions()
+                .setPrompt("Focus on performance bottlenecks in this database query module"));
 
-CompletableFuture.allOf(securityFuture, perfFuture).get();
+CompletableFuture
+        .allOf(securityFuture, perfFuture)
+        .get();
 
-System.out.println("Security: " + securityFuture.get().getData().content());
-System.out.println("Performance: " + perfFuture.get().getData().content());
+System.out
+        .println("Security: " + securityFuture
+                .get()
+                .getData()
+                .content());
+System.out
+        .println("Performance: " + perfFuture
+                .get()
+                .getData()
+                .content());
 
-client.stop().get();
+client
+        .stop()
+        .get();
 ```
 
 </details>
 
 ## Streaming responses
 
-When building interactive applications, stream agent responses to show real-time output. The MAF integration preserves the Copilot SDK's streaming capabilities.
-
-<details open>
-<summary><strong>.NET</strong></summary>
-
-<!-- docs-validate: skip -->
-```csharp
-using GitHub.Copilot;
-using Microsoft.Agents.AI;
-
-await using var copilotClient = new CopilotClient();
-await copilotClient.StartAsync();
-
-AIAgent agent = copilotClient.AsAIAgent(new SessionConfig { Model = "auto" });
-
-await foreach (AgentResponseUpdate update in agent.RunStreamingAsync("Write a quicksort implementation in C#"))
-{
-    Console.Write(update.Text);
-}
-Console.WriteLine();
-```
-
-</details>
-
-<details>
-<summary><strong>Python</strong></summary>
-
-<!-- docs-validate: skip -->
-```python
-from agent_framework.github import GitHubCopilotAgent
-
-async def main():
-    agent = GitHubCopilotAgent()
-
-    async with agent:
-        async for update in agent.run("Write a quicksort in Python", stream=True):
-            print(update.text, end="", flush=True)
-        print()
-```
-
-</details>
-
-You can also stream directly through the Copilot SDK without MAF:
+When building interactive applications, stream agent responses directly through the Copilot SDK to show real-time output:
 
 <details open>
 <summary><strong>Node.js / TypeScript (standalone SDK)</strong></summary>
 
 <!-- docs-validate: strict -->
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 const session = await client.createSession({
     model: "auto",
-    streaming: true,
-    onPermissionRequest: async () => ({ kind: "approve-once" }),
+    events: {
+        streaming: true,
+    },
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 
 session.on("assistant.message_delta", (event) => {
@@ -534,71 +333,67 @@ await session.sendAndWait({ prompt: "Write a quicksort implementation in TypeScr
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.generated.AssistantMessageDeltaEvent;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.generated.AssistantMessageDeltaEvent;
+import com.microsoft.copilot.rpc.*;
 
-var client = new CopilotClient();
-client.start().get();
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT));
+client
+        .start()
+        .get();
 
-var session = client.createSession(new SessionConfig()
-    .setModel("auto")
-    .setStreaming(true)
-    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-).get();
+var session = client
+        .createSession(new CreateSessionOptions()
+                .setModel("auto")
+                .setEvents(new SessionEventOptions()
+                        .setStreaming(true))
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL)))
+        .get();
 
-session.on(AssistantMessageDeltaEvent.class, event -> {
-    System.out.print(event.getData().deltaContent());
-});
+session
+        .on(AssistantMessageDeltaEvent.class, event -> {
+            System.out
+                    .print(event
+                            .getData()
+                            .deltaContent());
+        });
 
-session.sendAndWait(new MessageOptions()
-    .setPrompt("Write a quicksort implementation in Java")).get();
-System.out.println();
+session
+        .sendAndWait(new MessageOptions()
+                .setPrompt("Write a quicksort implementation in Java"))
+        .get();
+System.out
+        .println();
 
-client.stop().get();
+client
+        .stop()
+        .get();
 ```
 
 </details>
 
 ## Configuration reference
 
-### MAF agent options
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `Instructions` / `instructions` | `string` | System prompt for the agent |
-| `Tools` / `tools` | `AIFunction[]` / `list` | Custom function tools available to the agent |
-| `RunStreamingAsync` / `run(..., stream=True)` | method / argument | Stream responses; streaming is chosen per call, not set on the agent |
-| `Model` / `model` | `string` | Override the default model |
-
-### Copilot SDK options (passed through)
-
-All standard [SessionConfig](../getting-started.md) options are still available when creating the underlying Copilot client. The MAF wrapper delegates to the SDK under the hood:
-
-| SDK Feature | MAF Support |
-|-------------|-------------|
-| Custom tools (`DefineTool` / `AIFunctionFactory`) | ✅ Merged with MAF tools |
-| MCP servers | ✅ Configured on the SDK client |
-| Custom agents / sub-agents | ✅ Available within the Copilot agent |
-| Infinite sessions | ✅ Configured on the SDK client |
-| Model selection | ✅ Overridable per agent or per call |
-| Streaming | ✅ Full delta event support |
+For standalone SDK client and session configuration, see the [getting started guide](../getting-started.md).
 
 ## Best practices
 
 ### Choose the right level of integration
 
-Use the MAF wrapper when you need to compose Copilot with other providers in orchestrated workflows. If your application only uses Copilot, the standalone SDK is simpler and gives you full control:
+Until compatible MAF adapters are available, use the standalone SDK directly:
 
 <!-- docs-validate: strict -->
 ```typescript
 // Standalone SDK — full control, simpler setup
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 const session = await client.createSession({
     model: "auto",
-    onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 const response = await session.sendAndWait({ prompt: "Explain this code" });
 ```
@@ -622,42 +417,10 @@ const focusedAgents = [
 ];
 ```
 
-### Handle errors at the orchestration level
-
-Workflow agents can return `Microsoft.Extensions.AI.ErrorContent` in response messages instead of throwing an exception. Check for these errors before printing `AgentResponse.Text`, which excludes non-text content. Keep a `catch` block for exceptions that escape the workflow:
-
-<!-- docs-validate: skip -->
-```csharp
-using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
-using System.Linq;
-
-try
-{
-    AgentResponse result = await pipeline.RunAsync("Analyze this module");
-    var errors = result.Messages
-        .SelectMany(message => message.Contents)
-        .OfType<ErrorContent>()
-        .ToList();
-    if (errors.Count > 0)
-    {
-        throw new InvalidOperationException(
-            string.Join(Environment.NewLine, errors.Select(error => error.Message)));
-    }
-
-    Console.WriteLine(result.Text);
-}
-catch (Exception ex)
-{
-    Console.Error.WriteLine($"Pipeline failed: {ex.Message}");
-    // Fall back to single-agent mode or retry
-}
-```
-
 ## See also
 
 * [Getting Started](../getting-started.md): initial Copilot SDK setup
 * [Custom Agents](../features/custom-agents.md): define specialized sub-agents within the SDK
 * [Custom Skills](../features/skills.md): reusable prompt modules
-* [Microsoft Agent Framework documentation](https://learn.microsoft.com/en-us/agent-framework/agents/providers/github-copilot): official MAF docs for the Copilot provider
+* [Microsoft Agent Framework documentation](https://learn.microsoft.com/en-us/agent-framework/agents/providers/github-copilot): official MAF docs for the legacy Copilot adapter
 * [Blog: Build AI Agents with GitHub Copilot SDK and Microsoft Agent Framework](https://devblogs.microsoft.com/semantic-kernel/build-ai-agents-with-github-copilot-sdk-and-microsoft-agent-framework/)

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 const (
@@ -26,12 +26,10 @@ func TestSetToolsE2E(t *testing.T) {
 	t.Run("replaces_tools_on_a_created_session", func(t *testing.T) {
 		ctx.ConfigureSnapshot(t, "set_tools/replaces_tools_on_a_created_session")
 		var originalLookups, replacementLookups, vegetableLookups toolCallRecorder
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools: []copilot.Tool{
-				lookupFruitTool("apple", &originalLookups),
-				retiredLookupTool(),
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{
+			lookupFruitTool("apple", &originalLookups),
+			retiredLookupTool(),
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -77,10 +75,7 @@ func TestSetToolsE2E(t *testing.T) {
 	t.Run("replaces_tools_on_a_resumed_session", func(t *testing.T) {
 		ctx.ConfigureSnapshot(t, "set_tools/replaces_tools_on_a_resumed_session")
 		var createdLookups toolCallRecorder
-		created, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools:               []copilot.Tool{lookupFruitTool("apple", &createdLookups)},
-		})
+		created, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{lookupFruitTool("apple", &createdLookups)}}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -96,10 +91,7 @@ func TestSetToolsE2E(t *testing.T) {
 		}
 
 		var fruitLookups, vegetableLookups toolCallRecorder
-		resumed, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools:               []copilot.Tool{lookupFruitTool("apple", &fruitLookups)},
-		})
+		resumed, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{lookupFruitTool("apple", &fruitLookups)}}})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
 		}
@@ -130,10 +122,7 @@ func TestSetToolsE2E(t *testing.T) {
 	t.Run("keeps_the_previous_tools_when_a_replacement_is_rejected", func(t *testing.T) {
 		ctx.ConfigureSnapshot(t, "set_tools/keeps_the_previous_tools_when_a_replacement_is_rejected")
 		var originalLookups, replacementLookups toolCallRecorder
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools:               []copilot.Tool{lookupFruitTool("apple", &originalLookups)},
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{lookupFruitTool("apple", &originalLookups)}}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}

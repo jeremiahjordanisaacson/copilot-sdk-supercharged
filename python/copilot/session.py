@@ -39,13 +39,10 @@ from typing import (
 from pydantic import BaseModel
 
 from ._diagnostics import log_timing
-from ._jsonrpc import JsonRpcError, ProcessExitedError
-from ._telemetry import get_trace_context, trace_context
-from .canvas import CanvasError, CanvasHandler, OpenCanvasInstance
-from .generated.rpc import (
+from ._generated.rpc import (
     AutoTier as _RpcAutoTier,
 )
-from .generated.rpc import (
+from ._generated.rpc import (
     BuiltinToolInputSchemaType,
     CanvasProviderCloseRequest,
     CanvasProviderInvokeActionRequest,
@@ -58,6 +55,7 @@ from .generated.rpc import (
     MCPOauthHandlePendingRequest,
     MCPOauthPendingRequestResponse,
     MCPServerConfigDeferTools,
+    ModelCapabilitiesOverride,
     ModelSwitchAutoTierResult,
     ModelSwitchFusionTierRequest,
     ModelSwitchToRequest,
@@ -84,17 +82,16 @@ from .generated.rpc import (
     _SkillProviderListResult,
     _SkillProviderReadResult,
 )
-from .generated.rpc import (
+from ._generated.rpc import (
     CanvasHandler as RpcCanvasHandler,
 )
-from .generated.rpc import (
+from ._generated.rpc import (
     ContextTier as _RpcContextTier,
 )
-from .generated.rpc import (
+from ._generated.rpc import (
     FusionTier as _RpcFusionTier,
 )
-from .generated.rpc import ModelCapabilitiesOverride as _RpcModelCapabilitiesOverride
-from .generated.session_events import (
+from ._generated.session_events import (
     AssistantMessageData,
     AssistedApprovalAssessment,
     CapabilitiesChangedData,
@@ -117,9 +114,12 @@ from .generated.session_events import (
     UserMessageData,
     session_event_from_dict,
 )
-from .generated.session_events import (
+from ._generated.session_events import (
     ReasoningSummary as _RpcReasoningSummary,
 )
+from ._jsonrpc import JsonRpcError, ProcessExitedError
+from ._telemetry import get_trace_context, trace_context
+from .canvas import CanvasError, CanvasHandler, OpenCanvasInstance
 from .tools import (
     Tool,
     ToolHandler,
@@ -151,68 +151,6 @@ SessionEventTypeAlias = SessionEvent
 # ============================================================================
 # Reasoning Effort
 # ============================================================================
-
-
-@dataclass
-class ModelVisionLimitsOverride:
-    supported_media_types: list[str] | None = None
-    max_prompt_images: int | None = None
-    max_prompt_image_size: int | None = None
-
-
-@dataclass
-class ModelLimitsOverride:
-    """Per-field overrides; the context window does not replace a separate prompt limit."""
-
-    max_prompt_tokens: int | None = None
-    max_output_tokens: int | None = None
-    max_context_window_tokens: int | None = None
-    vision: ModelVisionLimitsOverride | None = None
-
-
-@dataclass
-class ModelSupportsOverride:
-    vision: bool | None = None
-    reasoning_effort: bool | None = None
-
-
-@dataclass
-class ModelCapabilitiesOverride:
-    supports: ModelSupportsOverride | None = None
-    limits: ModelLimitsOverride | None = None
-
-
-def _capabilities_to_dict(caps: ModelCapabilitiesOverride) -> dict:
-    result: dict = {}
-    if caps.supports is not None:
-        s: dict = {}
-        if caps.supports.vision is not None:
-            s["vision"] = caps.supports.vision
-        if caps.supports.reasoning_effort is not None:
-            s["reasoningEffort"] = caps.supports.reasoning_effort
-        if s:
-            result["supports"] = s
-    if caps.limits is not None:
-        lim: dict = {}
-        if caps.limits.max_prompt_tokens is not None:
-            lim["max_prompt_tokens"] = caps.limits.max_prompt_tokens
-        if caps.limits.max_output_tokens is not None:
-            lim["max_output_tokens"] = caps.limits.max_output_tokens
-        if caps.limits.max_context_window_tokens is not None:
-            lim["max_context_window_tokens"] = caps.limits.max_context_window_tokens
-        if caps.limits.vision is not None:
-            v: dict = {}
-            if caps.limits.vision.supported_media_types is not None:
-                v["supported_media_types"] = caps.limits.vision.supported_media_types
-            if caps.limits.vision.max_prompt_images is not None:
-                v["max_prompt_images"] = caps.limits.vision.max_prompt_images
-            if caps.limits.vision.max_prompt_image_size is not None:
-                v["max_prompt_image_size"] = caps.limits.vision.max_prompt_image_size
-            if v:
-                lim["vision"] = v
-        if lim:
-            result["limits"] = lim
-    return result
 
 
 # Model-defined; use list_models() to discover supported values. BYOK providers can define more.
@@ -1961,9 +1899,7 @@ class ProviderTokenArgs(TypedDict):
     be removed in future SDK or CLI releases.
     """
 
-    # Name of the BYOK provider needing a token. For the singular, whole-session
-    # ``provider`` this is the implicit provider name ("default"); for
-    # ``NamedProviderConfig`` entries it is ``NamedProviderConfig.name``.
+    # Configured NamedProviderConfig.name of the BYOK provider needing a token.
     provider_name: str
 
     # Id of the session that triggered this token request. A client-level shared
@@ -2021,69 +1957,11 @@ ProviderConfigModelProvider = Literal[
 """Product serving a configured provider's model."""
 
 
-class ProviderConfig(TypedDict, total=False):
-    """Configuration for a custom API provider"""
-
-    type: Literal["openai", "azure", "anthropic", "google"]
-    wire_api: Literal["completions", "responses"]
-    # Transport for OpenAI Responses requests. Defaults to "http". Set
-    # "websockets" to deliver Responses API requests over a persistent WebSocket
-    # connection instead of HTTP. Applies to OpenAI-compatible providers using
-    # wire_api "responses".
-    transport: Literal["http", "websockets"]
-    # Product serving the model, such as "ollama" or "lm_studio", reported in
-    # telemetry as model_provider. Only affects telemetry.
-    model_provider: ProviderConfigModelProvider
-    base_url: str
-    api_key: str
-    # Command run by the runtime before each provider request to obtain a fresh
-    # API key. Command failures fail the turn before sending a model request.
-    api_key_command: str
-    # Bearer token for authentication. Sets the Authorization header directly.
-    # Use this for services requiring bearer token auth instead of API key.
-    # Takes precedence over api_key when both are set.
-    bearer_token: str
-    azure: AzureProviderOptions  # Azure-specific options
-    headers: dict[str, str]
-    # Well-known model name used by the runtime to look up agent configuration
-    # (tools, prompts, reasoning behavior) and default token limits. Also used
-    # as the wire model when wire_model is not set.
-    # Falls back to SessionConfig.model.
-    model_id: str
-    # Model name sent to the provider API for inference. Use this when the
-    # provider's model name (e.g. an Azure deployment name or a custom
-    # fine-tune name) differs from model_id.
-    # Falls back to model_id, then SessionConfig.model.
-    wire_model: str
-    # Overrides the resolved model's default max prompt tokens. The runtime
-    # triggers conversation compaction before sending a request when the prompt
-    # (system message, history, tool definitions, user message) would exceed
-    # this limit.
-    max_prompt_tokens: int
-    # Overrides the maximum combined prompt and output context window.
-    # A separate max_prompt_tokens limit still applies.
-    max_context_window_tokens: int
-    # Overrides the resolved model's default max output tokens. When hit, the
-    # model stops generating and returns a truncated response.
-    max_output_tokens: int
-    # Per-request callback that resolves a bearer token on demand for this BYOK
-    # provider (for example via Azure Managed Identity). Never serialized — the
-    # SDK sends hasBearerTokenProvider: true on the wire and answers the
-    # runtime's providerToken.getToken requests with this callback's result.
-    # When set alongside api_key, api_key_command, or bearer_token, this callback
-    # takes precedence: the runtime applies its token as the Authorization: Bearer header for
-    # each request without sending the static credential or running the command.
-    bearer_token_provider: BearerTokenProvider
-
-
 class NamedProviderConfig(TypedDict, total=False):
     """A named BYOK provider connection (transport + credentials).
 
-    Referenced by :class:`ProviderModelConfig` entries via ``name``. Unlike the
-    singular :class:`ProviderConfig` (which makes the whole session BYOK and
-    bypasses Copilot API authentication), named providers are additive: they
-    coexist with Copilot API auth so models from CAPI and one or more BYOK
-    providers can be mixed within a single session and across sub-agents.
+    Referenced by :class:`ProviderModelConfig` entries via ``name``. Connections
+    do not disable GitHub identity; ``github.capi.enabled`` controls CAPI models.
 
     **Experimental.** Multi-provider BYOK configuration is experimental and may
     change or be removed in future SDK or CLI releases.
@@ -2091,13 +1969,17 @@ class NamedProviderConfig(TypedDict, total=False):
 
     # Stable identifier referenced by ProviderModelConfig.provider. Must not contain "/".
     name: str
-    type: Literal["openai", "azure", "anthropic", "google"]
+    type: Literal["openai", "azure", "anthropic", "google", "winml"]
     wire_api: Literal["completions", "responses"]
+    transport: Literal["http", "websockets"]
+    local_model: Any
     # Product serving this provider's models, such as "ollama" or "lm_studio",
     # reported in telemetry as model_provider. Only affects telemetry.
     model_provider: ProviderConfigModelProvider
     base_url: str
     api_key: str
+    # Runs before each request. Failure fails the request without static fallback.
+    api_key_command: str
     # Bearer token for authentication. Sets the Authorization header directly.
     # Takes precedence over api_key when both are set.
     bearer_token: str
@@ -2242,7 +2124,7 @@ class CopilotSession:
 
     Example:
         >>> async with await client.create_session(
-        ...     on_permission_request=PermissionHandler.approve_all,
+        ...     permissions={"on_request": PermissionHandler.approve_all}
         ... ) as session:
         ...     # Subscribe to events
         ...     unsubscribe = session.on(lambda event: print(event.type))
@@ -4649,10 +4531,10 @@ class CopilotSession:
 
         Example:
             >>> import asyncio
-            >>>
+
             >>> # Start a long-running request
             >>> task = asyncio.create_task(session.send("Write a very long story..."))
-            >>>
+
             >>> # Abort after 5 seconds
             >>> await asyncio.sleep(5)
             >>> await session.abort()
@@ -4717,9 +4599,7 @@ class CopilotSession:
         """
         rpc_caps = None
         if model_capabilities is not None:
-            rpc_caps = _RpcModelCapabilitiesOverride.from_dict(
-                _capabilities_to_dict(model_capabilities)
-            )
+            rpc_caps = model_capabilities
         request = ModelSwitchToRequest(
             model_id=model,
             reasoning_effort=reasoning_effort,

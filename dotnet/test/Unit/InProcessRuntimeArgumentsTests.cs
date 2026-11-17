@@ -5,7 +5,7 @@
 using System.Reflection;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed class InProcessRuntimeArgumentsTests
 {
@@ -14,6 +14,7 @@ public sealed class InProcessRuntimeArgumentsTests
     {
         var options = new CopilotClientOptions
         {
+            Mode = CopilotClientMode.CodingAgent,
             InternalTestOptions = new InternalTestOptions
             {
                 CopilotApiUrl = "http://replay",
@@ -22,8 +23,8 @@ public sealed class InProcessRuntimeArgumentsTests
                 NoProxy = "",
                 CaCertificatePath = "/test/ca.pem",
             },
-            GitHubToken = "typed-token",
-            BaseDirectory = "typed-home",
+            GitHub = new ClientGitHubOptions { Token = "typed-token" },
+            Runtime = RuntimeConnection.ForDefault(baseDirectory: "typed-home")
         };
         var method = typeof(CopilotClient).GetMethod(
             "BuildInProcessRuntimeEnvironment", BindingFlags.Static | BindingFlags.NonPublic);
@@ -55,34 +56,11 @@ public sealed class InProcessRuntimeArgumentsTests
 
         var exception = Assert.Throws<ArgumentException>(() => new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri("localhost:8080"),
-            InternalTestOptions = new InternalTestOptions(),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp("localhost", 8080),
+            InternalTestOptions = new InternalTestOptions()
         }));
         Assert.Contains("requires a runtime owned by this client", exception.Message);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void InProcess_Environment_Is_Rejected(bool empty)
-    {
-        var exception = Assert.Throws<ArgumentException>(() => new CopilotClient(new CopilotClientOptions
-        {
-            Connection = RuntimeConnection.ForInProcess(),
-            Environment = empty ? [] : new Dictionary<string, string> { ["FOO"] = "bar" },
-        }));
-        Assert.Contains("CopilotClientOptions.Environment is not supported", exception.Message);
-    }
-
-    [Fact]
-    public void InProcess_Client_Working_Directory_Remains_Unsupported()
-    {
-        var exception = Assert.Throws<ArgumentException>(() => new CopilotClient(new CopilotClientOptions
-        {
-            Connection = RuntimeConnection.ForInProcess(),
-            WorkingDirectory = ".",
-        }));
-        Assert.Contains("SessionConfig.WorkingDirectory", exception.Message);
     }
 
     [Theory]
@@ -93,16 +71,20 @@ public sealed class InProcessRuntimeArgumentsTests
         var before = Environment.GetEnvironmentVariables();
         var options = new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForInProcess(),
-            Telemetry = new TelemetryConfig
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForInProcess(),
+            Observability = new ClientObservabilityOptions
             {
-                OtlpEndpoint = "http://collector:4318",
-                OtlpProtocol = "http/protobuf",
-                FilePath = "/telemetry.jsonl",
-                ExporterType = "file",
-                SourceName = "inprocess-sdk",
-                CaptureContent = captureContent,
-            },
+                Telemetry = new TelemetryConfig
+                {
+                    OtlpEndpoint = "http://collector:4318",
+                    OtlpProtocol = "http/protobuf",
+                    FilePath = "/telemetry.jsonl",
+                    ExporterType = "file",
+                    SourceName = "inprocess-sdk",
+                    CaptureContent = captureContent,
+                }
+            }
         };
         using var client = new CopilotClient(options);
         var method = typeof(CopilotClient).GetMethod(

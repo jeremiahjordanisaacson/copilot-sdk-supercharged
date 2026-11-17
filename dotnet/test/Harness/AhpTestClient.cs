@@ -7,7 +7,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace GitHub.Copilot.Test.Harness;
+namespace Microsoft.Copilot.Test.Harness;
 
 public sealed class AhpTestClient : IAsyncDisposable
 {

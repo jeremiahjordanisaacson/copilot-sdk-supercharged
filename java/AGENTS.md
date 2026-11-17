@@ -46,7 +46,7 @@ and defaults with the corresponding reference SDK implementation, not just its
 API fields. Distinguish shared SDK policy from mode-specific defaults; require
 an explicit reason for each intentional difference.
 
-For session-request changes, cover create and resume, `COPILOT_CLI` and `EMPTY`,
+For session-request changes, cover create and resume, `CODING_AGENT` and `EMPTY`,
 and applicable null/omitted-config paths. Set mode-independent defaults before
 early returns. Keep public Javadoc consistent with the resulting behavior.
 
@@ -97,7 +97,7 @@ SDK facade to select checked-out runtime schemas:
 npm run generate:java
 ```
 
-The protocol constant `sdk/src/main/java/com/github/copilot/SdkProtocolVersion.java`
+The protocol constant `sdk/src/main/java/com/microsoft/copilot/SdkProtocolVersion.java`
 is also generated, despite living outside `src/generated/`. Change the shared
 `<SDK_ROOT>/sdk-protocol-version.json` and run
 `npm --prefix <SDK_ROOT>/nodejs run update:protocol-version` to update all six SDKs.

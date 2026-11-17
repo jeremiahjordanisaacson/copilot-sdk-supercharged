@@ -20,7 +20,7 @@ async fn cancel(peer: &mut Peer, host_id: &str, request_id: &str) {
 
 #[tokio::test]
 async fn requires_authentication_before_host_start_in_every_mode() {
-    for mode in [crate::ClientMode::CopilotCli, crate::ClientMode::Empty] {
+    for mode in [crate::ClientMode::CodingAgent, crate::ClientMode::Empty] {
         let (client_write, read) = duplex(1 << 20);
         let (write, client_read) = duplex(1 << 20);
         let client = Client::from_streams_with_mode_for_test(

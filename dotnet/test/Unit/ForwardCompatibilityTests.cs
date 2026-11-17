@@ -8,7 +8,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 /// <summary>
 /// Tests for forward-compatible handling of unknown session event types.
@@ -318,7 +318,7 @@ public class ForwardCompatibilityTests
     [Fact]
     public void RpcEnum_DefaultValue_HasEmptyStringValue()
     {
-        GitHub.Copilot.SessionMode mode = default;
+        Microsoft.Copilot.SessionMode mode = default;
 
         Assert.Equal(string.Empty, mode.Value);
         Assert.Equal(string.Empty, mode.ToString());
@@ -327,7 +327,7 @@ public class ForwardCompatibilityTests
     [Fact]
     public void RpcEnum_DefaultValueSerialization_ThrowsJsonException()
     {
-        GitHub.Copilot.SessionMode mode = default;
+        Microsoft.Copilot.SessionMode mode = default;
 
         var exception = Assert.Throws<JsonException>(() => JsonSerializer.Serialize(
             mode,
@@ -382,5 +382,5 @@ public class ForwardCompatibilityTests
     }
 }
 
-[JsonSerializable(typeof(GitHub.Copilot.SessionMode))]
+[JsonSerializable(typeof(Microsoft.Copilot.SessionMode))]
 internal partial class ForwardCompatibilityJsonContext : JsonSerializerContext;

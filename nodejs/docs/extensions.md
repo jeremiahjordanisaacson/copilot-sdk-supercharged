@@ -17,7 +17,7 @@ Extensions add custom tools, hooks, and behaviors to the Copilot CLI. They run a
 ```
 
 1. **Discovery**: The CLI scans `.github/extensions/` (project) and the user's copilot config extensions directory for subdirectories containing an `extension.mjs`, `extension.cjs` or `extension.js` entry file.
-2. **Launch**: Legacy extensions start eagerly. Extensions with a valid opt-in `extension.json` advertise native tools/canvases without starting, and launch on first admitted demand. Each launched extension is a child process with `@github/copilot-sdk` available via an automatic module resolver.
+2. **Launch**: Legacy extensions start eagerly. Extensions with a valid opt-in `extension.json` advertise native tools/canvases without starting, and launch on first admitted demand. Each launched extension is a child process with `@microsoft/copilot-sdk` available via an automatic module resolver.
 3. **Connection**: The extension calls `joinSession()` which establishes a JSON-RPC connection over stdio to the CLI and attaches to the user's current foreground session.
 4. **Registration**: Tools and hooks declared in the session options are registered with the CLI and become available to the agent.
 5. **Lifecycle**: Extensions reload on `/clear` or foreground-session replacement and stop on CLI exit. On macOS and Linux, ordinary stop/reload sends SIGTERM, then SIGKILL after 5s if still running. CLI exit and session/service teardown use a shared 1s grace period, including disabling extensions on SDK resume; Windows kills immediately without a grace period.
@@ -33,7 +33,7 @@ Extensions add custom tools, hooks, and behaviors to the Copilot CLI. They run a
 - The entry file must be named `extension.mjs`, `extension.cjs` or `extension.js`. If a directory holds more than one, the first in that order is used.
 - `.mjs` (ES modules) is the recommended form and is what the scaffold generates. `.cjs` is CommonJS, and `.js` is loaded under Node's usual module-type rules. TypeScript (`.ts`) is not supported.
 - Each extension lives in its own subdirectory.
-- The `@github/copilot-sdk` import is resolved automatically — you don't install it.
+- The `@microsoft/copilot-sdk` import is resolved automatically — you don't install it.
 
 In Protected Mode, local sessions that opt into extensions add filesystem access for the
 configured user extensions directory, validated project `.github/extensions/`, and their own
@@ -76,10 +76,10 @@ produce diagnostics and preserve eager startup.
 
 ## The SDK
 
-Extensions use `@github/copilot-sdk` for all interactions with the CLI:
+Extensions use `@microsoft/copilot-sdk` for all interactions with the CLI:
 
 ```js
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 const session = await joinSession({
     tools: [
@@ -98,7 +98,7 @@ The `session` object provides methods for sending messages, logging to the timel
 The CLI strips sensitive environment variables (for example `GITHUB_TOKEN`) from every extension process before it starts. An extension that needs one asks for it by name:
 
 ```js
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 const session = await joinSession({
     requestedEnvironmentVariables: ["GITHUB_TOKEN"],

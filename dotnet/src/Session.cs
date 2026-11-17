@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
@@ -15,7 +15,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading.Channels;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>
 /// Represents a single conversation session with the Copilot CLI.
@@ -41,8 +41,7 @@ namespace GitHub.Copilot;
 /// </remarks>
 /// <example>
 /// <code>
-/// await using var session = await client.CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll, Model = "gpt-5.4" });
-///
+/// await using var session = await client.CreateSessionAsync(new CreateSessionOptions() { Model = "gpt-5.4", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 /// // Subscribe to events
 /// using var subscription = session.On&lt;SessionEvent&gt;(evt =&gt;
 /// {
@@ -51,7 +50,6 @@ namespace GitHub.Copilot;
 ///         Console.WriteLine($"Assistant: {assistantMessage.Data?.Content}");
 ///     }
 /// });
-///
 /// // Send a message and wait for completion
 /// await session.SendAndWaitAsync(new MessageOptions { Prompt = "Hello, world!" });
 /// </code>
@@ -156,11 +154,11 @@ public sealed partial class CopilotSession : IAsyncDisposable
     public TranscriptRecoveryReport? TranscriptRecovery { get; internal set; }
 
     /// <summary>
-    /// Outcome of the <see cref="SessionConfigBase.PermissionMode"/> requested when
+    /// Outcome of the <see cref="SessionPermissionOptions.Mode"/> requested when
     /// the session was created or resumed: whether it was applied, and the
     /// authoritative mode the session started in. Null when no mode was requested.
     /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public PermissionsSetModeResult? PermissionModeResult { get; internal set; }
 
     /// <summary>
@@ -411,14 +409,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// </remarks>
     /// <example>
     /// <code>
-    /// var messageId = await session.SendAsync(new MessageOptions
-    /// {
-    ///     Prompt = "Explain this code",
-    ///     Attachments = new List&lt;Attachment&gt;
-    ///     {
-    ///         new AttachmentFile { Path = "./Program.cs", DisplayName = "Program.cs" }
-    ///     }
-    /// });
+    /// var messageId = await session.SendAsync(new MessageOptions { Prompt = "Explain this code", Attachments = new List&lt;Attachment&gt; { new AttachmentFile { Path = "./Program.cs", DisplayName = "Program.cs" } } });
     /// </code>
     /// </example>
     public async Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken = default)
@@ -629,18 +620,18 @@ public sealed partial class CopilotSession : IAsyncDisposable
         {
             throw new IOException("The session closed before a final response was received.", error);
         }
-        catch (IOException error) when (error.InnerException is RemoteRpcException remote)
+        catch (RemoteRpcException error)
         {
-            if (remote.ErrorCode == RemoteRpcException.MethodNotFoundErrorCode)
+            if (error.ErrorCode == RemoteRpcException.MethodNotFoundErrorCode)
             {
                 _completionRpcUnsupported = true;
                 return null;
             }
-            if (remote.ErrorData is { ValueKind: JsonValueKind.Object } data &&
+            if (error.ErrorData is { ValueKind: JsonValueKind.Object } data &&
                 data.TryGetProperty("completionEventId", out var id) && id.ValueKind == JsonValueKind.String)
             {
                 await DrainAsync(id.GetString());
-                throw new InvalidOperationException($"Session error: {remote.Message}", error);
+                throw new InvalidOperationException($"Session error: {error.Message}", error);
             }
             throw;
         }
@@ -840,12 +831,8 @@ public sealed partial class CopilotSession : IAsyncDisposable
     ///             break;
     ///     }
     /// });
-    ///
     /// // Or filter to a specific event kind at compile time:
-    /// using var sub2 = session.On&lt;AssistantMessageEvent&gt;(evt =&gt;
-    ///     Console.WriteLine(evt.Data?.Content));
-    ///
-    /// // The handler is automatically unsubscribed when the subscription is disposed.
+    /// using var sub2 = session.On&lt;AssistantMessageEvent&gt;(evt =&gt; Console.WriteLine(evt.Data?.Content));// The handler is automatically unsubscribed when the subscription is disposed.
     /// </code>
     /// </example>
     public IDisposable On<T>(Action<T> handler) where T : SessionEvent
@@ -1064,7 +1051,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// Replaces the complete custom tool list supplied by this SDK client for the live session.
     /// </summary>
     /// <param name="tools">
-    /// The same tool declarations accepted by <see cref="SessionConfigBase.Tools"/> when creating or resuming a session.
+    /// The same tool declarations accepted by <see cref="SessionToolOptions.Definitions"/> when creating or resuming a session.
     /// Passing an empty collection removes all externally implemented tools supplied by this client.
     /// </param>
     /// <param name="cancellationToken">
@@ -1376,9 +1363,9 @@ public sealed partial class CopilotSession : IAsyncDisposable
                                 {
                                     Elicitation = changed.Elicitation ?? current?.Elicitation,
                                     AutoModeRecovery = changed.AutoModeRecovery ?? current?.AutoModeRecovery,
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
                                     McpApps = changed.McpApps ?? current?.McpApps,
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
                                 }
                             };
                         }
@@ -1822,7 +1809,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             {
                 await Rpc.Permissions.HandlePendingPermissionRequestAsync(requestId, PermissionDecision.UserNotAvailable());
             }
-            catch (IOException)
+            catch (Exception deliveryError) when (deliveryError is IOException or RemoteRpcException)
             {
                 // Connection lost or RPC error — nothing we can do
             }
@@ -2309,7 +2296,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             {
                 await Rpc.Commands.HandlePendingCommandAsync(requestId, error: $"Unknown command: {commandName}");
             }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or RemoteRpcException)
             {
                 // Connection lost — nothing we can do
             }
@@ -2352,7 +2339,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             {
                 await Rpc.Commands.HandlePendingCommandAsync(requestId, error: message);
             }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or RemoteRpcException)
             {
                 // Connection lost — nothing we can do
             }
@@ -2384,18 +2371,13 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 requestId);
             var responseRpcTimestamp = Stopwatch.GetTimestamp();
             // The label is a sibling of the answer, never part of it.
-            await Rpc.Ui.HandlePendingElicitationAsync(new UIHandlePendingElicitationRequest
+            await Rpc.Ui.HandlePendingElicitationAsync(requestId: requestId, result: new UIElicitationResponse
             {
-                RequestId = requestId,
-                Result = new UIElicitationResponse
-                {
-                    Action = result.Action,
-                    Content = result.Content?.ToDictionary(
+                Action = result.Action,
+                Content = result.Content?.ToDictionary(
                         kvp => kvp.Key,
                         kvp => SerializeElicitationValue(kvp.Value))
-                },
-                DecisionContext = result.DecisionContext
-            });
+            }, decisionContext: result.DecisionContext);
             LoggingHelpers.LogTiming(_logger, LogLevel.Debug, null,
                 "CopilotSession.HandleElicitationRequestAsync response sent successfully. Elapsed={Elapsed}, SessionId={SessionId}, RequestId={RequestId}",
                 responseRpcTimestamp,
@@ -2414,7 +2396,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
                     Action = UIElicitationResponseAction.Cancel
                 });
             }
-            catch (Exception innerEx) when (innerEx is IOException or ObjectDisposedException)
+            catch (Exception innerEx) when (innerEx is IOException or ObjectDisposedException or RemoteRpcException)
             {
                 // Connection lost — nothing we can do
             }
@@ -2938,6 +2920,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
     /// <returns>A task representing the abort operation.</returns>
+    /// <exception cref="RemoteRpcException">Thrown when the runtime rejects the abort operation.</exception>
     /// <exception cref="InvalidOperationException">Thrown if the session has been disposed.</exception>
     /// <remarks>
     /// Use this to cancel a long-running request. The session remains valid and can continue
@@ -2946,11 +2929,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// <example>
     /// <code>
     /// // Start a long-running request
-    /// var messageTask = session.SendAsync(new MessageOptions
-    /// {
-    ///     Prompt = "Write a very long story..."
-    /// });
-    ///
+    /// var messageTask = session.SendAsync(new MessageOptions { Prompt = "Write a very long story..." });
     /// // Abort after 5 seconds
     /// await Task.Delay(TimeSpan.FromSeconds(5));
     /// await session.AbortAsync();
@@ -3019,22 +2998,19 @@ public sealed partial class CopilotSession : IAsyncDisposable
             }
 
             await Rpc.Model.SwitchToAsync(
-                new ModelSwitchToRequest
-                {
-                    ModelId = model,
-                    FusionTier = fusionTier,
-                    ReasoningEffort = options.ReasoningEffort,
-                    ReasoningSummary = options.ReasoningSummary,
-                    ModelCapabilities = options.ModelCapabilities,
-                    ContextTier = options.ContextTier,
-                },
-                cancellationToken);
+                modelId: model,
+                fusionTier: fusionTier,
+                reasoningEffort: options.ReasoningEffort,
+                reasoningSummary: options.ReasoningSummary,
+                modelCapabilities: options.ModelCapabilities,
+                contextTier: options.ContextTier,
+                cancellationToken: cancellationToken);
             return;
         }
 
         if (options.ResetAutoTier)
         {
-            var request = new ModelSwitchToRequestWithSession
+            var request = new ModelSwitchToRequest
             {
                 SessionId = SessionId,
                 ModelId = model,
@@ -3046,7 +3022,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             await CopilotClient.InvokeRpcAsync(
                 Rpc,
                 "session.model.switchTo",
-                [WithExplicitNullAutoTier(request, RpcJsonContext.Default.ModelSwitchToRequestWithSession)],
+                [WithExplicitNullAutoTier(request, RpcJsonContext.Default.ModelSwitchToRequest)],
                 cancellationToken);
             return;
         }
@@ -3222,11 +3198,10 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// </remarks>
     /// <example>
     /// <code>
-    /// // Using 'await using' for automatic disposal — session can still be resumed later
-    /// await using var session = await client.CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll });
-    ///
+    /// // Using 'await using' for automatic disposal � session can still be resumed later
+    /// await using var session = await client.CreateSessionAsync(new CreateSessionOptions() { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
     /// // Or manually dispose
-    /// var session2 = await client.CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll });
+    /// var session2 = await client.CreateSessionAsync(new CreateSessionOptions() { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
     /// // ... use the session ...
     /// await session2.DisposeAsync();
     /// </code>
@@ -3277,6 +3252,10 @@ public sealed partial class CopilotSession : IAsyncDisposable
         catch (IOException) when (!requireAcknowledgement)
         {
             // Connection is broken or closed
+        }
+        catch (RemoteRpcException error) when (!requireAcknowledgement)
+        {
+            LogSessionDetachFailed(SessionId, error.Message);
         }
         finally
         {

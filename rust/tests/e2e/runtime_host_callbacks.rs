@@ -2,13 +2,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::hooks::{HookContext, PreToolUseInput, PreToolUseOutput, SessionHooks};
-use github_copilot_sdk::session::Session;
-use github_copilot_sdk::tool::ToolHandler;
-use github_copilot_sdk::{
-    AhpSessionRequest, AhpSessionResumeRequest, Error, SystemMessageConfig, Tool, ToolInvocation,
-    ToolResult,
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::hooks::{HookContext, PreToolUseInput, PreToolUseOutput, SessionHooks};
+use copilot_sdk::session::Session;
+use copilot_sdk::tool::ToolHandler;
+use copilot_sdk::{
+    AhpSessionRequest, AhpSessionResumeRequest, Error, RuntimeConnection, SessionId,
+    SystemMessageConfig, TcpRuntimeOptions, Tool, ToolInvocation, ToolResult,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -92,9 +92,9 @@ async fn callback_resume_composes_tools_after_application_session_runtime_restar
                             .with_handler(app.clone());
                         let original = Arc::new(client.resume_session(
                             request.config
-                                .with_permission_handler(Arc::new(ApproveAllHandler))
+                                .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
                                 .with_system_message(SystemMessageConfig::new().with_mode("append").with_content(MARKER))
-                                .with_tools(vec![tool]).with_hooks(app)
+                                .with_tools(|group| group.with_definitions(vec![tool])).with_hooks(|group| group.with_handlers(app))
                         ).await?);
                         resumed_tx.send(original.clone()).unwrap();
                         Ok(original)
@@ -352,14 +352,16 @@ fn options_with_app(
                         .create_session(
                             request
                                 .config
-                                .with_permission_handler(Arc::new(ApproveAllHandler))
+                                .with_permissions(|group| {
+                                    group.with_on_request(Arc::new(ApproveAllHandler))
+                                })
                                 .with_system_message(
                                     SystemMessageConfig::new()
                                         .with_mode("append")
                                         .with_content(MARKER),
                                 )
-                                .with_tools(vec![tool])
-                                .with_hooks(callbacks),
+                                .with_tools(|group| group.with_definitions(vec![tool]))
+                                .with_hooks(|group| group.with_handlers(callbacks)),
                         )
                         .await?,
                 );
@@ -378,8 +380,8 @@ fn options_with_app(
 #[ignore = "requires local runtime host artifacts"]
 #[serial_test::serial]
 async fn resident_publication_preserves_original_without_invoking_factories() {
-    use github_copilot_sdk::rpc::ModeSetRequest;
-    use github_copilot_sdk::session_events::SessionMode;
+    use copilot_sdk::rpc::ModeSetRequest;
+    use copilot_sdk::session_events::SessionMode;
 
     run_snapshot("multi_client", TOOL_SNAPSHOT, |ctx| {
         Box::pin(async move {
@@ -402,9 +404,9 @@ async fn resident_publication_preserves_original_without_invoking_factories() {
                                 .with_mode("append")
                                 .with_content(MARKER),
                         )
-                        .with_excluded_tools(["bash"])
-                        .with_tools(vec![tool])
-                        .with_hooks(callbacks.clone()),
+                        .with_tools(|group| group.with_excluded_tools(["bash"]))
+                        .with_tools(|group| group.with_definitions(vec![tool]))
+                        .with_hooks(|group| group.with_handlers(callbacks.clone())),
                 )
                 .await
                 .unwrap();
@@ -605,11 +607,13 @@ async fn callback_disposal_and_owner_termination_release_once() {
         Box::pin(async move {
             for owner_loss in [false, true] {
                 let (runtime, port) = tcp_owner(ctx).await;
-                let owner = Client::start(options(ctx).with_transport(Transport::External {
-                    host: "127.0.0.1".into(),
-                    port,
-                    connection_token: Some(RUNTIME_TOKEN.into()),
-                }))
+                let owner = Client::start(ctx.client_options_with_transport(
+                    RuntimeConnection::Tcp(TcpRuntimeOptions {
+                        host: "127.0.0.1".into(),
+                        port,
+                        connection_token: Some(RUNTIME_TOKEN.into()),
+                    }),
+                ))
                 .await
                 .unwrap();
                 let (options, mut created, mut released) = options_with_app(Arc::default());

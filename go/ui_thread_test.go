@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 type uiThreadTestHost struct {

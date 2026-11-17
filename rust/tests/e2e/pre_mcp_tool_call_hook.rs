@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::hooks::{
-    HookContext, PreMcpToolCallInput, PreMcpToolCallOutput, SessionHooks,
-};
-use github_copilot_sdk::{IndexMap, McpServerConfig, McpStdioServerConfig};
+use copilot_sdk::hooks::{HookContext, PreMcpToolCallInput, PreMcpToolCallOutput, SessionHooks};
+use copilot_sdk::{IndexMap, McpServerConfig, McpStdioServerConfig};
 use serde_json::json;
 use tokio::sync::mpsc;
 
@@ -63,8 +61,8 @@ async fn should_set_meta_via_premcptoolcall_hook() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_mcp_servers(meta_echo_mcp_servers(ctx.repo_root()))
-                            .with_hooks(Arc::new(SetMetaHooks { tx })),
+                            .with_mcp(|group| group.with_servers(meta_echo_mcp_servers(ctx.repo_root())))
+                            .with_hooks(|group| group.with_handlers(Arc::new(SetMetaHooks { tx }))),
                     )
                     .await
                     .expect("create session");

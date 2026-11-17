@@ -1,3 +1,5 @@
+use crate::byok;
+use copilot_sdk::{RuntimeConnection, SpawnedTcpRuntimeOptions, TcpRuntimeOptions};
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
@@ -5,11 +7,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 use base64::Engine;
 use bytes::Bytes;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::{
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::{
     Attachment, Client, CopilotHttpRequest, CopilotHttpResponse, CopilotRequestContext,
-    CopilotRequestError, CopilotRequestHandler, MessageOptions, ProviderConfig,
-    ResumeSessionConfig, SessionConfig, SessionLimitsConfig, Transport,
+    CopilotRequestError, CopilotRequestHandler, CreateSessionOptions, MessageOptions,
+    ProviderConfig, ResumeSessionOptions, SessionLimitsConfig,
 };
 use http::{HeaderMap, HeaderValue};
 use parking_lot::Mutex;
@@ -33,7 +35,7 @@ fn session_limits(max_ai_credits: f64) -> SessionLimitsConfig {
 
 async fn send_and_get_next_exchange(
     ctx: &E2eContext,
-    session: &github_copilot_sdk::session::Session,
+    session: &copilot_sdk::session::Session,
     prompt: &str,
 ) -> Value {
     let existing_count = ctx.exchanges().len();
@@ -47,7 +49,7 @@ async fn send_and_get_next_exchange(
 }
 
 async fn assert_session_limits_applied(
-    session: &github_copilot_sdk::session::Session,
+    session: &copilot_sdk::session::Session,
     max_ai_credits: f64,
 ) {
     let snapshot = session
@@ -95,7 +97,7 @@ async fn should_apply_session_limits_on_create() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_session_limits(session_limits(30.0)),
+                            .with_execution(|group| group.with_limits(session_limits(30.0))),
                     )
                     .await
                     .expect("create session");
@@ -132,10 +134,12 @@ async fn should_apply_session_limits_on_resume() {
                     .expect("create session");
                 let session2 = client
                     .resume_session(
-                        ResumeSessionConfig::new(session1.id().clone())
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_session_limits(session_limits(30.0)),
+                        ResumeSessionOptions::new(session1.id().clone())
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_execution(|group| group.with_limits(session_limits(30.0))),
                     )
                     .await
                     .expect("resume session");
@@ -193,7 +197,7 @@ async fn should_apply_excluded_built_in_agents_on_create() {
                 let excluded = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_excluded_builtin_agents(["explore"]),
+                            .with_agents(|group| group.with_excluded_builtin_agents(["explore"])),
                     )
                     .await
                     .expect("create excluded-agent session");
@@ -233,10 +237,12 @@ async fn should_apply_excluded_built_in_agents_on_resume() {
                     .expect("create session");
                 let session2 = client
                     .resume_session(
-                        ResumeSessionConfig::new(session1.id().clone())
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_excluded_builtin_agents(["explore"]),
+                        ResumeSessionOptions::new(session1.id().clone())
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_agents(|group| group.with_excluded_builtin_agents(["explore"])),
                     )
                     .await
                     .expect("resume session");
@@ -526,11 +532,18 @@ async fn should_enable_citations_for_anthropic_file_attachments_on_create() {
             let client = ctx.start_llm_client(handler.clone()).await;
             let session = client
                 .create_session(
-                    SessionConfig::default()
-                        .with_permission_handler(Arc::new(ApproveAllHandler))
+                    CreateSessionOptions::default()
+                        .with_permissions(|group| {
+                            group.with_on_request(Arc::new(ApproveAllHandler))
+                        })
                         .with_model("claude-sonnet-5")
-                        .with_enable_citations(true)
-                        .with_provider(anthropic_provider()),
+                        .with_inference(|group| group.with_enable_citations(true))
+                        .with_inference(|group| byok::inference(group, anthropic_provider()))
+                        .with_github(|group| {
+                            group.with_capi(
+                                copilot_sdk::CapiSessionOptions::default().with_enabled(false),
+                            )
+                        }),
                 )
                 .await
                 .expect("create session");
@@ -567,11 +580,14 @@ async fn should_enable_citations_for_anthropic_file_attachments_on_resume() {
             let port = free_tcp_port();
             let token = "rust-citation-resume-token".to_string();
             let server = Client::start(
-                ctx.client_options_with_transport(Transport::Tcp {
-                    port,
-                    connection_token: Some(token.clone()),
-                })
-                .with_request_handler(handler.clone()),
+                ctx.client_options_with_transport(RuntimeConnection::SpawnedTcp(
+                    SpawnedTcpRuntimeOptions {
+                        process: Default::default(),
+                        port,
+                        connection_token: Some(token.clone()),
+                    },
+                ))
+                .with_models(|group| group.with_request_handler(handler.clone())),
             )
             .await
             .expect("start TCP server client");
@@ -579,21 +595,29 @@ async fn should_enable_citations_for_anthropic_file_attachments_on_resume() {
                 .create_session(ctx.approve_all_session_config())
                 .await
                 .expect("create session");
-            let resume_client =
-                Client::start(ctx.client_options_with_transport(Transport::External {
+            let resume_client = Client::start(ctx.client_options_with_transport(
+                RuntimeConnection::Tcp(TcpRuntimeOptions {
                     host: "127.0.0.1".to_string(),
                     port,
                     connection_token: Some(token),
-                }))
-                .await
-                .expect("start external client");
+                }),
+            ))
+            .await
+            .expect("start external client");
             let session2 = resume_client
                 .resume_session(
-                    ResumeSessionConfig::new(session1.id().clone())
-                        .with_permission_handler(Arc::new(ApproveAllHandler))
+                    ResumeSessionOptions::new(session1.id().clone())
+                        .with_permissions(|group| {
+                            group.with_on_request(Arc::new(ApproveAllHandler))
+                        })
                         .with_model("claude-sonnet-5")
-                        .with_enable_citations(true)
-                        .with_provider(anthropic_provider()),
+                        .with_inference(|group| group.with_enable_citations(true))
+                        .with_inference(|group| byok::inference(group, anthropic_provider()))
+                        .with_github(|group| {
+                            group.with_capi(
+                                copilot_sdk::CapiSessionOptions::default().with_enabled(false),
+                            )
+                        }),
                 )
                 .await
                 .expect("resume session");

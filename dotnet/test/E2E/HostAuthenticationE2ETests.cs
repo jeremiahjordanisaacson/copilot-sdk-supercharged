@@ -4,12 +4,12 @@
 
 #if NET8_0_OR_GREATER
 using System.Text.Json;
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public sealed class HostAuthenticationE2ETests : E2ETestBase
 {
@@ -37,8 +37,9 @@ public sealed class HostAuthenticationE2ETests : E2ETestBase
         // These cases prove auth without ambient credentials, which are process-wide.
         return Ctx.CreateClient(new()
         {
-            Connection = RuntimeConnection.ForStdio(),
-            UseLoggedInUser = false,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(),
+            GitHub = new ClientGitHubOptions { UseLoggedInUser = false }
         }, autoInjectGitHubToken: false, environment: environment);
     }
 
@@ -89,9 +90,10 @@ public sealed class HostAuthenticationE2ETests : E2ETestBase
             {
                 creates++;
                 AssertAdmission(request.Authentication);
-                request.Config.Provider = provider;
+                request.Config.Inference = ByokTestOptions.Inference(provider, request.Config.Inference);
+                (request.Config.GitHub.Capi ??= new()).Enabled = false;
                 request.Config.Model = "local-model";
-                request.Config.OnPermissionRequest = PermissionHandler.ApproveAll;
+                request.Config.Permissions.OnRequest = PermissionHandler.ApproveAll;
                 return original = await Ctx.CreateSessionAsync(owner, request.Config);
             }
         }))
@@ -123,9 +125,10 @@ public sealed class HostAuthenticationE2ETests : E2ETestBase
                 resumes++;
                 AssertAdmission(request.Authentication);
                 Assert.Equal(original!.SessionId, request.SessionId);
-                request.Config.Provider = provider;
+                request.Config.Inference = ByokTestOptions.Inference(provider, request.Config.Inference);
+                (request.Config.GitHub.Capi ??= new()).Enabled = false;
                 request.Config.Model = "local-model";
-                request.Config.OnPermissionRequest = PermissionHandler.ApproveAll;
+                request.Config.Permissions.OnRequest = PermissionHandler.ApproveAll;
                 return resumed = await Ctx.ResumeSessionAsync(replacement, request.SessionId, request.Config);
             }
         }))

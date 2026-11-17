@@ -1,14 +1,12 @@
 """Tests for generated RPC method behavior."""
 
-import inspect
 import json
 from datetime import timedelta
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from copilot._jsonrpc import JsonRpcClient
-from copilot.generated.rpc import (
+from copilot._generated.rpc import (
     ClientGlobalApiHandlers,
     CustomizationReloadOutcome,
     CustomizationReloadStatus,
@@ -21,21 +19,15 @@ from copilot.generated.rpc import (
     _SettingsRedactValueForDisplayRequest,
     register_client_global_api_handlers,
 )
+from copilot._jsonrpc import JsonRpcClient
 from copilot.rpc import (
-    AgentInfo,
-    AuthEnumerateQuery,
-    AuthReadValue,
     BuiltinToolInputSchemaType,
     CatalogInvalidRequestError,
     CommandsApi,
     CommandsInvokeRequest,
     CommandsRespondToQueuedCommandRequest,
-    DiscoveredExtensionPlugin,
-    DiscoveredHook,
     HostDisposeRequest,
     HostEmptyResult,
-    InstalledPluginInfo,
-    InstructionSource,
     LocalSessionMetadataValue,
     LogResult,
     MCPGrantType,
@@ -44,9 +36,6 @@ from copilot.rpc import (
     MCPServerConfigLocal,
     MCPStartServerRequest,
     PendingPermissionRequest,
-    Plugin,
-    ProtocolExternalToolDefinition,
-    ProtocolSystemMessageConfig,
     QueuedCommandHandled,
     QueuedCommandNotHandled,
     QuotaWarningProjection,
@@ -54,16 +43,12 @@ from copilot.rpc import (
     RemoteControlStatusResult,
     RemoteSessionMetadataValue,
     SandboxConfig,
-    SandboxConfigUserPolicyFilesystem,
     ServerRpc,
-    ServerSkill,
     SessionList,
     SessionModelList,
     SessionRpc,
     ShellBuildInteractiveEnvironmentRequest,
     ShellBuildInteractiveEnvironmentResult,
-    Skill,
-    SlashCommandAgentPromptResult,
     SlashCommandTextResult,
     TaskAgentInfo,
     UIElicitationSchemaType,
@@ -112,17 +97,17 @@ def test_fetch_response_mode_matches_request_mode_and_round_trips(mode):
 
 
 @pytest.mark.parametrize("value", ["anthropic", "azure", "openai"])
-def test_legacy_provider_type_remains_compatible_with_config_and_endpoint(value):
+def test_legacy_provider_type_remains_compatible_with_named_config_and_endpoint(value):
     from copilot import rpc
 
     kind = rpc.ProviderType(value)
-    config = rpc.ProviderConfig(base_url="http://localhost:1234", type=kind)
+    config = rpc.NamedProviderConfig(name="local", base_url="http://localhost:1234", type=kind)
     endpoint = rpc.ProviderEndpoint(base_url="http://localhost:1234", headers={}, type=kind)
 
     assert "ProviderType" in rpc.__all__
     assert config.to_dict()["type"] == value
     assert endpoint.to_dict()["type"] == value
-    assert rpc.ProviderConfig.from_dict(config.to_dict()).type is kind
+    assert rpc.NamedProviderConfig.from_dict(config.to_dict()).type is kind
     assert rpc.ProviderEndpoint.from_dict(endpoint.to_dict()).type is kind
     assert config.type is kind
     assert endpoint.type is kind
@@ -131,10 +116,12 @@ def test_legacy_provider_type_remains_compatible_with_config_and_endpoint(value)
     )
     assert named.type is kind
     assert named.to_dict()["type"] == value
-    current = rpc.ProviderConfig(base_url=config.base_url, type=rpc.ProviderConfigType(value))
+    current = rpc.NamedProviderConfig(
+        name="local", base_url=config.base_url, type=rpc.ProviderConfigType(value)
+    )
     assert current.to_dict()["type"] == value
     assert current.type is rpc.ProviderConfigType(value)
-    restored = rpc.ProviderConfig.from_dict(current.to_dict())
+    restored = rpc.NamedProviderConfig.from_dict(current.to_dict())
     assert restored.type is current.type
     assert restored == current
     named_current = rpc.NamedProviderConfig(
@@ -143,12 +130,14 @@ def test_legacy_provider_type_remains_compatible_with_config_and_endpoint(value)
     assert rpc.NamedProviderConfig.from_dict(named_current.to_dict()) == named_current
 
 
-def test_winml_provider_type_keeps_its_new_config_representation():
+def test_winml_provider_type_keeps_its_named_config_representation():
     from copilot import rpc
 
-    config = rpc.ProviderConfig(base_url="model.gguf", type=rpc.ProviderConfigType.WINML)
+    config = rpc.NamedProviderConfig(
+        name="local", base_url="model.gguf", type=rpc.ProviderConfigType.WINML
+    )
     assert config.to_dict()["type"] == "winml"
-    assert rpc.ProviderConfig.from_dict(config.to_dict()).type is rpc.ProviderConfigType.WINML
+    assert rpc.NamedProviderConfig.from_dict(config.to_dict()).type is rpc.ProviderConfigType.WINML
     with pytest.raises(ValueError):
         rpc.ProviderEndpoint.from_dict({"baseUrl": config.base_url, "headers": {}, "type": "winml"})
     with pytest.raises(ValueError):
@@ -185,28 +174,6 @@ def test_local_model_values_preserve_published_types_and_enum_identities(
     assert restored.to_dict() == payload
 
 
-@pytest.mark.parametrize(
-    "model,fields,payload",
-    [
-        (
-            AuthEnumerateQuery,
-            "kind refresh broker_available provider",
-            {"kind": "accounts", "refresh": True, "brokerAvailable": False, "provider": "entra"},
-        ),
-        (
-            ProtocolSystemMessageConfig,
-            "content mode content_blocks sections",
-            {"content": "Additional instructions", "mode": "append"},
-        ),
-    ],
-)
-def test_flat_union_positional_constructors_preserve_branch_field_order(model, fields, payload):
-    restored = model.from_dict(payload)
-    positional = model(*(getattr(restored, name) for name in fields.split()))
-
-    assert positional.to_dict() == payload
-
-
 def test_http_oauth_grant_uses_the_published_shared_enum():
     payload = {"url": "https://example.test/mcp", "oauthGrantType": "client_credentials"}
     restored = MCPServerConfigHTTP.from_dict(payload)
@@ -231,15 +198,6 @@ def test_uuid_rpc_field_preserves_stdlib_conversion_errors(value, error):
         LogResult.from_dict({"eventId": value})
 
 
-def test_external_tool_definition_preserves_positional_constructor():
-    definition = ProtocolExternalToolDefinition("Description", "lookup", None, True)
-    assert definition.is_terminal is True
-    expected = {"description": "Description", "name": "lookup", "isTerminal": True}
-    assert definition.to_dict() == expected
-    owned = expected | {"hasHandler": True}
-    assert ProtocolExternalToolDefinition.from_dict(owned).to_dict() == owned
-
-
 @pytest.mark.asyncio
 async def test_raw_setting_write_keeps_required_null():
     client = Mock()
@@ -250,133 +208,6 @@ async def test_raw_setting_write_keeps_required_null():
     client.request.assert_awaited_once_with(
         "user.settings.writeKey", {"key": "showReasoning", "value": None}
     )
-
-
-@pytest.mark.parametrize(
-    "model,legacy_fields,payload,metadata",
-    [
-        (
-            AgentInfo,
-            "description display_name id name disable_model_invocation hooks mcp_servers model "
-            "model_policy models path prompt reasoning_effort skills source tools user_invocable",
-            {
-                "description": "Description",
-                "displayName": "Agent",
-                "id": "agent-id",
-                "name": "agent",
-                "prompt": "Prompt",
-                "reasoningEffort": "high",
-                "skills": ["skill"],
-                "userInvocable": True,
-            },
-            {"pluginId": "builtin:tools"},
-        ),
-        (
-            DiscoveredExtensionPlugin,
-            "name",
-            {"name": "tools"},
-            {"id": "builtin:tools"},
-        ),
-        (
-            DiscoveredHook,
-            "enabled hook_type id origin disable_key project_path source",
-            {
-                "enabled": True,
-                "hookType": "preToolUse",
-                "id": "hook",
-                "origin": "plugin",
-                "disableKey": "disable-hook",
-                "projectPath": "/project",
-                "source": "tools",
-            },
-            {"pluginId": "builtin:tools", "definitionFileUri": "file:///hooks.json"},
-        ),
-        (
-            InstalledPluginInfo,
-            "enabled marketplace name description direct_source_id icon_url installed "
-            "installed_from managed managed_desired_enabled source verified_source version",
-            {
-                "enabled": True,
-                "marketplace": "catalog",
-                "name": "tools",
-                "installed": True,
-                "installedFrom": "/catalog",
-                "source": "source",
-                "version": "1.0",
-            },
-            {"id": "mp:catalog::tools", "rootPath": "/plugins/tools"},
-        ),
-        (
-            InstructionSource,
-            "content id label location source_path type apply_to default_disabled description "
-            "project_path",
-            {
-                "content": "Content",
-                "id": "instruction",
-                "label": "Instructions",
-                "location": "plugin",
-                "sourcePath": "/instructions.md",
-                "type": "plugin",
-                "projectPath": "/project",
-            },
-            {"pluginId": "builtin:tools"},
-        ),
-        (
-            Plugin,
-            "enabled marketplace name direct_source_id installed installed_from managed "
-            "managed_desired_enabled source version",
-            {
-                "enabled": True,
-                "marketplace": "catalog",
-                "name": "tools",
-                "installed": True,
-                "installedFrom": "/catalog",
-                "source": "source",
-                "version": "1.0",
-            },
-            {"id": "mp:catalog::tools", "rootPath": "/plugins/tools"},
-        ),
-        (
-            ServerSkill,
-            "description enabled name source user_invocable argument_hint command_name path "
-            "project_path",
-            {
-                "description": "Description",
-                "enabled": True,
-                "name": "skill",
-                "source": "plugin",
-                "userInvocable": True,
-                "path": "/SKILL.md",
-                "projectPath": "/project",
-            },
-            {"pluginId": "builtin:tools"},
-        ),
-        (
-            Skill,
-            "description enabled name source user_invocable argument_hint command_name "
-            "declared_name mcp_origin path plugin_name",
-            {
-                "description": "Description",
-                "enabled": True,
-                "name": "skill",
-                "source": "plugin",
-                "userInvocable": True,
-                "path": "/SKILL.md",
-                "pluginName": "tools",
-            },
-            {"pluginId": "builtin:tools"},
-        ),
-    ],
-)
-def test_customization_metadata_preserves_positional_constructors(
-    model, legacy_fields, payload, metadata
-):
-    restored = model.from_dict(payload)
-    legacy = model(*(getattr(restored, name) for name in legacy_fields.split()))
-    assert legacy.to_dict() == payload
-    assert model.from_dict(legacy.to_dict()) == legacy
-    extended = payload | metadata
-    assert model.from_dict(extended).to_dict() == extended
 
 
 def test_catalog_product_validation_refusal_preserves_typed_field():
@@ -564,123 +395,6 @@ def test_sandbox_config_round_trips_allow_bypass_and_omits_when_absent():
     assert SandboxConfig(enabled=True).to_dict() == {"enabled": True}
 
 
-def test_sandbox_extensions_preserve_existing_positional_parameters():
-    legacy_fields = [
-        "enabled",
-        "add_current_working_directory",
-        "allow_bypass",
-        "allow_dev_tool_access",
-        "auth",
-        "credentials",
-        "managed_lsp_routing_locked",
-        "managed_mcp_routing_locked",
-        "sandbox_lsp_servers",
-        "sandbox_mcp_servers",
-        "user_policy",
-    ]
-    parameters = list(inspect.signature(SandboxConfig).parameters)
-    assert parameters[: len(legacy_fields)] == legacy_fields
-
-    config = SandboxConfig(True, None, None, None, None, None, None, None, False, True)
-    assert config.to_dict() == {
-        "enabled": True,
-        "sandboxLspServers": False,
-        "sandboxMcpServers": True,
-    }
-    assert SandboxConfig.from_dict(config.to_dict()) == config
-    extended = SandboxConfig(
-        True,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        False,
-        True,
-        sandbox_extensions=False,
-        managed_extensions_routing_locked=True,
-    )
-    assert SandboxConfig.from_dict(extended.to_dict()) == extended
-    assert extended.to_dict()["sandboxExtensions"] is False
-    assert extended.to_dict()["managedExtensionsRoutingLocked"] is True
-
-
-def test_sandbox_enumerate_paths_preserve_existing_positional_parameters():
-    filesystem = SandboxConfigUserPolicyFilesystem(["denied"], ["readonly"], ["readwrite"])
-    assert filesystem.to_dict() == {
-        "deniedPaths": ["denied"],
-        "readonlyPaths": ["readonly"],
-        "readwritePaths": ["readwrite"],
-    }
-
-    payload = {**filesystem.to_dict(), "enumeratePaths": ["C:\\"]}
-    restored = SandboxConfigUserPolicyFilesystem.from_dict(payload)
-    assert restored == SandboxConfigUserPolicyFilesystem(
-        ["denied"], ["readonly"], ["readwrite"], enumerate_paths=["C:\\"]
-    )
-    assert restored.to_dict() == payload
-
-
-def test_slash_command_prompt_preserves_existing_positional_parameters():
-    result = SlashCommandAgentPromptResult("Display prompt", "Agent prompt", None, None, True)
-
-    assert result.runtime_settings_changed is True
-    assert result.reservation_token is None
-    payload = {
-        "displayPrompt": "Display prompt",
-        "kind": "agent-prompt",
-        "prompt": "Agent prompt",
-        "runtimeSettingsChanged": True,
-    }
-    assert result.to_dict() == payload
-
-    payload["reservationToken"] = "reservation-token"
-    restored = SlashCommandAgentPromptResult.from_dict(payload)
-    assert restored.runtime_settings_changed is True
-    assert restored.reservation_token == "reservation-token"
-    assert restored.to_dict() == payload
-
-
-def test_local_session_metadata_preserves_existing_positional_parameters():
-    metadata = LocalSessionMetadataValue(
-        False, "2026-01-01T01:00:00Z", "s1", "2026-01-01T00:00:00Z", "github/cli"
-    )
-
-    assert list(inspect.signature(LocalSessionMetadataValue).parameters)[-1] == "last_client_name"
-    assert metadata.client_name == "github/cli"
-    assert metadata.last_client_name is None
-    payload = {
-        "clientName": "github/cli",
-        "isRemote": False,
-        "lastClientName": "vscode-agent-host",
-        "modifiedTime": "2026-01-01T01:00:00Z",
-        "sessionId": "s1",
-        "startTime": "2026-01-01T00:00:00Z",
-    }
-    restored = LocalSessionMetadataValue.from_dict(payload)
-    assert restored.last_client_name == "vscode-agent-host"
-    assert restored.to_dict() == payload
-
-
-def test_mcp_oauth_scopes_preserve_existing_positional_parameters():
-    parameters = inspect.signature(MCPServerConfigHTTP).parameters
-
-    assert parameters["oauth_scopes"].kind is inspect.Parameter.KEYWORD_ONLY
-    assert parameters["oidc"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
-
-    config = MCPServerConfigHTTP.from_dict(
-        {
-            "url": "https://example.test/mcp",
-            "oauthScopes": ["tools:read", "resources:read"],
-            "oidc": True,
-        }
-    )
-    assert config.oauth_scopes == ["tools:read", "resources:read"]
-    assert config.oidc is True
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "model,payload",
@@ -752,47 +466,6 @@ async def test_mcp_start_request_preserves_header_values(config):
     client.request.assert_awaited_once_with(
         "session.mcp.startServer", {"sessionId": "ide-session", **payload}
     )
-
-
-def test_auth_read_value_preserves_existing_positional_parameters():
-    assert list(inspect.signature(AuthReadValue).parameters) == [
-        "kind",
-        "account",
-        "status",
-        "errors",
-        "auth_info",
-        "auth_selection_id",
-    ]
-    payload = {
-        "kind": "activeAccount",
-        "authInfo": {"type": "user", "host": "https://github.com", "login": "octocat"},
-    }
-    result = AuthReadValue.from_dict(payload)
-    assert result.auth_info.login == "octocat"
-    assert result.status is None
-    assert result.errors is None
-    assert result.to_dict() == payload
-
-
-def test_model_list_preserves_existing_positional_parameters():
-    models = [{"id": "fixture-model"}]
-    prices = []
-    providers = []
-    quotas = {"premium": {"remaining": 42}}
-
-    result = SessionModelList(models, prices, providers, quotas)
-
-    assert result.list is models
-    assert result.auto is None
-    assert result.model_price_categories is prices
-    assert result.providers is providers
-    assert result.quota_snapshots is quotas
-    assert result.to_dict() == {
-        "list": models,
-        "modelPriceCategories": prices,
-        "providers": providers,
-        "quotaSnapshots": quotas,
-    }
 
 
 def test_model_list_round_trips_metadata_without_remapping_existing_fields():

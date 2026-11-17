@@ -11,7 +11,7 @@ Write this script's version/hash snapshot (by default in its Rust crate root).
   --version VERSION   Runtime version (default: ../nodejs/package.json copilotCliVersion).
   --release-url URL   Exact public release base URL (no trailing slash):
                       https://github.com/github/copilot-cli/releases/download/v<VERSION>
-                      https://github.com/github/copilot-sdk/releases/download/runtime-<VERSION>
+                      https://github.com/microsoft/copilot-sdk/releases/download/runtime-<VERSION>
                       Default: the copilot-cli URL.
   --checksums FILE    Read local SHA256SUMS.txt instead of downloading it.
   --output FILE       Write to a selected-source staging file instead of this script's crate.
@@ -62,7 +62,7 @@ fi
 DEFAULT_RELEASE_URL="https://github.com/github/copilot-cli/releases/download/v${VERSION}"
 RELEASE_URL="${RELEASE_URL:-${DEFAULT_RELEASE_URL}}"
 if [[ "${RELEASE_URL}" != "${DEFAULT_RELEASE_URL}" &&
-      "${RELEASE_URL}" != "https://github.com/github/copilot-sdk/releases/download/runtime-${VERSION}" ]]; then
+      "${RELEASE_URL}" != "https://github.com/microsoft/copilot-sdk/releases/download/runtime-${VERSION}" ]]; then
   echo "error: --release-url must be the exact public copilot-cli/v<version> or copilot-sdk/runtime-<version> release URL" >&2
   exit 1
 fi

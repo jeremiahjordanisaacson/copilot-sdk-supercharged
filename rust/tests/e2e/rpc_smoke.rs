@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 
-use github_copilot_sdk::rpc::PingRequest;
-use github_copilot_sdk::session_events::SessionMode;
+use copilot_sdk::rpc::PingRequest;
+use copilot_sdk::session_events::SessionMode;
 
 static E2E: super::support::SharedE2eGroup =
     super::support::SharedE2eGroup::standard("rpc_server", 1);

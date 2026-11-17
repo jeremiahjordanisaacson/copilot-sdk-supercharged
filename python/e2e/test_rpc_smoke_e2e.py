@@ -15,7 +15,9 @@ pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 
 async def test_generated_rpc_round_trip():
-    client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+    )
     try:
         await client.start()
 
@@ -23,7 +25,9 @@ async def test_generated_rpc_round_trip():
         assert pong.message == "pong: typed rpc test"
         assert pong.timestamp is not None
 
-        session = await client.create_session(on_permission_request=PermissionHandler.approve_all)
+        session = await client.create_session(
+            permissions={"on_request": PermissionHandler.approve_all}
+        )
         try:
             assert await session.rpc.mode.get() == SessionMode.INTERACTIVE
         finally:

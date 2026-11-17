@@ -7509,30 +7509,6 @@ export type SessionOpenOptionsReasoningSummary =
   /** Request a detailed summary of model reasoning. */
   | "detailed";
 /**
- * Controls automatic non-interactive profile loading where supported. Explicit initScripts are unaffected.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "ShellInitProfile".
- */
-/** @experimental */
-export type ShellInitProfile =
-  /** Disable automatic non-interactive profile loading. Explicit initScripts still run. */
-  | "none"
-  /** Allow automatic non-interactive profile loading when supported. Explicit initScripts still run. */
-  | "non-interactive";
-/**
- * Supported built-in shells for initialization scripts.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "ShellInitScriptShell".
- */
-/** @experimental */
-export type ShellInitScriptShell =
-  /** Source the script in the built-in Bash shell on macOS and Linux. */
-  | "bash"
-  /** Source the script in the built-in PowerShell shell on Windows. */
-  | "powershell";
-/**
  * How MCP server environment values are interpreted.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -7556,6 +7532,30 @@ export type SessionOpenOptionsAdditionalContentExclusionPolicyScope =
   | "repo"
   /** The content exclusion policy applies across all repositories. */
   | "all";
+/**
+ * Controls automatic non-interactive profile loading where supported. Explicit initScripts are unaffected.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ShellInitProfile".
+ */
+/** @experimental */
+export type ShellInitProfile =
+  /** Disable automatic non-interactive profile loading. Explicit initScripts still run. */
+  | "none"
+  /** Allow automatic non-interactive profile loading when supported. Explicit initScripts still run. */
+  | "non-interactive";
+/**
+ * Supported built-in shells for initialization scripts.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ShellInitScriptShell".
+ */
+/** @experimental */
+export type ShellInitScriptShell =
+  /** Source the script in the built-in Bash shell on macOS and Linux. */
+  | "bash"
+  /** Source the script in the built-in PowerShell shell on Windows. */
+  | "powershell";
 /**
  * Open a session by creating, resuming, attaching, connecting to a remote, or handing off.
  *
@@ -12571,6 +12571,12 @@ export interface NamedProviderConfig {
    */
   apiKey?: string;
   /**
+   * Command run before each request to acquire a fresh API key. Failure
+   * fails the request without static-key or anonymous fallback. Bearer
+   * authentication takes precedence.
+   */
+  apiKeyCommand?: string;
+  /**
    * Static bearer token used to authenticate provider requests.
    */
   bearerToken?: string;
@@ -13334,6 +13340,13 @@ export interface CanvasSourceCloseRequest {
  */
 /** @experimental */
 export interface CapiSessionOptions {
+  /**
+   * Enables the session's built-in Copilot model catalog, authentication and
+   * inference, including subagent and ancillary model work. Defaults to true
+   * on create; omission on resume preserves the policy. Does not disable
+   * GitHub identity, tools, MCP, managed settings or separate telemetry.
+   */
+  enabled?: boolean;
   /**
    * Routing preference for sessions whose model is `auto`. On create or cold resume, this establishes the preference sent as `tier` on CAPI `/auto` requests; when omitted on cold resume, the runtime restores the last committed preference. On resident resume, a different value requests a safe switch after resume succeeds and cannot change an in-flight turn. Successful switches are persisted for later cold resume. When no preference is supplied or restored, CAPI default routing is used. `fast` is an integrator-only latency preset, not a first-party GitHub Copilot product preference. For Copilot Fusion, prefer `fusionTier`: the `balance`, `hydrafusion` and `hydrafusion-max` identifiers it replaces remain accepted but are deprecated.
    */
@@ -16880,6 +16893,10 @@ export interface EntraAuthConfig {
    * Application (client) ID of the host's Microsoft Entra registration. Must be nonblank. The runtime does not supply a default application.
    */
   clientId: string;
+  /**
+   * Native OneAuth application descriptor ID. Omit or leave blank to use clientId. This does not change the OAuth client ID or isolate accounts from other applications.
+   */
+  oneAuthApplicationId?: string;
   /**
    * Application name reported by OneAuth to Microsoft Auth Telemetry System (MATS). Omit or leave blank to disable MATS telemetry without disabling authentication. OneAuth normalizes the name and may group applications into shared event tables.
    */
@@ -26857,11 +26874,6 @@ export interface McpFilteredServer {
    * PII-free filter reason
    */
   redactedReason?: string;
-  /**
-   * @deprecated
-   * Deprecated. This field is no longer populated.
-   */
-  enterpriseName?: string;
 }
 /**
  * MCP headers refresh request id and the host response.
@@ -29898,12 +29910,7 @@ export interface ModelBillingTokenPrices {
    */
   outputPrice?: number;
   /**
-   * @deprecated
-   * Use cacheReadPrice when available. Cost per billing batch of cached tokens in the unit reported by models.listTokenPriceUnits.
-   */
-  cachePrice?: number;
-  /**
-   * AI Credits cost per billing batch of cached (read) tokens
+   * Cost per billing batch of cached (read) tokens. The unit is reported by models.listTokenPriceUnits.
    */
   cacheReadPrice?: number;
   /**
@@ -29918,11 +29925,6 @@ export interface ModelBillingTokenPrices {
    * Number of tokens per standard billing batch
    */
   batchSize?: number;
-  /**
-   * @deprecated
-   * Use maxPromptTokens instead. Prompt token budget for the default tier. The total context window is this value plus the model's max_output_tokens.
-   */
-  contextMax?: number;
   /**
    * Prompt token budget for the default tier. The total context window is this value plus the model's max_output_tokens.
    */
@@ -29949,11 +29951,6 @@ export interface ModelBillingTokenPricesLongContext {
    */
   outputPrice?: number;
   /**
-   * @deprecated
-   * Use cacheReadPrice instead. AI Credits cost per billing batch of cached tokens
-   */
-  cachePrice?: number;
-  /**
    * AI Credits cost per billing batch of cached (read) tokens
    */
   cacheReadPrice?: number;
@@ -29965,11 +29962,6 @@ export interface ModelBillingTokenPricesLongContext {
    * AI Credits cost per billing batch of 1-hour cache-write (cache creation) tokens.
    */
   cacheWrite1hPrice?: number;
-  /**
-   * @deprecated
-   * Use maxPromptTokens instead. Prompt token budget for the long context tier. The total context window is this value plus the model's max_output_tokens.
-   */
-  contextMax?: number;
   /**
    * Prompt token budget for the long context tier. The total context window is this value plus the model's max_output_tokens.
    */
@@ -33959,89 +33951,6 @@ export interface ProviderAddResult {
   models: JsonValue[];
 }
 /**
- * Custom model-provider configuration (BYOK).
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "ProviderConfig".
- */
-/** @experimental */
-export interface ProviderConfig {
-  /**
-   * Provider type. Defaults to "openai" for generic OpenAI-compatible APIs.
-   */
-  type?: ProviderConfigType;
-  /**
-   * Wire API format (openai/azure only). Defaults to "completions".
-   */
-  wireApi?: ProviderConfigWireApi;
-  /**
-   * Provider transport. Defaults to "http".
-   */
-  transport?: ProviderConfigTransport;
-  /**
-   * API endpoint URL.
-   */
-  baseUrl: string;
-  /**
-   * API key. Optional for local providers like Ollama.
-   */
-  apiKey?: string;
-  /**
-   * Command run by the runtime before each provider request to obtain a fresh API key. Credential-command failures fail the turn without sending a model request. Bearer authentication takes precedence.
-   */
-  apiKeyCommand?: string;
-  /**
-   * Bearer token for authentication. Sets the Authorization header directly. Takes precedence over apiKey when both are set.
-   */
-  bearerToken?: string;
-  /**
-   * Azure-specific provider options.
-   */
-  azure?: ProviderConfigAzure;
-  /**
-   * Well-known model ID used for capability lookup. When set, agent behavior config and token limits are inferred from this model.
-   */
-  modelId?: string;
-  /**
-   * Overrides for model capabilities when they cannot be inferred from modelId.
-   */
-  modelCapabilities?: ModelCapabilitiesOverride;
-  /**
-   * Provider name used for model and telemetry attribution.
-   */
-  providerName?: string;
-  /**
-   * The product serving the model, reported in telemetry as `model_provider`. Set it when `type` alone cannot identify the product, such as Ollama or LM Studio behind an OpenAI-compatible endpoint. Only affects telemetry.
-   */
-  modelProvider?: ProviderConfigModelProvider;
-  /**
-   * The model identifier sent to the provider API for inference (the "wire" model), as opposed to modelId which is the well-known base.
-   */
-  wireModel?: string;
-  /**
-   * Maximum prompt/input tokens for the model.
-   */
-  maxPromptTokens?: number;
-  /**
-   * Maximum context window tokens for the model.
-   */
-  maxContextWindowTokens?: number;
-  /**
-   * Maximum output tokens for the model.
-   */
-  maxOutputTokens?: number;
-  /**
-   * Custom HTTP headers to include in all outbound requests to the provider.
-   */
-  headers?: {
-    [k: string]: string | undefined;
-  };
-  /**
-   * When true, the SDK client supplies bearer tokens on demand: the runtime calls the client-session `providerToken.getToken` callback before each request and applies the returned token as an `Authorization: Bearer <token>` header. This is the bearer/OAuth scheme used by Azure AD / managed-identity tokens and provider OAuth access tokens (including Anthropic's), not a provider-specific API-key header such as Anthropic's `x-api-key`. The token-acquiring function itself stays on the SDK side and is never serialized; only this flag crosses the wire. When set alongside `apiKey`/`bearerToken`, the callback takes precedence: the runtime applies the token returned by `providerToken.getToken` as the `Authorization: Bearer` header for each request and does not send the static credential.
-   */
-  hasBearerTokenProvider?: boolean;
-}
-/**
  * A snapshot of the provider endpoint the session is currently configured to talk to.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -34169,7 +34078,7 @@ export interface ProviderTokenAcquireRequest {
    */
   sessionId: string;
   /**
-   * Name of the BYOK provider needing a token. For the legacy whole-session provider this is the implicit provider name; for named providers it is the configured provider name.
+   * Explicit name of the BYOK connection needing a token, including when it is the default connection.
    */
   providerName: string;
 }
@@ -34221,7 +34130,7 @@ export interface ProviderUpdateProviderRequest {
 /** @experimental */
 export interface ProviderWithdrawRequest {
   /**
-   * Provider-qualified selection ids to withdraw. Ids that are not registered are ignored, so withdrawal is idempotent. A provider left with no models referencing it is removed too.
+   * Provider-qualified selection ids to withdraw. Ids that are not registered are ignored, so withdrawal is idempotent. A provider left with no models referencing it is removed too, unless it is the session's default provider.
    */
   models: string[];
 }
@@ -34238,7 +34147,7 @@ export interface ProviderWithdrawResult {
    */
   withdrawn: string[];
   /**
-   * Providers removed because one of the withdrawn models was the last entry referencing them. A provider that merely has no models is not removed.
+   * Providers removed because one of the withdrawn models was the last entry referencing them. The default provider and providers that merely have no models are not removed.
    */
   providersRemoved: string[];
   /**
@@ -35949,10 +35858,6 @@ export interface SandboxConfigUserPolicy {
    * macOS seatbelt options to merge into the base policy.
    */
   seatbelt?: SandboxConfigUserPolicySeatbelt;
-  /**
-   * Deprecated legacy location for `seatbelt`; read only when the top-level `seatbelt` is absent.
-   */
-  experimental?: SandboxConfigUserPolicyExperimental;
 }
 /**
  * Filesystem rules to merge into the base policy.
@@ -36037,32 +35942,6 @@ export interface SandboxConfigUserPolicyNetworkProxy {
  */
 /** @experimental */
 export interface SandboxConfigUserPolicySeatbelt {
-  /**
-   * Whether the macOS seatbelt profile may access the keychain.
-   */
-  keychainAccess?: boolean;
-}
-/**
- * Platform-specific experimental policy fields.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SandboxConfigUserPolicyExperimental".
- */
-/** @experimental */
-export interface SandboxConfigUserPolicyExperimental {
-  /**
-   * macOS seatbelt experimental options.
-   */
-  seatbelt?: SandboxConfigUserPolicyExperimentalSeatbelt;
-}
-/**
- * macOS seatbelt experimental options.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SandboxConfigUserPolicyExperimentalSeatbelt".
- */
-/** @experimental */
-export interface SandboxConfigUserPolicyExperimentalSeatbelt {
   /**
    * Whether the macOS seatbelt profile may access the keychain.
    */
@@ -38982,6 +38861,318 @@ export interface SessionModelPriceCategory {
   priceCategory: ModelPickerPriceCategory;
 }
 /**
+ * Agent definitions, selection, and source filters.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenAgentOptions".
+ */
+/** @experimental */
+export interface SessionOpenAgentOptions {
+  /**
+   * Built-in subagent names to include in this session. When specified, only these built-ins are available, subject to runtime availability and exclusions. Custom agents with the same name remain available.
+   */
+  includedBuiltinAgents?: string[];
+  /**
+   * Built-in subagent names to exclude from this session. Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a custom agent with the same name is available.
+   */
+  excludedBuiltinAgents?: string[];
+  /**
+   * Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+   */
+  directories?: string[];
+  /**
+   * Whether custom agents default to local-only execution.
+   */
+  localDiscoveryOnly?: boolean;
+  /**
+   * Runtime context discriminator for agent filtering.
+   */
+  context?: string;
+}
+/**
+ * Event delivery and streaming.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenEventOptions".
+ */
+/** @experimental */
+export interface SessionOpenEventOptions {
+  /**
+   * Whether model responses stream as delta events.
+   */
+  streaming?: boolean;
+}
+/**
+ * Execution accounting and autonomous continuation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenExecutionOptions".
+ */
+/** @experimental */
+export interface SessionOpenExecutionOptions {
+  /**
+   * Whether auto-mode continuation is enabled.
+   */
+  continueOnAutoMode?: boolean;
+  /**
+   * Initial session limits.
+   */
+  limits?: SessionLimitsConfig;
+  /**
+   * Autopilot policy. Defaults to runtime-owned continuation with at most five automatic continuations. Does not change the session mode.
+   */
+  autopilot?: AutopilotOptions;
+}
+/**
+ * Feature experimentation and trusted assignments.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenExperimentOptions".
+ */
+/** @experimental */
+export interface SessionOpenExperimentOptions {
+  /**
+   * ExP assignment ('flight') data injected by an SDK integrator, in the same JSON shape the Copilot CLI fetches from the experimentation service (CopilotExpAssignmentResponse). When supplied this is fed into the FeatureFlagService exactly like CLI-fetched assignments and ExP-backed flags wait for it. When absent the session does not block on ExP.
+   *
+   * @internal
+   */
+  assignments?: JsonValue;
+  /**
+   * Trusted host defaults consumed by the runtime during session construction.
+   *
+   * @internal
+   */
+  configuration?: SessionFeatureFlagConfiguration;
+  /**
+   * Feature-flag values resolved by the host.
+   */
+  flags?: {
+    [k: string]: boolean | undefined;
+  };
+  /**
+   * Whether experimental behavior is enabled.
+   */
+  enableExperimentalMode?: boolean;
+}
+/**
+ * Project directory access and change tracking.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenFilesystemOptions".
+ */
+/** @experimental */
+export interface SessionOpenFilesystemOptions {
+  /**
+   * Opt in to capturing file changes for session rewind and session diff. Capture cannot reconstruct changes made before it was enabled. On create it starts capture from the first turn. It is also honored on resume: for a session that already has tracked prior turns, tracking continues automatically even if this is omitted; passing it on resume additionally enables tracking for an eligible session that has no prior root turn yet. Resuming a session whose prior root turns were never tracked has no restorable baseline, so tracking stays disabled for it and rewind reports file change tracking as unavailable; the resume itself still succeeds, so sessions that predate tracking remain loadable. The opt-in is only rejected when the session can never track (a subagent session, or one without local session storage). It is intentionally absent from the mutable options update because enabling it after edits have occurred would create an incomplete, misleading baseline. Subagents share the parent session's capture store and are not tracked as separate rewind points: a file a subagent writes is attributed to whichever root user turn was open when the capture was staged, just before the tool body ran. A turn cannot open while a staged capture is still in flight, so a subagent tool that staged under the spawning turn stays attributed to it however late the write lands, while a capture it stages after the user's next message belongs to that later turn. Attribution decides which turn's rewind point counts and file preview include that write; it does not narrow which rewinds revert it, because a rewind restores every capture from the selected turn onward, so the earlier spawning turn reverts it as well.
+   */
+  trackFileChanges?: boolean;
+  /**
+   * Additional directories the agent may access beyond the working directory. Each entry is granted to the session's file-access allow-list and surfaced to the model (system prompt context and `@`-mention completion). Conventional `.github/skills/` and `.github/agents/` definitions under each directory also join the session's project catalogs when their existing subsystem gates are enabled: added-root skills require both `enableConfigDiscovery` and effective `enableSkills`; added-root agents require `enableConfigDiscovery`. Supplying a directory therefore activates configuration from it and should be treated as a trust decision. Absolute paths are recommended; a relative path is resolved against the session's working directory. Nonexistent or unresolvable entries are skipped with a warning. This is applied during session creation and cold resume and is not persisted, so a cold resume must re-supply the directories.
+   */
+  additionalDirectories?: string[];
+  /**
+   * Pre-resolved working-directory context for session startup.
+   */
+  workingDirectoryContext?: SessionContext;
+}
+/**
+ * GitHub integration and session credentials.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenGitHubOptions".
+ */
+/** @experimental */
+export interface SessionOpenGitHubOptions {
+  /**
+   * Opt-in: self-fetch and enforce enterprise managed settings, including managed hook policies, at session bootstrap.
+   */
+  fetchManagedSettings?: boolean;
+  /**
+   * Declares that a human drives this session's conversation, enabling user-message analysis (sentiment, task completion criteria, and task analytics) for user-authored messages. Automated messages remain excluded. Defaults to false for SDK sessions. Applied when the session is created or loaded from storage; ignored when resuming a session that is already active, and for cloud sessions.
+   */
+  interactiveUser?: boolean;
+  /**
+   * Initial authentication info for the session.
+   */
+  authInfo?: AuthInfo;
+  /**
+   * Options scoped to the built-in CAPI (Copilot API) provider.
+   */
+  capi?: CapiSessionOptions;
+  /**
+   * Whether a CLI host explicitly requested the initial Auto preference. False preserves a settings-derived preference without validating availability during creation; execution still validates it. Defaults to true and is ignored for non-CLI callers.
+   *
+   * @internal
+   */
+  autoTierIsExplicit?: boolean;
+  /**
+   * Override URL for the Copilot API endpoint.
+   */
+  copilotUrl?: string;
+}
+/**
+ * Host Git context and commit attribution.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenGitOptions".
+ */
+/** @experimental */
+export interface SessionOpenGitOptions {
+  /**
+   * Whether commit-message coauthor trailers are enabled.
+   */
+  coauthorEnabled?: boolean;
+}
+/**
+ * Callback and filesystem hook sources.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenHookOptions".
+ */
+/** @experimental */
+export interface SessionOpenHookOptions {
+  /**
+   * Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+   */
+  directories?: string[];
+  /**
+   * Live gate for repository-origin file hooks, including the primary repository, trusted repository-configured roots, and accepted startup additional directories (including CLI --add-dir). False suppresses these hooks; explicit hookDirectories and SDK callbacks are independent. Additional-root eligibility and the DISABLE_ADDITIONAL_DIRECTORY_HOOKS escape hatch are captured at create/cold resume, not expanded by later grants or feature-flag changes. Discovery uses containing Git roots, so supply only trusted repositories: commands and prompts need no further approval. Policy, hook-disable settings, and sandbox rules still apply. Provider-backed sessions skip repository hooks with a warning on omission, skip silently on false, and reject explicit true.
+   */
+  enableRepositoryHooks?: boolean;
+}
+/**
+ * Model tuning and provider catalog.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenInferenceOptions".
+ */
+/** @experimental */
+export interface SessionOpenInferenceOptions {
+  /**
+   * Initial reasoning effort level. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. When omitted, no effort override is applied.
+   */
+  reasoningEffort?: string;
+  /**
+   * Initial reasoning summary mode for supported model clients.
+   */
+  reasoningSummary?: SessionOpenOptionsReasoningSummary;
+  /**
+   * Initial output verbosity level for supported models.
+   */
+  verbosity?: Verbosity;
+  /**
+   * Connection used for unqualified BYOK selections. Requires effective
+   * `github.capi.enabled: false`. Omission on resume preserves the policy;
+   * explicit null clears it. Does not select an initial model.
+   */
+  defaultProvider?: string | null;
+  /**
+   * Named BYOK connections. Built-in Copilot availability is independently controlled by github.capi.enabled.
+   *
+   * @experimental
+   */
+  providers?: NamedProviderConfig[];
+  /**
+   * BYOK model definitions added to the selectable model list, each referencing a provider name.
+   *
+   * @experimental
+   */
+  models?: ProviderModelConfig[];
+  /**
+   * Experimental: enable native model citations for supported Anthropic and OpenAI models, normalized onto the `assistant.message` event. Off by default; may change or be removed while the citations surface is experimental.
+   *
+   * @experimental
+   */
+  enableCitations?: boolean;
+  /**
+   * Whether the model may request multiple tool calls per response. Defaults to true. False sends a provider hint, not an execution guarantee: all returned calls are still handled and handlers may run concurrently. Re-supply on cold resume.
+   */
+  allowMultipleToolCalls?: boolean;
+  /**
+   * Initial model capability overrides.
+   */
+  capabilities?: ModelCapabilitiesOverride;
+}
+/**
+ * Instruction sources and discovery.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenInstructionOptions".
+ */
+/** @experimental */
+export interface SessionOpenInstructionOptions {
+  /**
+   * Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+   */
+  directories?: string[];
+  /**
+   * Whether to skip custom instruction sources.
+   */
+  skipCustomInstructions?: boolean;
+  /**
+   * Whether to invalidate cached custom-instruction discovery before constructing the session. Use when instruction files may have changed earlier in the same runtime process.
+   */
+  refreshCustomInstructions?: boolean;
+  /**
+   * Instruction source IDs disabled for this session.
+   */
+  disabledSources?: string[];
+  /**
+   * Whether on-demand custom instruction discovery is enabled.
+   */
+  onDemandDiscovery?: boolean;
+}
+/**
+ * Human input and mode-switch callback capabilities.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenInteractionOptions".
+ */
+/** @experimental */
+export interface SessionOpenInteractionOptions {
+  /**
+   * Whether ask_user is explicitly disabled.
+   */
+  askUserDisabled?: boolean;
+  /**
+   * Whether the host is an interactive UI.
+   */
+  runningInInteractiveMode?: boolean;
+}
+/**
+ * MCP servers, OAuth, and renderer capability.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenMcpOptions".
+ */
+/** @experimental */
+export interface SessionOpenMcpOptions {
+  /**
+   * OAuth Client ID Metadata Document URL used by this host for MCP authorization.
+   */
+  authClientIdMetadataUrl?: string;
+  /**
+   * How MCP server environment values are interpreted.
+   */
+  envValueMode?: SessionOpenOptionsEnvValueMode;
+  /**
+   * MCP server names disabled for this session. Disabled servers are not started or authenticated on create or cold resume.
+   */
+  disabledServers?: string[];
+  /**
+   * Non-secret host-managed HTTP MCP servers keyed by stable managed identity. Managed provenance is runtime-established from this separate field and credentials are supplied through dynamic-header refresh.
+   *
+   * @experimental
+   */
+  managedServers?: {
+    [k: string]: ManagedMcpServerConfig | undefined;
+  };
+  /**
+   * Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
+   */
+  allowAllServerInstructions?: boolean;
+}
+/**
  * Session construction options.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -39002,25 +39193,9 @@ export interface SessionOpenOptions {
    */
   model?: string;
   /**
-   * Initial reasoning effort level. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. When omitted, no effort override is applied.
-   */
-  reasoningEffort?: string;
-  /**
-   * Initial reasoning summary mode for supported model clients.
-   */
-  reasoningSummary?: SessionOpenOptionsReasoningSummary;
-  /**
-   * Initial output verbosity level for supported models.
-   */
-  verbosity?: Verbosity;
-  /**
    * Identifier of the client driving the session.
    */
   clientName?: string;
-  /**
-   * OAuth Client ID Metadata Document URL used by this host for MCP authorization.
-   */
-  authClientIdMetadataUrl?: string;
   /**
    * Structured client kind used for runtime behavior gates.
    */
@@ -39034,93 +39209,9 @@ export interface SessionOpenOptions {
    */
   integrationId?: string;
   /**
-   * ExP assignment ('flight') data injected by an SDK integrator, in the same JSON shape the Copilot CLI fetches from the experimentation service (CopilotExpAssignmentResponse). When supplied this is fed into the FeatureFlagService exactly like CLI-fetched assignments and ExP-backed flags wait for it. When absent the session does not block on ExP.
-   *
-   * @internal
-   */
-  expAssignments?: JsonValue;
-  /**
-   * Trusted host defaults consumed by the runtime during session construction.
-   *
-   * @internal
-   */
-  featureFlagConfiguration?: SessionFeatureFlagConfiguration;
-  /**
-   * Opt-in: self-fetch and enforce enterprise managed settings, including managed hook policies, at session bootstrap.
-   */
-  enableManagedSettings?: boolean;
-  /**
-   * Managed-setting paths this trusted SDK host enforces externally or does not support, excluded from fetched, device, and policy-helper policy for this session. Exact dotted paths exclude a setting and its descendants (for example sandbox or permissions.disableBypassPermissionsMode); wildcards and array indices are not supported. Host-injected managedSettings and policy availability checks are not excluded. Not persisted; re-supply on resume, where omission restores full enforcement. Requires enableManagedSettings to self-fetch policy.
-   */
-  excludedManagedSettings?: string[];
-  /**
-   * Opt in to enforcing non-overridable managed model controls on session model, Auto-tier, reasoning-effort, and context-tier changes. Managed defaults still apply when omitted; this option only turns conflicting changes into errors.
-   */
-  enforceManagedModelDefaults?: boolean;
-  /**
-   * Permissions-only enterprise policy injected by the SDK host at session create or resume. Composes restrictively with self-fetched and device policy and is not persisted.
-   */
-  managedSettings?: SessionManagedSettings;
-  /**
-   * Declares that a human drives this session's conversation, enabling user-message analysis (sentiment, task completion criteria, and task analytics) for user-authored messages. Automated messages remain excluded. Defaults to false for SDK sessions. Applied when the session is created or loaded from storage; ignored when resuming a session that is already active, and for cloud sessions.
-   */
-  interactiveUser?: boolean;
-  /**
-   * Opt in to capturing file changes for session rewind and session diff. Capture cannot reconstruct changes made before it was enabled. On create it starts capture from the first turn. It is also honored on resume: for a session that already has tracked prior turns, tracking continues automatically even if this is omitted; passing it on resume additionally enables tracking for an eligible session that has no prior root turn yet. Resuming a session whose prior root turns were never tracked has no restorable baseline, so tracking stays disabled for it and rewind reports file change tracking as unavailable; the resume itself still succeeds, so sessions that predate tracking remain loadable. The opt-in is only rejected when the session can never track (a subagent session, or one without local session storage). It is intentionally absent from the mutable options update because enabling it after edits have occurred would create an incomplete, misleading baseline. Subagents share the parent session's capture store and are not tracked as separate rewind points: a file a subagent writes is attributed to whichever root user turn was open when the capture was staged, just before the tool body ran. A turn cannot open while a staged capture is still in flight, so a subagent tool that staged under the spawning turn stays attributed to it however late the write lands, while a capture it stages after the user's next message belongs to that later turn. Attribution decides which turn's rewind point counts and file preview include that write; it does not narrow which rewinds revert it, because a rewind restores every capture from the selected turn onward, so the earlier spawning turn reverts it as well.
-   */
-  enableFileChangeTracking?: boolean;
-  /**
-   * Feature-flag values resolved by the host.
-   */
-  featureFlags?: {
-    [k: string]: boolean | undefined;
-  };
-  /**
-   * Whether experimental behavior is enabled.
-   */
-  isExperimentalMode?: boolean;
-  /**
-   * Initial authentication info for the session.
-   */
-  authInfo?: AuthInfo;
-  /**
-   * Custom model-provider configuration (BYOK).
-   */
-  provider?: ProviderConfig;
-  /**
-   * Options scoped to the built-in CAPI (Copilot API) provider.
-   */
-  capi?: CapiSessionOptions;
-  /**
-   * Whether a CLI host explicitly requested the initial Auto preference. False preserves a settings-derived preference without validating availability during creation; execution still validates it. Defaults to true and is ignored for non-CLI callers.
-   *
-   * @internal
-   */
-  autoTierIsExplicit?: boolean;
-  /**
-   * Named BYOK provider connections, additive to CAPI auth. Combining with `provider` is rejected.
-   *
-   * @experimental
-   */
-  providers?: NamedProviderConfig[];
-  /**
-   * BYOK model definitions added to the selectable model list, each referencing a provider name.
-   *
-   * @experimental
-   */
-  models?: ProviderModelConfig[];
-  /**
    * Working directory to anchor the session.
    */
   workingDirectory?: string;
-  /**
-   * Additional directories the agent may access beyond the working directory. Each entry is granted to the session's file-access allow-list and surfaced to the model (system prompt context and `@`-mention completion). Conventional `.github/skills/` and `.github/agents/` definitions under each directory also join the session's project catalogs when their existing subsystem gates are enabled: added-root skills require both `enableConfigDiscovery` and effective `enableSkills`; added-root agents require `enableConfigDiscovery`. Supplying a directory therefore activates configuration from it and should be treated as a trust decision. Absolute paths are recommended; a relative path is resolved against the session's working directory. Nonexistent or unresolvable entries are skipped with a warning. This is applied during session creation and cold resume and is not persisted, so a cold resume must re-supply the directories.
-   */
-  additionalDirectories?: string[];
-  /**
-   * Pre-resolved working-directory context for session startup.
-   */
-  workingDirectoryContext?: SessionContext;
   /**
    * Whether this session supports remote steering.
    */
@@ -39142,6 +39233,197 @@ export interface SessionOpenOptions {
    */
   detachedFromSpawningParentEngagementId?: string;
   /**
+   * Startup-only experimental runtime lifecycle diagnostics configuration.
+   *
+   * @internal
+   * @experimental
+   */
+  lifecycleDiagnostics?: LifecycleDiagnosticsConfiguration;
+  /**
+   * Capabilities enabled for this session.
+   */
+  sessionCapabilities?: SessionCapability[];
+  /**
+   * Model tuning and provider catalog.
+   */
+  inference?: SessionOpenInferenceOptions;
+  /**
+   * MCP servers, OAuth, and renderer capability.
+   */
+  mcp?: SessionOpenMcpOptions;
+  /**
+   * Feature experimentation and trusted assignments.
+   */
+  experiments?: SessionOpenExperimentOptions;
+  /**
+   * GitHub integration and session credentials.
+   */
+  github?: SessionOpenGitHubOptions;
+  /**
+   * Host-injected session policy.
+   */
+  policy?: SessionOpenPolicyOptions;
+  /**
+   * Project directory access and change tracking.
+   */
+  filesystem?: SessionOpenFilesystemOptions;
+  /**
+   * Tool declarations, exposure, and behavior.
+   */
+  tools?: SessionOpenToolOptions;
+  /**
+   * Agent definitions, selection, and source filters.
+   */
+  agents?: SessionOpenAgentOptions;
+  /**
+   * Permission decisions and sandboxing.
+   */
+  permissions?: SessionOpenPermissionOptions;
+  /**
+   * Skill loading, sources, and provider capability.
+   */
+  skills?: SessionOpenSkillOptions;
+  /**
+   * Instruction sources and discovery.
+   */
+  instructions?: SessionOpenInstructionOptions;
+  /**
+   * Callback and filesystem hook sources.
+   */
+  hooks?: SessionOpenHookOptions;
+  /**
+   * Explicit plugin sources.
+   */
+  plugins?: SessionOpenPluginOptions;
+  /**
+   * Host Git context and commit attribution.
+   */
+  git?: SessionOpenGitOptions;
+  /**
+   * Event delivery and streaming.
+   */
+  events?: SessionOpenEventOptions;
+  /**
+   * Human input and mode-switch callback capabilities.
+   */
+  interaction?: SessionOpenInteractionOptions;
+  /**
+   * Execution accounting and autonomous continuation.
+   */
+  execution?: SessionOpenExecutionOptions;
+  /**
+   * Context retention and session-state storage.
+   */
+  state?: SessionOpenStateOptions;
+  /**
+   * Override Copilot configuration directory.
+   */
+  configDirectory?: string;
+  /**
+   * Enables runtime discovery of supported configuration. Explicitly supplied
+   * configuration takes precedence; explicit feature roots remain independent.
+   */
+  enableConfigDiscovery?: boolean;
+}
+/**
+ * Host-injected session policy.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenPolicyOptions".
+ */
+/** @experimental */
+export interface SessionOpenPolicyOptions {
+  /**
+   * Managed-setting paths this trusted SDK host enforces externally or does not support, excluded from fetched, device, and policy-helper policy for this session. Exact dotted paths exclude a setting and its descendants (for example sandbox or permissions.disableBypassPermissionsMode); wildcards and array indices are not supported. Host-injected managedSettings and policy availability checks are not excluded. Not persisted; re-supply on resume, where omission restores full enforcement. Requires enableManagedSettings to self-fetch policy.
+   */
+  excludedManagedSettings?: string[];
+  /**
+   * Opt in to enforcing non-overridable managed model controls on session model, Auto-tier, reasoning-effort, and context-tier changes. Managed defaults still apply when omitted; this option only turns conflicting changes into errors.
+   */
+  enforceManagedModelDefaults?: boolean;
+  /**
+   * Permissions-only enterprise policy injected by the SDK host at session create or resume. Composes restrictively with self-fetched and device policy and is not persisted.
+   */
+  managedSettings?: SessionManagedSettings;
+  /**
+   * Additional content-exclusion policies to merge into the session policy set.
+   *
+   * @experimental
+   */
+  additionalContentExclusionPolicies?: SessionOpenOptionsAdditionalContentExclusionPolicy[];
+}
+/**
+ * Content-exclusion policy supplied to `sessions.open` options, with rules, last-updated data, and scope.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenOptionsAdditionalContentExclusionPolicy".
+ */
+/** @experimental */
+export interface SessionOpenOptionsAdditionalContentExclusionPolicy {
+  /**
+   * Content-exclusion rules to apply.
+   */
+  rules: SessionOpenOptionsAdditionalContentExclusionPolicyRule[];
+  /**
+   * Opaque policy update timestamp supplied by the host.
+   */
+  last_updated_at: JsonValue;
+  /**
+   * Allowed values for the `SessionOpenOptionsAdditionalContentExclusionPolicyScope` enumeration.
+   */
+  scope: SessionOpenOptionsAdditionalContentExclusionPolicyScope;
+}
+/**
+ * Single content-exclusion rule supplied to `sessions.open` options, with paths, match conditions, and source.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenOptionsAdditionalContentExclusionPolicyRule".
+ */
+/** @experimental */
+export interface SessionOpenOptionsAdditionalContentExclusionPolicyRule {
+  /**
+   * Path patterns covered by this rule.
+   */
+  paths: string[];
+  /**
+   * Conditions of which at least one must match.
+   */
+  ifAnyMatch?: string[];
+  /**
+   * Conditions none of which may match.
+   */
+  ifNoneMatch?: string[];
+  /**
+   * Source descriptor for a `sessions.open` content-exclusion rule, with source name and type.
+   */
+  source: SessionOpenOptionsAdditionalContentExclusionPolicyRuleSource;
+}
+/**
+ * Source descriptor for a `sessions.open` content-exclusion rule, with source name and type.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenOptionsAdditionalContentExclusionPolicyRuleSource".
+ */
+/** @experimental */
+export interface SessionOpenOptionsAdditionalContentExclusionPolicyRuleSource {
+  /**
+   * Name of the policy source.
+   */
+  name: string;
+  /**
+   * Type of the policy source.
+   */
+  type: string;
+}
+/**
+ * Tool declarations, exposure, and behavior.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenToolOptions".
+ */
+/** @experimental */
+export interface SessionOpenToolOptions {
+  /**
    * Allowlist of available tool names.
    */
   availableTools?: string[];
@@ -39150,223 +39432,21 @@ export interface SessionOpenOptions {
    */
   excludedTools?: string[];
   /**
-   * Built-in subagent names to include in this session. When specified, only these built-ins are available, subject to runtime availability and exclusions. Custom agents with the same name remain available.
-   */
-  includedBuiltinAgents?: string[];
-  /**
-   * Built-in subagent names to exclude from this session. Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a custom agent with the same name is available.
-   */
-  excludedBuiltinAgents?: string[];
-  /**
-   * @deprecated
-   * Deprecated and ignored. Shell command analysis is always enabled; retained for wire compatibility.
-   */
-  enableScriptSafety?: boolean;
-  /**
    * Per-session settings for built-in shell tools.
    */
   shell?: ShellOptions;
-  /**
-   * @deprecated
-   * Use shell.initProfile instead. Shell init profile.
-   */
-  shellInitProfile?: string;
   /**
    * PowerShell process flags applied to built-in and user-requested shell commands.
    */
   shellProcessFlags?: string[];
   /**
-   * Resolved sandbox configuration.
-   */
-  sandboxConfig?: SandboxConfig;
-  /**
-   * Origin of the sandbox choice. Settings-derived origins (never_configured, user_enabled, user_disabled, repository_policy) let managed policy floor a host preference; explicit below-floor changes remain policy conflicts unless a session opt-out is authorized. Also used for telemetry provenance.
-   *
-   * @experimental
-   */
-  sandboxConfigSource?: SandboxConfigSource;
-  /**
    * Whether interactive shell sessions are logged.
    */
   logInteractiveShells?: boolean;
   /**
-   * How MCP server environment values are interpreted.
-   */
-  envValueMode?: SessionOpenOptionsEnvValueMode;
-  /**
-   * MCP server names disabled for this session. Disabled servers are not started or authenticated on create or cold resume.
-   */
-  disabledMcpServers?: string[];
-  /**
-   * Startup-only experimental runtime lifecycle diagnostics configuration.
-   *
-   * @internal
-   * @experimental
-   */
-  lifecycleDiagnostics?: LifecycleDiagnosticsConfiguration;
-  /**
-   * Non-secret host-managed HTTP MCP servers keyed by stable managed identity. Managed provenance is runtime-established from this separate field and credentials are supplied through dynamic-header refresh.
-   *
-   * @experimental
-   */
-  managedMcpServers?: {
-    [k: string]: ManagedMcpServerConfig | undefined;
-  };
-  /**
-   * Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
-   */
-  allowAllMcpServerInstructions?: boolean;
-  /**
-   * Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-   */
-  skillDirectories?: string[];
-  /**
-   * Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-   */
-  agentDirectories?: string[];
-  /**
-   * Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-   */
-  instructionDirectories?: string[];
-  /**
-   * Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-   */
-  hookDirectories?: string[];
-  /**
-   * Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.
-   */
-  ignoredSkillsLocations?: string[];
-  /**
-   * Whether skill loading is enabled. When omitted, explicit SDK skill roots or an SDK skill provider enable skills independently of enableConfigDiscovery.
-   */
-  enableSkills?: boolean;
-  /**
-   * Whether the requesting SDK session has a skill provider. The provider remains ephemeral and is never persisted in session options or history. When enableSkills is false, it remains bound but dormant and receives no callbacks. Cloud, relay, handoff, and raw sessions.open flows reject it because they cannot safely pre-register the callback handler.
-   *
-   * @internal
-   * @experimental
-   */
-  hasSkillProvider?: boolean;
-  /**
-   * Built-in skill names to include in this session. When specified, only these runtime-bundled skills are available. Skills from other sources with the same name remain available.
-   */
-  includedBuiltinSkills?: string[];
-  /**
-   * Skill IDs disabled for this session.
-   */
-  disabledSkills?: string[];
-  /**
-   * Installed plugins visible to the session.
-   */
-  installedPlugins?: InstalledPlugin[];
-  /**
-   * Whether custom agents default to local-only execution.
-   */
-  customAgentsLocalOnly?: boolean;
-  /**
-   * Whether to skip custom instruction sources.
-   */
-  skipCustomInstructions?: boolean;
-  /**
-   * Whether to invalidate cached custom-instruction discovery before constructing the session. Use when instruction files may have changed earlier in the same runtime process.
-   */
-  refreshCustomInstructions?: boolean;
-  /**
-   * Instruction source IDs disabled for this session.
-   */
-  disabledInstructionSources?: string[];
-  /**
-   * Whether commit-message coauthor trailers are enabled.
-   */
-  coauthorEnabled?: boolean;
-  /**
-   * Optional trajectory output file path.
-   */
-  trajectoryFile?: string;
-  /**
-   * Whether model responses stream as delta events.
-   */
-  enableStreaming?: boolean;
-  /**
-   * Experimental: enable native model citations for supported Anthropic and OpenAI models, normalized onto the `assistant.message` event. Off by default; may change or be removed while the citations surface is experimental.
-   *
-   * @experimental
-   */
-  enableCitations?: boolean;
-  /**
-   * Whether the model may request multiple tool calls per response. Defaults to true. False sends a provider hint, not an execution guarantee: all returned calls are still handled and handlers may run concurrently. Re-supply on cold resume.
-   */
-  allowMultipleToolCalls?: boolean;
-  /**
-   * Override URL for the Copilot API endpoint.
-   */
-  copilotUrl?: string;
-  /**
-   * Whether ask_user is explicitly disabled.
-   */
-  askUserDisabled?: boolean;
-  /**
-   * Whether auto-mode continuation is enabled.
-   */
-  continueOnAutoMode?: boolean;
-  /**
-   * Whether the host is an interactive UI.
-   */
-  runningInInteractiveMode?: boolean;
-  /**
-   * Whether on-demand custom instruction discovery is enabled.
-   */
-  enableOnDemandInstructionDiscovery?: boolean;
-  /**
    * Maximum decoded byte size of a single inline model-facing binary tool result persisted in session events (default 10 MB).
    */
   maxInlineBinaryBytes?: number;
-  /**
-   * Initial model capability overrides.
-   */
-  modelCapabilitiesOverrides?: ModelCapabilitiesOverride;
-  /**
-   * Initial session limits.
-   */
-  sessionLimits?: SessionLimitsConfig;
-  /**
-   * Autopilot policy. Defaults to runtime-owned continuation with at most five automatic continuations. Does not change the session mode.
-   */
-  autopilot?: AutopilotOptions;
-  /**
-   * Runtime context discriminator for agent filtering.
-   */
-  agentContext?: string;
-  /**
-   * Override directory for session event logs.
-   */
-  eventsLogDirectory?: string;
-  /**
-   * Whether subagent callback events should be forwarded into the session event log sink.
-   */
-  eventsLogIncludesSubagents?: boolean;
-  /**
-   * Override Copilot configuration directory.
-   */
-  configDir?: string;
-  /**
-   * Additional content-exclusion policies to merge into the session policy set.
-   *
-   * @experimental
-   */
-  additionalContentExclusionPolicies?: SessionOpenOptionsAdditionalContentExclusionPolicy[];
-  /**
-   * Live gate for repository-origin file hooks, including the primary repository, trusted repository-configured roots, and accepted startup additional directories (including CLI --add-dir). False suppresses these hooks; explicit hookDirectories and SDK callbacks are independent. Additional-root eligibility and the DISABLE_ADDITIONAL_DIRECTORY_HOOKS escape hatch are captured at create/cold resume, not expanded by later grants or feature-flag changes. Discovery uses containing Git roots, so supply only trusted repositories: commands and prompts need no further approval. Policy, hook-disable settings, and sandbox rules still apply. Provider-backed sessions skip repository hooks with a warning on omission, skip silently on false, and reject explicit true.
-   */
-  enableFileHooks?: boolean;
-  /**
-   * Memory configuration for this session.
-   */
-  memory?: MemoryConfiguration;
-  /**
-   * Capabilities enabled for this session.
-   */
-  sessionCapabilities?: SessionCapability[];
 }
 /**
  * Per-session settings for built-in shell tools.
@@ -39466,67 +39546,97 @@ export interface ShellCredentials {
   gh?: boolean;
 }
 /**
- * Content-exclusion policy supplied to `sessions.open` options, with rules, last-updated data, and scope.
+ * Permission decisions and sandboxing.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionOpenOptionsAdditionalContentExclusionPolicy".
+ * via the `definition` "SessionOpenPermissionOptions".
  */
 /** @experimental */
-export interface SessionOpenOptionsAdditionalContentExclusionPolicy {
+export interface SessionOpenPermissionOptions {
   /**
-   * Content-exclusion rules to apply.
+   * Resolved sandbox configuration.
    */
-  rules: SessionOpenOptionsAdditionalContentExclusionPolicyRule[];
+  sandbox?: SandboxConfig;
   /**
-   * Opaque policy update timestamp supplied by the host.
+   * Origin of the sandbox choice. Settings-derived origins (never_configured, user_enabled, user_disabled, repository_policy) let managed policy floor a host preference; explicit below-floor changes remain policy conflicts unless a session opt-out is authorized. Also used for telemetry provenance.
+   *
+   * @experimental
    */
-  last_updated_at: JsonValue;
-  /**
-   * Allowed values for the `SessionOpenOptionsAdditionalContentExclusionPolicyScope` enumeration.
-   */
-  scope: SessionOpenOptionsAdditionalContentExclusionPolicyScope;
+  sandboxSource?: SandboxConfigSource;
 }
 /**
- * Single content-exclusion rule supplied to `sessions.open` options, with paths, match conditions, and source.
+ * Skill loading, sources, and provider capability.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionOpenOptionsAdditionalContentExclusionPolicyRule".
+ * via the `definition` "SessionOpenSkillOptions".
  */
 /** @experimental */
-export interface SessionOpenOptionsAdditionalContentExclusionPolicyRule {
+export interface SessionOpenSkillOptions {
   /**
-   * Path patterns covered by this rule.
+   * Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
    */
-  paths: string[];
+  directories?: string[];
   /**
-   * Conditions of which at least one must match.
+   * Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.
    */
-  ifAnyMatch?: string[];
+  ignoredLocations?: string[];
   /**
-   * Conditions none of which may match.
+   * Whether skill loading is enabled. When omitted, explicit SDK skill roots or an SDK skill provider enable skills independently of enableConfigDiscovery.
    */
-  ifNoneMatch?: string[];
+  enabled?: boolean;
   /**
-   * Source descriptor for a `sessions.open` content-exclusion rule, with source name and type.
+   * Whether the requesting SDK session has a skill provider. The provider remains ephemeral and is never persisted in session options or history. When enableSkills is false, it remains bound but dormant and receives no callbacks. Cloud, relay, handoff, and raw sessions.open flows reject it because they cannot safely pre-register the callback handler.
+   *
+   * @internal
+   * @experimental
    */
-  source: SessionOpenOptionsAdditionalContentExclusionPolicyRuleSource;
+  hasProvider?: boolean;
+  /**
+   * Built-in skill names to include in this session. When specified, only these runtime-bundled skills are available. Skills from other sources with the same name remain available.
+   */
+  includedBuiltinSkills?: string[];
+  /**
+   * Skill IDs disabled for this session.
+   */
+  disabledSkills?: string[];
 }
 /**
- * Source descriptor for a `sessions.open` content-exclusion rule, with source name and type.
+ * Explicit plugin sources.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionOpenOptionsAdditionalContentExclusionPolicyRuleSource".
+ * via the `definition` "SessionOpenPluginOptions".
  */
 /** @experimental */
-export interface SessionOpenOptionsAdditionalContentExclusionPolicyRuleSource {
+export interface SessionOpenPluginOptions {
   /**
-   * Name of the policy source.
+   * Installed plugins visible to the session.
    */
-  name: string;
+  installed?: InstalledPlugin[];
+}
+/**
+ * Context retention and session-state storage.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionOpenStateOptions".
+ */
+/** @experimental */
+export interface SessionOpenStateOptions {
   /**
-   * Type of the policy source.
+   * Optional trajectory output file path.
    */
-  type: string;
+  trajectoryFile?: string;
+  /**
+   * Override directory for session event logs.
+   */
+  eventsLogDirectory?: string;
+  /**
+   * Whether subagent callback events should be forwarded into the session event log sink.
+   */
+  eventsLogIncludesSubagents?: boolean;
+  /**
+   * Memory configuration for this session.
+   */
+  memory?: MemoryConfiguration;
 }
 /**
  * Parameters for creating a new local session.
@@ -41204,30 +41314,154 @@ export interface SessionTelemetryEngagement {
   engagementId?: string;
 }
 /**
- * Patch of mutable session options to apply to the running session.
+ * Agent definitions, selection, and source filters.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionUpdateOptionsParams".
+ * via the `definition` "SessionUpdateAgentOptions".
  */
 /** @experimental */
-export interface SessionUpdateOptionsParams {
+export interface SessionUpdateAgentOptions {
   /**
-   * Session-only user preferences. Omitted preferences keep their current values.
+   * Built-in subagent names to include in this session. When specified, only these built-ins are available, subject to runtime availability and exclusions. Custom agents with the same name remain available. Set to null to remove the allowlist restriction.
    */
-  settings?: SessionSettingsPatch;
+  includedBuiltinAgents?: string[] | null;
   /**
-   * Enable or disable the native image tool for this session without changing the conversation model.
-   * Omitted values preserve the current setting. Re-supply consent on cold resume.
+   * Built-in subagent names to exclude from this session. Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a custom agent with the same name is available.
    */
-  imageGeneration?: ProtocolImageGenerationOptions;
+  excludedBuiltinAgents?: string[];
   /**
-   * The model ID to use for assistant turns.
+   * Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
    */
-  model?: string;
+  directories?: string[];
+  /**
+   * Whether to default custom agents to local-only execution.
+   */
+  localDiscoveryOnly?: boolean;
+  /**
+   * When true, the selected custom agent's prompt is not injected into the user message (skill context is still injected). Used by automation triggers where the agent prompt is already in the problem statement.
+   */
+  suppressCustomAgentPrompt?: boolean;
+  /**
+   * Runtime context discriminator (e.g., `cli`, `actions`).
+   */
+  context?: string;
+}
+/**
+ * Event delivery and streaming.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateEventOptions".
+ */
+/** @experimental */
+export interface SessionUpdateEventOptions {
+  /**
+   * Whether to stream model responses.
+   */
+  streaming?: boolean;
+}
+/**
+ * Execution accounting and autonomous continuation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateExecutionOptions".
+ */
+/** @experimental */
+export interface SessionUpdateExecutionOptions {
+  /**
+   * Whether to allow auto-mode continuation across turns.
+   */
+  continueOnAutoMode?: boolean;
+  /**
+   * Optional session limits. Pass null to clear the session limits.
+   */
+  limits?: SessionLimitsConfig | null;
+  /**
+   * Patch the Autopilot policy. Omitted fields retain their current values; an empty object makes no changes. Does not change the session mode.
+   */
+  autopilot?: AutopilotOptions;
+}
+/**
+ * Feature experimentation and trusted assignments.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateExperimentOptions".
+ */
+/** @experimental */
+export interface SessionUpdateExperimentOptions {
+  /**
+   * Map of feature-flag IDs to their boolean enabled state.
+   */
+  flags?: {
+    [k: string]: boolean | undefined;
+  };
+  /**
+   * Whether experimental capabilities are enabled.
+   */
+  enableExperimentalMode?: boolean;
+}
+/**
+ * GitHub integration and session credentials.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateGitHubOptions".
+ */
+/** @experimental */
+export interface SessionUpdateGitHubOptions {
+  /**
+   * Options scoped to the built-in CAPI (Copilot API) provider.
+   */
+  capi?: CapiSessionOptions;
+  /**
+   * Override URL for the Copilot API endpoint.
+   */
+  copilotUrl?: string;
+}
+/**
+ * Host Git context and commit attribution.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateGitOptions".
+ */
+/** @experimental */
+export interface SessionUpdateGitOptions {
+  /**
+   * Whether to include the `Co-authored-by` trailer in commit messages.
+   */
+  coauthorEnabled?: boolean;
+  /**
+   * Whether to enable host git operations (context resolution, child repo scanning, git info in system prompt).
+   */
+  enableHostGitOperations?: boolean;
+}
+/**
+ * Callback and filesystem hook sources.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateHookOptions".
+ */
+/** @experimental */
+export interface SessionUpdateHookOptions {
+  /**
+   * Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+   */
+  directories?: string[];
+  /**
+   * Whether to enable repository-origin file hooks from `.github/hooks/` and trusted repository-configured roots. Does not control explicit hookDirectories or SDK callback hooks.
+   */
+  enableRepositoryHooks?: boolean;
+}
+/**
+ * Model tuning and provider catalog.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateInferenceOptions".
+ */
+/** @experimental */
+export interface SessionUpdateInferenceOptions {
   /**
    * Per-property model capability overrides for the selected model.
    */
-  modelCapabilitiesOverrides?: ModelCapabilitiesOverride;
+  capabilities?: ModelCapabilitiesOverride;
   /**
    * Reasoning effort for the selected model. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. When omitted, no effort override is applied.
    */
@@ -41241,6 +41475,99 @@ export interface SessionUpdateOptionsParams {
    */
   verbosity?: Verbosity;
   /**
+   * Connection used for unqualified selections. Omission preserves routing;
+   * null clears it. Requires effective CAPI disablement.
+   */
+  defaultProvider?: string | null;
+  /**
+   * Whether to surface reasoning-summary events from the model.
+   */
+  enableReasoningSummaries?: boolean;
+  /**
+   * Context tier for models with tiered pricing. The session uses this to derive effective `modelCapabilitiesOverrides` so compaction, truncation, token display, and request limits honor the selected tier.
+   */
+  contextTier?: OptionsUpdateContextTier;
+}
+/**
+ * Instruction sources and discovery.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateInstructionOptions".
+ */
+/** @experimental */
+export interface SessionUpdateInstructionOptions {
+  /**
+   * Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+   */
+  directories?: string[];
+  /**
+   * Whether to discover custom instructions on demand after successful file views (AGENTS.md / CLAUDE.md / .github/copilot-instructions.md surfacing). Combined with `skipCustomInstructions`.
+   */
+  onDemandDiscovery?: boolean;
+  /**
+   * Whether to skip loading custom instruction sources.
+   */
+  skipCustomInstructions?: boolean;
+  /**
+   * Instruction source IDs to exclude from the system prompt.
+   */
+  disabledSources?: string[];
+  /**
+   * Organization-level custom instructions to inject into the system prompt.
+   */
+  organizationText?: string;
+}
+/**
+ * Human input and mode-switch callback capabilities.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateInteractionOptions".
+ */
+/** @experimental */
+export interface SessionUpdateInteractionOptions {
+  /**
+   * Whether to disable the `ask_user` tool (encourages autonomous behavior).
+   */
+  askUserDisabled?: boolean;
+  /**
+   * Whether the session is running in an interactive UI.
+   */
+  runningInInteractiveMode?: boolean;
+}
+/**
+ * MCP servers, OAuth, and renderer capability.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateMcpOptions".
+ */
+/** @experimental */
+export interface SessionUpdateMcpOptions {
+  /**
+   * How env values are passed to MCP servers (`direct` inlines literal values; `indirect` resolves at launch).
+   */
+  envValueMode?: OptionsUpdateEnvValueMode;
+  /**
+   * Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
+   */
+  allowAllServerInstructions?: boolean;
+}
+/**
+ * Patch of mutable session options to apply to the running session.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateOptionsParams".
+ */
+/** @experimental */
+export interface SessionUpdateOptionsParams {
+  /**
+   * Session-only user preferences. Omitted preferences keep their current values.
+   */
+  settings?: SessionSettingsPatch;
+  /**
+   * The model ID to use for assistant turns.
+   */
+  model?: string;
+  /**
    * Identifier of the client driving the session.
    */
   clientName?: string;
@@ -41253,27 +41580,95 @@ export interface SessionUpdateOptionsParams {
    */
   integrationId?: string;
   /**
-   * Map of feature-flag IDs to their boolean enabled state.
-   */
-  featureFlags?: {
-    [k: string]: boolean | undefined;
-  };
-  /**
-   * Whether experimental capabilities are enabled.
-   */
-  isExperimentalMode?: boolean;
-  /**
-   * Custom model-provider configuration (BYOK).
-   */
-  provider?: ProviderConfig;
-  /**
-   * Options scoped to the built-in CAPI (Copilot API) provider.
-   */
-  capi?: CapiSessionOptions;
-  /**
    * Absolute working-directory path for shell tools.
    */
   workingDirectory?: string;
+  /**
+   * Replaces the session's capability set with the given list. Use to enable or disable capabilities mid-session (e.g., remove `memory` for reproducible scripted runs). Omit the field to leave the existing capability set unchanged.
+   */
+  sessionCapabilities?: SessionCapability[];
+  /**
+   * Tool declarations, exposure, and behavior.
+   */
+  tools?: SessionUpdateToolOptions;
+  /**
+   * Model tuning and provider catalog.
+   */
+  inference?: SessionUpdateInferenceOptions;
+  /**
+   * Feature experimentation and trusted assignments.
+   */
+  experiments?: SessionUpdateExperimentOptions;
+  /**
+   * GitHub integration and session credentials.
+   */
+  github?: SessionUpdateGitHubOptions;
+  /**
+   * Agent definitions, selection, and source filters.
+   */
+  agents?: SessionUpdateAgentOptions;
+  /**
+   * Permission decisions and sandboxing.
+   */
+  permissions?: SessionUpdatePermissionOptions;
+  /**
+   * MCP servers, OAuth, and renderer capability.
+   */
+  mcp?: SessionUpdateMcpOptions;
+  /**
+   * Skill loading, sources, and provider capability.
+   */
+  skills?: SessionUpdateSkillOptions;
+  /**
+   * Instruction sources and discovery.
+   */
+  instructions?: SessionUpdateInstructionOptions;
+  /**
+   * Callback and filesystem hook sources.
+   */
+  hooks?: SessionUpdateHookOptions;
+  /**
+   * Explicit plugin sources.
+   */
+  plugins?: SessionUpdatePluginOptions;
+  /**
+   * Host Git context and commit attribution.
+   */
+  git?: SessionUpdateGitOptions;
+  /**
+   * Context retention and session-state storage.
+   */
+  state?: SessionUpdateStateOptions;
+  /**
+   * Event delivery and streaming.
+   */
+  events?: SessionUpdateEventOptions;
+  /**
+   * Human input and mode-switch callback capabilities.
+   */
+  interaction?: SessionUpdateInteractionOptions;
+  /**
+   * Execution accounting and autonomous continuation.
+   */
+  execution?: SessionUpdateExecutionOptions;
+  /**
+   * Host-injected session policy.
+   */
+  policy?: SessionUpdatePolicyOptions;
+}
+/**
+ * Tool declarations, exposure, and behavior.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateToolOptions".
+ */
+/** @experimental */
+export interface SessionUpdateToolOptions {
+  /**
+   * Enable or disable the native image tool for this session without changing the conversation model.
+   * Omitted values preserve the current setting. Re-supply consent on cold resume.
+   */
+  imageGeneration?: ProtocolImageGenerationOptions;
   /**
    * Allowlist of tool names available to this session.
    */
@@ -41283,77 +41678,65 @@ export interface SessionUpdateOptionsParams {
    */
   excludedTools?: string[];
   /**
-   * Built-in subagent names to include in this session. When specified, only these built-ins are available, subject to runtime availability and exclusions. Custom agents with the same name remain available. Set to null to remove the allowlist restriction.
-   */
-  includedBuiltinAgents?: string[] | null;
-  /**
-   * Built-in subagent names to exclude from this session. Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a custom agent with the same name is available.
-   */
-  excludedBuiltinAgents?: string[];
-  /**
    * Controls how availableTools (allowlist) and excludedTools (denylist) combine when both are set. Omitted updates preserve the current setting; new sessions default to excluded.
    */
-  toolFilterPrecedence?: OptionsUpdateToolFilterPrecedence;
-  /**
-   * @deprecated
-   * Deprecated and ignored. Shell command analysis is always enabled; retained for wire compatibility.
-   */
-  enableScriptSafety?: boolean;
+  filterPrecedence?: OptionsUpdateToolFilterPrecedence;
   /**
    * Per-session settings for built-in shell tools.
    */
   shell?: ShellOptions;
   /**
-   * @deprecated
-   * Use shell.initProfile instead. Shell init profile (`None` or `NonInteractive`).
-   */
-  shellInitProfile?: string;
-  /**
    * PowerShell process flags applied to built-in and user-requested shell commands.
    */
   shellProcessFlags?: string[];
-  /**
-   * Resolved sandbox configuration.
-   */
-  sandboxConfig?: SandboxConfig;
-  /**
-   * Origin of the sandbox choice. Settings-derived origins (never_configured, user_enabled, user_disabled, repository_policy) let managed policy floor a host preference; explicit below-floor changes remain policy conflicts unless a session opt-out is authorized. Also used for telemetry provenance.
-   *
-   * @experimental
-   */
-  sandboxConfigSource?: SandboxConfigSource;
   /**
    * Whether interactive shell sessions are logged.
    */
   logInteractiveShells?: boolean;
   /**
-   * How env values are passed to MCP servers (`direct` inlines literal values; `indirect` resolves at launch).
+   * Maximum decoded byte size of a single model-facing binary tool result (e.g. an image) persisted inline in session events and re-presented to the model on later turns / resume. Larger results are persisted as a metadata-only marker and shown to the model as a short text note. Defaults to 10 MB.
    */
-  envValueMode?: OptionsUpdateEnvValueMode;
+  maxInlineBinaryBytes?: number;
   /**
-   * Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
+   * Whether to expose the `manage_schedule` tool to the agent. The runtime always owns the per-session schedule registry; this flag only controls tool exposure (typically gated to staff users).
    */
-  allowAllMcpServerInstructions?: boolean;
+  manageScheduleEnabled?: boolean;
+}
+/**
+ * Permission decisions and sandboxing.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdatePermissionOptions".
+ */
+/** @experimental */
+export interface SessionUpdatePermissionOptions {
+  /**
+   * Resolved sandbox configuration.
+   */
+  sandbox?: SandboxConfig;
+  /**
+   * Origin of the sandbox choice. Settings-derived origins (never_configured, user_enabled, user_disabled, repository_policy) let managed policy floor a host preference; explicit below-floor changes remain policy conflicts unless a session opt-out is authorized. Also used for telemetry provenance.
+   *
+   * @experimental
+   */
+  sandboxSource?: SandboxConfigSource;
+}
+/**
+ * Skill loading, sources, and provider capability.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateSkillOptions".
+ */
+/** @experimental */
+export interface SessionUpdateSkillOptions {
   /**
    * Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
    */
-  skillDirectories?: string[];
-  /**
-   * Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-   */
-  agentDirectories?: string[];
-  /**
-   * Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-   */
-  instructionDirectories?: string[];
-  /**
-   * Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-   */
-  hookDirectories?: string[];
+  directories?: string[];
   /**
    * Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.
    */
-  ignoredSkillsLocations?: string[];
+  ignoredLocations?: string[];
   /**
    * Built-in skill names to include in this session. When specified, only these runtime-bundled skills are available. Skills from other sources with the same name remain available. Set to null to remove the allowlist restriction.
    */
@@ -41363,69 +41746,35 @@ export interface SessionUpdateOptionsParams {
    */
   disabledSkills?: string[];
   /**
-   * Whether to discover custom instructions on demand after successful file views (AGENTS.md / CLAUDE.md / .github/copilot-instructions.md surfacing). Combined with `skipCustomInstructions`.
+   * Whether skill loading is enabled. Explicit false disables every source, including explicit SDK roots and a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless explicit SDK skill roots or an SDK skill provider are supplied.
    */
-  enableOnDemandInstructionDiscovery?: boolean;
-  /**
-   * Maximum decoded byte size of a single model-facing binary tool result (e.g. an image) persisted inline in session events and re-presented to the model on later turns / resume. Larger results are persisted as a metadata-only marker and shown to the model as a short text note. Defaults to 10 MB.
-   */
-  maxInlineBinaryBytes?: number;
+  enabled?: boolean;
+}
+/**
+ * Explicit plugin sources.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdatePluginOptions".
+ */
+/** @experimental */
+export interface SessionUpdatePluginOptions {
   /**
    * Full set of installed plugins for the session. Replaces the existing list; the runtime invalidates the skills cache only when the list materially changes.
    */
-  installedPlugins?: SessionInstalledPlugin[];
-  /**
-   * Whether to default custom agents to local-only execution.
-   */
-  customAgentsLocalOnly?: boolean;
-  /**
-   * When true, the selected custom agent's prompt is not injected into the user message (skill context is still injected). Used by automation triggers where the agent prompt is already in the problem statement.
-   */
-  suppressCustomAgentPrompt?: boolean;
-  /**
-   * Whether to skip loading custom instruction sources.
-   */
-  skipCustomInstructions?: boolean;
-  /**
-   * Instruction source IDs to exclude from the system prompt.
-   */
-  disabledInstructionSources?: string[];
-  /**
-   * Whether to include the `Co-authored-by` trailer in commit messages.
-   */
-  coauthorEnabled?: boolean;
+  installed?: SessionInstalledPlugin[];
+}
+/**
+ * Context retention and session-state storage.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdateStateOptions".
+ */
+/** @experimental */
+export interface SessionUpdateStateOptions {
   /**
    * Optional path for trajectory output.
    */
   trajectoryFile?: string;
-  /**
-   * Whether to stream model responses.
-   */
-  enableStreaming?: boolean;
-  /**
-   * Override URL for the Copilot API endpoint.
-   */
-  copilotUrl?: string;
-  /**
-   * Whether to disable the `ask_user` tool (encourages autonomous behavior).
-   */
-  askUserDisabled?: boolean;
-  /**
-   * Whether to allow auto-mode continuation across turns.
-   */
-  continueOnAutoMode?: boolean;
-  /**
-   * Whether the session is running in an interactive UI.
-   */
-  runningInInteractiveMode?: boolean;
-  /**
-   * Whether to surface reasoning-summary events from the model.
-   */
-  enableReasoningSummaries?: boolean;
-  /**
-   * Runtime context discriminator (e.g., `cli`, `actions`).
-   */
-  agentContext?: string;
   /**
    * Override directory for the session-events log. When unset, the runtime's default events log directory is used.
    */
@@ -41435,55 +41784,28 @@ export interface SessionUpdateOptionsParams {
    */
   eventsLogIncludesSubagents?: boolean;
   /**
+   * Whether to skip embedding retrieval pipeline initialization and execution.
+   */
+  skipEmbeddingRetrieval?: boolean;
+  /**
+   * Whether to enable cross-session store writes and reads.
+   */
+  enableCrossSessionStore?: boolean;
+}
+/**
+ * Host-injected session policy.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionUpdatePolicyOptions".
+ */
+/** @experimental */
+export interface SessionUpdatePolicyOptions {
+  /**
    * Additional content-exclusion policies to merge into the session's policy set.
    *
    * @experimental
    */
   additionalContentExclusionPolicies?: OptionsUpdateAdditionalContentExclusionPolicy[];
-  /**
-   * Whether to expose the `manage_schedule` tool to the agent. The runtime always owns the per-session schedule registry; this flag only controls tool exposure (typically gated to staff users).
-   */
-  manageScheduleEnabled?: boolean;
-  /**
-   * Replaces the session's capability set with the given list. Use to enable or disable capabilities mid-session (e.g., remove `memory` for reproducible scripted runs). Omit the field to leave the existing capability set unchanged.
-   */
-  sessionCapabilities?: SessionCapability[];
-  /**
-   * Whether to skip embedding retrieval pipeline initialization and execution.
-   */
-  skipEmbeddingRetrieval?: boolean;
-  /**
-   * Organization-level custom instructions to inject into the system prompt.
-   */
-  organizationCustomInstructions?: string;
-  /**
-   * Whether to enable repository-origin file hooks from `.github/hooks/` and trusted repository-configured roots. Does not control explicit hookDirectories or SDK callback hooks.
-   */
-  enableFileHooks?: boolean;
-  /**
-   * Whether to enable host git operations (context resolution, child repo scanning, git info in system prompt).
-   */
-  enableHostGitOperations?: boolean;
-  /**
-   * Whether to enable cross-session store writes and reads.
-   */
-  enableSessionStore?: boolean;
-  /**
-   * Whether skill loading is enabled. Explicit false disables every source, including explicit SDK roots and a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless explicit SDK skill roots or an SDK skill provider are supplied.
-   */
-  enableSkills?: boolean;
-  /**
-   * Context tier for models with tiered pricing. The session uses this to derive effective `modelCapabilitiesOverrides` so compaction, truncation, token display, and request limits honor the selected tier.
-   */
-  contextTier?: OptionsUpdateContextTier;
-  /**
-   * Optional session limits. Pass null to clear the session limits.
-   */
-  sessionLimits?: SessionLimitsConfig | null;
-  /**
-   * Patch the Autopilot policy. Omitted fields retain their current values; an empty object makes no changes. Does not change the session mode.
-   */
-  autopilot?: AutopilotOptions;
 }
 /**
  * Indicates whether the session options patch was applied successfully.
@@ -46111,16 +46433,6 @@ export interface WorkflowAgentSummary {
    * Requested and resolved context observations, when available.
    */
   context?: WorkflowAgentContextObservation;
-  /**
-   * @deprecated
-   * Deprecated compatibility alias for model.requested.
-   */
-  requestedModel?: string;
-  /**
-   * @deprecated
-   * Deprecated compatibility alias for model.resolved.
-   */
-  resolvedModel?: string;
   /**
    * Epoch milliseconds when the agent started.
    */

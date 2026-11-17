@@ -97,11 +97,11 @@ func TestConfiguredInstallDirPreservesOverridesWithoutUserCache(t *testing.T) {
 	if dir, err := configuredInstallDir(); dir != filepath.Join(home, "cache", "copilot-sdk") || err != nil {
 		t.Fatalf("COPILOT_HOME override: dir=%q err=%v", dir, err)
 	}
-	config.Dir = t.TempDir()
-	if dir, err := configuredInstallDir(); dir != config.Dir || err != nil {
+	config.Directory = t.TempDir()
+	if dir, err := configuredInstallDir(); dir != config.Directory || err != nil {
 		t.Fatalf("explicit directory override: dir=%q err=%v", dir, err)
 	}
-	config.Dir = ""
+	config.Directory = ""
 	t.Setenv("COPILOT_HOME", "")
 	for _, key := range []string{"HOME", "XDG_CACHE_HOME", "LocalAppData"} {
 		t.Setenv(key, home)
@@ -162,7 +162,7 @@ func TestInstallRuntimeWritesRetainedAssets(t *testing.T) {
 		RuntimeAssets:         bytes.NewReader(assets),
 		RuntimeAssetsHash:     assetsHash[:],
 		Version:               "1.2.3",
-		Dir:                   tempDir,
+		Directory:             tempDir,
 	})
 
 	gotWrapper, err := installRuntimeAt(tempDir)
@@ -223,7 +223,7 @@ func TestInstallRuntimeWritesAdjacentPairWithoutCLI(t *testing.T) {
 		RuntimeNode:           bytes.NewReader(node),
 		RuntimeNodeHash:       nodeHash[:],
 		Version:               "1.2.3",
-		Dir:                   tempDir,
+		Directory:             tempDir,
 	})
 
 	gotWrapper, err := installRuntimeAt(tempDir)
@@ -450,11 +450,11 @@ func TestInstallAtWritesBinaryAndLicense(t *testing.T) {
 	content := []byte("hello")
 	hash := sha256.Sum256(content)
 	Setup(Config{
-		Cli:     bytes.NewReader(content),
-		CliHash: hash[:],
-		License: []byte("license"),
-		Version: "1.2.3",
-		Dir:     tempDir,
+		Cli:       bytes.NewReader(content),
+		CliHash:   hash[:],
+		License:   []byte("license"),
+		Version:   "1.2.3",
+		Directory: tempDir,
 	})
 
 	path := Path()
@@ -511,7 +511,7 @@ func TestInstallAtInstallsRuntimePairAndAssetsWithoutRuntimeLib(t *testing.T) {
 		RuntimeAssets:         bytes.NewReader(assets),
 		RuntimeAssetsHash:     assetsHash[:],
 		Version:               "1.2.3",
-		Dir:                   tempDir,
+		Directory:             tempDir,
 	})
 
 	path, err := installAt(tempDir)
@@ -602,7 +602,7 @@ func TestPathRetriesAfterFailedInstall(t *testing.T) {
 	}
 	content := []byte("cli")
 	hash := sha256.Sum256(content)
-	Setup(Config{Cli: bytes.NewReader(content), CliHash: hash[:], Dir: blocked})
+	Setup(Config{Cli: bytes.NewReader(content), CliHash: hash[:], Directory: blocked})
 
 	if path := Path(); path != "" {
 		t.Fatalf("Path() = %q with a file as the install directory; want empty", path)
@@ -685,7 +685,7 @@ func TestPathRetriesRewindableArtifactAfterWriteFailure(t *testing.T) {
 				RuntimeNode: bytes.NewReader(content), RuntimeNodeHash: hash[:],
 				RuntimeExecutable: bytes.NewReader(content), RuntimeExecutableHash: hash[:],
 				RuntimeLib: bytes.NewReader(content), RuntimeLibHash: hash[:],
-				Dir: dir,
+				Directory: dir,
 			}
 			reader, name := &cfg.Cli, binaryNameForOS()
 			switch artifact {
@@ -730,7 +730,7 @@ func TestRuntimePathRetriesAssetsAfterFailedPath(t *testing.T) {
 		RuntimeNode: bytes.NewReader(content), RuntimeNodeHash: hash[:],
 		RuntimeExecutable: bytes.NewReader(content), RuntimeExecutableHash: hash[:],
 		RuntimeAssets: bytes.NewReader(assets), RuntimeAssetsHash: assetsHash[:],
-		Dir: dir,
+		Directory: dir,
 	})
 	blocked := filepath.Join(dir, "definitions")
 	if err := os.WriteFile(blocked, []byte("not a directory"), 0600); err != nil {
@@ -863,7 +863,7 @@ func TestInstallReleasesReplayBuffersAfterSuccess(t *testing.T) {
 	t.Cleanup(resetGlobals)
 	content := bytes.Repeat([]byte("cli "), 4096)
 	hash := sha256.Sum256(content)
-	Setup(Config{Cli: &plainReader{bytes.NewReader(content)}, CliHash: hash[:], Dir: t.TempDir()})
+	Setup(Config{Cli: &plainReader{bytes.NewReader(content)}, CliHash: hash[:], Directory: t.TempDir()})
 	reader := config.Cli.(*retryableReader)
 	if path := Path(); path == "" {
 		t.Fatal("install failed")
@@ -900,7 +900,7 @@ func TestRuntimePathRetainsReadersForLaterCLIInstall(t *testing.T) {
 					RuntimeLib: fileReader("library"), RuntimeLibHash: hash[:],
 					RuntimeExecutable: fileReader("wrapper"), RuntimeExecutableHash: hash[:],
 					RuntimeNode: fileReader("node"), RuntimeNodeHash: hash[:],
-					Dir: dir,
+					Directory: dir,
 				})
 				if cachedRuntime {
 					for _, name := range []string{runtimeExecutableName(), "runtime.node"} {
@@ -957,13 +957,13 @@ func TestSeekableReaderStaysOpenAcrossFailedLicenseWrite(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(first, binaryNameForOS()+".license"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	Setup(Config{Cli: f, CliHash: hash[:], License: []byte("license"), Dir: first})
+	Setup(Config{Cli: f, CliHash: hash[:], License: []byte("license"), Directory: first})
 	if path := Path(); path != "" {
 		t.Fatalf("Path() = %q although the license could not be written", path)
 	}
 	// Changing the install directory, as a COPILOT_HOME change would, must still
 	// be able to replay the CLI from the caller's file.
-	config.Dir = second
+	config.Directory = second
 	cliPathCached = false
 	if path := Path(); path == "" {
 		t.Fatal("Path() could not reinstall into a new directory after the license failure")
@@ -1008,7 +1008,7 @@ func TestUnusedReadersSurviveRuntimeFirstWarmCacheAndCacheSwitch(t *testing.T) {
 		Cli: opened["cli"], CliHash: sum(cli), License: []byte("license"),
 		RuntimeNode: opened["node"], RuntimeNodeHash: sum(node),
 		RuntimeExecutable: opened["wrapper"], RuntimeExecutableHash: sum(wrapper),
-		Dir: first,
+		Directory: first,
 	})
 	if path, err := RuntimePath(); err != nil || path == "" {
 		t.Fatalf("RuntimePath() = %q, %v", path, err)
@@ -1016,7 +1016,7 @@ func TestUnusedReadersSurviveRuntimeFirstWarmCacheAndCacheSwitch(t *testing.T) {
 	if path := Path(); path != "" {
 		t.Fatalf("Path() = %q although the license could not be written", path)
 	}
-	config.Dir = second
+	config.Directory = second
 	cliPathCached = false
 	if path := Path(); path == "" {
 		t.Fatal("Path() could not install into a new cache after a runtime-first warm start")
@@ -1085,9 +1085,9 @@ func TestPathRetriesNonSeekableReaderConfiguredThroughSetup(t *testing.T) {
 	hash := sha256.Sum256(content)
 	blocked := filepath.Join(dir, binaryNameForOS())
 	Setup(Config{
-		Cli:     &plainReader{&obstructedOnce{Reader: bytes.NewReader(content), path: blocked}},
-		CliHash: hash[:],
-		Dir:     dir,
+		Cli:       &plainReader{&obstructedOnce{Reader: bytes.NewReader(content), path: blocked}},
+		CliHash:   hash[:],
+		Directory: dir,
 	})
 	if path := Path(); path != "" {
 		t.Fatalf("Path() = %q despite an obstructed install", path)
@@ -1175,7 +1175,7 @@ func TestPathRetriesLicenseWriteBeforeCachingSuccess(t *testing.T) {
 	dir := t.TempDir()
 	content := []byte("cli")
 	hash := sha256.Sum256(content)
-	Setup(Config{Cli: bytes.NewReader(content), CliHash: hash[:], License: []byte("license"), Dir: dir})
+	Setup(Config{Cli: bytes.NewReader(content), CliHash: hash[:], License: []byte("license"), Directory: dir})
 	licensePath := filepath.Join(dir, binaryNameForOS()+".license")
 	if err := os.Mkdir(licensePath, 0755); err != nil {
 		t.Fatal(err)

@@ -65,25 +65,27 @@ The existing input structs and callback signatures remain unchanged.
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input) => {
-      console.log(`Tool called: ${input.toolName}`);
-      // Allow all tools
-      return { permissionDecision: "allow" };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input) => {
+                console.log(`Tool called: ${input.toolName}`);
+                // Allow all tools
+                return { permissionDecision: "allow" };
+            },
+            onPostToolUse: async (input) => {
+                console.log(`Tool result: ${JSON.stringify(input.toolResult)}`);
+                return null; // No modifications
+            },
+            onSessionStart: async (input) => {
+                return { additionalContext: "User prefers concise answers." };
+            },
+        },
     },
-    onPostToolUse: async (input) => {
-      console.log(`Tool result: ${JSON.stringify(input.toolResult)}`);
-      return null; // No modifications
-    },
-    onSessionStart: async (input) => {
-      return { additionalContext: "User prefers concise answers." };
-    },
-  },
 });
 ```
 
@@ -96,8 +98,9 @@ const session = await client.createSession({
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
+
 async def main():
-    client = CopilotClient()
+    client = CopilotClient(mode="coding-agent")
     await client.start()
 
     async def on_pre_tool_use(input_data, invocation):
@@ -111,11 +114,16 @@ async def main():
     async def on_session_start(input_data, invocation):
         return {"additionalContext": "User prefers concise answers."}
 
-    session = await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={
-            "on_pre_tool_use": on_pre_tool_use,
-            "on_post_tool_use": on_post_tool_use,
-            "on_session_start": on_session_start,
-        })
+    session = await client.create_session(
+        permissions={"on_request": PermissionHandler.approve_all},
+        hooks={
+            "handlers": {
+                "on_pre_tool_use": on_pre_tool_use,
+                "on_post_tool_use": on_post_tool_use,
+                "on_session_start": on_session_start,
+            }
+        },
+    )
 ```
 
 </details>
@@ -127,34 +135,36 @@ async def main():
 package main
 
 import (
-    "context"
-    "fmt"
-    copilot "github.com/github/copilot-sdk/go"
+	"context"
+	"fmt"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
-    client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
-    session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
-        Hooks: &copilot.SessionHooks{
-            OnPreToolUse: func(input copilot.PreToolUseHookInput, inv copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
-                fmt.Printf("Tool called: %s\n", input.ToolName)
-                return &copilot.PreToolUseHookOutput{
-                    PermissionDecision: "allow",
-                }, nil
-            },
-            OnPostToolUse: func(input copilot.PostToolUseHookInput, inv copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
-                fmt.Printf("Tool result: %v\n", input.ToolResult)
-                return nil, nil
-            },
-            OnSessionStart: func(input copilot.SessionStartHookInput, inv copilot.HookInvocation) (*copilot.SessionStartHookOutput, error) {
-                return &copilot.SessionStartHookOutput{
-                    AdditionalContext: "User prefers concise answers.",
-                }, nil
-            },
-        },
-    })
-    _ = session
+	session, _ := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+		Hooks: copilot.SessionHookOptions{
+			Handlers: &copilot.SessionHooks{
+				OnPreToolUse: func(input copilot.PreToolUseHookInput, inv copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
+					fmt.Printf("Tool called: %s\n", input.ToolName)
+					return &copilot.PreToolUseHookOutput{
+						PermissionDecision: "allow",
+					}, nil
+				},
+				OnPostToolUse: func(input copilot.PostToolUseHookInput, inv copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
+					fmt.Printf("Tool result: %v\n", input.ToolResult)
+					return nil, nil
+				},
+				OnSessionStart: func(input copilot.SessionStartHookInput, inv copilot.HookInvocation) (*copilot.SessionStartHookOutput, error) {
+					return &copilot.SessionStartHookOutput{
+						AdditionalContext: "User prefers concise answers.",
+					}, nil
+				},
+			},
+		},
+	})
+	_ = session
 }
 ```
 
@@ -164,33 +174,37 @@ func main() {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
-var client = new CopilotClient();
-
-var session = await client.CreateSessionAsync(new SessionConfig
+var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    Hooks = new SessionHooks
+    Hooks = new SessionHookOptions
     {
-        OnPreToolUse = (input, invocation) =>
+        Handlers = new SessionHooks
         {
-            Console.WriteLine($"Tool called: {input.ToolName}");
-            return Task.FromResult<PreToolUseHookOutput?>(
-                new PreToolUseHookOutput { PermissionDecision = "allow" }
-            );
-        },
-        OnPostToolUse = (input, invocation) =>
-        {
-            Console.WriteLine($"Tool result: {input.ToolResult}");
-            return Task.FromResult<PostToolUseHookOutput?>(null);
-        },
-        OnSessionStart = (input, invocation) =>
-        {
-            return Task.FromResult<SessionStartHookOutput?>(
-                new SessionStartHookOutput { AdditionalContext = "User prefers concise answers." }
-            );
-        },
-    },
+            OnPreToolUse = (input, invocation) =>
+            {
+                Console.WriteLine($"Tool called: {input.ToolName}");
+                return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput
+                {
+                    PermissionDecision = "allow"
+                });
+            },
+            OnPostToolUse = (input, invocation) =>
+            {
+                Console.WriteLine($"Tool result: {input.ToolResult}");
+                return Task.FromResult<PostToolUseHookOutput?>(null);
+            },
+            OnSessionStart = (input, invocation) =>
+            {
+                return Task.FromResult<SessionStartHookOutput?>(new SessionStartHookOutput
+                {
+                    AdditionalContext = "User prefers concise answers."
+                });
+            },
+        }
+    }
 });
 ```
 
@@ -200,33 +214,43 @@ var session = await client.CreateSessionAsync(new SessionConfig
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.*;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
-try (var client = new CopilotClient()) {
-    client.start().get();
+try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
+    client
+            .start()
+            .get();
 
     var hooks = new SessionHooks()
-        .setOnPreToolUse((input, invocation) -> {
-            System.out.println("Tool called: " + input.getToolName());
-            return CompletableFuture.completedFuture(PreToolUseHookOutput.allow());
-        })
-        .setOnPostToolUse((input, invocation) -> {
-            System.out.println("Tool result: " + input.getToolResult());
-            return CompletableFuture.completedFuture(null);
-        })
-        .setOnSessionStart((input, invocation) -> {
-            return CompletableFuture.completedFuture(
-                new SessionStartHookOutput("User prefers concise answers.", null)
-            );
-        });
+            .setOnPreToolUse((input, invocation) -> {
+                System.out
+                        .println("Tool called: " + input
+                                .getToolName());
+                return CompletableFuture
+                        .completedFuture(PreToolUseHookOutput
+                                .allow());
+            })
+            .setOnPostToolUse((input, invocation) -> {
+                System.out
+                        .println("Tool result: " + input
+                                .getToolResult());
+                return CompletableFuture
+                        .completedFuture(null);
+            })
+            .setOnSessionStart((input, invocation) -> {
+                return CompletableFuture
+                        .completedFuture(new SessionStartHookOutput("User prefers concise answers.", null));
+            });
 
-    var session = client.createSession(
-        new SessionConfig()
-            .setHooks(hooks)
-            .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-    ).get();
+    var session = client
+            .createSession(new CreateSessionOptions()
+                    .setHooks(new SessionHookOptions()
+                            .setHandlers(hooks))
+                    .setPermissions(new SessionPermissionOptions()
+                            .setOnRequest(PermissionHandler.APPROVE_ALL)))
+            .get();
 }
 ```
 
@@ -248,16 +272,22 @@ This allows hooks to maintain state or perform session-specific logic.
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input) => {
-      console.log(`[${new Date().toISOString()}] Tool: ${input.toolName}, Args: ${JSON.stringify(input.toolArgs)}`);
-      return { permissionDecision: "allow" };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input) => {
+                console.log(
+                    `[${new Date().toISOString()}] Tool: ${input.toolName}, Args: ${JSON.stringify(input.toolArgs)}`,
+                );
+                return { permissionDecision: "allow" };
+            },
+            onPostToolUse: async (input) => {
+                console.log(
+                    `[${new Date().toISOString()}] Result: ${JSON.stringify(input.toolResult)}`,
+                );
+                return null;
+            },
+        },
     },
-    onPostToolUse: async (input) => {
-      console.log(`[${new Date().toISOString()}] Result: ${JSON.stringify(input.toolResult)}`);
-      return null;
-    },
-  },
 });
 ```
 
@@ -267,17 +297,19 @@ const session = await client.createSession({
 const BLOCKED_TOOLS = ["shell", "bash", "exec"];
 
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input) => {
-      if (BLOCKED_TOOLS.includes(input.toolName)) {
-        return {
-          permissionDecision: "deny",
-          permissionDecisionReason: "Shell access is not permitted",
-        };
-      }
-      return { permissionDecision: "allow" };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input) => {
+                if (BLOCKED_TOOLS.includes(input.toolName)) {
+                    return {
+                        permissionDecision: "deny",
+                        permissionDecisionReason: "Shell access is not permitted",
+                    };
+                }
+                return { permissionDecision: "allow" };
+            },
+        },
     },
-  },
 });
 ```
 
@@ -285,14 +317,16 @@ const session = await client.createSession({
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async () => {
-      const userPrefs = await loadUserPreferences();
-      return {
-        additionalContext: `User preferences: ${JSON.stringify(userPrefs)}`,
-      };
+    hooks: {
+        handlers: {
+            onSessionStart: async () => {
+                const userPrefs = await loadUserPreferences();
+                return {
+                    additionalContext: `User preferences: ${JSON.stringify(userPrefs)}`,
+                };
+            },
+        },
     },
-  },
 });
 ```
 

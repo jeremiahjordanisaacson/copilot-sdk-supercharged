@@ -4,7 +4,7 @@
 
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 // Exercises .NET 8's ConfigureAwaitOptions on net8.0 and the SDK's downlevel polyfill, which the test project compiles
 // in, on net472.

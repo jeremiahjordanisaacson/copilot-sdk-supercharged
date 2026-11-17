@@ -8,16 +8,16 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 const pendingWorkTimeout = 60 * time.Second
 
 // Mirrors dotnet/test/PendingWorkResumeTests.cs (snapshot category "pending_work_resume").
 //
-// Most subtests spawn a TCP server client, connect a "suspended" client through URIConnection
+// Most subtests spawn a TCP server client, connect a "suspended" client through TCPConnection
 // trigger pending work, then ForceStop the suspended client (preserving session state)
 // and resume from a fresh client with ContinuePendingWork=true. Warm-join coverage keeps
 // the original client connected while a second client resumes the same session.
@@ -28,7 +28,7 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 	t.Run("should continue pending permission request after resume", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		_, cliURL := startTCPServer(t, ctx)
+		_, serverPort := startTCPServer(t, ctx)
 
 		type ValueParams struct {
 			Value string `json:"value" jsonschema:"Value to transform"`
@@ -43,17 +43,15 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 		releasePermission := make(chan rpc.PermissionDecision, 1)
 
 		suspendedClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+			opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 		})
-		session1, err := suspendedClient.CreateSession(t.Context(), &copilot.SessionConfig{
-			Tools: []copilot.Tool{originalTool},
-			OnPermissionRequest: func(req copilot.PermissionRequest, _ copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-				select {
-				case permissionRequested <- req:
-				default:
-				}
-				return <-releasePermission, nil
-			},
+		session1, err := suspendedClient.CreateSession(t.Context(), &copilot.CreateSessionOptions{Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{originalTool}}, Permissions: copilot.SessionPermissionOptions{OnRequest: func(req copilot.PermissionRequest, _ copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+			select {
+			case permissionRequested <- req:
+			default:
+			}
+			return <-releasePermission, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -103,16 +101,13 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 			})
 
 		resumedClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+			opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 		})
 		t.Cleanup(func() { resumedClient.ForceStop() })
 
-		session2, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			ContinuePendingWork: copilot.Bool(true),
-			OnPermissionRequest: func(_ copilot.PermissionRequest, _ copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-				return &rpc.PermissionDecisionNoResult{}, nil
-			},
-			Tools: []copilot.Tool{resumedTool},
+		session2, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{ContinuePendingWork: copilot.Bool(true), Permissions: copilot.SessionPermissionOptions{OnRequest: func(_ copilot.PermissionRequest, _ copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+			return &rpc.PermissionDecisionNoResult{}, nil
+		}}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{resumedTool}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
@@ -141,7 +136,7 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 	t.Run("should continue pending external tool request after resume", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		_, cliURL := startTCPServer(t, ctx)
+		_, serverPort := startTCPServer(t, ctx)
 
 		type ValueParams struct {
 			Value string `json:"value" jsonschema:"Value to look up"`
@@ -160,12 +155,9 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 			})
 
 		suspendedClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+			opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 		})
-		session1, err := suspendedClient.CreateSession(t.Context(), &copilot.SessionConfig{
-			Tools:               []copilot.Tool{originalTool},
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := suspendedClient.CreateSession(t.Context(), &copilot.CreateSessionOptions{Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{originalTool}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -196,14 +188,11 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 		suspendedClient.ForceStop()
 
 		resumedClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+			opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 		})
 		t.Cleanup(func() { resumedClient.ForceStop() })
 
-		session2, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			ContinuePendingWork: copilot.Bool(true),
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session2, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{ContinuePendingWork: copilot.Bool(true), Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -230,7 +219,7 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 	t.Run("should continue parallel pending external tool requests after resume", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		_, cliURL := startTCPServer(t, ctx)
+		_, serverPort := startTCPServer(t, ctx)
 
 		type ValueParams struct {
 			Value string `json:"value" jsonschema:"Value to look up"`
@@ -258,12 +247,9 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 			})
 
 		suspendedClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+			opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 		})
-		session1, err := suspendedClient.CreateSession(t.Context(), &copilot.SessionConfig{
-			Tools:               []copilot.Tool{originalA, originalB},
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := suspendedClient.CreateSession(t.Context(), &copilot.CreateSessionOptions{Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{originalA, originalB}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -301,14 +287,11 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 		suspendedClient.ForceStop()
 
 		resumedClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+			opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 		})
 		t.Cleanup(func() { resumedClient.ForceStop() })
 
-		session2, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			ContinuePendingWork: copilot.Bool(true),
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session2, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{ContinuePendingWork: copilot.Bool(true), Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -344,18 +327,16 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 	t.Run("should resume successfully when no pending work exists", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		_, cliURL := startTCPServer(t, ctx)
+		_, serverPort := startTCPServer(t, ctx)
 
 		var sessionID string
 		func() {
 			firstClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-				opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+				opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 			})
 			defer firstClient.ForceStop()
 
-			firstSession, err := firstClient.CreateSession(t.Context(), &copilot.SessionConfig{
-				OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			})
+			firstSession, err := firstClient.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 			if err != nil {
 				t.Fatalf("Failed to create first session: %v", err)
 			}
@@ -375,14 +356,11 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 		}()
 
 		resumedClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+			opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 		})
 		t.Cleanup(func() { resumedClient.ForceStop() })
 
-		resumedSession, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			ContinuePendingWork: copilot.Bool(true),
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		resumedSession, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{ContinuePendingWork: copilot.Bool(true), Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -413,7 +391,7 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 		t.Run(fmt.Sprintf("should keep pending external tool handleable on %s resume when continuependingwork is false", scenario.name), func(t *testing.T) {
 			ctx.ConfigureForTest(t)
 
-			_, cliURL := startTCPServer(t, ctx)
+			_, serverPort := startTCPServer(t, ctx)
 
 			type ValueParams struct {
 				Value string `json:"value" jsonschema:"Value to look up"`
@@ -431,15 +409,12 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 				})
 
 			suspendedClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-				opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+				opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 			})
 			if !scenario.disconnectOriginalClient {
 				defer suspendedClient.ForceStop()
 			}
-			session1, err := suspendedClient.CreateSession(t.Context(), &copilot.SessionConfig{
-				Tools:               []copilot.Tool{originalTool},
-				OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			})
+			session1, err := suspendedClient.CreateSession(t.Context(), &copilot.CreateSessionOptions{Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{originalTool}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 			if err != nil {
 				t.Fatalf("Failed to create session: %v", err)
 			}
@@ -470,8 +445,7 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 
 			if scenario.disconnectOriginalClient {
 				lockObserver := ctx.NewClient(func(opts *copilot.ClientOptions) {
-					stdio := opts.Connection.(copilot.StdioConnection)
-					opts.Connection = copilot.TCPConnection{Path: stdio.Path}
+					useTCP(opts, 0, "")
 				})
 				t.Cleanup(func() { lockObserver.ForceStop() })
 				if err := lockObserver.Start(t.Context()); err != nil {
@@ -498,7 +472,7 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 			}
 
 			resumedClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-				opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+				opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 			})
 			t.Cleanup(func() { resumedClient.ForceStop() })
 
@@ -507,12 +481,9 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 			// cold mode the original is gone, so we register a fresh throwing handler
 			// to assert the runtime doesn't re-invoke the tool on resume (orphan
 			// auto-completion happens internally).
-			resumeConfig := &copilot.ResumeSessionConfig{
-				ContinuePendingWork: copilot.Bool(false),
-				OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			}
+			resumeConfig := &copilot.ResumeSessionOptions{ContinuePendingWork: copilot.Bool(false), Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}}
 			if scenario.disconnectOriginalClient {
-				resumeConfig.Tools = []copilot.Tool{
+				resumeConfig.Tools.Definitions = []copilot.Tool{
 					copilot.DefineTool("resume_external_tool", "Looks up a value after resumption",
 						func(_ ValueParams, _ copilot.ToolInvocation) (string, error) {
 							t.Errorf("Resumed-session handler should not be invoked")
@@ -590,18 +561,16 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 	t.Run("should report continuependingwork true in resume event", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		_, cliURL := startTCPServer(t, ctx)
+		_, serverPort := startTCPServer(t, ctx)
 
 		var sessionID string
 		func() {
 			firstClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-				opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+				opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 			})
 			defer firstClient.ForceStop()
 
-			firstSession, err := firstClient.CreateSession(t.Context(), &copilot.SessionConfig{
-				OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			})
+			firstSession, err := firstClient.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 			if err != nil {
 				t.Fatalf("Failed to create first session: %v", err)
 			}
@@ -621,14 +590,11 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 		}()
 
 		resumedClient := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+			opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 		})
 		t.Cleanup(func() { resumedClient.ForceStop() })
 
-		resumedSession, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			ContinuePendingWork: copilot.Bool(true),
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		resumedSession, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{ContinuePendingWork: copilot.Bool(true), Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -672,42 +638,40 @@ func TestPendingWorkResumeE2E(t *testing.T) {
 	})
 }
 
-// serverCliURL extracts the local CLI URL from a TCP-mode server client.
+// serverRuntimePort extracts the TCP port from a TCP-mode server client.
 // The server must already be started; this function panics with a fatal
 // test failure if the port is not yet available.
-func serverCliURL(t *testing.T, server *testharness.Client) string {
+func serverRuntimePort(t *testing.T, server *testharness.Client) int {
 	t.Helper()
 	port := server.RuntimePort()
 	if port == 0 {
-		t.Fatal("Expected non-zero RuntimePort from TCP server client; ensure the server is started before calling serverCliURL")
+		t.Fatal("Expected non-zero RuntimePort from TCP server client; ensure the server is started before calling serverRuntimePort")
 	}
-	return fmt.Sprintf("localhost:%d", port)
+	return port
 }
 
 // sharedTCPToken is the connection token used by startTCPServer and any sibling
-// client that connects via the resulting CLI URL. Tests use a fixed token rather
+// client that connects via the resulting TCP port. Tests use a fixed token rather
 // than the auto-generated one because the second client is constructed without
 // access to the first client's internal state.
 const sharedTCPToken = "tcp-shared-test-token"
 
-// startTCPServer starts a TCP-mode server client and returns its CLI URL.
+// startTCPServer starts a TCP-mode server client and returns its TCP port.
 // It triggers an initial connection so RuntimePort is populated.
-func startTCPServer(t *testing.T, ctx *testharness.TestContext) (*testharness.Client, string) {
+func startTCPServer(t *testing.T, ctx *testharness.TestContext) (*testharness.Client, int) {
 	t.Helper()
 	server := ctx.NewClient(func(opts *copilot.ClientOptions) {
-		opts.Connection = copilot.TCPConnection{Path: opts.Connection.(copilot.StdioConnection).Path, ConnectionToken: sharedTCPToken}
+		useTCP(opts, 0, sharedTCPToken)
 	})
 	t.Cleanup(func() { server.ForceStop() })
 	// Trigger connection so we can read the port. CreateSession+Disconnect is the
 	// established pattern (see multi_client_test.go).
-	initSession, err := server.CreateSession(t.Context(), &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	})
+	initSession, err := server.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 	if err != nil {
 		t.Fatalf("Failed to start TCP server client: %v", err)
 	}
 	initSession.Disconnect()
-	return server, serverCliURL(t, server)
+	return server, serverRuntimePort(t, server)
 }
 
 type collectedExternalRequests struct {

@@ -14,7 +14,7 @@ Recovery requires runtime rollout enablement and explicit enrollment. Set the la
 | ------- | -------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | Node.js | `autoModeRecovery: true`         | `onAutoModeSwitchRequest`             | `session.capabilities.ui?.autoModeRecovery === true`                                               |
 | Python  | `auto_mode_recovery=True`        | `on_auto_mode_switch_request`         | `session.capabilities.get("ui", {}).get("autoModeRecovery") is True`                               |
-| Go      | `CreateSessionWithAutoModeRecovery` / `ResumeSessionWithAutoModeRecovery` | `AutoModeRecoveryOptions.OnAutoModeSwitchRequest` | `session.CapabilitiesWithAutoModeRecovery().UI.AutoModeRecovery` when `UI` is non-nil |
+| Go      | `AutoModeRecovery: true`         | `OnAutoModeSwitchRequest`             | `session.Capabilities().UI.AutoModeRecovery` when `UI` is non-nil                                  |
 | .NET    | `AutoModeRecovery = true`        | `OnAutoModeSwitchRequest`             | `session.Capabilities.Ui?.AutoModeRecovery == true`                                                |
 | Java    | `.setAutoModeRecovery(true)`     | `.setOnAutoModeSwitch(...)`           | `session.getCapabilities().getUi().getAutoModeRecovery().orElse(false)` when `getUi()` is non-null |
 | Rust    | `.with_auto_mode_recovery(true)` | `.with_auto_mode_switch_handler(...)` | `session.auto_mode_recovery_supported()`                                                           |
@@ -33,32 +33,42 @@ These examples assume you have implemented `presentAutoOffer` (or its language e
 <summary><strong>TypeScript</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient, approveAll } from "@github/copilot-sdk";
-import type { AutoModeSwitchHandler } from "@github/copilot-sdk";
+import { CopilotClient, approveAll } from "@microsoft/copilot-sdk";
+import type { AutoModeSwitchHandler } from "@microsoft/copilot-sdk";
 
 declare const presentAutoOffer: AutoModeSwitchHandler;
 declare const existingSessionId: string;
 const permissionHandler = approveAll;
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 
 const config = {
-    autoModeRecovery: true,
-    onPermissionRequest: permissionHandler,
-    onAutoModeSwitchRequest: presentAutoOffer,
+    interaction: {
+        autoModeRecovery: true,
+        onAutoModeSwitchRequest: presentAutoOffer,
+    },
+    permissions: {
+        onRequest: permissionHandler,
+    },
 };
 const session = await client.createSession(config);
 // Re-register support when resuming; enrollment is not a saved preference.
 const resumed = await client.resumeSession(existingSessionId, config);
 console.log(session.sessionId, resumed.sessionId);
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```typescript
 const config = {
-    autoModeRecovery: true,
-    onPermissionRequest: permissionHandler,
-    onAutoModeSwitchRequest: presentAutoOffer,
+    interaction: {
+        autoModeRecovery: true,
+        onAutoModeSwitchRequest: presentAutoOffer,
+    },
+    permissions: {
+        onRequest: permissionHandler,
+    },
 };
 const session = await client.createSession(config);
 // Re-register support when resuming; enrollment is not a saved preference.
@@ -70,43 +80,60 @@ const resumed = await client.resumeSession(existingSessionId, config);
 <summary><strong>Python</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```python
-from copilot import AutoModeSwitchRequest, AutoModeSwitchResponse, CopilotClient, PermissionHandler
+from copilot import (
+    AutoModeSwitchRequest,
+    AutoModeSwitchResponse,
+    CopilotClient,
+    PermissionHandler,
+)
 
 permission_handler = PermissionHandler.approve_all
 
 
-def present_auto_offer(request: AutoModeSwitchRequest, invocation: dict[str, str]) -> AutoModeSwitchResponse:
+def present_auto_offer(
+    request: AutoModeSwitchRequest, invocation: dict[str, str]
+) -> AutoModeSwitchResponse:
     return "no"
 
 
 async def main(client: CopilotClient, existing_session_id: str) -> None:
     session = await client.create_session(
-        auto_mode_recovery=True,
-        on_permission_request=permission_handler,
-        on_auto_mode_switch_request=present_auto_offer,
+        interaction={
+            "auto_mode_recovery": True,
+            "on_auto_mode_switch_request": present_auto_offer,
+        },
+        permissions={"on_request": permission_handler},
     )
     resumed = await client.resume_session(
         existing_session_id,
-        auto_mode_recovery=True,
-        on_permission_request=permission_handler,
-        on_auto_mode_switch_request=present_auto_offer,
+        interaction={
+            "auto_mode_recovery": True,
+            "on_auto_mode_switch_request": present_auto_offer,
+        },
+        permissions={"on_request": permission_handler},
     )
     print(session.session_id, resumed.session_id)
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```python
 session = await client.create_session(
-    auto_mode_recovery=True,
-    on_permission_request=permission_handler,
-    on_auto_mode_switch_request=present_auto_offer,
+    interaction={
+        "auto_mode_recovery": True,
+        "on_auto_mode_switch_request": present_auto_offer,
+    },
+    permissions={"on_request": permission_handler},
 )
 resumed = await client.resume_session(
     existing_session_id,
-    auto_mode_recovery=True,
-    on_permission_request=permission_handler,
-    on_auto_mode_switch_request=present_auto_offer,
+    interaction={
+        "auto_mode_recovery": True,
+        "on_auto_mode_switch_request": present_auto_offer,
+    },
+    permissions={"on_request": permission_handler},
 )
 ```
 
@@ -115,59 +142,70 @@ resumed = await client.resume_session(
 <summary><strong>Go</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```go
 package main
 
 import (
 	"context"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
-func presentAutoOffer(request copilot.AutoModeSwitchRequestWithAutoModeRecovery, invocation copilot.AutoModeSwitchInvocation) (copilot.AutoModeSwitchResponse, error) {
+func presentAutoOffer(request copilot.AutoModeSwitchRequest, invocation copilot.AutoModeSwitchInvocation) (copilot.AutoModeSwitchResponse, error) {
 	return copilot.AutoModeSwitchResponseNo, nil
 }
 
 var permissionHandler = copilot.PermissionHandler.ApproveAll
 
 func run(ctx context.Context, client *copilot.Client, existingSessionID string) error {
-	session, err := client.CreateSessionWithAutoModeRecovery(ctx, &copilot.SessionConfig{
-		OnPermissionRequest: permissionHandler,
-	}, &copilot.AutoModeRecoveryOptions{
-		OnAutoModeSwitchRequest: presentAutoOffer,
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Permissions: copilot.SessionPermissionOptions{OnRequest: permissionHandler},
+		Interaction: copilot.SessionInteractionOptions{
+			AutoModeRecovery: true,
+			OnAutoModeSwitchRequest: presentAutoOffer,
+		},
 	})
 	if err != nil {
 		return err
 	}
-	resumed, err := client.ResumeSessionWithAutoModeRecovery(ctx, existingSessionID, &copilot.ResumeSessionConfig{
-		OnPermissionRequest: permissionHandler,
-	}, &copilot.AutoModeRecoveryOptions{
-		OnAutoModeSwitchRequest: presentAutoOffer,
+	resumed, err := client.ResumeSession(ctx, existingSessionID, &copilot.ResumeSessionOptions{
+		Permissions: copilot.SessionPermissionOptions{OnRequest: permissionHandler},
+		Interaction: copilot.SessionInteractionOptions{
+			AutoModeRecovery: true,
+			OnAutoModeSwitchRequest: presentAutoOffer,
+		},
 	})
 	_, _ = session, resumed
 	return err
 }
 
 func main() {
-	_ = run(context.Background(), copilot.NewClient(nil), "existing-session-id")
+	_ = run(context.Background(), copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent}), "existing-session-id")
 }
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```go
-session, err := client.CreateSessionWithAutoModeRecovery(ctx, &copilot.SessionConfig{
-    OnPermissionRequest: permissionHandler,
-}, &copilot.AutoModeRecoveryOptions{
-    OnAutoModeSwitchRequest: presentAutoOffer,
+session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+    Permissions: copilot.SessionPermissionOptions{OnRequest: permissionHandler},
+    Interaction: copilot.SessionInteractionOptions{
+        AutoModeRecovery: true,
+        OnAutoModeSwitchRequest: presentAutoOffer,
+    },
 })
 if err != nil {
-    return err
+	return err
 }
-resumed, err := client.ResumeSessionWithAutoModeRecovery(ctx, existingSessionID, &copilot.ResumeSessionConfig{
-    OnPermissionRequest: permissionHandler,
-}, &copilot.AutoModeRecoveryOptions{
-    OnAutoModeSwitchRequest: presentAutoOffer,
+resumed, err := client.ResumeSession(ctx, existingSessionID, &copilot.ResumeSessionOptions{
+    Permissions: copilot.SessionPermissionOptions{OnRequest: permissionHandler},
+    Interaction: copilot.SessionInteractionOptions{
+        AutoModeRecovery: true,
+        OnAutoModeSwitchRequest: presentAutoOffer,
+    },
 })
+
 ```
 
 </details>
@@ -175,43 +213,66 @@ resumed, err := client.ResumeSessionWithAutoModeRecovery(ctx, existingSessionID,
 <summary><strong>.NET</strong></summary>
 
 <!-- docs-validate: hidden -->
-```csharp
-using GitHub.Copilot;
 
-var client = new CopilotClient();
+```csharp
+using Microsoft.Copilot;
+
+var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
 var permissionHandler = PermissionHandler.ApproveAll;
 var existingSessionId = "existing-session-id";
-
-await using var session = await client.CreateSessionAsync(new SessionConfig
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    AutoModeRecovery = true,
-    OnPermissionRequest = permissionHandler,
-    OnAutoModeSwitchRequest = PresentAutoOfferAsync
+    Interaction = new SessionInteractionOptions
+    {
+        AutoModeRecovery = true,
+        OnAutoModeSwitchRequest = PresentAutoOfferAsync
+    },
+    Permissions = new SessionPermissionOptions
+    {
+        OnRequest = permissionHandler
+    }
 });
-await using var resumed = await client.ResumeSessionAsync(existingSessionId, new ResumeSessionConfig
+await using var resumed = await client.ResumeSessionAsync(existingSessionId, new ResumeSessionOptions
 {
-    AutoModeRecovery = true,
-    OnPermissionRequest = permissionHandler,
-    OnAutoModeSwitchRequest = PresentAutoOfferAsync
+    Interaction = new SessionInteractionOptions
+    {
+        AutoModeRecovery = true,
+        OnAutoModeSwitchRequest = PresentAutoOfferAsync
+    },
+    Permissions = new SessionPermissionOptions
+    {
+        OnRequest = permissionHandler
+    }
 });
-
-static Task<AutoModeSwitchResponse> PresentAutoOfferAsync(AutoModeSwitchRequest request, AutoModeSwitchInvocation invocation) =>
-    Task.FromResult(AutoModeSwitchResponse.No);
+static Task<AutoModeSwitchResponse> PresentAutoOfferAsync(AutoModeSwitchRequest request, AutoModeSwitchInvocation invocation) => Task.FromResult(AutoModeSwitchResponse.No);
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```csharp
-await using var session = await client.CreateSessionAsync(new SessionConfig
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    AutoModeRecovery = true,
-    OnPermissionRequest = permissionHandler,
-    OnAutoModeSwitchRequest = PresentAutoOfferAsync
+    Interaction = new SessionInteractionOptions
+    {
+        AutoModeRecovery = true,
+        OnAutoModeSwitchRequest = PresentAutoOfferAsync
+    },
+    Permissions = new SessionPermissionOptions
+    {
+        OnRequest = permissionHandler
+    }
 });
-await using var resumed = await client.ResumeSessionAsync(existingSessionId, new ResumeSessionConfig
+await using var resumed = await client.ResumeSessionAsync(existingSessionId, new ResumeSessionOptions
 {
-    AutoModeRecovery = true,
-    OnPermissionRequest = permissionHandler,
-    OnAutoModeSwitchRequest = PresentAutoOfferAsync
+    Interaction = new SessionInteractionOptions
+    {
+        AutoModeRecovery = true,
+        OnAutoModeSwitchRequest = PresentAutoOfferAsync
+    },
+    Permissions = new SessionPermissionOptions
+    {
+        OnRequest = permissionHandler
+    }
 });
 ```
 
@@ -220,47 +281,67 @@ await using var resumed = await client.ResumeSessionAsync(existingSessionId, new
 <summary><strong>Java</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.AutoModeSwitchHandler;
-import com.github.copilot.rpc.AutoModeSwitchResponse;
-import com.github.copilot.rpc.PermissionHandler;
-import com.github.copilot.rpc.ResumeSessionConfig;
-import com.github.copilot.rpc.SessionConfig;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.AutoModeSwitchHandler;
+import com.microsoft.copilot.rpc.AutoModeSwitchResponse;
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.PermissionHandler;
+import com.microsoft.copilot.rpc.ResumeSessionOptions;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
 import java.util.concurrent.CompletableFuture;
+import com.microsoft.copilot.rpc.SessionInteractionOptions;
+import com.microsoft.copilot.rpc.SessionPermissionOptions;
 
 public class AutoModeRecoveryExample {
     public static void main(String[] args) throws Exception {
-        var client = new CopilotClient();
+        var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT));
         PermissionHandler permissionHandler = PermissionHandler.APPROVE_ALL;
-        AutoModeSwitchHandler presentAutoOffer =
-            (request, invocation) -> CompletableFuture.completedFuture(AutoModeSwitchResponse.NO);
+        AutoModeSwitchHandler presentAutoOffer = (request, invocation) -> CompletableFuture
+                .completedFuture(AutoModeSwitchResponse.NO);
         var existingSessionId = "existing-session-id";
 
-        var session = client.createSession(new SessionConfig()
-            .setAutoModeRecovery(true)
-            .setOnPermissionRequest(permissionHandler)
-            .setOnAutoModeSwitch(presentAutoOffer));
-        var resumed = client.resumeSession(existingSessionId, new ResumeSessionConfig()
-            .setAutoModeRecovery(true)
-            .setOnPermissionRequest(permissionHandler)
-            .setOnAutoModeSwitch(presentAutoOffer));
-        session.get();
-        resumed.get();
+        var session = client
+                .createSession(new CreateSessionOptions()
+                        .setInteraction(new SessionInteractionOptions()
+                                .setAutoModeRecovery(true)
+                                .setOnAutoModeSwitchRequest(presentAutoOffer))
+                        .setPermissions(new SessionPermissionOptions()
+                                .setOnRequest(permissionHandler)));
+        var resumed = client
+                .resumeSession(existingSessionId, new ResumeSessionOptions()
+                        .setInteraction(new SessionInteractionOptions()
+                                .setAutoModeRecovery(true)
+                                .setOnAutoModeSwitchRequest(presentAutoOffer))
+                        .setPermissions(new SessionPermissionOptions()
+                                .setOnRequest(permissionHandler)));
+        session
+                .get();
+        resumed
+                .get();
     }
 }
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```java
-var session = client.createSession(new SessionConfig()
-    .setAutoModeRecovery(true)
-    .setOnPermissionRequest(permissionHandler)
-    .setOnAutoModeSwitch(presentAutoOffer));
-var resumed = client.resumeSession(existingSessionId, new ResumeSessionConfig()
-    .setAutoModeRecovery(true)
-    .setOnPermissionRequest(permissionHandler)
-    .setOnAutoModeSwitch(presentAutoOffer));
+var session = client
+        .createSession(new CreateSessionOptions()
+                .setInteraction(new SessionInteractionOptions()
+                        .setAutoModeRecovery(true)
+                        .setOnAutoModeSwitchRequest(presentAutoOffer))
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(permissionHandler)));
+var resumed = client
+        .resumeSession(existingSessionId, new ResumeSessionOptions()
+                .setInteraction(new SessionInteractionOptions()
+                        .setAutoModeRecovery(true)
+                        .setOnAutoModeSwitchRequest(presentAutoOffer))
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(permissionHandler)));
 ```
 
 </details>
@@ -268,6 +349,7 @@ var resumed = client.resumeSession(existingSessionId, new ResumeSessionConfig()
 <summary><strong>Rust</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```rust
 struct PresentAutoOffer;
 
@@ -278,8 +360,8 @@ impl AutoModeSwitchHandler for PresentAutoOffer {
         _session_id: SessionId,
         _error_code: Option<String>,
         _retry_after_seconds: Option<f64>,
-    ) -> github_copilot_sdk::handler::AutoModeSwitchResponse {
-        github_copilot_sdk::handler::AutoModeSwitchResponse::No
+    ) -> copilot_sdk::handler::AutoModeSwitchResponse {
+        copilot_sdk::handler::AutoModeSwitchResponse::No
     }
 }
 
@@ -287,27 +369,56 @@ let permission_handler: Arc<dyn PermissionHandler> = Arc::new(ApproveAllHandler)
 let present_auto_offer: Arc<dyn AutoModeSwitchHandler> = Arc::new(PresentAutoOffer);
 let existing_session_id = SessionId::from("existing-session-id");
 
-let session = client.create_session(SessionConfig::default()
-    .with_auto_mode_recovery(true)
-    .with_permission_handler(permission_handler.clone())
-    .with_auto_mode_switch_handler(present_auto_offer.clone())).await?;
-let resumed = client.resume_session(ResumeSessionConfig::new(existing_session_id)
-    .with_auto_mode_recovery(true)
-    .with_permission_handler(permission_handler)
-    .with_auto_mode_switch_handler(present_auto_offer)).await?;
+let session = client
+    .create_session(
+        CreateSessionOptions::default()
+            .with_interaction(|__sdk_group| __sdk_group.with_auto_mode_recovery(true))
+            .with_permissions(|__sdk_group| {
+                __sdk_group.with_on_request(permission_handler.clone())
+            })
+            .with_interaction(|__sdk_group| {
+                __sdk_group.with_on_auto_mode_switch_request(present_auto_offer.clone())
+            }),
+    )
+    .await?;
+let resumed = client
+    .resume_session(
+        ResumeSessionOptions::new(existing_session_id)
+            .with_interaction(|__sdk_group| __sdk_group.with_auto_mode_recovery(true))
+            .with_permissions(|__sdk_group| __sdk_group.with_on_request(permission_handler))
+            .with_interaction(|__sdk_group| {
+                __sdk_group.with_on_auto_mode_switch_request(present_auto_offer)
+            }),
+    )
+    .await?;
 let _ = (session, resumed);
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```rust
-let session = client.create_session(SessionConfig::default()
-    .with_auto_mode_recovery(true)
-    .with_permission_handler(permission_handler.clone())
-    .with_auto_mode_switch_handler(present_auto_offer.clone())).await?;
-let resumed = client.resume_session(ResumeSessionConfig::new(existing_session_id)
-    .with_auto_mode_recovery(true)
-    .with_permission_handler(permission_handler)
-    .with_auto_mode_switch_handler(present_auto_offer)).await?;
+let session = client
+    .create_session(
+        CreateSessionOptions::default()
+            .with_interaction(|__sdk_group| __sdk_group.with_auto_mode_recovery(true))
+            .with_permissions(|__sdk_group| {
+                __sdk_group.with_on_request(permission_handler.clone())
+            })
+            .with_interaction(|__sdk_group| {
+                __sdk_group.with_on_auto_mode_switch_request(present_auto_offer.clone())
+            }),
+    )
+    .await?;
+let resumed = client
+    .resume_session(
+        ResumeSessionOptions::new(existing_session_id)
+            .with_interaction(|__sdk_group| __sdk_group.with_auto_mode_recovery(true))
+            .with_permissions(|__sdk_group| __sdk_group.with_on_request(permission_handler))
+            .with_interaction(|__sdk_group| {
+                __sdk_group.with_on_auto_mode_switch_request(present_auto_offer)
+            }),
+    )
+    .await?;
 ```
 
 </details>

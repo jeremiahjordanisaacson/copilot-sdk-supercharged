@@ -1,12 +1,12 @@
 //! Permission policy primitives that produce a [`PermissionHandler`](crate::handler::PermissionHandler).
 //!
 //! Compose these into a session via the builder methods
-//! [`SessionConfig::approve_all_permissions`](crate::types::SessionConfig::approve_all_permissions),
-//! [`deny_all_permissions`](crate::types::SessionConfig::deny_all_permissions),
-//! and [`approve_permissions_if`](crate::types::SessionConfig::approve_permissions_if).
+//! [`SessionPermissionOptions::approve_all_permissions`](crate::types::SessionPermissionOptions::approve_all_permissions),
+//! [`deny_all_permissions`](crate::types::SessionPermissionOptions::deny_all_permissions),
+//! and [`approve_permissions_if`](crate::types::SessionPermissionOptions::approve_permissions_if).
 //! The same primitives are also available as standalone functions that
 //! return an `Arc<dyn PermissionHandler>` you can install via
-//! [`SessionConfig::with_permission_handler`](crate::types::SessionConfig::with_permission_handler).
+//! [`SessionPermissionOptions::with_on_request`](crate::types::SessionPermissionOptions::with_on_request).
 //!
 //! For a one-shot approve / deny without composition, see
 //! [`ApproveAllHandler`](crate::handler::ApproveAllHandler) and
@@ -41,7 +41,7 @@ pub fn deny_all() -> Arc<dyn PermissionHandler> {
 /// request. `true` approves, `false` denies.
 ///
 /// ```rust,no_run
-/// # use github_copilot_sdk::permission;
+/// # use copilot_sdk::permission;
 /// let handler = permission::approve_if(|data| {
 ///     data.extra.get("tool").and_then(|v| v.as_str()) != Some("shell")
 /// });
@@ -57,9 +57,9 @@ where
 }
 
 /// Internal policy enum used by both the standalone helpers and the
-/// `SessionConfig` policy builders.
+/// `CreateSessionOptions` policy builders.
 ///
-/// Stored as `pub(crate)` on `SessionConfig::permission_policy` so that
+/// Stored as `pub(crate)` on `CreateSessionOptions::permission_policy` so that
 /// the order of `with_permission_handler(...)` and the policy builders
 /// does not matter -- the policy is applied at `Client::create_session`
 /// time.

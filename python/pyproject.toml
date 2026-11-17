@@ -3,7 +3,7 @@ requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "github-copilot-sdk"
+name = "microsoft-copilot-sdk"
 # Placeholder; the real version is injected at publish time (see
 # .github/workflows/publish.yml). Kept as a dev sentinel so source/editable
 # installs never report a stale real version, matching the .NET and Rust SDKs.
@@ -13,7 +13,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
-    {name = "GitHub", email = "opensource@github.com"}
+    {name = "Microsoft", email = "opensource@github.com"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -59,8 +59,8 @@ include = ["copilot*"]
 line-length = 100
 target-version = "py311"
 exclude = [
-    "generated",
-    "copilot/generated",
+    "_generated",
+    "copilot/_generated",
 ]
 
 [tool.ruff.lint]
@@ -82,8 +82,8 @@ invalid-argument-type = "warn"
 
 [tool.ty.src]
 exclude = [
-    "generated",
-    "copilot/generated",
+    "_generated",
+    "copilot/_generated",
     "copilot/test_*.py",
 ]
 

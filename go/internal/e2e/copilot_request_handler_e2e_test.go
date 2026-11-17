@@ -15,8 +15,8 @@ import (
 	"testing"
 
 	"github.com/coder/websocket"
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 const (
@@ -170,10 +170,7 @@ func TestCopilotRequestHandler(t *testing.T) {
 		t.Fatalf("Failed to start client: %v", err)
 	}
 
-	session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		Capi:                &copilot.CapiSessionOptions{EnableWebSocketResponses: copilot.Bool(true)},
-	})
+	session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{EnableWebSocketResponses: copilot.Bool(true)}}})
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}

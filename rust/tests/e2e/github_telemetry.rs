@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::{Client, SessionConfig};
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::{Client, CreateSessionOptions};
 
 use super::support::{DEFAULT_TEST_TOKEN, with_e2e_context_no_snapshot};
 
@@ -18,16 +18,20 @@ async fn should_forward_github_telemetry_on_session_create() {
             ctx.set_default_copilot_user();
 
             let (collected, mut notifications) = tokio::sync::mpsc::unbounded_channel();
-            let client = Client::start(ctx.client_options().with_on_github_telemetry(move |n| {
-                let _ = collected.send(n);
+            let client = Client::start(ctx.client_options().with_github(|group| {
+                group.with_on_telemetry(move |n| {
+                    let _ = collected.send(n);
+                })
             }))
             .await
             .expect("start client");
             let session = client
                 .create_session(
-                    SessionConfig::default()
-                        .with_github_token(DEFAULT_TEST_TOKEN)
-                        .with_permission_handler(Arc::new(ApproveAllHandler)),
+                    CreateSessionOptions::default()
+                        .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                        .with_permissions(|group| {
+                            group.with_on_request(Arc::new(ApproveAllHandler))
+                        }),
                 )
                 .await
                 .expect("create session");

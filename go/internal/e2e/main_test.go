@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 func TestMain(m *testing.M) {

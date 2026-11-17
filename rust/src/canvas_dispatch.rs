@@ -112,7 +112,7 @@ fn canvas_handler_or_err(
     handler.cloned().ok_or_else(|| {
         CanvasError::new(
             "canvas_handler_unset",
-            "No CanvasHandler installed on this session; call SessionConfig::with_canvas_handler before creating the session.",
+            "No CanvasHandler installed on this session; call SessionCanvasOptions::with_handler before creating the session.",
         )
     })
 }

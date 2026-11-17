@@ -179,7 +179,7 @@ async def test_graceful_stop_settles_pending_rpc():
         patch.object(CopilotClient, "_resolve_inprocess_runtime", return_value="test-runtime"),
     ):
         host = FfiRuntimeHost("test-runtime", None)
-        client = CopilotClient(connection=RuntimeConnection.for_inprocess())
+        client = CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_inprocess())
     rpc = JsonRpcClient(host.process)
     runtime = Mock(shutdown=AsyncMock())
     pending = None
@@ -239,7 +239,9 @@ async def test_client_shutdown_keeps_event_loop_responsive_until_native_cleanup_
     host._connection_id = 21
     host._outbound_callback = object()
 
-    client = CopilotClient(connection=RuntimeConnection.for_stdio(path="copilot"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path="copilot")
+    )
     client._ffi_host = host
     client._process = host.process
     client._state = "connected"

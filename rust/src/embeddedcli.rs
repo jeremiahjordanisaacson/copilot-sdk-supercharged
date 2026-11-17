@@ -243,7 +243,7 @@ fn install_failed(binary_name: &str, dir: &Path, error: &EmbeddedCliError) -> cr
 /// embedded archive on first call.
 ///
 /// On first call this extracts the embedded archive to
-/// `<platform cache dir>/github-copilot-sdk/cli/<version>/copilot[.exe]`
+/// `<platform cache dir>/copilot-sdk/cli/<version>/copilot[.exe]`
 /// and returns the resulting path. The cache dir comes from
 /// the OS's LocalAppData known folder on Windows,
 /// `~/Library/Caches/` on macOS, `$XDG_CACHE_HOME` (or `~/.cache/`) on
@@ -282,7 +282,7 @@ pub(crate) fn path() -> Result<Option<PathBuf>, crate::Error> {
 }
 
 /// Install the embedded CLI binary into the given directory instead of the
-/// default `<platform cache dir>/github-copilot-sdk/cli/<version>/` location
+/// default `<platform cache dir>/copilot-sdk/cli/<version>/` location
 /// (see [`path`] for the per-platform mapping).
 ///
 /// Idempotent: skips extraction when an already-published binary passes the
@@ -292,7 +292,7 @@ pub(crate) fn path() -> Result<Option<PathBuf>, crate::Error> {
 /// Returns `None` when the SDK was built without a bundled CLI, and an error
 /// naming the directory when installation fails.
 #[cfg(feature = "bundled-cli")]
-#[allow(dead_code)] // Used by resolve.rs when ClientOptions::bundled_cli_extract_dir is set.
+#[allow(dead_code)] // Used by resolve.rs when ClientOptions::bundled_cli_extract_directory is set.
 pub(crate) fn install_at(extract_dir: &Path) -> Result<Option<PathBuf>, crate::Error> {
     #[cfg(has_bundled_cli)]
     {

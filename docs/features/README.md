@@ -35,6 +35,6 @@ These guides cover the capabilities you can add to your Copilot SDK application.
 ## Related
 
 * [Hooks Reference](../hooks/README.md): detailed API reference for each hook type
-* [Integrations](../integrations/microsoft-agent-framework.md): use the SDK with other platforms (MAF, etc.)
+* [Integrations](../integrations/microsoft-agent-framework.md): MAF V2 compatibility status
 * [Troubleshooting](../troubleshooting/debugging.md): when things don't work as expected
 * [Compatibility](../troubleshooting/compatibility.md): SDK vs CLI feature matrix

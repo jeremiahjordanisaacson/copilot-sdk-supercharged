@@ -2,25 +2,25 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
+use copilot_sdk::{OwnedRuntimeOptions, RuntimeConnection, SpawnedProcessOptions};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use github_copilot_sdk::github_token::{
+use copilot_sdk::github_token::{
     GitHubToken, GitHubTokenProviderArgs, GitHubTokenProviderResult, GitHubTokenRequestReason,
 };
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::rpc::{
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::rpc::{
     ConnectorAccountRequest, ConnectorAuthorizationScope, ConnectorAvailability,
-    ConnectorConnectRequest, ConnectorConnectResult, ConnectorMcpStatus, ConnectorReconcileOptions,
-    ConnectorReconcileRequest, ConnectorSessionAccount, ConnectorStatus, McpDisableRequest,
-    McpListToolsRequest,
+    ConnectorConnectRequest, ConnectorConnectResult, ConnectorMcpStatus, ConnectorReconcileRequest,
+    ConnectorSessionAccount, ConnectorStatus, McpDisableRequest, McpListToolsRequest,
 };
-use github_copilot_sdk::session::Session;
-use github_copilot_sdk::{
-    Client, ClientOptions, LogLevel, McpHttpServerConfig, McpServerConfig, SessionConfig, Transport,
+use copilot_sdk::session::Session;
+use copilot_sdk::{
+    Client, ClientOptions, CreateSessionOptions, LogLevel, McpHttpServerConfig, McpServerConfig,
 };
 use serde_json::{Value, json};
 #[cfg(target_os = "macos")]
@@ -79,42 +79,60 @@ async fn control(update: Option<Value>) -> Result<Value> {
 
 async fn client(label: &str, stdio: bool) -> Result<Client> {
     let transport = if stdio || setting("CONNECTOR_LOCAL_TRANSPORT") == "stdio" {
-        Transport::Stdio
+        RuntimeConnection::for_spawned_stdio(Default::default())
     } else {
-        Transport::InProcess
+        RuntimeConnection::for_in_process(Default::default())
     };
     Ok(Client::start(
-        ClientOptions::new()
-            .with_transport(transport)
-            .with_log_level(LogLevel::Error)
-            .with_use_logged_in_user(false)
-            .with_base_directory(PathBuf::from(setting("CONNECTOR_LOCAL_DIRECTORY")).join(label)),
+        ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+            .with_runtime({
+                let mut runtime = transport;
+                if let Some(process) = runtime.child_process_options_mut() {
+                    *process = SpawnedProcessOptions::new().with_owned(|_| {
+                        OwnedRuntimeOptions::new().with_base_directory(
+                            PathBuf::from(setting("CONNECTOR_LOCAL_DIRECTORY")).join(label),
+                        )
+                    });
+                }
+                if let Some(owned) = runtime.owned_options_mut() {
+                    *owned = OwnedRuntimeOptions::new().with_base_directory(
+                        PathBuf::from(setting("CONNECTOR_LOCAL_DIRECTORY")).join(label),
+                    );
+                }
+                runtime
+            })
+            .with_observability(|group| group.with_log_level(LogLevel::Error))
+            .with_github(|group| group.with_use_logged_in_user(false)),
     )
     .await?)
 }
 
-fn config(enabled: bool) -> SessionConfig {
-    SessionConfig::default()
-        .with_permission_handler(Arc::new(ApproveAllHandler))
-        .with_feature_flags(HashMap::from([
-            ("MANAGED_MCP_SERVERS".to_owned(), enabled),
-            ("CONNECTORS".to_owned(), true),
-        ]))
-        .with_request_extensions(false)
-        .with_disabled_mcp_servers(["github-mcp-server"])
+fn config(enabled: bool) -> CreateSessionOptions {
+    CreateSessionOptions::default()
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+        .with_experiments(|group| {
+            group.with_flags(HashMap::from([
+                ("MANAGED_MCP_SERVERS".to_owned(), enabled),
+                ("CONNECTORS".to_owned(), true),
+            ]))
+        })
+        .with_extensions(|group| group.with_enabled(false))
+        .with_mcp(|group| group.with_disabled_servers(["github-mcp-server"]))
         .with_working_directory(setting("CONNECTOR_LOCAL_DIRECTORY"))
-        .with_mcp_servers(
-            [(
-                "ordinary".to_owned(),
-                McpServerConfig::Http(McpHttpServerConfig {
-                    url: setting("CONNECTOR_LOCAL_ORDINARY"),
-                    tools: Some(vec!["*".to_owned()]),
-                    ..Default::default()
-                }),
-            )]
-            .into_iter()
-            .collect(),
-        )
+        .with_mcp(|group| {
+            group.with_servers(
+                [(
+                    "ordinary".to_owned(),
+                    McpServerConfig::Http(McpHttpServerConfig {
+                        url: setting("CONNECTOR_LOCAL_ORDINARY"),
+                        tools: Some(vec!["*".to_owned()]),
+                        ..Default::default()
+                    }),
+                )]
+                .into_iter()
+                .collect(),
+            )
+        })
 }
 
 async fn account(session: &Session) -> Result<ConnectorSessionAccount> {
@@ -175,26 +193,15 @@ async fn reconcile(
     account_id: &str,
     force: Option<&str>,
 ) -> Result<ConnectorStatus> {
-    let connectors = session.rpc().connectors();
-    Ok(match force {
-        Some(force) => {
-            connectors
-                .reconcile_with_options(
-                    ConnectorReconcileOptions::new(account_id)
-                        .refresh_catalog(true)
-                        .force_connector_name(force),
-                )
-                .await?
-        }
-        None => {
-            connectors
-                .reconcile(ConnectorReconcileRequest {
-                    account_id: account_id.to_owned(),
-                    refresh_catalog: Some(true),
-                })
-                .await?
-        }
-    })
+    Ok(session
+        .rpc()
+        .connectors()
+        .reconcile(ConnectorReconcileRequest {
+            account_id: account_id.to_owned(),
+            refresh_catalog: Some(true),
+            force_connector_name: force.map(str::to_owned),
+        })
+        .await?)
 }
 
 fn server_id(status: &ConnectorStatus, name: &str) -> String {
@@ -235,7 +242,7 @@ async fn static_identity() -> Result<()> {
     let config_before = persistent_config("static")?;
     let accounts_before = serde_json::to_value(client.rpc().account().get_all_users().await?)?;
     let session = client
-        .create_session(config(true).with_github_token(FIRST))
+        .create_session(config(true).with_github(|group| group.with_token(FIRST)))
         .await?;
     let selected = account(&session).await?;
     assert!(
@@ -248,7 +255,7 @@ async fn static_identity() -> Result<()> {
             .is_none()
     );
     let second = client
-        .create_session(config(true).with_github_token(FIRST))
+        .create_session(config(true).with_github(|group| group.with_token(FIRST)))
         .await?;
     let other = account(&second).await?;
     assert_ne!(selected.account_id, other.account_id);
@@ -314,7 +321,7 @@ async fn provider_case(scope: bool) -> Result<()> {
     let config_before = persistent_config("provider")?;
     let accounts_before = serde_json::to_value(client.rpc().account().get_all_users().await?)?;
     let session = client
-        .create_session(config(true).with_github_token_provider(provider))
+        .create_session(config(true).with_github(|group| group.with_token_provider(provider)))
         .await?;
     let selected = account(&session).await?;
     if scope {
@@ -427,10 +434,10 @@ async fn targeted() -> Result<()> {
     let first_client = client("first-process", true).await?;
     let second_client = client("second-process", false).await?;
     let first = first_client
-        .create_session(config(true).with_github_token(FIRST))
+        .create_session(config(true).with_github(|group| group.with_token(FIRST)))
         .await?;
     let second = second_client
-        .create_session(config(true).with_github_token(FIRST))
+        .create_session(config(true).with_github(|group| group.with_token(FIRST)))
         .await?;
     let first_account = account(&first).await?;
     let second_account = account(&second).await?;
@@ -473,6 +480,7 @@ async fn targeted() -> Result<()> {
         .mcp()
         .disable(McpDisableRequest {
             server_name: server_id(&status, "calendar"),
+            expected_installation_id: None,
         })
         .await?;
     let status = reconcile(&second, &second_account.account_id, Some("mail")).await?;
@@ -503,7 +511,7 @@ async fn targeted() -> Result<()> {
 async fn disabled() -> Result<()> {
     let client = client("disabled", false).await?;
     let session = client
-        .create_session(config(false).with_github_token(FIRST))
+        .create_session(config(false).with_github(|group| group.with_token(FIRST)))
         .await?;
     let capabilities = session.rpc().connectors().get_capabilities().await?;
     assert_eq!(capabilities.availability, ConnectorAvailability::Disabled);

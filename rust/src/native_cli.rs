@@ -1,6 +1,6 @@
 //! Repository-private construction for the native CLI, not a published SDK mode.
 
-use crate::{Client, ClientOptions, Error, ErrorKind, Transport};
+use crate::{Client, ClientOptions, Error, ErrorKind, RuntimeConnection};
 
 /// Start the native CLI's connection after normal SDK setup.
 ///
@@ -13,7 +13,10 @@ pub async fn start<E>(
 where
     E: From<Error>,
 {
-    if !matches!(options.transport, Transport::InProcess) {
+    if !matches!(
+        &options.runtime,
+        Some(RuntimeConnection::InProcess(_) | RuntimeConnection::AttachedInProcess(_))
+    ) {
         return Err(Error::with_message(
             ErrorKind::InvalidConfig,
             "native CLI construction requires the in-process transport",

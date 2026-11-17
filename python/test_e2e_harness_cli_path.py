@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from copilot import CopilotClient, RuntimeConnection, StdioRuntimeConnection
+from copilot import CopilotClient, RuntimeConnection, SpawnedStdioRuntimeConnection
 from copilot.client import CloudSessionOptions
 from e2e import test_inprocess_ffi_e2e
 from e2e.testharness import context
@@ -24,8 +24,9 @@ async def test_session_cwd_defaults_do_not_override_cloud_or_explicit_directorie
     monkeypatch.setattr(CopilotClient, "create_session", create_session)
     client = context._TestClient(
         "/fixture",
+        mode="coding-agent",
         cli_path="unused-runtime",
-        connection=RuntimeConnection.for_stdio(path="unused-runtime"),
+        runtime=RuntimeConnection.for_spawned_stdio(path="unused-runtime"),
     )
     await client.create_session()
     create_session.assert_awaited_once_with(working_directory="/fixture")
@@ -39,8 +40,9 @@ async def test_session_cwd_defaults_do_not_override_cloud_or_explicit_directorie
     create_session.reset_mock()
     subprocess_client = context._TestClient(
         None,
+        mode="coding-agent",
         cli_path="unused-runtime",
-        connection=RuntimeConnection.for_stdio(path="unused-runtime"),
+        runtime=RuntimeConnection.for_spawned_stdio(path="unused-runtime"),
     )
     await subprocess_client.create_session()
     create_session.assert_awaited_once_with()
@@ -153,7 +155,10 @@ async def test_inprocess_setup_rejects_missing_prepared_library(prepared_runtime
         await test_context.teardown()
 
 
-async def test_standalone_ffi_smoke_uses_the_fixture_runtime(prepared_runtime, monkeypatch):
+@pytest.mark.parametrize("explicit", [False, True])
+async def test_standalone_ffi_smoke_uses_the_fixture_runtime(
+    prepared_runtime, monkeypatch, explicit
+):
     create_host = Mock(side_effect=RuntimeError("native startup stopped"))
     monkeypatch.setattr("copilot.client.FfiRuntimeHost.create", create_host)
     test_context = context.E2ETestContext()
@@ -161,9 +166,12 @@ async def test_standalone_ffi_smoke_uses_the_fixture_runtime(prepared_runtime, m
         await test_context.setup()
         with pytest.raises(RuntimeError, match="native startup stopped"):
             await test_context.client._start_inprocess_ffi()
+        monkeypatch.setenv("COPILOT_CLI_PATH", test_context.cli_path)
         smoke_test = test_inprocess_ffi_e2e.TestInProcessFfi()
         with pytest.raises(RuntimeError, match="native startup stopped"):
-            await smoke_test.test_should_start_and_connect_over_in_process_ffi(test_context, "stop")
+            await smoke_test.test_should_start_and_connect_over_in_process_ffi(
+                test_context, "stop", explicit, monkeypatch
+            )
         assert create_host.call_count == 2
         for call in create_host.call_args_list:
             assert call.args == (str(prepared_runtime.with_name("runtime.node")),)
@@ -178,10 +186,10 @@ async def test_setup_preserves_subprocess_runtime_selection(prepared_runtime, us
     try:
         await test_context.setup(cli_args=cli_args)
         connection = test_context.client._connection
-        assert isinstance(connection, StdioRuntimeConnection)
+        assert isinstance(connection, SpawnedStdioRuntimeConnection)
         assert connection.path == str(prepared_runtime)
         assert connection.args == tuple(cli_args or [])
-        assert test_context.client._options.working_directory == test_context.work_dir
+        assert connection.working_directory == test_context.work_dir
         assert test_context.client._inprocess_runtime_path is None
     finally:
         await test_context.teardown()
@@ -201,7 +209,7 @@ def test_inprocess_collection_preserves_offline_runtime_override(
     monkeypatch.setenv("CAPI_HMAC_KEY", "secret")
 
     assert context.get_cli_path_for_tests() == str(cli.resolve())
-    client = CopilotClient(connection=RuntimeConnection.for_inprocess())
+    client = CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_inprocess())
     assert client._inprocess_runtime_path == str(runtime)
     assert client._cli_path_source == "environment"
     assert context.os.environ["COPILOT_HMAC_KEY"] == "secret"
@@ -215,7 +223,7 @@ def test_inprocess_collection_rejects_incomplete_offline_runtime(tmp_path, monke
     monkeypatch.setenv("COPILOT_SKIP_CLI_DOWNLOAD", "1")
 
     with pytest.raises(RuntimeError, match="In-process runtime library not found next to"):
-        CopilotClient(connection=RuntimeConnection.for_inprocess())
+        CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_inprocess())
 
 
 def test_inprocess_runtime_selection_uses_process_environment(tmp_path, monkeypatch):
@@ -225,6 +233,6 @@ def test_inprocess_runtime_selection_uses_process_environment(tmp_path, monkeypa
     runtime.write_text("native runtime\n")
     monkeypatch.setenv("COPILOT_CLI_PATH", str(cli))
 
-    client = CopilotClient(connection=RuntimeConnection.for_inprocess())
+    client = CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_inprocess())
     assert client._inprocess_runtime_path == str(runtime)
     assert context.os.environ["COPILOT_CLI_PATH"] == str(cli)

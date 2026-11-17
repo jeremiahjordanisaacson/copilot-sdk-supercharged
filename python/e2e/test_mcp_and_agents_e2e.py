@@ -62,7 +62,7 @@ class TestMCPServers:
         mcp_servers = _test_mcp_servers("test-server")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, mcp_servers=mcp_servers
+            permissions={"on_request": PermissionHandler.approve_all}, mcp={"servers": mcp_servers}
         )
 
         assert session.session_id is not None
@@ -85,7 +85,7 @@ class TestMCPServers:
         }
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, mcp_servers=mcp_servers
+            permissions={"on_request": PermissionHandler.approve_all}, mcp={"servers": mcp_servers}
         )
 
         assert session.session_id is not None
@@ -97,7 +97,7 @@ class TestMCPServers:
     ):
         """Test that MCP server configuration is accepted on session resume"""
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session1.session_id
 
@@ -106,8 +106,8 @@ class TestMCPServers:
 
         session2 = await ctx.client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            mcp_servers=mcp_servers,
+            permissions={"on_request": PermissionHandler.approve_all},
+            mcp={"servers": mcp_servers},
         )
 
         assert session2.session_id == session_id
@@ -130,7 +130,7 @@ class TestMCPServers:
         }
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, mcp_servers=mcp_servers
+            permissions={"on_request": PermissionHandler.approve_all}, mcp={"servers": mcp_servers}
         )
 
         assert session.session_id is not None
@@ -162,7 +162,8 @@ class TestCustomAgents:
         ]
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, custom_agents=custom_agents
+            permissions={"on_request": PermissionHandler.approve_all},
+            agents={"definitions": custom_agents},
         )
 
         assert session.session_id is not None
@@ -179,7 +180,7 @@ class TestCustomAgents:
     ):
         """Test that custom agent configuration is accepted on session resume"""
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session1.session_id
         await session1.send_and_wait("What is 1+1?")
@@ -198,8 +199,8 @@ class TestCustomAgents:
 
         session2 = await ctx.client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            custom_agents=custom_agents,
+            permissions={"on_request": PermissionHandler.approve_all},
+            agents={"definitions": custom_agents},
         )
 
         assert session2.session_id == session_id
@@ -215,8 +216,7 @@ class TestCustomAgents:
         mcp_servers = _test_mcp_servers("server1", "server2")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            mcp_servers=mcp_servers,
+            permissions={"on_request": PermissionHandler.approve_all}, mcp={"servers": mcp_servers}
         )
         try:
             assert session.session_id is not None
@@ -244,9 +244,9 @@ class TestCombinedConfiguration:
         ]
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            mcp_servers=mcp_servers,
-            custom_agents=custom_agents,
+            permissions={"on_request": PermissionHandler.approve_all},
+            mcp={"servers": mcp_servers},
+            agents={"definitions": custom_agents},
         )
 
         assert session.session_id is not None
@@ -268,8 +268,8 @@ class TestCombinedConfiguration:
         ]
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            custom_agents=custom_agents,
+            permissions={"on_request": PermissionHandler.approve_all},
+            agents={"definitions": custom_agents},
         )
         try:
             import re
@@ -292,8 +292,8 @@ class TestCombinedConfiguration:
         ]
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            custom_agents=custom_agents,
+            permissions={"on_request": PermissionHandler.approve_all},
+            agents={"definitions": custom_agents},
         )
         try:
             import re
@@ -322,8 +322,8 @@ class TestCombinedConfiguration:
         ]
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            custom_agents=custom_agents,
+            permissions={"on_request": PermissionHandler.approve_all},
+            agents={"definitions": custom_agents},
         )
         try:
             import re

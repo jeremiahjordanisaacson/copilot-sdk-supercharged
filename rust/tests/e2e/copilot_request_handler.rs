@@ -19,22 +19,24 @@
 //!   the prompt of a turn the model has not answered removes it from the
 //!   persisted session, so a resume does not bring it back.
 
+use crate::byok;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::{SinkExt, StreamExt};
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::rpc::{QueueWithdrawMessageRequest, SendMode, SendRequest};
-use github_copilot_sdk::session_events::{AssistantMessageData, UserMessageData};
-use github_copilot_sdk::{
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::rpc::{QueueWithdrawMessageRequest, SendMode, SendRequest};
+use copilot_sdk::session_events::{AssistantMessageData, UserMessageData};
+use copilot_sdk::{
     CopilotHttpRequest, CopilotHttpResponse, CopilotRequestContext, CopilotRequestError,
     CopilotRequestHandler, CopilotWebSocketForwarder, CopilotWebSocketHandler,
-    CopilotWebSocketResponse, DeliveryMode, MessageOptions, MessageSource, ProviderConfig,
-    SessionConfig, SessionEvent, forward_http,
+    CopilotWebSocketResponse, CreateSessionOptions, DeliveryMode, MessageOptions, MessageSource,
+    ProviderConfig, SessionEvent, forward_http,
 };
+use futures_util::{SinkExt, StreamExt};
 use http::header::{HeaderName, HeaderValue};
 use http::{HeaderMap, Uri};
 use serde_json::{Value, json};
@@ -291,7 +293,7 @@ fn synth_inference_response(url: &str, body: &[u8], text: &str) -> CopilotHttpRe
     )
 }
 
-async fn session_send(session: &github_copilot_sdk::session::Session) -> Option<SessionEvent> {
+async fn session_send(session: &copilot_sdk::session::Session) -> Option<SessionEvent> {
     session
         .send_and_wait(say_ok())
         .await
@@ -536,12 +538,12 @@ async fn services_http_and_websocket_via_handler() {
             };
             let client = ctx.start_llm_client(handler).await;
             let session = client
-                .create_session(
-                    ctx.approve_all_session_config().with_capi(
-                        github_copilot_sdk::CapiSessionOptions::new()
+                .create_session(ctx.approve_all_session_config().with_github(|group| {
+                    group.with_capi(
+                        copilot_sdk::CapiSessionOptions::new()
                             .with_enable_web_socket_responses(true),
-                    ),
-                )
+                    )
+                }))
                 .await
                 .expect("create session");
 
@@ -766,17 +768,23 @@ async fn threads_session_id_into_inference() {
 
             // BYOK session.
             let before = handler.inference_records().len();
-            let byok_config = SessionConfig::default()
-                .with_permission_handler(Arc::new(ApproveAllHandler))
+            let byok_config = CreateSessionOptions::default()
+                .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
                 .with_model("claude-sonnet-5")
-                .with_provider(
-                    ProviderConfig::new("https://byok.invalid/v1")
-                        .with_provider_type("openai")
-                        .with_wire_api("responses")
-                        .with_api_key("byok-secret")
-                        .with_model_id("claude-sonnet-5")
-                        .with_wire_model("claude-sonnet-5"),
-                );
+                .with_inference(|group| {
+                    byok::inference(
+                        group,
+                        ProviderConfig::new("https://byok.invalid/v1")
+                            .with_provider_type("openai")
+                            .with_wire_api("responses")
+                            .with_api_key("byok-secret")
+                            .with_model_id("claude-sonnet-5")
+                            .with_wire_model("claude-sonnet-5"),
+                    )
+                })
+                .with_github(|group| {
+                    group.with_capi(copilot_sdk::CapiSessionOptions::default().with_enabled(false))
+                });
             let byok_session = client
                 .create_session(byok_config)
                 .await

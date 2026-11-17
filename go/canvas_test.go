@@ -7,8 +7,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestCanvasDeclaration_JSONShape(t *testing.T) {
@@ -412,9 +412,9 @@ func TestCanvasResumeSessionRequest_OpenCanvasesWireShape(t *testing.T) {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	raw, ok := decoded["openCanvases"].([]any)
+	raw, ok := sessionWireGroup(decoded, "canvases")["open"].([]any)
 	if !ok || len(raw) != 1 {
-		t.Fatalf("expected openCanvases array of length 1, got %v", decoded["openCanvases"])
+		t.Fatalf("expected openCanvases array of length 1, got %v", sessionWireGroup(decoded, "canvases")["open"])
 	}
 	first, _ := raw[0].(map[string]any)
 	if first["canvasId"] != "echo" {
@@ -433,7 +433,7 @@ func TestCanvasResumeSessionRequest_OpenCanvasesWireShape(t *testing.T) {
 	if err := json.Unmarshal(emptyData, &emptyDecoded); err != nil {
 		t.Fatalf("unmarshal empty failed: %v", err)
 	}
-	if _, present := emptyDecoded["openCanvases"]; present {
+	if _, present := sessionWireGroup(emptyDecoded, "canvases")["open"]; present {
 		t.Fatalf("openCanvases should be omitted when nil")
 	}
 }

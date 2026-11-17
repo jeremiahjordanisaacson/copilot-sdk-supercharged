@@ -2,11 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class AskUserE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "ask_user", output)
 {
@@ -15,18 +15,19 @@ public class AskUserE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     {
         var userInputRequests = new List<UserInputRequest>();
         CopilotSession? session = null;
-        session = await CreateSessionAsync(new SessionConfig
+        session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnUserInputRequest = (request, invocation) =>
+            Interaction = new SessionInteractionOptions
             {
-                userInputRequests.Add(request);
-                Assert.Equal(session!.SessionId, invocation.SessionId);
-
-                // Return the first choice if available, otherwise a freeform answer
-                var answer = request.Choices?.FirstOrDefault() ?? "freeform answer";
-                var wasFreeform = request.Choices == null || request.Choices.Count == 0;
-
-                return Task.FromResult(new UserInputResponse { Answer = answer, WasFreeform = wasFreeform });
+                OnUserInputRequest = (request, invocation) =>
+        {
+            userInputRequests.Add(request);
+            Assert.Equal(session!.SessionId, invocation.SessionId);
+            // Return the first choice if available, otherwise a freeform answer
+            var answer = request.Choices?.FirstOrDefault() ?? "freeform answer";
+            var wasFreeform = request.Choices == null || request.Choices.Count == 0;
+            return Task.FromResult(new UserInputResponse { Answer = answer, WasFreeform = wasFreeform });
+        }
             }
         });
 
@@ -47,16 +48,17 @@ public class AskUserE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     {
         var userInputRequests = new List<UserInputRequest>();
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnUserInputRequest = (request, invocation) =>
+            Interaction = new SessionInteractionOptions
             {
-                userInputRequests.Add(request);
-
-                // Pick the first choice
-                var answer = request.Choices?.FirstOrDefault() ?? "default";
-
-                return Task.FromResult(new UserInputResponse { Answer = answer, WasFreeform = false });
+                OnUserInputRequest = (request, invocation) =>
+        {
+            userInputRequests.Add(request);
+            // Pick the first choice
+            var answer = request.Choices?.FirstOrDefault() ?? "default";
+            return Task.FromResult(new UserInputResponse { Answer = answer, WasFreeform = false });
+        }
             }
         });
 
@@ -78,14 +80,16 @@ public class AskUserE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         var userInputRequests = new List<UserInputRequest>();
         var freeformAnswer = "This is my custom freeform answer that was not in the choices";
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnUserInputRequest = (request, invocation) =>
+            Interaction = new SessionInteractionOptions
             {
-                userInputRequests.Add(request);
-
-                // Return a freeform answer (not from choices)
-                return Task.FromResult(new UserInputResponse { Answer = freeformAnswer, WasFreeform = true });
+                OnUserInputRequest = (request, invocation) =>
+        {
+            userInputRequests.Add(request);
+            // Return a freeform answer (not from choices)
+            return Task.FromResult(new UserInputResponse { Answer = freeformAnswer, WasFreeform = true });
+        }
             }
         });
 

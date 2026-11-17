@@ -1,4 +1,4 @@
-//go:build copilot_inprocess && windows
+//go:build copilot_inprocess && !copilot_no_inprocess && windows
 
 package ffihost
 

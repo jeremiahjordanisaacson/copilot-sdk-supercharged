@@ -3,12 +3,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 using System.Diagnostics.CodeAnalysis;
-using RpcInstallationDecision = GitHub.Copilot.Rpc.InstallationDecision;
-using RpcInstallationsConfirmRequest = GitHub.Copilot.Rpc.InstallationsConfirmRequest;
-using RpcInstallationsConfirmResult = GitHub.Copilot.Rpc.InstallationsConfirmResult;
-using RpcInstallationsHandler = GitHub.Copilot.Rpc.IInstallationsHandler;
+using RpcInstallationDecision = Microsoft.Copilot.Rpc.InstallationDecision;
+using RpcInstallationsConfirmRequest = Microsoft.Copilot.Rpc.InstallationsConfirmRequest;
+using RpcInstallationsConfirmResult = Microsoft.Copilot.Rpc.InstallationsConfirmResult;
+using RpcInstallationsHandler = Microsoft.Copilot.Rpc.IInstallationsHandler;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>
 /// The cancellable lifetime of one installation confirmation.

@@ -4,12 +4,12 @@ This guide covers common issues and debugging techniques for the Copilot SDK acr
 
 ## Table of contents
 
-* [Enable Debug Logging](#enable-debug-logging)
-* [Common Issues](#common-issues)
-* [MCP Server Debugging](#mcp-server-debugging)
-* [Connection Issues](#connection-issues)
-* [Tool Execution Issues](#tool-execution-issues)
-* [Platform-Specific Issues](#platform-specific-issues)
+- [Enable Debug Logging](#enable-debug-logging)
+- [Common Issues](#common-issues)
+- [MCP Server Debugging](#mcp-server-debugging)
+- [Connection Issues](#connection-issues)
+- [Tool Execution Issues](#tool-execution-issues)
+- [Platform-Specific Issues](#platform-specific-issues)
 
 ## Enable debug logging
 
@@ -19,10 +19,13 @@ The first step in debugging is enabling verbose logging to see what's happening 
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-  logLevel: "debug",  // Options: "none", "error", "warning", "info", "debug", "all"
+    mode: "coding-agent",
+    observability: {
+        logLevel: "debug",
+    },
 });
 ```
 
@@ -34,7 +37,7 @@ const client = new CopilotClient({
 ```python
 from copilot import CopilotClient
 
-client = CopilotClient(log_level="debug")
+client = CopilotClient(mode="coding-agent", observability={"log_level": "debug"})
 ```
 
 </details>
@@ -43,26 +46,36 @@ client = CopilotClient(log_level="debug")
 <summary><strong>Go</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
 
 func main() {
-	client := copilot.NewClient(&copilot.ClientOptions{
-		LogLevel: "debug",
-	})
-	_ = client
+    client := copilot.NewClient(&copilot.ClientOptions{
+        Mode: copilot.ModeCodingAgent,
+        Observability: copilot.ClientObservabilityOptions{
+            LogLevel: "debug",
+        },
+    })
+    _ = client
 }
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```go
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
+
 
 client := copilot.NewClient(&copilot.ClientOptions{
-    LogLevel: "debug",
+    Mode: copilot.ModeCodingAgent,
+    Observability: copilot.ClientObservabilityOptions{
+        LogLevel: "debug",
+    },
 })
+
 ```
 
 </details>
@@ -71,7 +84,7 @@ client := copilot.NewClient(&copilot.ClientOptions{
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using Microsoft.Extensions.Logging;
 
 // Using ILogger (AddConsole comes from the Microsoft.Extensions.Logging.Console package)
@@ -80,11 +93,14 @@ var loggerFactory = LoggerFactory.Create(builder =>
     builder.SetMinimumLevel(LogLevel.Debug);
     builder.AddConsole();
 });
-
 var client = new CopilotClient(new CopilotClientOptions
 {
-    LogLevel = CopilotLogLevel.Debug,
-    Logger = loggerFactory.CreateLogger<CopilotClient>()
+    Mode = CopilotClientMode.CodingAgent,
+    Observability = new ClientObservabilityOptions
+    {
+        LogLevel = CopilotLogLevel.Debug,
+        Logger = loggerFactory.CreateLogger<CopilotClient>()
+    }
 });
 ```
 
@@ -94,12 +110,12 @@ var client = new CopilotClient(new CopilotClientOptions
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 
-var client = new CopilotClient(new CopilotClientOptions()
-    .setLogLevel("debug")
-);
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+        .setObservability(new ClientObservabilityOptions()
+                .setLogLevel("debug")));
 ```
 
 </details>
@@ -108,7 +124,7 @@ var client = new CopilotClient(new CopilotClientOptions()
 
 The SDK-managed out-of-process runtime writes redacted
 `process-<timestamp>-<pid>.log` files under the Copilot home's `logs` directory
-by default in `copilot-cli` mode. SDKs in `empty` mode do not set the logging
+by default in `coding-agent` mode. SDKs in `empty` mode do not set the logging
 opt-in, but an inherited setting can still enable it; session events remain
 available to `collectLogs`. An explicitly selected older CLI executable may
 ignore this setting. You can specify a custom log location with `--log-dir`;
@@ -119,10 +135,11 @@ not start a separate logging process.
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-  connection: RuntimeConnection.forStdio({ args: ["--log-dir", "/path/to/logs"] }),
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forSpawnedStdio({ args: ["--log-dir", "/path/to/logs"] }),
 });
 ```
 
@@ -135,7 +152,8 @@ const client = new CopilotClient({
 from copilot import CopilotClient, RuntimeConnection
 
 client = CopilotClient(
-    connection=RuntimeConnection.for_stdio(args=["--log-dir", "/path/to/logs"])
+    mode="coding-agent",
+    runtime=RuntimeConnection.for_spawned_stdio(args=["--log-dir", "/path/to/logs"])
 )
 ```
 
@@ -145,28 +163,33 @@ client = CopilotClient(
 <summary><strong>Go</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
 
 func main() {
 	client := copilot.NewClient(&copilot.ClientOptions{
-		Connection: copilot.StdioConnection{
+		Mode: copilot.ModeCodingAgent,
+		Runtime: copilot.SpawnedStdioConnection{
 			Args: []string{"--log-dir", "/path/to/logs"},
 		},
 	})
 	_ = client
 }
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```go
 client := copilot.NewClient(&copilot.ClientOptions{
-    Connection: copilot.StdioConnection{
+    Mode: copilot.ModeCodingAgent,
+    Runtime: copilot.SpawnedStdioConnection{
         Args: []string{"--log-dir", "/path/to/logs"},
     },
 })
+
 ```
 
 </details>
@@ -177,7 +200,8 @@ client := copilot.NewClient(&copilot.ClientOptions{
 ```csharp
 var client = new CopilotClient(new CopilotClientOptions
 {
-    Connection = RuntimeConnection.ForStdio(args: new[] { "--log-dir", "/path/to/logs" })
+    Mode = CopilotClientMode.CodingAgent,
+    Runtime = RuntimeConnection.ForSpawnedStdio(args: new[] { "--log-dir", "/path/to/logs" })
 });
 ```
 
@@ -187,11 +211,14 @@ var client = new CopilotClient(new CopilotClientOptions
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.RuntimeConnection;
+import java.util.List;
 
-var client = new CopilotClient(new CopilotClientOptions()
-    .setCliArgs(new String[] {"--log-dir", "/path/to/logs"}));
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+    .setRuntime(RuntimeConnection.forSpawnedStdio().setArgs(List.of("--log-dir", "/path/to/logs"))));
 ```
 
 </details>
@@ -207,81 +234,95 @@ var client = new CopilotClient(new CopilotClientOptions()
 1. Install the CLI: [Installation guide](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)
 
 1. Verify installation:
-   ```bash
-   copilot --version
-   ```
+
+    ```bash
+    copilot --version
+    ```
 
 1. Specify the full path:
 
-   <details open>
-   <summary><strong>Node.js</strong></summary>
+    <details open>
+    <summary><strong>Node.js</strong></summary>
 
-   ```typescript
-   import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+    ```typescript
+    import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
-   const client = new CopilotClient({
-     connection: RuntimeConnection.forStdio({ path: "/usr/local/bin/copilot" }),
-   });
-   ```
-   </details>
+    const client = new CopilotClient({
+        mode: "coding-agent",
+        runtime: RuntimeConnection.forSpawnedStdio({ path: "/usr/local/bin/copilot" }),
+    });
+    ```
 
-   <details>
-   <summary><strong>Python</strong></summary>
+    </details>
 
-   ```python
-   from copilot import CopilotClient, RuntimeConnection
+    <details>
+    <summary><strong>Python</strong></summary>
 
-   client = CopilotClient(
-       connection=RuntimeConnection.for_stdio(path="/usr/local/bin/copilot")
-   )
-   ```
-   </details>
+    ```python
+    from copilot import CopilotClient, RuntimeConnection
 
-   <details>
-   <summary><strong>Go</strong></summary>
+    client = CopilotClient(
+        mode="coding-agent",
+        runtime=RuntimeConnection.for_spawned_stdio(path="/usr/local/bin/copilot")
+    )
+    ```
 
-   <!-- docs-validate: hidden -->
-   ```go
-   package main
+    </details>
 
-   import copilot "github.com/github/copilot-sdk/go"
+    <details>
+    <summary><strong>Go</strong></summary>
 
-   func main() {
-   	client := copilot.NewClient(&copilot.ClientOptions{
-   		Connection: copilot.StdioConnection{Path: "/usr/local/bin/copilot"},
-   	})
-   	_ = client
-   }
-   ```
-   <!-- /docs-validate: hidden -->
+    <!-- docs-validate: hidden -->
 
-   ```go
-   client := copilot.NewClient(&copilot.ClientOptions{
-       Connection: copilot.StdioConnection{Path: "/usr/local/bin/copilot"},
-   })
-   ```
-   </details>
+    ```go
+    package main
 
-   <details>
-   <summary><strong>.NET</strong></summary>
+    import copilot "github.com/microsoft/copilot-sdk/go/v2"
 
-   ```csharp
-   var client = new CopilotClient(new CopilotClientOptions
-   {
-       Connection = RuntimeConnection.ForStdio(path: "/usr/local/bin/copilot"),
-   });
-   ```
-   </details>
+    func main() {
+        client := copilot.NewClient(&copilot.ClientOptions{
+            Mode: copilot.ModeCodingAgent,
+            Runtime: copilot.SpawnedStdioConnection{Path: "/usr/local/bin/copilot"},
+        })
+        _ = client
+    }
+    ```
 
-   <details>
-   <summary><strong>Java</strong></summary>
+    <!-- /docs-validate: hidden -->
 
-   ```java
-   var client = new CopilotClient(new CopilotClientOptions()
-       .setCliPath("/usr/local/bin/copilot")
-   );
-   ```
-   </details>
+    ```go
+    client := copilot.NewClient(&copilot.ClientOptions{
+        Mode: copilot.ModeCodingAgent,
+        Runtime: copilot.SpawnedStdioConnection{Path: "/usr/local/bin/copilot"},
+    })
+
+    ```
+
+    </details>
+
+    <details>
+    <summary><strong>.NET</strong></summary>
+
+    ```csharp
+    var client = new CopilotClient(new CopilotClientOptions
+    {
+        Mode = CopilotClientMode.CodingAgent,
+        Runtime = RuntimeConnection.ForSpawnedStdio(path: "/usr/local/bin/copilot"),
+    });
+    ```
+
+    </details>
+
+    <details>
+    <summary><strong>Java</strong></summary>
+
+    ```java
+    var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+        .setRuntime(RuntimeConnection.forSpawnedStdio("/usr/local/bin/copilot"))
+    );
+    ```
+
+    </details>
 
 ### "Not authenticated"
 
@@ -290,84 +331,106 @@ var client = new CopilotClient(new CopilotClientOptions()
 **Solution:**
 
 1. Authenticate the CLI:
-   ```bash
-   copilot auth login
-   ```
+
+    ```bash
+    copilot auth login
+    ```
 
 1. Or provide a token programmatically:
 
-   <details open>
-   <summary><strong>Node.js</strong></summary>
+    <details open>
+    <summary><strong>Node.js</strong></summary>
 
-   ```typescript
-   import { CopilotClient } from "@github/copilot-sdk";
+    ```typescript
+    import { CopilotClient } from "@microsoft/copilot-sdk";
 
-   const client = new CopilotClient({
-     gitHubToken: process.env.GITHUB_TOKEN,
-   });
-   ```
-   </details>
+    const client = new CopilotClient({
+        mode: "coding-agent",
+        github: {
+            token: process.env.GITHUB_TOKEN,
+        },
+    });
+    ```
 
-   <details>
-   <summary><strong>Python</strong></summary>
+    </details>
 
-   ```python
-   import os
-   from copilot import CopilotClient
+    <details>
+    <summary><strong>Python</strong></summary>
 
-   client = CopilotClient(github_token=os.environ.get("GITHUB_TOKEN"))
-   ```
-   </details>
+    ```python
+    import os
+    from copilot import CopilotClient
 
-   <details>
-   <summary><strong>Go</strong></summary>
+    client = CopilotClient(mode="coding-agent", github={"token": os.environ.get("GITHUB_TOKEN")})
+    ```
 
-   <!-- docs-validate: hidden -->
-   ```go
-   package main
+    </details>
 
-   import (
-   	"os"
+    <details>
+    <summary><strong>Go</strong></summary>
 
-   	copilot "github.com/github/copilot-sdk/go"
-   )
+    <!-- docs-validate: hidden -->
 
-   func main() {
-   	client := copilot.NewClient(&copilot.ClientOptions{
-   		GitHubToken: os.Getenv("GITHUB_TOKEN"),
-   	})
-   	_ = client
-   }
-   ```
-   <!-- /docs-validate: hidden -->
+    ```go
+    package main
 
-   ```go
-   client := copilot.NewClient(&copilot.ClientOptions{
-       GitHubToken: os.Getenv("GITHUB_TOKEN"),
-   })
-   ```
-   </details>
+    import (
+        copilot "github.com/microsoft/copilot-sdk/go/v2"
+        "os"
+    )
 
-   <details>
-   <summary><strong>.NET</strong></summary>
+    func main() {
+        client := copilot.NewClient(&copilot.ClientOptions{
+            Mode: copilot.ModeCodingAgent,
+            GitHub: copilot.ClientGitHubOptions{
+                Token: os.Getenv("GITHUB_TOKEN"),
+            },
+        })
+        _ = client
+    }
+    ```
 
-   ```csharp
-   var client = new CopilotClient(new CopilotClientOptions
-   {
-       GitHubToken = Environment.GetEnvironmentVariable("GITHUB_TOKEN")
-   });
-   ```
-   </details>
+    <!-- /docs-validate: hidden -->
 
-   <details>
-   <summary><strong>Java</strong></summary>
+    ```go
+    client := copilot.NewClient(&copilot.ClientOptions{
+        Mode: copilot.ModeCodingAgent,
+        GitHub: copilot.ClientGitHubOptions{
+            Token: os.Getenv("GITHUB_TOKEN"),
+        },
+    })
 
-   ```java
-   var client = new CopilotClient(new CopilotClientOptions()
-       .setGitHubToken(System.getenv("GITHUB_TOKEN"))
-   );
-   ```
-   </details>
+    ```
+
+    </details>
+
+    <details>
+    <summary><strong>.NET</strong></summary>
+
+    ```csharp
+    var client = new CopilotClient(new CopilotClientOptions
+    {
+        Mode = CopilotClientMode.CodingAgent,
+        GitHub = new ClientGitHubOptions
+        {
+            Token = Environment.GetEnvironmentVariable("GITHUB_TOKEN")
+        }
+    });
+    ```
+
+    </details>
+
+    <details>
+    <summary><strong>Java</strong></summary>
+
+    ```java
+    var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+            .setGitHub(new ClientGitHubOptions()
+                    .setToken(System
+                            .getenv("GITHUB_TOKEN"))));
+    ```
+
+    </details>
 
 ### "Session not found"
 
@@ -376,16 +439,17 @@ var client = new CopilotClient(new CopilotClientOptions()
 **Solution:**
 
 1. Ensure you're not calling methods after `disconnect()`:
-   ```typescript
-   await session.disconnect();
-   // Don't use session after this!
-   ```
+
+    ```typescript
+    await session.disconnect();
+    // Don't use session after this!
+    ```
 
 1. For resuming sessions, verify the session ID exists:
-   ```typescript
-   const sessions = await client.listSessions();
-   console.log("Available sessions:", sessions);
-   ```
+    ```typescript
+    const sessions = await client.listSessions();
+    console.log("Available sessions:", sessions);
+    ```
 
 ### "Connection refused" / "ECONNREFUSED"
 
@@ -394,18 +458,21 @@ var client = new CopilotClient(new CopilotClientOptions()
 **Solution:**
 
 1. Check if the CLI runs correctly standalone:
-   ```bash
-   copilot --server --stdio
-   ```
+
+    ```bash
+    copilot --server --stdio
+    ```
 
 1. Check for port conflicts if using TCP mode:
-   ```typescript
-   import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
 
-   const client = new CopilotClient({
-     connection: RuntimeConnection.forTcp({ port: 0 }),  // Use random available port
-   });
-   ```
+    ```typescript
+    import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
+
+    const client = new CopilotClient({
+        mode: "coding-agent",
+        runtime: RuntimeConnection.forSpawnedTcp({ port: 0 }), // Use random available port
+    });
+    ```
 
 ## MCP server debugging
 
@@ -413,11 +480,11 @@ MCP (Model Context Protocol) servers can be tricky to debug. For comprehensive M
 
 ### Quick MCP checklist
 
-* [ ] MCP server executable exists and runs independently
-* [ ] Command path is correct (use absolute paths)
-* [ ] Tools are enabled: `tools: ["*"]`
-* [ ] Server responds to `initialize` request correctly
-* [ ] Working directory (`workingDirectory`) is set if needed
+- [ ] MCP server executable exists and runs independently
+- [ ] Command path is correct (use absolute paths)
+- [ ] Tools are enabled: `tools: ["*"]`
+- [ ] Server responds to `initialize` request correctly
+- [ ] Working directory (`workingDirectory`) is set if needed
 
 ### Test your MCP server
 
@@ -431,39 +498,46 @@ See [MCP Debugging Guide](./mcp-debugging.md) for detailed troubleshooting.
 
 ## Connection issues
 
-### stdio vs TCP mode
+### Transport modes
 
-Out of process, the SDK talks to the runtime over one of two transports:
+Choose the connection type appropriate to your deployment:
 
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| **Stdio** (default) | CLI runs as subprocess, communicates via pipes | Local development, single process |
-| **TCP** | CLI runs separately, communicates via TCP socket | Multiple clients, remote CLI |
+| Mode                     | Description                                                        | Use Case                                                 |
+| ------------------------ | ------------------------------------------------------------------ | -------------------------------------------------------- |
+| **In-process** (default) | Native runtime in the application process, JSON-RPC over the C ABI | Applications with matching native runtime assets         |
+| **Stdio**                | CLI runs as subprocess, communicates via pipes                     | Subprocess isolation or per-client process configuration |
+| **TCP**                  | CLI runs separately, communicates via TCP socket                   | Multiple clients, remote CLI                             |
 
-**Stdio mode (default):**
+**Stdio mode:**
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-  connection: RuntimeConnection.forStdio(),  // This is the default
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forSpawnedStdio(),
 });
 ```
 
 **TCP mode:**
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-  connection: RuntimeConnection.forTcp({ port: 8080 }),  // Or 0 for random port
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forSpawnedTcp({ port: 8080 }), // Or 0 for random port
 });
 ```
 
 **Connect to existing server:**
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-  connection: RuntimeConnection.forUri("localhost:8080"),  // Connect to running server
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forTcp("localhost", 8080), // Connect to running server
 });
 ```
 
@@ -472,67 +546,77 @@ The experimental in-process transport loads the runtime into your process instea
 ### Diagnosing connection failures
 
 1. **Check the connection:**
-   ```typescript
-   const response = await client.ping();
-   console.log("Server responded at", response.timestamp);
-   // Fails with "Client not connected" if the client is not started
-   ```
+
+    ```typescript
+    const response = await client.ping();
+    console.log("Server responded at", response.timestamp);
+    // Starts the client if needed; surfaces startup and connection errors
+    ```
 
 1. **Verify CLI process is running:**
-   ```bash
-   # Check for copilot processes
-   ps aux | grep copilot
-   ```
+    ```bash
+    # Check for copilot processes
+    ps aux | grep copilot
+    ```
 
 ## Tool execution issues
 
 ### Custom tool not being called
 
 1. **Verify tool registration:**
-   <!-- docs-validate: hidden -->
-   ```typescript
-   import type { Tool } from "@github/copilot-sdk";
+    <!-- docs-validate: hidden -->
 
-   declare const myTool: Tool<{ location: string }>;
+    ```typescript
+    import type { Tool } from "@microsoft/copilot-sdk";
 
-   const session = await client.createSession({
-     tools: [myTool],
-   });
-   ```
-   <!-- /docs-validate: hidden -->
-   ```typescript
-   const session = await client.createSession({
-     tools: [myTool],
-   });
-   ```
+    declare const myTool: Tool<{ location: string }>;
+
+    const session = await client.createSession({
+        tools: {
+            definitions: [myTool],
+        },
+    });
+    ```
+
+    <!-- /docs-validate: hidden -->
+
+    ```typescript
+    const session = await client.createSession({
+        tools: {
+            definitions: [myTool],
+        },
+    });
+    ```
 
 1. **Check tool schema is valid JSON Schema:**
-   ```typescript
-   const myTool = {
-     name: "get_weather",
-     description: "Get weather for a location",
-     parameters: {
-       type: "object",
-       properties: {
-         location: { type: "string", description: "City name" },
-       },
-       required: ["location"],
-     },
-     handler: async (args: { location: string }) => {
-       return { temperature: 72 };
-     },
-   };
-   ```
+
+    ```typescript
+    const myTool = {
+        name: "get_weather",
+        description: "Get weather for a location",
+        parameters: {
+            type: "object",
+            properties: {
+                location: { type: "string", description: "City name" },
+            },
+            required: ["location"],
+        },
+        handler: async (args: { location: string }) => {
+            return { temperature: 72 };
+        },
+    };
+    ```
 
 1. **Ensure handler returns valid result:**
-   ```typescript
-   handler: async (args: { location: string }) => {
-     // Must return something JSON-serializable
-     return { success: true, data: "result" };
-     
-     // Don't return undefined or non-serializable objects
-   }
-   ```
+
+    ```typescript
+    handler: async (args: { location: string }) => {
+        // Must return something JSON-serializable
+        return { success: true, data: "result" };
+
+        // Don't return undefined or non-serializable objects
+    };
+    ```
 
 ### Tool errors not surfacing
 
@@ -540,13 +624,13 @@ A failed tool call arrives as `tool.execution_complete` with `success: false`, a
 
 ```typescript
 session.on("tool.execution_complete", (event) => {
-  if (!event.data.success) {
-    console.error("Tool error:", event.data.error);
-  }
+    if (!event.data.success) {
+        console.error("Tool error:", event.data.error);
+    }
 });
 
 session.on("session.error", (event) => {
-  console.error("Session error:", event.data);
+    console.error("Session error:", event.data);
 });
 ```
 
@@ -555,68 +639,76 @@ session.on("session.error", (event) => {
 ### Windows
 
 1. **Path separators:** Use raw strings or forward slashes:
-   ```csharp
-   var options = new CopilotClientOptions
-   {
-       // Verbatim string
-       Connection = RuntimeConnection.ForStdio(path: @"C:\Program Files\GitHub\copilot.exe"),
-   };
-   // or forward slashes
-   options.Connection = RuntimeConnection.ForStdio(path: "C:/Program Files/GitHub/copilot.exe");
-   ```
+
+    ```csharp
+    var options = new CopilotClientOptions
+
+    {
+        Mode = CopilotClientMode.CodingAgent,
+        // Verbatim string
+        Runtime = RuntimeConnection.ForSpawnedStdio(path: @"C:\Program Files\GitHub\copilot.exe"),
+    };
+    // or forward slashes
+    options.Runtime = RuntimeConnection.ForSpawnedStdio(path: "C:/Program Files/GitHub/copilot.exe");
+    ```
 
 1. **PATHEXT resolution:** The SDK handles this automatically, but if issues persist:
-   ```csharp
-   var server = new McpStdioServerConfig
-   {
-       // Explicitly specify .exe
-       Command = "myserver.exe",  // Not just "myserver"
-   };
-   ```
+
+    ```csharp
+    var server = new McpStdioServerConfig
+    {
+        // Explicitly specify .exe
+        Command = "myserver.exe",  // Not just "myserver"
+    };
+    ```
 
 1. **Console encoding:** Ensure UTF-8 for proper JSON handling:
-   ```csharp
-   Console.OutputEncoding = System.Text.Encoding.UTF8;
-   ```
+    ```csharp
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    ```
 
 ### macOS
 
 1. **Gatekeeper issues:** If CLI is blocked:
-   ```bash
-   xattr -d com.apple.quarantine /path/to/copilot
-   ```
+
+    ```bash
+    xattr -d com.apple.quarantine /path/to/copilot
+    ```
 
 1. **PATH issues in GUI apps:** GUI applications may not inherit shell PATH:
-   ```typescript
-   import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
 
-   const client = new CopilotClient({
-     connection: RuntimeConnection.forStdio({ path: "/opt/homebrew/bin/copilot" }),  // Full path
-   });
-   ```
+    ```typescript
+    import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
+
+    const client = new CopilotClient({
+        mode: "coding-agent",
+        runtime: RuntimeConnection.forSpawnedStdio({ path: "/opt/homebrew/bin/copilot" }), // Full path
+    });
+    ```
 
 ### Linux
 
 1. **Permission issues:**
-   ```bash
-   chmod +x /path/to/copilot
-   ```
+
+    ```bash
+    chmod +x /path/to/copilot
+    ```
 
 1. **Missing libraries:** Check for required shared libraries:
-   ```bash
-   ldd /path/to/copilot
-   ```
+    ```bash
+    ldd /path/to/copilot
+    ```
 
 ## Getting help
 
 If you're still stuck:
 
 1. **Collect debug information:**
-   * SDK version
-   * CLI version (`copilot --version`)
-   * Operating system
-   * Debug logs
-   * Minimal reproduction code
+    - SDK version
+    - CLI version (`copilot --version`)
+    - Operating system
+    - Debug logs
+    - Minimal reproduction code
 
 1. **Search existing issues:** [GitHub Issues](https://github.com/github/copilot-sdk/issues)
 
@@ -624,7 +716,7 @@ If you're still stuck:
 
 ## See also
 
-* [Getting Started Guide](../getting-started.md)
-* [MCP Overview](../features/mcp.md) - MCP configuration and setup
-* [MCP Debugging Guide](./mcp-debugging.md) - Detailed MCP troubleshooting
-* [API Reference](https://github.com/github/copilot-sdk)
+- [Getting Started Guide](../getting-started.md)
+- [MCP Overview](../features/mcp.md) - MCP configuration and setup
+- [MCP Debugging Guide](./mcp-debugging.md) - Detailed MCP troubleshooting
+- [API Reference](https://github.com/github/copilot-sdk)

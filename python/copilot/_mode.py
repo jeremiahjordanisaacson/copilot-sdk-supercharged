@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from .session import MemoryConfiguration
 
-CopilotClientMode = Literal["copilot-cli", "empty"]
+CopilotClientMode = Literal["coding-agent", "empty"]
 
 _TOOL_NAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -303,40 +303,48 @@ def _post_create_options_patch(
     """Build the patch sent via ``session.options.update`` after create/resume.
 
     In empty mode the four overridable flags default to safe values
-    (caller-supplied values win); ``installedPlugins=[]`` is unconditional.
-    ``includedBuiltinSkills`` defaults to an empty list, but callers can
+    (caller-supplied values win); ``plugins.installed=[]`` is unconditional.
+    ``skills.includedBuiltinSkills`` defaults to an empty list, but callers can
     explicitly allow selected runtime-bundled skills.
     Returns ``None`` if no patch should be sent.
     """
     if mode == "empty":
         patch: dict[str, Any] = {
-            "skipCustomInstructions": (
-                skip_custom_instructions if skip_custom_instructions is not None else True
-            ),
-            "customAgentsLocalOnly": _custom_agents_local_only_default(
-                mode, custom_agents_local_only
-            ),
-            "coauthorEnabled": coauthor_enabled if coauthor_enabled is not None else False,
-            "manageScheduleEnabled": (
-                manage_schedule_enabled if manage_schedule_enabled is not None else False
-            ),
-            "installedPlugins": [],
-            "includedBuiltinSkills": (
-                included_builtin_skills if included_builtin_skills is not None else []
-            ),
+            "instructions": {
+                "skipCustomInstructions": (
+                    skip_custom_instructions if skip_custom_instructions is not None else True
+                )
+            },
+            "agents": {
+                "localDiscoveryOnly": _custom_agents_local_only_default(
+                    mode, custom_agents_local_only
+                )
+            },
+            "git": {"coauthorEnabled": coauthor_enabled if coauthor_enabled is not None else False},
+            "tools": {
+                "manageScheduleEnabled": (
+                    manage_schedule_enabled if manage_schedule_enabled is not None else False
+                )
+            },
+            "plugins": {"installed": []},
+            "skills": {
+                "includedBuiltinSkills": (
+                    included_builtin_skills if included_builtin_skills is not None else []
+                )
+            },
         }
         return patch
     patch = {}
     if skip_custom_instructions is not None:
-        patch["skipCustomInstructions"] = skip_custom_instructions
+        patch["instructions"] = {"skipCustomInstructions": skip_custom_instructions}
     if custom_agents_local_only is not None:
-        patch["customAgentsLocalOnly"] = custom_agents_local_only
+        patch["agents"] = {"localDiscoveryOnly": custom_agents_local_only}
     if coauthor_enabled is not None:
-        patch["coauthorEnabled"] = coauthor_enabled
+        patch["git"] = {"coauthorEnabled": coauthor_enabled}
     if manage_schedule_enabled is not None:
-        patch["manageScheduleEnabled"] = manage_schedule_enabled
+        patch["tools"] = {"manageScheduleEnabled": manage_schedule_enabled}
     if included_builtin_skills is not None:
-        patch["includedBuiltinSkills"] = included_builtin_skills
+        patch["skills"] = {"includedBuiltinSkills": included_builtin_skills}
     return patch or None
 
 
@@ -345,15 +353,15 @@ def _require_storage_for_empty_mode(
     mode: CopilotClientMode | None,
     base_directory: str | None,
     session_fs_set: bool,
-    is_uri_connection: bool,
+    is_tcp_connection: bool,
 ) -> None:
     if mode != "empty":
         return
-    if base_directory or session_fs_set or is_uri_connection:
+    if base_directory or session_fs_set or is_tcp_connection:
         return
     raise ValueError(
         "CopilotClient(mode='empty') requires base_directory, session_fs, "
-        "or a UriRuntimeConnection. Empty mode needs explicit per-tenant "
+        "or a TcpRuntimeConnection. Empty mode needs explicit per-tenant "
         "storage and won't fall back to ~/.copilot."
     )
 

@@ -14,7 +14,7 @@ The `onPreToolUse` hook is called **before** a tool executes. Use it to:
 
 <!-- docs-validate: hidden -->
 ```ts
-import type { PreToolUseHookInput, HookInvocation, PreToolUseHookOutput } from "@github/copilot-sdk";
+import type { PreToolUseHookInput, HookInvocation, PreToolUseHookOutput } from "@microsoft/copilot-sdk";
 type PreToolUseHandler = (
   input: PreToolUseHookInput,
   invocation: HookInvocation
@@ -64,7 +64,7 @@ PreToolUseHandler = Callable[
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
 
 // Aliases let the signature below use the package's own type names.
 type (
@@ -97,7 +97,7 @@ type PreToolUseHandler func(
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 public delegate Task<PreToolUseHookOutput?> PreToolUseHandler(
     PreToolUseHookInput input,
@@ -123,7 +123,7 @@ public delegate Task<PreToolUseHookOutput?> PreToolUseHandler(
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 public class PreToolUseSignature {
@@ -225,13 +225,15 @@ const getWeather = defineTool("get_weather", {
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input, invocation) => {
-      console.log(`[${invocation.sessionId}] Calling ${input.toolName}`);
-      console.log(`  Args: ${JSON.stringify(input.toolArgs)}`);
-      return { permissionDecision: "allow" };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input, invocation) => {
+                console.log(`[${invocation.sessionId}] Calling ${input.toolName}`);
+                console.log(`  Args: ${JSON.stringify(input.toolArgs)}`);
+                return { permissionDecision: "allow" };
+            },
+        },
     },
-  },
 });
 ```
 
@@ -244,14 +246,19 @@ const session = await client.createSession({
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
+
 
 async def on_pre_tool_use(input_data, invocation):
     print(f"[{invocation['session_id']}] Calling {input_data['toolName']}")
     print(f"  Args: {input_data['toolArgs']}")
     return {"permissionDecision": "allow"}
 
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={"on_pre_tool_use": on_pre_tool_use})
+
+session = await client.create_session(
+    permissions={"on_request": PermissionHandler.approve_all},
+    hooks={"handlers": {"on_pre_tool_use": on_pre_tool_use}},
+)
 ```
 
 </details>
@@ -266,19 +273,21 @@ package main
 import (
 	"context"
 	"fmt"
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
-	client := copilot.NewClient(nil)
-	session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
-		Hooks: &copilot.SessionHooks{
-			OnPreToolUse: func(input copilot.PreToolUseHookInput, inv copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
-				fmt.Printf("[%s] Calling %s\n", inv.SessionID, input.ToolName)
-				fmt.Printf("  Args: %v\n", input.ToolArgs)
-				return &copilot.PreToolUseHookOutput{
-					PermissionDecision: "allow",
-				}, nil
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+	session, _ := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+		Hooks: copilot.SessionHookOptions{
+			Handlers: &copilot.SessionHooks{
+				OnPreToolUse: func(input copilot.PreToolUseHookInput, inv copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
+					fmt.Printf("[%s] Calling %s\n", inv.SessionID, input.ToolName)
+					fmt.Printf("  Args: %v\n", input.ToolArgs)
+					return &copilot.PreToolUseHookOutput{
+						PermissionDecision: "allow",
+					}, nil
+				},
 			},
 		},
 	})
@@ -287,17 +296,20 @@ func main() {
 ```
 <!-- /docs-validate: hidden -->
 ```go
-session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
-    Hooks: &copilot.SessionHooks{
-        OnPreToolUse: func(input copilot.PreToolUseHookInput, inv copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
-            fmt.Printf("[%s] Calling %s\n", inv.SessionID, input.ToolName)
-            fmt.Printf("  Args: %v\n", input.ToolArgs)
-            return &copilot.PreToolUseHookOutput{
-                PermissionDecision: "allow",
-            }, nil
-        },
-    },
+session, _ := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+	Hooks: copilot.SessionHookOptions{
+		Handlers: &copilot.SessionHooks{
+			OnPreToolUse: func(input copilot.PreToolUseHookInput, inv copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
+				fmt.Printf("[%s] Calling %s\n", inv.SessionID, input.ToolName)
+				fmt.Printf("  Args: %v\n", input.ToolArgs)
+				return &copilot.PreToolUseHookOutput{
+					PermissionDecision: "allow",
+				}, nil
+			},
+		},
+	},
 })
+
 ```
 
 </details>
@@ -306,19 +318,23 @@ session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-var session = await client.CreateSessionAsync(new SessionConfig
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    Hooks = new SessionHooks
+    Hooks = new SessionHookOptions
     {
-        OnPreToolUse = (input, invocation) =>
+        Handlers = new SessionHooks
         {
-            Console.WriteLine($"[{invocation.SessionId}] Calling {input.ToolName}");
-            Console.WriteLine($"  Args: {input.ToolArgs}");
-            return Task.FromResult<PreToolUseHookOutput?>(
-                new PreToolUseHookOutput { PermissionDecision = "allow" }
-            );
-        },
-    },
+            OnPreToolUse = (input, invocation) =>
+            {
+                Console.WriteLine($"[{invocation.SessionId}] Calling {input.ToolName}");
+                Console.WriteLine($"  Args: {input.ToolArgs}");
+                return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput
+                {
+                    PermissionDecision = "allow"
+                });
+            },
+        }
+    }
 });
 ```
 
@@ -329,47 +345,67 @@ var session = await client.CreateSessionAsync(new SessionConfig
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.*;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 public class LogAllToolCallsExample {
     public static void main(String[] args) throws Exception {
-        try (var client = new CopilotClient()) {
+        try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
             var hooks = new SessionHooks()
-                .setOnPreToolUse((input, invocation) -> {
-                    System.out.println("[" + invocation.getSessionId() + "] Calling " + input.getToolName());
-                    System.out.println("  Args: " + input.getToolArgs());
-                    return CompletableFuture.completedFuture(PreToolUseHookOutput.allow());
-                });
+                    .setOnPreToolUse((input, invocation) -> {
+                        System.out
+                                .println("[" + invocation
+                                        .getSessionId() + "] Calling "
+                                        + input
+                                                .getToolName());
+                        System.out
+                                .println("  Args: " + input
+                                        .getToolArgs());
+                        return CompletableFuture
+                                .completedFuture(PreToolUseHookOutput
+                                        .allow());
+                    });
 
-            var session = client.createSession(
-                new SessionConfig()
-                    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                    .setHooks(hooks)
-            ).get();
+            var session = client
+                    .createSession(new CreateSessionOptions()
+                            .setPermissions(new SessionPermissionOptions()
+                                    .setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setHooks(new SessionHookOptions()
+                                    .setHandlers(hooks)))
+                    .get();
         }
     }
 }
 ```
 <!-- /docs-validate: hidden -->
 ```java
-import com.github.copilot.*;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 var hooks = new SessionHooks()
-    .setOnPreToolUse((input, invocation) -> {
-        System.out.println("[" + invocation.getSessionId() + "] Calling " + input.getToolName());
-        System.out.println("  Args: " + input.getToolArgs());
-        return CompletableFuture.completedFuture(PreToolUseHookOutput.allow());
-    });
+        .setOnPreToolUse((input, invocation) -> {
+            System.out
+                    .println("[" + invocation
+                            .getSessionId() + "] Calling "
+                            + input
+                                    .getToolName());
+            System.out
+                    .println("  Args: " + input
+                            .getToolArgs());
+            return CompletableFuture
+                    .completedFuture(PreToolUseHookOutput
+                            .allow());
+        });
 
-var session = client.createSession(
-    new SessionConfig()
-        .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-        .setHooks(hooks)
-).get();
+var session = client
+        .createSession(new CreateSessionOptions()
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL))
+                .setHooks(new SessionHookOptions()
+                        .setHandlers(hooks)))
+        .get();
 ```
 
 </details>
@@ -380,17 +416,19 @@ var session = client.createSession(
 const BLOCKED_TOOLS = ["shell", "bash", "write_file", "delete_file"];
 
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input) => {
-      if (BLOCKED_TOOLS.includes(input.toolName)) {
-        return {
-          permissionDecision: "deny",
-          permissionDecisionReason: `Tool '${input.toolName}' is not permitted in this environment`,
-        };
-      }
-      return { permissionDecision: "allow" };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input) => {
+                if (BLOCKED_TOOLS.includes(input.toolName)) {
+                    return {
+                        permissionDecision: "deny",
+                        permissionDecisionReason: `Tool '${input.toolName}' is not permitted in this environment`,
+                    };
+                }
+                return { permissionDecision: "allow" };
+            },
+        },
     },
-  },
 });
 ```
 
@@ -398,22 +436,24 @@ const session = await client.createSession({
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input) => {
-      // Add a default timeout to all shell commands
-      if (input.toolName === "shell" && input.toolArgs) {
-        const args = input.toolArgs as { command: string; timeout?: number };
-        return {
-          permissionDecision: "allow",
-          modifiedArgs: {
-            ...args,
-            timeout: args.timeout ?? 30000, // Default 30s timeout
-          },
-        };
-      }
-      return { permissionDecision: "allow" };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input) => {
+                // Add a default timeout to all shell commands
+                if (input.toolName === "shell" && input.toolArgs) {
+                    const args = input.toolArgs as { command: string; timeout?: number };
+                    return {
+                        permissionDecision: "allow",
+                        modifiedArgs: {
+                            ...args,
+                            timeout: args.timeout ?? 30000, // Default 30s timeout
+                        },
+                    };
+                }
+                return { permissionDecision: "allow" };
+            },
+        },
     },
-  },
 });
 ```
 
@@ -423,24 +463,24 @@ const session = await client.createSession({
 const ALLOWED_DIRECTORIES = ["/home/user/projects", "/tmp"];
 
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input) => {
-      if (input.toolName === "read_file" || input.toolName === "write_file") {
-        const args = input.toolArgs as { path: string };
-        const isAllowed = ALLOWED_DIRECTORIES.some(dir => 
-          args.path.startsWith(dir)
-        );
-        
-        if (!isAllowed) {
-          return {
-            permissionDecision: "deny",
-            permissionDecisionReason: `Access to '${args.path}' is not permitted. Allowed directories: ${ALLOWED_DIRECTORIES.join(", ")}`,
-          };
-        }
-      }
-      return { permissionDecision: "allow" };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input) => {
+                if (input.toolName === "read_file" || input.toolName === "write_file") {
+                    const args = input.toolArgs as { path: string };
+                    const isAllowed = ALLOWED_DIRECTORIES.some((dir) => args.path.startsWith(dir));
+
+                    if (!isAllowed) {
+                        return {
+                            permissionDecision: "deny",
+                            permissionDecisionReason: `Access to '${args.path}' is not permitted. Allowed directories: ${ALLOWED_DIRECTORIES.join(", ")}`,
+                        };
+                    }
+                }
+                return { permissionDecision: "allow" };
+            },
+        },
     },
-  },
 });
 ```
 
@@ -450,14 +490,16 @@ const session = await client.createSession({
 const VERBOSE_TOOLS = ["list_directory", "search_files"];
 
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input) => {
-      return {
-        permissionDecision: "allow",
-        suppressOutput: VERBOSE_TOOLS.includes(input.toolName),
-      };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input) => {
+                return {
+                    permissionDecision: "allow",
+                    suppressOutput: VERBOSE_TOOLS.includes(input.toolName),
+                };
+            },
+        },
     },
-  },
 });
 ```
 
@@ -465,17 +507,20 @@ const session = await client.createSession({
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input) => {
-      if (input.toolName === "query_database") {
-        return {
-          permissionDecision: "allow",
-          additionalContext: "Remember: This database uses PostgreSQL syntax. Always use parameterized queries.",
-        };
-      }
-      return { permissionDecision: "allow" };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input) => {
+                if (input.toolName === "query_database") {
+                    return {
+                        permissionDecision: "allow",
+                        additionalContext:
+                            "Remember: This database uses PostgreSQL syntax. Always use parameterized queries.",
+                    };
+                }
+                return { permissionDecision: "allow" };
+            },
+        },
     },
-  },
 });
 ```
 

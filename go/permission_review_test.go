@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestPermissionEventSubscriberBeforeSessionReturns(t *testing.T) {
@@ -64,13 +64,9 @@ func TestPermissionEventSubscriberBeforeSessionReturns(t *testing.T) {
 			var session *Session
 			var err error
 			if resume {
-				session, err = client.ResumeSession(t.Context(), "review-session", &ResumeSessionConfig{
-					OnEvent: legacyHandler, OnEventWithPermissionEnvelope: handler,
-				})
+				session, err = client.ResumeSession(t.Context(), "review-session", &ResumeSessionOptions{Events: SessionEventOptions{OnEvent: legacyHandler, OnEventWithPermissionEnvelope: handler}})
 			} else {
-				session, err = client.CreateSession(t.Context(), &SessionConfig{
-					SessionID: "review-session", OnEvent: legacyHandler, OnEventWithPermissionEnvelope: handler,
-				})
+				session, err = client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "review-session", Events: SessionEventOptions{OnEvent: legacyHandler, OnEventWithPermissionEnvelope: handler}})
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -87,19 +83,18 @@ func TestPermissionEventSubscriberPreservesRequest(t *testing.T) {
 	t.Parallel()
 	client, server, forwarded := newPermissionReviewClient(t)
 	callbackDone := make(chan struct{})
-	session, err := client.CreateSessionWithPermissionEnvelope(t.Context(), &SessionConfig{SessionID: "review-session"},
-		func(envelope *PermissionRequestEnvelope, _ PermissionHandlerInvocation) (rpc.PermissionDecision, error) {
-			request := envelope.Request.(*PermissionRequestHook)
-			request.ToolName = "callback-edit"
-			request.ToolArgs.(map[string]any)["id"] = json.Number("42")
-			close(callbackDone)
-			return &rpc.PermissionDecisionNoResult{}, nil
-		})
+	session, err := client.CreateSession(t.Context(), &CreateSessionOptions{Permissions: SessionPermissionOptions{OnRequestWithEnvelope: func(envelope *PermissionRequestEnvelope, _ PermissionHandlerInvocation) (rpc.PermissionDecision, error) {
+		request := envelope.Request.(*PermissionRequestHook)
+		request.ToolName = "callback-edit"
+		request.ToolArgs.(map[string]any)["id"] = json.Number("42")
+		close(callbackDone)
+		return &rpc.PermissionDecisionNoResult{}, nil
+	}}, SessionID: "review-session"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	legacy := make(chan any, 2)
+	legacy := make(chan any, 1)
 	legacyHandler := func(event SessionEvent) {
 		data, ok := event.Data.(*PermissionRequestedData)
 		if !ok {
@@ -109,7 +104,6 @@ func TestPermissionEventSubscriberPreservesRequest(t *testing.T) {
 		legacy <- data.PermissionRequest.(*PermissionRequestHook).ToolArgs.(map[string]any)["id"]
 	}
 	session.On(legacyHandler)
-	session.OnWithAutoModeRecovery(legacyHandler)
 	unsubscribe := session.OnWithPermissionEnvelope(func(event SessionEvent) {
 		<-callbackDone
 		data, ok := event.Data.(*PermissionRequestedDataWithEnvelope)
@@ -135,10 +129,8 @@ func TestPermissionEventSubscriberPreservesRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertOriginalPermissionRequest(t, <-forwarded, original)
-	for range 2 {
-		if value := <-legacy; value != float64(9007199254740992) {
-			t.Errorf("legacy handler value = %v (%T), want original float64 decoding", value, value)
-		}
+	if value := <-legacy; value != float64(9007199254740992) {
+		t.Errorf("legacy handler value = %v (%T), want original float64 decoding", value, value)
 	}
 }
 
@@ -228,75 +220,74 @@ func TestPermissionReviewPreservesHandlerRequest(t *testing.T) {
 			handlerDone := make(chan error, 1)
 			marshaled := make(chan json.RawMessage, 1)
 			sessionReady := make(chan *Session, 1)
-			session, err := client.CreateSessionWithPermissionEnvelope(t.Context(), &SessionConfig{SessionID: "review-session"},
-				func(envelope *PermissionRequestEnvelope, invocation PermissionHandlerInvocation) (rpc.PermissionDecision, error) {
-					request := envelope.Request
-					session := <-sessionReady
-					if request.Kind() != rpc.PermissionRequestKind(kind) || !request.RequiresManagedApproval() {
-						err := fmt.Errorf("unexpected permission request: %#v", request)
+			session, err := client.CreateSession(t.Context(), &CreateSessionOptions{Permissions: SessionPermissionOptions{OnRequestWithEnvelope: func(envelope *PermissionRequestEnvelope, invocation PermissionHandlerInvocation) (rpc.PermissionDecision, error) {
+				request := envelope.Request
+				session := <-sessionReady
+				if request.Kind() != rpc.PermissionRequestKind(kind) || !request.RequiresManagedApproval() {
+					err := fmt.Errorf("unexpected permission request: %#v", request)
+					handlerDone <- err
+					return nil, err
+				}
+				switch name {
+				case "hook-edited":
+					item := request.(*PermissionRequestHook).ToolArgs.(map[string]any)["items"].([]any)[0].(map[string]any)
+					if item["id"] != json.Number("9007199254740993") {
+						err := fmt.Errorf("hook argument = %v (%T), want json.Number(9007199254740993)", item["id"], item["id"])
 						handlerDone <- err
 						return nil, err
 					}
-					switch name {
-					case "hook-edited":
-						item := request.(*PermissionRequestHook).ToolArgs.(map[string]any)["items"].([]any)[0].(map[string]any)
-						if item["id"] != json.Number("9007199254740993") {
-							err := fmt.Errorf("hook argument = %v (%T), want json.Number(9007199254740993)", item["id"], item["id"])
-							handlerDone <- err
-							return nil, err
-						}
-						item["label"] = "edited"
-					case "shell-commands-edited":
-						data, err := json.Marshal(envelope)
-						if err != nil {
-							handlerDone <- err
-							return nil, err
-						}
-						data = bytes.Replace(data, []byte(`"readOnly":true`), []byte(`"readOnly":false`), 1)
-						if err := json.Unmarshal(data, envelope); err != nil {
-							handlerDone <- err
-							return nil, err
-						}
-					}
-					if kind == "read" {
-						read, ok := request.(*PermissionRequestRead)
-						if !ok || read.Path != "/workspace/file.txt" {
-							err := fmt.Errorf("read request lost its typed fields: %#v", request)
-							handlerDone <- err
-							return nil, err
-						}
-						if name == "read-edited" || name == "read-null-edited" {
-							read.Path = "/workspace/changed.txt"
-							toolCallID := "changed-tool-call"
-							read.ToolCallID = &toolCallID
-						}
-						if name == "read-remove-optional" {
-							read.ManagedApprovalRequired = nil
-						}
-						switch name {
-						case "read-grant-edited":
-							read.SandboxPathGrant.Path = "/workspace/changed"
-						case "read-grant-cleared":
-							read.SandboxPathGrant = nil
-						case "read-grant-remove-optional":
-							read.SandboxPathGrant.DeniedPath = nil
-						}
-					}
+					item["label"] = "edited"
+				case "shell-commands-edited":
 					data, err := json.Marshal(envelope)
 					if err != nil {
 						handlerDone <- err
 						return nil, err
 					}
-					marshaled <- data
-					review, err := session.RPC.Permissions.ManagedReviewRequired(t.Context(), &rpc.SessionPermissionsManagedReviewRequiredRequest{
-						Request: envelope,
-					})
-					if err == nil && (review == nil || !bool(*review)) {
-						err = fmt.Errorf("managed review result = %v, want true", review)
+					data = bytes.Replace(data, []byte(`"readOnly":true`), []byte(`"readOnly":false`), 1)
+					if err := json.Unmarshal(data, envelope); err != nil {
+						handlerDone <- err
+						return nil, err
 					}
+				}
+				if kind == "read" {
+					read, ok := request.(*PermissionRequestRead)
+					if !ok || read.Path != "/workspace/file.txt" {
+						err := fmt.Errorf("read request lost its typed fields: %#v", request)
+						handlerDone <- err
+						return nil, err
+					}
+					if name == "read-edited" || name == "read-null-edited" {
+						read.Path = "/workspace/changed.txt"
+						toolCallID := "changed-tool-call"
+						read.ToolCallID = &toolCallID
+					}
+					if name == "read-remove-optional" {
+						read.ManagedApprovalRequired = nil
+					}
+					switch name {
+					case "read-grant-edited":
+						read.SandboxPathGrant.Path = "/workspace/changed"
+					case "read-grant-cleared":
+						read.SandboxPathGrant = nil
+					case "read-grant-remove-optional":
+						read.SandboxPathGrant.DeniedPath = nil
+					}
+				}
+				data, err := json.Marshal(envelope)
+				if err != nil {
 					handlerDone <- err
-					return &rpc.PermissionDecisionNoResult{}, err
+					return nil, err
+				}
+				marshaled <- data
+				review, err := session.RPC.Permissions.ManagedReviewRequired(t.Context(), &rpc.SessionPermissionsManagedReviewRequiredRequest{
+					Request: envelope,
 				})
+				if err == nil && (review == nil || !bool(*review)) {
+					err = fmt.Errorf("managed review result = %v, want true", review)
+				}
+				handlerDone <- err
+				return &rpc.PermissionDecisionNoResult{}, err
+			}}, SessionID: "review-session"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -357,7 +348,7 @@ func TestPermissionReviewPreservesCopiedAndEditedEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	client, _, forwarded := newPermissionReviewClient(t)
-	session, err := client.CreateSession(t.Context(), &SessionConfig{SessionID: "review-session"})
+	session, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "review-session"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +397,7 @@ func TestPermissionReviewPreservesExplicitRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			client, _, forwarded := newPermissionReviewClient(t)
-			session, err := client.CreateSession(t.Context(), &SessionConfig{SessionID: "review-session"})
+			session, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "review-session"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -469,13 +460,13 @@ func TestPermissionEnvelopeAndLegacyCallbacks(t *testing.T) {
 					observed <- request
 					return &rpc.PermissionDecisionNoResult{}, nil
 				}
-				create := &SessionConfig{SessionID: "review-session"}
-				restore := &ResumeSessionConfig{}
+				create := &CreateSessionOptions{SessionID: "review-session"}
+				restore := &ResumeSessionOptions{}
 				switch mode {
 				case "legacy", "nil-envelope":
-					create.OnPermissionRequest, restore.OnPermissionRequest = legacy, legacy
+					create.Permissions.OnRequest, restore.Permissions.OnRequest = legacy, legacy
 				case "prompt":
-					create.OnPermissionRequestWithPrompt, restore.OnPermissionRequestWithPrompt = prompt, prompt
+					create.Permissions.OnRequestWithPrompt, restore.Permissions.OnRequestWithPrompt = prompt, prompt
 				}
 				var session *Session
 				var err error
@@ -485,9 +476,11 @@ func TestPermissionEnvelopeAndLegacyCallbacks(t *testing.T) {
 						handler = envelope
 					}
 					if resume {
-						session, err = client.ResumeSessionWithPermissionEnvelope(t.Context(), "review-session", restore, handler)
+						restore.Permissions.OnRequestWithEnvelope = handler
+						session, err = client.ResumeSession(t.Context(), "review-session", restore)
 					} else {
-						session, err = client.CreateSessionWithPermissionEnvelope(t.Context(), create, handler)
+						create.Permissions.OnRequestWithEnvelope = handler
+						session, err = client.CreateSession(t.Context(), create)
 					}
 				} else if resume {
 					session, err = client.ResumeSession(t.Context(), "review-session", restore)
@@ -589,21 +582,23 @@ func TestPermissionEnvelopeHandlerSelection(t *testing.T) {
 			method := "session.create"
 			if resume {
 				method = "session.resume"
-				config := &ResumeSessionConfig{
-					OnPermissionRequest: legacy, OnPermissionRequestWithPrompt: prompt,
+				config := &ResumeSessionOptions{
+					Permissions: SessionPermissionOptions{OnRequest: legacy, OnRequestWithPrompt: prompt},
 				}
-				session, err = client.ResumeSessionWithPermissionEnvelope(t.Context(), "review-session", config, handler)
-				if reflect.ValueOf(config.OnPermissionRequest).Pointer() != reflect.ValueOf(legacy).Pointer() ||
-					reflect.ValueOf(config.OnPermissionRequestWithPrompt).Pointer() != reflect.ValueOf(prompt).Pointer() {
+				config.Permissions.OnRequestWithEnvelope = handler
+				session, err = client.ResumeSession(t.Context(), "review-session", config)
+				if reflect.ValueOf(config.Permissions.OnRequest).Pointer() != reflect.ValueOf(legacy).Pointer() ||
+					reflect.ValueOf(config.Permissions.OnRequestWithPrompt).Pointer() != reflect.ValueOf(prompt).Pointer() {
 					t.Fatal("resume changed caller-owned handlers")
 				}
 			} else {
-				config := &SessionConfig{
-					OnPermissionRequest: legacy, OnPermissionRequestWithPrompt: prompt,
+				config := &CreateSessionOptions{
+					Permissions: SessionPermissionOptions{OnRequest: legacy, OnRequestWithPrompt: prompt},
 				}
-				session, err = client.CreateSessionWithPermissionEnvelope(t.Context(), config, handler)
-				if reflect.ValueOf(config.OnPermissionRequest).Pointer() != reflect.ValueOf(legacy).Pointer() ||
-					reflect.ValueOf(config.OnPermissionRequestWithPrompt).Pointer() != reflect.ValueOf(prompt).Pointer() {
+				config.Permissions.OnRequestWithEnvelope = handler
+				session, err = client.CreateSession(t.Context(), config)
+				if reflect.ValueOf(config.Permissions.OnRequest).Pointer() != reflect.ValueOf(legacy).Pointer() ||
+					reflect.ValueOf(config.Permissions.OnRequestWithPrompt).Pointer() != reflect.ValueOf(prompt).Pointer() {
 					t.Fatal("create changed caller-owned handlers")
 				}
 			}
@@ -611,7 +606,7 @@ func TestPermissionEnvelopeHandlerSelection(t *testing.T) {
 				t.Fatal(err)
 			}
 			request, ok := findRequest(requests.snapshot(), method)
-			if !ok || request.Params["requestPermission"] != true {
+			if !ok || sessionWireGroup(request.Params, "permissions")["request"] != true {
 				t.Fatalf("envelope handler did not register permission interest: %+v", requests.snapshot())
 			}
 			envelope := &PermissionRequestEnvelope{Request: &PermissionRequestRead{Path: "/workspace/file.txt"}}
@@ -688,14 +683,18 @@ func TestPermissionEnvelopeAndMCPAuthRuntimeRefresh(t *testing.T) {
 					var session *Session
 					var err error
 					if resume {
-						config := &ResumeSessionConfig{OnMCPAuthRequest: legacyAuth, OnPermissionRequest: legacyPermission, OnPermissionRequestWithPrompt: promptPermission}
+						config := &ResumeSessionOptions{MCP: SessionMCPOptions{OnAuthRequest: legacyAuth}, Permissions: SessionPermissionOptions{OnRequest: legacyPermission, OnRequestWithPrompt: promptPermission}}
+						config.Permissions.OnRequestWithEnvelope = permission
+						config.MCP.OnAuthRuntimeRefresh = refresh
 						before := *config
-						session, err = client.ResumeSessionWithPermissionEnvelopeAndMCPAuthRuntimeRefresh(t.Context(), "review-session", config, permission, refresh)
+						session, err = client.ResumeSession(t.Context(), "review-session", config)
 						assertPermissionConfigUnchanged(t, before, *config)
 					} else {
-						config := &SessionConfig{SessionID: "review-session", OnMCPAuthRequest: legacyAuth, OnPermissionRequest: legacyPermission, OnPermissionRequestWithPrompt: promptPermission}
+						config := &CreateSessionOptions{SessionID: "review-session", MCP: SessionMCPOptions{OnAuthRequest: legacyAuth}, Permissions: SessionPermissionOptions{OnRequest: legacyPermission, OnRequestWithPrompt: promptPermission}}
+						config.Permissions.OnRequestWithEnvelope = permission
+						config.MCP.OnAuthRuntimeRefresh = refresh
 						before := *config
-						session, err = client.CreateSessionWithPermissionEnvelopeAndMCPAuthRuntimeRefresh(t.Context(), config, permission, refresh)
+						session, err = client.CreateSession(t.Context(), config)
 						assertPermissionConfigUnchanged(t, before, *config)
 					}
 					if err != nil {
@@ -783,31 +782,27 @@ func TestPermissionEnvelopeAndMCPAuthRuntimeRefreshComposition(t *testing.T) {
 				var err error
 				method := "session.create"
 				if mode == "create" {
-					session, err = client.CreateSessionWithPermissionEnvelopeAndMCPAuthRuntimeRefresh(t.Context(), &SessionConfig{
-						SessionID: "review-session", OnPermissionRequest: legacyPermission, OnMCPAuthRequest: legacyAuth,
-					}, envelopeHandler, refreshHandler)
+					session, err = client.CreateSession(t.Context(), &CreateSessionOptions{Permissions: SessionPermissionOptions{OnRequestWithEnvelope: envelopeHandler, OnRequest: legacyPermission}, MCP: SessionMCPOptions{OnAuthRuntimeRefresh: refreshHandler, OnAuthRequest: legacyAuth},
+						SessionID: "review-session",
+					})
 				} else {
 					method = "session.resume"
 					if mode == "warm resume" {
-						previous, err := client.CreateSession(t.Context(), &SessionConfig{
-							SessionID: "review-session", OnPermissionRequest: legacyPermission, OnMCPAuthRequest: legacyAuth,
-						})
+						previous, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "review-session", Permissions: SessionPermissionOptions{OnRequest: legacyPermission}, MCP: SessionMCPOptions{OnAuthRequest: legacyAuth}})
 						if err != nil {
 							t.Fatal(err)
 						}
 						defer previous.Disconnect()
 						requests.clear()
 					}
-					session, err = client.ResumeSessionWithPermissionEnvelopeAndMCPAuthRuntimeRefresh(t.Context(), "review-session", &ResumeSessionConfig{
-						OnPermissionRequest: legacyPermission, OnMCPAuthRequest: legacyAuth,
-					}, envelopeHandler, refreshHandler)
+					session, err = client.ResumeSession(t.Context(), "review-session", &ResumeSessionOptions{Permissions: SessionPermissionOptions{OnRequestWithEnvelope: envelopeHandler, OnRequest: legacyPermission}, MCP: SessionMCPOptions{OnAuthRuntimeRefresh: refreshHandler, OnAuthRequest: legacyAuth}})
 				}
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer session.Disconnect()
 				initialization, ok := findRequest(requests.snapshot(), method)
-				if !ok || initialization.Params["requestPermission"] != true {
+				if !ok || sessionWireGroup(initialization.Params, "permissions")["request"] != true {
 					t.Fatalf("missing permission registration: %+v", requests.snapshot())
 				}
 				interest, ok := findRequest(requests.snapshot(), "session.eventLog.registerInterest")
@@ -858,6 +853,10 @@ func assertPermissionConfigUnchanged(t *testing.T, before, after any) {
 	a, b := reflect.ValueOf(before), reflect.ValueOf(after)
 	for i := 0; i < a.NumField(); i++ {
 		x, y := a.Field(i), b.Field(i)
+		if x.Kind() == reflect.Struct {
+			assertPermissionConfigUnchanged(t, x.Interface(), y.Interface())
+			continue
+		}
 		equal := false
 		if x.Kind() == reflect.Func {
 			equal = x.Pointer() == y.Pointer()
@@ -890,7 +889,7 @@ func newPermissionReviewClient(t *testing.T, setup ...func(*jsonrpc2.Client)) (*
 		}
 		server := jsonrpc2.NewClient(conn, conn)
 		server.SetRequestHandler("connect", func(json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
-			return json.RawMessage(`{"ok":true,"protocolVersion":3,"version":"test"}`), nil
+			return json.RawMessage(`{"ok":true,"protocolVersion":4,"version":"test"}`), nil
 		})
 		server.SetRequestHandler("plugins.builtin.set", func(json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
 			return json.RawMessage(`{}`), nil
@@ -924,7 +923,7 @@ func newPermissionReviewClient(t *testing.T, setup ...func(*jsonrpc2.Client)) (*
 			peer   *installationConfirmationPeer
 		}{server, &installationConfirmationPeer{t: t, conn: conn, reader: bufio.NewReader(conn)}}
 	}()
-	client := NewClient(&ClientOptions{Connection: URIConnection{URL: listener.Addr().String()}})
+	client := NewClient(&ClientOptions{Mode: ModeCodingAgent, Runtime: TCPConnection{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port}})
 	var server *jsonrpc2.Client
 	t.Cleanup(func() {
 		client.ForceStop()

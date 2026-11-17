@@ -1,7 +1,7 @@
 package fixture;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.copilot.generated.rpc.CompatibilityCallParams;
+import com.microsoft.copilot.generated.rpc.CompatibilityCallParams;
 
 public final class BuilderRpcCaller {
     public static void main(String[] args) throws Exception {

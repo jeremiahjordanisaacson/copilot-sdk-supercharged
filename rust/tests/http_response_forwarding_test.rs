@@ -1,18 +1,19 @@
 #![allow(clippy::unwrap_used)]
 
+use copilot_sdk::{RuntimeConnection, TcpRuntimeOptions};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use base64::Engine;
 use bytes::Bytes;
-use futures_util::{SinkExt, StreamExt, stream};
-use github_copilot_sdk::{
+use copilot_sdk::{
     Client, ClientOptions, CopilotHttpRequest, CopilotHttpResponse, CopilotHttpResponseBody,
     CopilotRequestContext, CopilotRequestError, CopilotRequestHandler, CopilotWebSocketForwarder,
     CopilotWebSocketHandler, CopilotWebSocketMessage, CopilotWebSocketResponse,
-    SDK_PROTOCOL_VERSION, Transport,
+    SDK_PROTOCOL_VERSION,
 };
+use futures_util::{SinkExt, StreamExt, stream};
 use http::HeaderMap;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
@@ -62,15 +63,13 @@ impl Peer {
     async fn start(handler: impl CopilotRequestHandler) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let work = tempfile::tempdir().unwrap();
-        let options = ClientOptions::new()
-            .with_program(std::env::current_exe().unwrap())
-            .with_cwd(work.path())
-            .with_transport(Transport::External {
-                host: "127.0.0.1".into(),
+        let options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+            .with_runtime(RuntimeConnection::Tcp(TcpRuntimeOptions {
+                host: "127.0.0.1".to_string(),
                 port: listener.local_addr().unwrap().port(),
                 connection_token: None,
-            })
-            .with_request_handler(handler);
+            }))
+            .with_models(|group| group.with_request_handler(handler));
         let (client, (read, write)) = timeout(DEADLINE, async {
             tokio::join!(Client::start(options), async {
                 let (socket, _) = listener.accept().await.unwrap();
@@ -972,8 +971,7 @@ impl CopilotRequestHandler for ForwardingHandler {
         request: CopilotHttpRequest,
         _context: &CopilotRequestContext,
     ) -> Result<CopilotHttpResponse, CopilotRequestError> {
-        let mut response =
-            github_copilot_sdk::copilot_request_handler::forward_http(request).await?;
+        let mut response = copilot_sdk::copilot_request_handler::forward_http(request).await?;
         let observed = self.0.clone();
         let mut received = 0;
         response.body = Box::pin(response.body.map(move |chunk| {

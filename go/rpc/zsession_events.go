@@ -14,12 +14,6 @@ type SessionEventData interface {
 	Type() SessionEventType
 }
 
-// SessionEventWithAutoModeRecovery decodes recovery-aware capability changes.
-// SessionEvent keeps its legacy payload types for existing type switches.
-type SessionEventWithAutoModeRecovery struct {
-	SessionEvent
-}
-
 // SessionEvent represents a single session event with a typed data payload.
 type SessionEvent struct {
 	// Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -279,13 +273,11 @@ const (
 	SessionEventTypeSystemMessage         SessionEventType = "system.message"
 	SessionEventTypeSystemNotification    SessionEventType = "system.notification"
 	SessionEventTypeToolExecutionComplete SessionEventType = "tool.execution_complete"
-	// Deprecated: SessionEventTypeToolExecutionPartialResult identifies a deprecated event.
-	SessionEventTypeToolExecutionPartialResult SessionEventType = "tool.execution_partial_result"
-	SessionEventTypeToolExecutionProgress      SessionEventType = "tool.execution_progress"
-	SessionEventTypeToolExecutionStart         SessionEventType = "tool.execution_start"
-	SessionEventTypeToolSearchActivated        SessionEventType = "tool_search.activated"
-	SessionEventTypeToolShellOutput            SessionEventType = "tool.shell_output"
-	SessionEventTypeToolUserRequested          SessionEventType = "tool.user_requested"
+	SessionEventTypeToolExecutionProgress SessionEventType = "tool.execution_progress"
+	SessionEventTypeToolExecutionStart    SessionEventType = "tool.execution_start"
+	SessionEventTypeToolSearchActivated   SessionEventType = "tool_search.activated"
+	SessionEventTypeToolShellOutput       SessionEventType = "tool.shell_output"
+	SessionEventTypeToolUserRequested     SessionEventType = "tool.user_requested"
 	// Experimental: SessionEventTypeUIEphemeralQuery identifies an experimental event that may
 	// change or be removed.
 	SessionEventTypeUIEphemeralQuery   SessionEventType = "ui.ephemeral_query"
@@ -548,9 +540,6 @@ type AssistantMessageData struct {
 	OriginatingMessageID *string `json:"originatingMessageId,omitempty"`
 	// Output tokens this message adds to replayed context, for token accounting: the API response's completion_tokens, plus reasoning tokens a wire replays as input but reports separately, shared across the response's message chunks. Use assistant.usage for billed usage.
 	OutputTokens *int64 `json:"outputTokens,omitempty"`
-	// Tool call ID of the parent tool invocation when this event originates from a sub-agent
-	// Deprecated: ParentToolCallID is deprecated.
-	ParentToolCallID *string `json:"parentToolCallId,omitempty"`
 	// Generation phase for phased-output models (e.g., thinking vs. response phases)
 	Phase *string `json:"phase,omitempty"`
 	// Opaque origin provider identity captured at dispatch. Only an exact match with the target provider permits replay of reasoningOpaque, encryptedContent, reasoningBlocks, serverTools, and provider response/item identifiers. Matching model ids or wire protocols is insufficient. Omitted for legacy or unattributed messages; the runtime excludes unproven opaque state when projecting to a known provider. Text content and client tool requests/results remain portable semantic history.
@@ -957,21 +946,6 @@ type SubagentSelectedData struct {
 
 func (*SubagentSelectedData) sessionEventData()      {}
 func (*SubagentSelectedData) Type() SessionEventType { return SessionEventTypeSubagentSelected }
-
-// Deprecated merged replacement snapshot of shell output. Use tool.shell_output for append-only, stream-tagged output instead.
-//
-// Deprecated: ToolExecutionPartialResultData is deprecated.
-type ToolExecutionPartialResultData struct {
-	// Merged replacement snapshot from the running shell, not an append-only chunk
-	PartialOutput string `json:"partialOutput"`
-	// Tool call ID this partial result belongs to
-	ToolCallID string `json:"toolCallId"`
-}
-
-func (*ToolExecutionPartialResultData) sessionEventData() {}
-func (*ToolExecutionPartialResultData) Type() SessionEventType {
-	return SessionEventTypeToolExecutionPartialResult
-}
 
 // Durable record that a canvas instance is open, used to restore open canvases on cold session resume. Intentionally omits the transient url and availability.
 // Experimental: SessionCanvasRecordedData is part of an experimental API and may change or be removed.
@@ -1571,6 +1545,9 @@ func (*ExternalToolCompletedData) Type() SessionEventType {
 type ExternalToolRequestedData struct {
 	// Arguments to pass to the external tool
 	Arguments any `json:"arguments,omitempty"`
+	// Whether the tool definition had an SDK handler when this request was dispatched.
+	// Internal: HasHandler is part of the SDK's internal API surface and is not intended for external use.
+	HasHandler *bool `json:"hasHandler,omitempty"`
 	// Stable provider identity captured with an extension-owned tool definition; hosts use it to route the request to the same provider that was offered to the model
 	ProviderID *string `json:"providerId,omitempty"`
 	// Unique identifier for this request; used to respond via session.respondToExternalTool()
@@ -1896,6 +1873,12 @@ type SessionInfoData struct {
 	InfoType string `json:"infoType"`
 	// Human-readable informational message for display in the timeline
 	Message string `json:"message"`
+	// Credential-free provider routing policy applied at this configuration boundary.
+	// Internal: ProviderRouting is part of the SDK's internal API surface and is not intended for external use.
+	ProviderRouting any `json:"providerRouting,omitempty"`
+	// Reasoning configuration consumed at this conversation boundary. Present on reasoning_effort updates; preserves the original request baseline and applied effort without creating a user message.
+	// Internal: ResponsesReasoning is part of the SDK's internal API surface and is not intended for external use.
+	ResponsesReasoning *ResponsesReasoning `json:"responsesReasoning,omitempty"`
 	// Optional actionable tip displayed with this message
 	Tip *string `json:"tip,omitempty"`
 	// Optional URL associated with this message that the user can open in a browser
@@ -2068,9 +2051,6 @@ type AssistantUsageData struct {
 	OutputTokens *int64 `json:"outputTokens,omitempty"`
 	// Time to first observable model output in milliseconds. Includes text, reasoning, and tool-call output; only available for streaming requests that produce observable output.
 	OutputTtftMs *float64 `json:"outputTtftMs,omitempty"`
-	// Parent tool call ID when this usage originates from a sub-agent
-	// Deprecated: ParentToolCallID is deprecated.
-	ParentToolCallID *string `json:"parentToolCallId,omitempty"`
 	// Bucket of AI credits the session had billed before this call, for the adaptive Anthropic prompt-cache policy. Omitted outside the adaptive TTL experiment.
 	// Internal: PromptCacheCreditsBucket is part of the SDK's internal API surface and is not intended for external use.
 	PromptCacheCreditsBucket *string `json:"promptCacheCreditsBucket,omitempty"`
@@ -2364,6 +2344,8 @@ type SessionModelChangeData struct {
 	PreviousVerbosity *Verbosity `json:"previousVerbosity,omitempty"`
 	// Provider selected for newModel. Omitted for legacy or unattributed selections; never inferred from a later selection.
 	ProviderID *string `json:"providerId,omitempty"`
+	// Credential-free provider routing policy and selected-model registration.
+	ProviderRouting any `json:"providerRouting,omitempty"`
 	// Reasoning effort level after the model change, if applicable
 	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
 	// True when the reasoning effort is a managed-policy default bound to reasoningEffortModel. Omitted for agent-authored, user-authored, independent, and legacy effort.
@@ -3074,30 +3056,6 @@ type CapabilitiesChangedData struct {
 func (*CapabilitiesChangedData) sessionEventData()      {}
 func (*CapabilitiesChangedData) Type() SessionEventType { return SessionEventTypeCapabilitiesChanged }
 
-// Session capability change notification
-type CapabilitiesChangedDataWithAutoModeRecovery struct {
-	// UI capability changes
-	UI *CapabilitiesChangedUIWithAutoModeRecovery `json:"ui,omitempty"`
-}
-
-func (*CapabilitiesChangedDataWithAutoModeRecovery) sessionEventData() {}
-func (*CapabilitiesChangedDataWithAutoModeRecovery) Type() SessionEventType {
-	return SessionEventTypeCapabilitiesChanged
-}
-
-// Legacy returns capability changes without recovery extensions.
-func (r CapabilitiesChangedDataWithAutoModeRecovery) Legacy() CapabilitiesChangedData {
-	var result CapabilitiesChangedData
-	if r.UI != nil {
-		result.UI = &CapabilitiesChangedUI{
-			Canvases:    r.UI.Canvases,
-			Elicitation: r.UI.Elicitation,
-			MCPApps:     r.UI.MCPApps,
-		}
-	}
-	return result
-}
-
 // Session command list change notification, for SDK command registration or built-in command availability; `session.commands.list` returns the full list
 type CommandsChangedData struct {
 	// Current list of registered SDK commands
@@ -3187,6 +3145,8 @@ type SessionStartData struct {
 	Producer string `json:"producer"`
 	// Provider of selectedModel at creation time, when explicitly selected.
 	ProviderID *string `json:"providerId,omitempty"`
+	// Credential-free effective model routing policy restored on cold resume.
+	ProviderRouting any `json:"providerRouting,omitempty"`
 	// Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
 	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
 	// True when the reasoning effort is a managed-policy default bound to reasoningEffortModel. Omitted for agent-authored, user-authored, independent, and legacy effort.
@@ -3275,6 +3235,8 @@ type SessionResumeData struct {
 	EventsFileSizeBytes *int64 `json:"eventsFileSizeBytes,omitempty"`
 	// Provider of selectedModel at resume time, when explicitly selected.
 	ProviderID *string `json:"providerId,omitempty"`
+	// Credential-free effective model routing policy restored on cold resume.
+	ProviderRouting any `json:"providerRouting,omitempty"`
 	// Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
 	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
 	// True when the reasoning effort is a managed-policy default bound to reasoningEffortModel. Omitted for agent-authored, user-authored, independent, and legacy effort.
@@ -3425,9 +3387,6 @@ type AssistantMessageDeltaData struct {
 	DeltaContent string `json:"deltaContent"`
 	// Message ID this delta belongs to, matching the corresponding assistant.message event
 	MessageID string `json:"messageId"`
-	// Tool call ID of the parent tool invocation when this event originates from a sub-agent
-	// Deprecated: ParentToolCallID is deprecated.
-	ParentToolCallID *string `json:"parentToolCallId,omitempty"`
 }
 
 func (*AssistantMessageDeltaData) sessionEventData() {}
@@ -3711,9 +3670,6 @@ type ToolExecutionCompleteData struct {
 	MCPMeta any `json:"mcpMeta,omitempty"`
 	// Model identifier that generated this tool call
 	Model *string `json:"model,omitempty"`
-	// Tool call ID of the parent tool invocation when this event originates from a sub-agent
-	// Deprecated: ParentToolCallID is deprecated.
-	ParentToolCallID *string `json:"parentToolCallId,omitempty"`
 	// Host-owned call ID of the run_program invocation that requested this child tool. Its result is program input, not a model message; agent attribution remains independent.
 	// Experimental: ProgramToolCallID is part of an experimental API and may change or be removed.
 	ProgramToolCallID *string `json:"programToolCallId,omitempty"`
@@ -3785,9 +3741,6 @@ type ToolExecutionStartData struct {
 	MCPTransport *MCPServerTransport `json:"mcpTransport,omitempty"`
 	// Model identifier that generated this tool call
 	Model *string `json:"model,omitempty"`
-	// Tool call ID of the parent tool invocation when this event originates from a sub-agent
-	// Deprecated: ParentToolCallID is deprecated.
-	ParentToolCallID *string `json:"parentToolCallId,omitempty"`
 	// Host-owned call ID of the run_program invocation that requested this child tool. Its result is program input, not a model message; agent attribution remains independent.
 	// Experimental: ProgramToolCallID is part of an experimental API and may change or be removed.
 	ProgramToolCallID *string `json:"programToolCallId,omitempty"`
@@ -4203,16 +4156,6 @@ type CanvasRegistryChangedCanvasAction struct {
 
 // UI capability changes
 type CapabilitiesChangedUI struct {
-	// Whether canvas rendering is now supported
-	Canvases *bool `json:"canvases,omitempty"`
-	// Whether elicitation is now supported
-	Elicitation *bool `json:"elicitation,omitempty"`
-	// Whether MCP Apps (SEP-1865) UI passthrough is now supported
-	MCPApps *bool `json:"mcpApps,omitempty"`
-}
-
-// UI capability changes
-type CapabilitiesChangedUIWithAutoModeRecovery struct {
 	// Whether a recovery-aware Auto-switch responder is registered. This does not imply current eligibility or override model policy.
 	AutoModeRecovery *bool `json:"autoModeRecovery,omitempty"`
 	// Whether canvas rendering is now supported
@@ -6376,21 +6319,6 @@ func (ToolExecutionCompleteContentShellExit) Type() ToolExecutionCompleteContent
 	return ToolExecutionCompleteContentTypeShellExit
 }
 
-// Deprecated for shell command exit metadata. Use ToolExecutionCompleteContentShellExit instead.
-type ToolExecutionCompleteContentTerminal struct {
-	// Working directory where the command was executed
-	Cwd *string `json:"cwd,omitempty"`
-	// Process exit code, if the command has completed
-	ExitCode *int64 `json:"exitCode,omitempty"`
-	// Terminal/shell output text
-	Text string `json:"text"`
-}
-
-func (ToolExecutionCompleteContentTerminal) toolExecutionCompleteContent() {}
-func (ToolExecutionCompleteContentTerminal) Type() ToolExecutionCompleteContentType {
-	return ToolExecutionCompleteContentTypeTerminal
-}
-
 // Plain text content block
 type ToolExecutionCompleteContentText struct {
 	// The text content
@@ -7947,7 +7875,6 @@ const (
 	ToolExecutionCompleteContentTypeResource     ToolExecutionCompleteContentType = "resource"
 	ToolExecutionCompleteContentTypeResourceLink ToolExecutionCompleteContentType = "resource_link"
 	ToolExecutionCompleteContentTypeShellExit    ToolExecutionCompleteContentType = "shell_exit"
-	ToolExecutionCompleteContentTypeTerminal     ToolExecutionCompleteContentType = "terminal"
 	ToolExecutionCompleteContentTypeText         ToolExecutionCompleteContentType = "text"
 )
 

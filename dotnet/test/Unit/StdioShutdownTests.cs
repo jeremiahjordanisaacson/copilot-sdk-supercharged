@@ -4,10 +4,10 @@
 
 #if NET8_0_OR_GREATER
 using System.Diagnostics;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed class StdioShutdownTests
 {
@@ -32,9 +32,10 @@ public sealed class StdioShutdownTests
                 : null;
             await using var client = new CopilotClient(new CopilotClientOptions
             {
-                Connection = RuntimeConnection.ForStdio(path: "node", args: [script, marker, operation, pidPath]),
-                UseLoggedInUser = false,
-                Logger = observer,
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = RuntimeConnection.ForSpawnedStdio(path: "node", args: [script, marker, operation, pidPath]),
+                GitHub = new ClientGitHubOptions { UseLoggedInUser = false },
+                Observability = new ClientObservabilityOptions { Logger = observer }
             });
             if (operation == "start-failure")
             {

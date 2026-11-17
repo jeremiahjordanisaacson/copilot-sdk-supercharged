@@ -28,7 +28,9 @@ _PARAMS = {
 
 @pytest.mark.asyncio
 async def test_create_and_resume_bind_store_before_request() -> None:
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     captured: list[tuple[str, dict]] = []
     stored: list[str] = []
 
@@ -49,20 +51,22 @@ async def test_create_and_resume_bind_store_before_request() -> None:
         stored.append(memory["session_id"])
 
     memory: MemoryConfiguration = {"enabled": True, "store_memory": store}
-    await client.create_session(session_id="created", memory=memory)
-    await client.resume_session("resumed", memory=memory)
+    await client.create_session(session_id="created", state={"memory": memory})
+    await client.resume_session("resumed", state={"memory": memory})
 
     payloads = {method: params for method, params in captured}
     for method in ("session.create", "session.resume"):
-        assert payloads[method]["hasMemoryStore"] is True
-        assert payloads[method]["memory"] == {"enabled": True}
+        assert payloads[method]["state"]["hasMemoryStore"] is True
+        assert payloads[method]["state"]["memory"] == {"enabled": True}
     assert stored == ["created", "resumed"]
     assert "session.memory.configureStore" not in payloads
 
 
 @pytest.mark.asyncio
 async def test_store_memory_requires_enabled_memory_before_any_request() -> None:
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     client._client = Mock()
     client._client.request = AsyncMock()
 
@@ -71,19 +75,21 @@ async def test_store_memory_requires_enabled_memory_before_any_request() -> None
 
     memory: MemoryConfiguration = {"enabled": False, "store_memory": store}
     with pytest.raises(ValueError, match="memory.store_memory requires memory.enabled"):
-        await client.create_session(memory=memory)
+        await client.create_session(state={"memory": memory})
     with pytest.raises(ValueError, match="memory.store_memory requires memory.enabled"):
-        await client.resume_session("resumed", memory=memory)
+        await client.resume_session("resumed", state={"memory": memory})
     with pytest.raises(ValueError, match="not supported for cloud sessions"):
         await client.create_session(
-            cloud=CloudSessionOptions(), memory={"enabled": True, "store_memory": store}
+            cloud=CloudSessionOptions(), state={"memory": {"enabled": True, "store_memory": store}}
         )
     client._client.request.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_memory_store_request_invokes_callback() -> None:
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     session = CopilotSession("session-1", Mock())
     stored: list[StoredMemory] = []
 
@@ -107,7 +113,9 @@ async def test_memory_store_request_invokes_callback() -> None:
 
 @pytest.mark.asyncio
 async def test_memory_store_errors_are_generic() -> None:
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
 
     with pytest.raises(JsonRpcError) as unknown_session:
         await client._handle_memory_store(_PARAMS)
@@ -157,7 +165,9 @@ async def test_memory_store_callback_is_cancelled_by_runtime(trigger: str) -> No
             cancelled.set()
             raise
 
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     process = _WriteOnlyProcess()
     rpc_client = JsonRpcClient(process)
     rpc_client._loop = asyncio.get_running_loop()
@@ -200,7 +210,9 @@ async def test_memory_store_callback_is_skipped_when_cancelled_before_dispatch()
         nonlocal called
         called = True
 
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     process = _WriteOnlyProcess()
     rpc_client = JsonRpcClient(process)
     rpc_client._loop = asyncio.get_running_loop()
@@ -235,7 +247,9 @@ async def test_memory_store_callback_self_cancellation_is_a_failure(cancel_style
         task.cancel()
         await asyncio.sleep(0)
 
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     process = _WriteOnlyProcess()
     rpc_client = JsonRpcClient(process)
     rpc_client._loop = asyncio.get_running_loop()
@@ -273,7 +287,9 @@ async def test_memory_store_callback_raising_base_exception_is_a_failure(shape: 
             pytest.fail("store assertion failed")
         raise _HostAbort("store assertion failed")
 
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     process = _WriteOnlyProcess()
     rpc_client = JsonRpcClient(process)
     rpc_client._loop = asyncio.get_running_loop()
@@ -303,7 +319,9 @@ async def test_memory_store_callback_raising_base_exception_is_a_failure(shape: 
 @pytest.mark.parametrize("teardown", ["delete", "close"])
 @pytest.mark.asyncio
 async def test_memory_store_is_cleared_on_client_teardown(teardown: str) -> None:
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     session = CopilotSession("session-1", Mock())
     session._register_memory_store(AsyncMock())
     client._sessions["session-1"] = session

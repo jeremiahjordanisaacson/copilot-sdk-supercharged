@@ -4,10 +4,10 @@
 
 #if NET8_0_OR_GREATER
 using System.Diagnostics;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed class AhpTestClientTests
 {

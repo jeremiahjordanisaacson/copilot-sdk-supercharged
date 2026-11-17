@@ -1,12 +1,13 @@
 # Copilot SDK
 
-Welcome to the GitHub Copilot SDK docs. Whether you're building your first Copilot-powered app or deploying to production, you'll find what you need here.
+Welcome to the Microsoft Copilot SDK docs. Whether you're building your first Copilot-powered app or deploying to production, you'll find what you need here.
 
 ## Where to start
 
 | I want to... | Go to |
 |---|---|
 | **Build my first app** | [Getting Started](./getting-started.md)—end-to-end tutorial with streaming & custom tools |
+| **Upgrade to SDK v2** | [Breaking changes](./v2-breaking-changes.md)—package, import, and client-mode migrations |
 | **Set up for production** | [Setup Guides](./setup/README.md)—architecture, deployment patterns, scaling |
 | **Configure authentication** | [Authentication](./auth/README.md)—GitHub OAuth, server-to-server authentication, environment variables, BYOK |
 | **Add features to my app** | [Features](./features/README.md)—hooks, custom agents, MCP, skills, and more |
@@ -25,7 +26,7 @@ How to configure and deploy the SDK for your use case.
 * [Default Setup (Bundled CLI)](./setup/bundled-cli.md): the SDK includes the CLI automatically
 * [Local CLI](./setup/local-cli.md): use your own CLI binary or running instance
 * [Backend Services](./setup/backend-services.md): server-side with headless CLI over TCP
-* [In-process Runtime](./setup/in-process-runtime.md): host the runtime inside your application process (experimental)
+* [In-process Runtime](./setup/in-process-runtime.md): the v2 default and subprocess migration options
 * [GitHub OAuth](./setup/github-oauth.md): implement the OAuth flow
 * [Azure Managed Identity](./setup/azure-managed-identity.md): BYOK with Microsoft Foundry
 * [Scaling & Multi-Tenancy](./setup/scaling.md): horizontal scaling, isolation patterns
@@ -83,4 +84,4 @@ Detailed API reference for each session hook.
 
 Guides for using the SDK with other platforms and frameworks.
 
-* [Microsoft Agent Framework](./integrations/microsoft-agent-framework.md): MAF multi-agent workflows
+* [Microsoft Agent Framework](./integrations/microsoft-agent-framework.md): V2 compatibility status

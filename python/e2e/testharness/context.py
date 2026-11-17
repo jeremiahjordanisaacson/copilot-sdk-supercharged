@@ -17,7 +17,7 @@ from typing import Any
 
 from copilot import CopilotClient, CopilotSession, RuntimeConnection
 from copilot._ffi_runtime_host import resolve_library_path
-from copilot.client import _InternalTestOptions
+from copilot.client import ChildProcessRuntimeConnection, _InternalTestOptions
 
 from .proxy import CapiProxy
 
@@ -65,10 +65,9 @@ DEFAULT_GITHUB_TOKEN = "fake-token-for-e2e-tests"
 def is_inprocess_transport() -> bool:
     """Return True when the E2E suite should run over the in-process (FFI) transport.
 
-    Selected by the ``inprocess`` CI matrix cell via
-    ``COPILOT_SDK_DEFAULT_CONNECTION=inprocess``. Mirrors the Node/.NET harnesses.
+    This is the SDK default; the stdio CI cell selects its transport explicitly.
     """
-    return (os.environ.get("COPILOT_SDK_DEFAULT_CONNECTION") or "").lower() == "inprocess"
+    return (os.environ.get("COPILOT_SDK_DEFAULT_CONNECTION") or "").lower() in ("", "inprocess")
 
 
 class _TestClient(CopilotClient):
@@ -152,33 +151,34 @@ class E2ETestContext:
         if self._client_inprocess:
             self._client = _TestClient(
                 self.work_dir,
+                mode="coding-agent",
                 cli_path=self.cli_path,
-                connection=RuntimeConnection.for_inprocess(),
-                github_token=DEFAULT_GITHUB_TOKEN,
                 _test_options=test_options,
-                base_directory=self.home_dir,
+                runtime=RuntimeConnection.for_inprocess(base_directory=self.home_dir),
+                github={"token": DEFAULT_GITHUB_TOKEN},
             )
         else:
             self._client = _TestClient(
                 None,
+                mode="coding-agent",
                 cli_path=self.cli_path,
-                connection=RuntimeConnection.for_stdio(
+                _test_options=test_options,
+                runtime=RuntimeConnection.for_spawned_stdio(
                     path=self.cli_path,
                     args=tuple(cli_args or []),
+                    working_directory=self.work_dir,
+                    base_directory=self.home_dir,
+                    env=runtime_env,
                 ),
-                working_directory=self.work_dir,
-                base_directory=self.home_dir,
-                env=runtime_env,
-                _test_options=test_options,
-                github_token=DEFAULT_GITHUB_TOKEN,
+                github={"token": DEFAULT_GITHUB_TOKEN},
             )
 
     def create_inprocess_client(self, **options: Any) -> CopilotClient:
         """Create an independent client using this fixture's prepared runtime."""
+        options.setdefault("runtime", RuntimeConnection.for_inprocess())
         return _TestClient(
             None,
             cli_path=self.cli_path,
-            connection=RuntimeConnection.for_inprocess(),
             **options,
         )
 
@@ -186,10 +186,11 @@ class E2ETestContext:
         """Set a child runtime's environment before starting the client."""
         if self._client_inprocess:
             raise ValueError("In-process fixtures require typed client/session options")
-        options = self.client._options
-        if options.env is None:
-            options.env = {}
-        options.env[key] = value
+        connection = self.client._options.connection
+        assert isinstance(connection, ChildProcessRuntimeConnection)
+        if connection.env is None:
+            connection.env = {}
+        connection.env[key] = value
 
     async def teardown(self, test_failed: bool = False):
         """Clean up the test context.

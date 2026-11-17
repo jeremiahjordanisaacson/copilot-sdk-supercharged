@@ -35,13 +35,16 @@ try {
     await once(server, "listening");
     const origin = `http://127.0.0.1:${server.address().port}`;
     client = new CopilotClient({
-        connection: RuntimeConnection.forStdio({
+        mode: "coding-agent",
+        runtime: RuntimeConnection.forSpawnedStdio({
             path: resolve(runtimePath),
             env: { ...process.env, COPILOT_HOME: home },
+            workingDirectory: home,
         }),
-        workingDirectory: home,
-        gitHubToken: "ghs_fetch_example_local_only",
-        useLoggedInUser: false,
+        github: {
+            token: "ghs_fetch_example_local_only",
+            useLoggedInUser: false,
+        },
     });
     await client.start();
     const request = await client.rpc.fetch.create();

@@ -1,13 +1,13 @@
-﻿/*---------------------------------------------------------------------------------------------
+/*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "elicitation", output)
@@ -15,10 +15,8 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     [Fact]
     public async Task Defaults_Capabilities_When_Not_Provided()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         // Default capabilities should exist (even if empty)
         Assert.NotNull(session.Capabilities);
@@ -28,10 +26,8 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     [Fact]
     public async Task Elicitation_Throws_When_Capability_Is_Missing()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         // Capabilities.Ui?.Elicitation should not be true by default (headless mode)
         Assert.True(session.Capabilities.Ui?.Elicitation != true);
@@ -75,15 +71,8 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     [Fact]
     public async Task Sends_RequestElicitation_When_Handler_Provided()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            OnElicitationRequest = _ => Task.FromResult(new ElicitationResult
-            {
-                Action = UIElicitationResponseAction.Accept,
-                Content = new Dictionary<string, object>(),
-            }),
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Interaction = new SessionInteractionOptions { OnElicitationRequest = _ => Task.FromResult(new ElicitationResult { Action = UIElicitationResponseAction.Accept, Content = new Dictionary<string, object>(), }) } });
 
         // Session should be created successfully with requestElicitation=true
         Assert.NotNull(session);
@@ -96,14 +85,17 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     [InlineData(false)]
     public async Task Should_Report_Elicitation_Capability_Based_On_Handler_Presence(bool hasHandler)
     {
-        var config = new SessionConfig
+        var config = new CreateSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
+            Permissions = new SessionPermissionOptions
+            {
+                OnRequest = PermissionHandler.ApproveAll
+            }
         };
 
         if (hasHandler)
         {
-            config.OnElicitationRequest = _ => Task.FromResult(new ElicitationResult
+            config.Interaction.OnElicitationRequest = _ => Task.FromResult(new ElicitationResult
             {
                 Action = UIElicitationResponseAction.Accept,
                 Content = new Dictionary<string, object>(),
@@ -118,10 +110,8 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     [Fact]
     public async Task Session_Without_ElicitationHandler_Creates_Successfully()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         // requestElicitation was false (no handler)
         Assert.NotNull(session);
@@ -131,18 +121,17 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     [Fact]
     public async Task ConfirmAsync_Returns_True_When_Handler_Accepts()
     {
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnElicitationRequest = context =>
+            Interaction = new SessionInteractionOptions
             {
-                Assert.Equal("Confirm?", context.Message);
-                Assert.Contains("confirmed", context.RequestedSchema!.Properties.Keys);
-                return Task.FromResult(new ElicitationResult
-                {
-                    Action = UIElicitationResponseAction.Accept,
-                    Content = new Dictionary<string, object> { ["confirmed"] = true },
-                });
-            },
+                OnElicitationRequest = context =>
+        {
+            Assert.Equal("Confirm?", context.Message);
+            Assert.Contains("confirmed", context.RequestedSchema!.Properties.Keys);
+            return Task.FromResult(new ElicitationResult { Action = UIElicitationResponseAction.Accept, Content = new Dictionary<string, object> { ["confirmed"] = true }, });
+        }
+            }
         });
 
         Assert.True(session.Capabilities.Ui?.Elicitation);
@@ -152,13 +141,8 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     [Fact]
     public async Task ConfirmAsync_Returns_False_When_Handler_Declines()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            OnElicitationRequest = _ => Task.FromResult(new ElicitationResult
-            {
-                Action = UIElicitationResponseAction.Decline,
-            }),
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Interaction = new SessionInteractionOptions { OnElicitationRequest = _ => Task.FromResult(new ElicitationResult { Action = UIElicitationResponseAction.Decline, }) } });
 
         Assert.False(await session.Ui.ConfirmAsync("Confirm?"));
     }
@@ -166,18 +150,17 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     [Fact]
     public async Task SelectAsync_Returns_Selected_Option()
     {
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnElicitationRequest = context =>
+            Interaction = new SessionInteractionOptions
             {
-                Assert.Equal("Choose", context.Message);
-                Assert.Contains("selection", context.RequestedSchema!.Properties.Keys);
-                return Task.FromResult(new ElicitationResult
-                {
-                    Action = UIElicitationResponseAction.Accept,
-                    Content = new Dictionary<string, object> { ["selection"] = "beta" },
-                });
-            },
+                OnElicitationRequest = context =>
+        {
+            Assert.Equal("Choose", context.Message);
+            Assert.Contains("selection", context.RequestedSchema!.Properties.Keys);
+            return Task.FromResult(new ElicitationResult { Action = UIElicitationResponseAction.Accept, Content = new Dictionary<string, object> { ["selection"] = "beta" }, });
+        }
+            }
         });
 
         Assert.Equal("beta", await session.Ui.SelectAsync("Choose", ["alpha", "beta"]));
@@ -186,18 +169,17 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     [Fact]
     public async Task InputAsync_Returns_Freeform_Value()
     {
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnElicitationRequest = context =>
+            Interaction = new SessionInteractionOptions
             {
-                Assert.Equal("Enter value", context.Message);
-                Assert.Contains("value", context.RequestedSchema!.Properties.Keys);
-                return Task.FromResult(new ElicitationResult
-                {
-                    Action = UIElicitationResponseAction.Accept,
-                    Content = new Dictionary<string, object> { ["value"] = "typed value" },
-                });
-            },
+                OnElicitationRequest = context =>
+        {
+            Assert.Equal("Enter value", context.Message);
+            Assert.Contains("value", context.RequestedSchema!.Properties.Keys);
+            return Task.FromResult(new ElicitationResult { Action = UIElicitationResponseAction.Accept, Content = new Dictionary<string, object> { ["value"] = "typed value" }, });
+        }
+            }
         });
 
         var result = await session.Ui.InputAsync("Enter value", new UiInputOptions
@@ -225,13 +207,16 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
             new ElicitationResult { Action = UIElicitationResponseAction.Cancel },
         ]);
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnElicitationRequest = context =>
+            Interaction = new SessionInteractionOptions
             {
-                Assert.Equal("Name?", context.Message);
-                return Task.FromResult(responses.Dequeue());
-            },
+                OnElicitationRequest = context =>
+        {
+            Assert.Equal("Name?", context.Message);
+            return Task.FromResult(responses.Dequeue());
+        }
+            }
         });
 
         var parameters = new ElicitationParams
@@ -262,10 +247,8 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     {
         // The handler's own cancellation, such as an HttpClient timeout, is a handler failure:
         // the SDK must still answer, or the pending elicitation never completes.
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            OnElicitationRequest = _ => Task.FromCanceled<ElicitationResult>(new CancellationToken(canceled: true)),
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Interaction = new SessionInteractionOptions { OnElicitationRequest = _ => Task.FromCanceled<ElicitationResult>(new CancellationToken(canceled: true)) } });
 
         var result = await session.Ui.ElicitAsync(new ElicitationParams
         {
@@ -285,19 +268,8 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     [Fact]
     public async Task ElicitationAsync_Returns_Collection_And_Numeric_Content_From_Handler()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            OnElicitationRequest = _ => Task.FromResult(new ElicitationResult
-            {
-                Action = UIElicitationResponseAction.Accept,
-                Content = new Dictionary<string, object>
-                {
-                    ["tags"] = new List<string> { "a", "b" },
-                    ["ratio"] = 2.5f,
-                    ["price"] = 9.99m,
-                },
-            }),
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Interaction = new SessionInteractionOptions { OnElicitationRequest = _ => Task.FromResult(new ElicitationResult { Action = UIElicitationResponseAction.Accept, Content = new Dictionary<string, object> { ["tags"] = new List<string> { "a", "b" }, ["ratio"] = 2.5f, ["price"] = 9.99m, }, }) } });
 
         var result = await session.Ui.ElicitAsync(new ElicitationParams
         {
@@ -332,7 +304,10 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
     {
         var capabilities = new SessionCapabilities
         {
-            Ui = new SessionUiCapabilities { Elicitation = true }
+            Ui = new SessionUiCapabilities
+            {
+                Elicitation = true
+            }
         };
 
         Assert.NotNull(capabilities.Ui);
@@ -457,15 +432,21 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
             Action = UIElicitationResponseAction.Cancel,
         });
 
-        var config = new SessionConfig
+        var config = new CreateSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            OnElicitationRequest = handler,
+            Permissions = new SessionPermissionOptions
+            {
+                OnRequest = PermissionHandler.ApproveAll
+            },
+            Interaction = new SessionInteractionOptions
+            {
+                OnElicitationRequest = handler
+            }
         };
 
         var clone = config.Clone();
 
-        Assert.Same(handler, clone.OnElicitationRequest);
+        Assert.Same(handler, clone.Interaction.OnElicitationRequest);
     }
 
     [Fact]
@@ -476,15 +457,20 @@ public class ElicitationE2ETests(E2ETestFixture fixture, ITestOutputHelper outpu
             Action = UIElicitationResponseAction.Cancel,
         });
 
-        var config = new ResumeSessionConfig
+        var config = new ResumeSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            OnElicitationRequest = handler,
+            Permissions = new SessionPermissionOptions
+            {
+                OnRequest = PermissionHandler.ApproveAll
+            },
+            Interaction = new SessionInteractionOptions
+            {
+                OnElicitationRequest = handler
+            }
         };
 
         var clone = config.Clone();
 
-        Assert.Same(handler, clone.OnElicitationRequest);
+        Assert.Same(handler, clone.Interaction.OnElicitationRequest);
     }
 }
-

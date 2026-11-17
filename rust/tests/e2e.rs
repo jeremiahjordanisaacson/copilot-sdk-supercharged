@@ -7,6 +7,8 @@ mod abort;
 mod ask_user;
 #[path = "e2e/auto_tier.rs"]
 mod auto_tier;
+#[path = "support/byok.rs"]
+mod byok;
 #[path = "e2e/byok_bearer_token_provider.rs"]
 mod byok_bearer_token_provider;
 #[path = "e2e/canvas.rs"]

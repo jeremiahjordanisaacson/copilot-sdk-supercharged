@@ -2,12 +2,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
-use github_copilot_sdk::session_events::{
+use copilot_sdk::session_events::{
     AssistantMessageData, AssistantUsageData, SessionEventType, SessionUsageInfoData,
     ToolExecutionCompleteData, ToolExecutionStartData, UserMessageData, UserMessageDelivery,
 };
-use github_copilot_sdk::tool::ToolHandler;
-use github_copilot_sdk::{
+use copilot_sdk::tool::ToolHandler;
+use copilot_sdk::{
     DeliveryMode, Error, MessageOptions, MessageSource, Tool, ToolInvocation, ToolResult,
 };
 use tokio::sync::{Mutex, mpsc};
@@ -362,7 +362,7 @@ async fn should_order_idle_queued_and_immediate_delivery_while_busy() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        ctx.approve_all_session_config().with_tools(vec![
+                        ctx.approve_all_session_config().with_tools(|group| group.with_definitions(vec![
                             Tool::new("scenario_send_blocker")
                                 .with_description("Blocks the active turn until released")
                                 .with_handler(Arc::new(SequencedBlockingTool {
@@ -370,7 +370,7 @@ async fn should_order_idle_queued_and_immediate_delivery_while_busy() {
                                     release_rx: Mutex::new(release_rx),
                                     invocation_count: AtomicUsize::new(0),
                                 })),
-                        ]),
+                        ])),
                     )
                     .await
                     .expect("create session");

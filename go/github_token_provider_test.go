@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestGitHubTokenProviderConfigValidation(t *testing.T) {
@@ -18,16 +18,10 @@ func TestGitHubTokenProviderConfigValidation(t *testing.T) {
 		return GitHubTokenCancelled(), nil
 	}
 
-	if _, err := NewClient(nil).CreateSession(t.Context(), &SessionConfig{
-		GitHubToken:         "static",
-		GitHubTokenProvider: provider,
-	}); err == nil || !strings.Contains(err.Error(), "cannot be used together") {
+	if _, err := NewClient(&ClientOptions{Mode: ModeCodingAgent}).CreateSession(t.Context(), &CreateSessionOptions{GitHub: SessionGitHubOptions{Token: "static", TokenProvider: provider}}); err == nil || !strings.Contains(err.Error(), "cannot be used together") {
 		t.Fatalf("CreateSession error = %v", err)
 	}
-	if _, err := NewClient(nil).ResumeSession(t.Context(), "session", &ResumeSessionConfig{
-		GitHubToken:         "static",
-		GitHubTokenProvider: provider,
-	}); err == nil || !strings.Contains(err.Error(), "cannot be used together") {
+	if _, err := NewClient(&ClientOptions{Mode: ModeCodingAgent}).ResumeSession(t.Context(), "session", &ResumeSessionOptions{GitHub: SessionGitHubOptions{Token: "static", TokenProvider: provider}}); err == nil || !strings.Contains(err.Error(), "cannot be used together") {
 		t.Fatalf("ResumeSession error = %v", err)
 	}
 }
@@ -53,37 +47,38 @@ func TestGitHubTokenProviderCreateRequestAndCallback(t *testing.T) {
 	})
 
 	var gotArgs GitHubTokenProviderArgs
-	session, err := client.CreateSession(t.Context(), &SessionConfig{
-		GitHubTokenProvider: func(args GitHubTokenProviderArgs) (*GitHubTokenProviderResult, error) {
-			gotArgs = args
-			return GitHubTokenResult(&GitHubToken{
-				AccessToken: "secret-token",
-				TokenType:   String("bearer"),
-				ExpiresIn:   8 * 60 * 60,
-			}), nil
-		},
+	session, err := client.CreateSession(t.Context(), &CreateSessionOptions{GitHub: SessionGitHubOptions{Token: "", TokenProvider: func(args GitHubTokenProviderArgs) (*GitHubTokenProviderResult, error) {
+		gotArgs = args
+		return GitHubTokenResult(&GitHubToken{
+			AccessToken: "secret-token",
+			TokenType:   String("bearer"),
+			ExpiresIn:   8 * 60 * 60,
+		}), nil
+	}},
 	})
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
 
 	var wire struct {
-		RegistrationID string `json:"gitHubTokenProviderRegistrationId"`
-		GitHubToken    string `json:"gitHubToken"`
+		GitHub struct {
+			RegistrationID string  `json:"tokenProviderRegistrationId"`
+			Token          *string `json:"token"`
+		} `json:"github"`
 	}
 	if err := json.Unmarshal(createParams, &wire); err != nil {
 		t.Fatal(err)
 	}
-	if wire.RegistrationID == "" {
+	if wire.GitHub.RegistrationID == "" {
 		t.Fatal("gitHubTokenProviderRegistrationId was not serialized")
 	}
-	if wire.GitHubToken != "" {
-		t.Fatal("static gitHubToken should not be serialized")
+	if wire.GitHub.Token != nil {
+		t.Fatal("zero-value token must remain omitted when a provider is supplied")
 	}
 
 	sessionID := session.SessionID
 	raw, rpcErr := server.Request(t.Context(), "gitHubToken.getToken", &rpc.GitHubTokenAcquireRequest{
-		RegistrationID: wire.RegistrationID,
+		RegistrationID: wire.GitHub.RegistrationID,
 		Host:           "github.example.com",
 		SessionID:      &sessionID,
 		Reason:         rpc.GitHubTokenAcquireReasonRefresh,
@@ -114,7 +109,7 @@ func TestGitHubTokenProviderCreateRequestAndCallback(t *testing.T) {
 		t.Fatal("provider registration was not removed on disconnect")
 	}
 	if _, rpcErr := server.Request(t.Context(), "gitHubToken.getToken", &rpc.GitHubTokenAcquireRequest{
-		RegistrationID: wire.RegistrationID,
+		RegistrationID: wire.GitHub.RegistrationID,
 		Host:           "github.com",
 		Reason:         rpc.GitHubTokenAcquireReasonInitial,
 	}); rpcErr == nil {
@@ -126,10 +121,9 @@ func TestGitHubTokenProviderCreateRequestAndCallback(t *testing.T) {
 		resumeParams = append(json.RawMessage(nil), params...)
 		return []byte(`{"sessionId":"resumed-session","workspacePath":"/workspace"}`), nil
 	})
-	resumed, err := client.ResumeSession(t.Context(), "resumed-session", &ResumeSessionConfig{
-		GitHubTokenProvider: func(GitHubTokenProviderArgs) (*GitHubTokenProviderResult, error) {
-			return GitHubTokenCancelled(), nil
-		},
+	resumed, err := client.ResumeSession(t.Context(), "resumed-session", &ResumeSessionOptions{GitHub: SessionGitHubOptions{Token: "", TokenProvider: func(GitHubTokenProviderArgs) (*GitHubTokenProviderResult, error) {
+		return GitHubTokenCancelled(), nil
+	}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -137,8 +131,11 @@ func TestGitHubTokenProviderCreateRequestAndCallback(t *testing.T) {
 	if err := json.Unmarshal(resumeParams, &wire); err != nil {
 		t.Fatal(err)
 	}
-	if wire.RegistrationID == "" {
+	if wire.GitHub.RegistrationID == "" {
 		t.Fatal("resume did not serialize gitHubTokenProviderRegistrationId")
+	}
+	if wire.GitHub.Token != nil {
+		t.Fatal("resume serialized an omitted zero-value token alongside its provider")
 	}
 	if err := resumed.Disconnect(); err != nil {
 		t.Fatal(err)
@@ -178,10 +175,9 @@ func TestGitHubTokenProviderResultsErrorsAndRollback(t *testing.T) {
 	server.SetRequestHandler("session.create", func(json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
 		return nil, &jsonrpc2.Error{Code: -32000, Message: "create failed"}
 	})
-	if _, err := rollbackClient.CreateSession(t.Context(), &SessionConfig{
-		GitHubTokenProvider: func(GitHubTokenProviderArgs) (*GitHubTokenProviderResult, error) {
-			return GitHubTokenCancelled(), nil
-		},
+	if _, err := rollbackClient.CreateSession(t.Context(), &CreateSessionOptions{GitHub: SessionGitHubOptions{TokenProvider: func(GitHubTokenProviderArgs) (*GitHubTokenProviderResult, error) {
+		return GitHubTokenCancelled(), nil
+	}},
 	}); err == nil {
 		t.Fatal("expected create failure")
 	}
@@ -329,7 +325,7 @@ func TestGitHubTokenProvidersClearedOnConnectionClose(t *testing.T) {
 func TestGitHubTokenProvidersSurviveRetiredTransportClose(t *testing.T) {
 	oldSession, oldPeer := newSetToolsTestSession(t)
 	replacement, _ := newSetToolsTestSession(t)
-	client := NewClient(nil)
+	client := NewClient(&ClientOptions{Mode: ModeCodingAgent})
 	client.client = oldSession.client
 	client.setupNotificationHandler()
 	client.client = replacement.client

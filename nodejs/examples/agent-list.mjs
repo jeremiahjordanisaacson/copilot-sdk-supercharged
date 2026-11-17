@@ -11,21 +11,39 @@ if (!cliPath) {
 }
 
 const client = new CopilotClient({
-    connection: { kind: "stdio", path: cliPath },
-    useLoggedInUser: false,
+    mode: "coding-agent",
+    runtime: { kind: "spawned-stdio", path: cliPath },
+    github: {
+        useLoggedInUser: false,
+    },
 });
 try {
     const session = await client.createSession({
         model: "example-model",
-        provider: { type: "openai", baseUrl: "http://127.0.0.1:1", apiKey: "example" },
-        onPermissionRequest: approveAll,
-        customAgents: [
-            {
-                name: "reviewer",
-                description: "Reviews a proposed change",
-                prompt: "Review the change without modifying files.",
-            },
-        ],
+        github: { capi: { enabled: false } },
+        inference: {
+            defaultProvider: "example",
+            providers: [
+                {
+                    name: "example",
+                    type: "openai",
+                    baseUrl: "http://127.0.0.1:1",
+                    apiKey: "example",
+                },
+            ],
+        },
+        permissions: {
+            onRequest: approveAll,
+        },
+        agents: {
+            definitions: [
+                {
+                    name: "reviewer",
+                    description: "Reviews a proposed change",
+                    prompt: "Review the change without modifying files.",
+                },
+            ],
+        },
     });
     try {
         const request = Object.freeze({ includePrompt: true });

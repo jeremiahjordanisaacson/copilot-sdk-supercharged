@@ -6,7 +6,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 
-namespace GitHub.Copilot.Test.Harness;
+namespace Microsoft.Copilot.Test.Harness;
 
 internal sealed class RuntimeStartupProcessObserver(string pidPath, bool useStdio, ILogger? logger = null)
     : ILogger, IDisposable

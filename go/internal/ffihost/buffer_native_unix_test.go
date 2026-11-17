@@ -1,4 +1,4 @@
-//go:build copilot_inprocess && (darwin || linux)
+//go:build copilot_inprocess && !copilot_no_inprocess && (darwin || linux)
 
 package ffihost
 

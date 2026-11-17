@@ -4,7 +4,7 @@
 # Snapshot the Copilot CLI version + per-platform SHA-256 hashes for the
 # rust crate's bundled-CLI build.rs. Runs at SDK publish time, mirroring
 # how .NET's _GenerateVersionProps BeforeTargets="Pack" target writes
-# GitHub.Copilot.SDK.props before NuGet packing.
+# Microsoft.Copilot.SDK.props before NuGet packing.
 #
 # Input:
 #   - ../nodejs/package.json - pinned release version.

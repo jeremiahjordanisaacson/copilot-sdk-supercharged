@@ -46,7 +46,7 @@ WIRE_REQUEST = {
 
 
 def _client() -> CopilotClient:
-    return CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    return CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234))
 
 
 def _session_awaiting_cancel() -> tuple[CopilotSession, asyncio.Event]:
@@ -427,7 +427,9 @@ class TestShellAuthenticationHandler:
 class TestShellAuthenticationWireFlag:
     @pytest.mark.asyncio
     async def test_requests_shell_authentication_only_with_a_handler(self):
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
         try:
             captured: list[tuple[str, dict]] = []
@@ -439,19 +441,27 @@ class TestShellAuthenticationWireFlag:
 
             client._client.request = mock_request
 
-            await client.create_session(on_permission_request=PermissionHandler.approve_all)
+            await client.create_session(permissions={"on_request": PermissionHandler.approve_all})
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                on_shell_authentication_request=lambda _request, _invocation: {"action": "cancel"},
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "on_shell_authentication_request": lambda _request, _invocation: {
+                        "action": "cancel"
+                    }
+                },
             )
             await client.resume_session(
                 session.session_id,
-                on_permission_request=PermissionHandler.approve_all,
-                on_shell_authentication_request=lambda _request, _invocation: {"action": "cancel"},
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "on_shell_authentication_request": lambda _request, _invocation: {
+                        "action": "cancel"
+                    }
+                },
             )
 
             flags = [
-                (method, params.get("requestShellAuthentication"))
+                (method, params.get("interaction", {}).get("requestShellAuthentication"))
                 for method, params in captured
                 if method in ("session.create", "session.resume")
             ]

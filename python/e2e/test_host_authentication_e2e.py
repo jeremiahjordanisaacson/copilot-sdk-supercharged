@@ -58,20 +58,23 @@ async def boundary():
 
     def client():
         instance = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=get_cli_path_for_tests()),
-            working_directory=str(work),
-            use_logged_in_user=False,
-            env={
-                **os.environ,
-                "COPILOT_HOME": str(home),
-                "HOME": str(home),
-                "USERPROFILE": str(home),
-                "GH_TOKEN": "",
-                "GITHUB_TOKEN": "",
-                "COPILOT_GITHUB_TOKEN": "",
-                "COPILOT_HMAC_KEY": "",
-                "CAPI_HMAC_KEY": "",
-            },
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=get_cli_path_for_tests(),
+                working_directory=str(work),
+                env={
+                    **os.environ,
+                    "COPILOT_HOME": str(home),
+                    "HOME": str(home),
+                    "USERPROFILE": str(home),
+                    "GH_TOKEN": "",
+                    "GITHUB_TOKEN": "",
+                    "COPILOT_GITHUB_TOKEN": "",
+                    "COPILOT_HMAC_KEY": "",
+                    "CAPI_HMAC_KEY": "",
+                },
+            ),
+            github={"use_logged_in_user": False},
         )
         clients.append(instance)
         return instance
@@ -177,13 +180,24 @@ async def test_byok_create_and_cold_resume_trust_admission_identity(boundary, mo
             mode, "owner" if mode == "custom" else None
         )
         assert "authentication" not in request.config
-        assert "github_token" not in request.config
+        assert "token" not in request.config.get("github", {})
         config = {
             **request.config,
-            "provider": provider,
+            "inference": {
+                **request.config.get("inference", {}),
+                "default_provider": "byok",
+                "providers": [{"name": "byok", **provider}],
+            },
+            "github": {**request.config.get("github", {}), "capi": {"enabled": False}},
             "model": "local-model",
-            "extension_sdk_path": str(Path(__file__).parents[2] / "nodejs/dist"),
-            "on_permission_request": PermissionHandler.approve_all,
+            "extensions": {
+                **request.config.get("extensions", {}),
+                "sdk_path": str(Path(__file__).parents[2] / "nodejs/dist"),
+            },
+            "permissions": {
+                **request.config.get("permissions", {}),
+                "on_request": PermissionHandler.approve_all,
+            },
         }
         session = (
             await owner.resume_session(request.session_id, **config)

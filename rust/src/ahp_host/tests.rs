@@ -96,7 +96,13 @@ fn fixture() -> (Client, Peer) {
     let (client_write, read) = duplex(1 << 20);
     let (write, client_read) = duplex(1 << 20);
     (
-        Client::from_streams(client_read, client_write, PathBuf::from(".")).unwrap(),
+        Client::from_streams(
+            crate::ClientMode::CodingAgent,
+            client_read,
+            client_write,
+            PathBuf::from("."),
+        )
+        .unwrap(),
         Peer { read, write },
     )
 }

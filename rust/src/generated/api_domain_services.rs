@@ -641,69 +641,15 @@ pub(crate) struct AgentsCustomAgentInitialModelDecisionResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentsDiscoverRequest {
+    /// Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without ambient discovery, subject to managed/source disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_directories: Option<Vec<String>>,
     /// When true, omit the host's agents (the user-level agent directory and all plugin agents), leaving only project and remote agents. For multitenant deployments.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exclude_host_agents: Option<bool>,
     /// Optional list of project directory paths to scan for project-scoped agents. When omitted or empty, no project is scanned: user-level and globally enabled plugin agents are still returned, but agents of a plugin enabled only in a repository's settings are not.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_paths: Option<Vec<String>>,
-}
-
-/// Extensible [`AgentsDiscoverRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`AgentsDiscoverOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentsDiscoverOptions {
-    #[serde(flatten)]
-    legacy: AgentsDiscoverRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    agent_directories: Option<Vec<String>>,
-}
-
-impl AgentsDiscoverOptions {
-    /// Creates options with the required inputs.
-    pub fn new() -> Self {
-        Self {
-            legacy: AgentsDiscoverRequest {
-                project_paths: None,
-                exclude_host_agents: None,
-            },
-            agent_directories: None,
-        }
-    }
-
-    /// Optional list of project directory paths to scan for project-scoped agents. When omitted or empty, no project is scanned: user-level and globally enabled plugin agents are still returned, but agents of a plugin enabled only in a repository's settings are not.
-    pub fn project_paths(mut self, value: Vec<String>) -> Self {
-        self.legacy.project_paths = Some(value);
-        self
-    }
-
-    /// When true, omit the host's agents (the user-level agent directory and all plugin agents), leaving only project and remote agents. For multitenant deployments.
-    pub fn exclude_host_agents(mut self, value: bool) -> Self {
-        self.legacy.exclude_host_agents = Some(value);
-        self
-    }
-
-    /// Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without ambient discovery, subject to managed/source disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
-    pub fn agent_directories(mut self, value: Vec<String>) -> Self {
-        self.agent_directories = Some(value);
-        self
-    }
-}
-
-impl Default for AgentsDiscoverOptions {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Name of the custom agent to select for subsequent turns.
@@ -898,69 +844,15 @@ pub(crate) struct AgentsGetBuiltinsResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentsGetDiscoveryPathsRequest {
+    /// Explicit discovery-only agent roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_directories: Option<Vec<String>>,
     /// When true, omit the host's user-level agent directory, leaving only project directories. For multitenant deployments (mirrors `discover`'s `excludeHostAgents`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exclude_host_agents: Option<bool>,
     /// Optional list of project directory paths. When omitted or empty, only the user-level directory is returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_paths: Option<Vec<String>>,
-}
-
-/// Extensible [`AgentsGetDiscoveryPathsRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`AgentsGetDiscoveryPathsOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentsGetDiscoveryPathsOptions {
-    #[serde(flatten)]
-    legacy: AgentsGetDiscoveryPathsRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    agent_directories: Option<Vec<String>>,
-}
-
-impl AgentsGetDiscoveryPathsOptions {
-    /// Creates options with the required inputs.
-    pub fn new() -> Self {
-        Self {
-            legacy: AgentsGetDiscoveryPathsRequest {
-                project_paths: None,
-                exclude_host_agents: None,
-            },
-            agent_directories: None,
-        }
-    }
-
-    /// Optional list of project directory paths. When omitted or empty, only the user-level directory is returned.
-    pub fn project_paths(mut self, value: Vec<String>) -> Self {
-        self.legacy.project_paths = Some(value);
-        self
-    }
-
-    /// When true, omit the host's user-level agent directory, leaving only project directories. For multitenant deployments (mirrors `discover`'s `excludeHostAgents`).
-    pub fn exclude_host_agents(mut self, value: bool) -> Self {
-        self.legacy.exclude_host_agents = Some(value);
-        self
-    }
-
-    /// Explicit discovery-only agent roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.
-    pub fn agent_directories(mut self, value: Vec<String>) -> Self {
-        self.agent_directories = Some(value);
-        self
-    }
-}
-
-impl Default for AgentsGetDiscoveryPathsOptions {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Request to add a model to the server-owned saved provider configuration.
@@ -3079,6 +2971,9 @@ pub struct CatalogSearchPage {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogSearchRequest {
+    /// Restrict results to resources in at least one of these server-defined workflow categories, such as `design` or `test`. Requires the `catalog-search-categories` capability. Each value is a lowercase slug; the known set is not exhaustive, and a category the server does not recognise matches nothing. Omit to search every category.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub categories: Option<Vec<String>>,
     /// Protocol version and capabilities the caller requires.
     pub contract: CatalogClientContract,
     /// Restrict results to these candidate kinds. Agent Plugins are opt-in and require the `agent-plugin-discovery` capability so protocol-v3 clients generated before that variant cannot receive an unknown result; when omitted, the backwards-compatible MCP server and AI skill kinds are searched.
@@ -3090,78 +2985,12 @@ pub struct CatalogSearchRequest {
     /// Numbered navigation using metadata from an earlier response. Requires catalog-search-pagination and the same query, kinds, categories and effective limit. Omit for a fresh first-page search.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<CatalogSearchPage>,
-    /// Free-text search query. Persisted as tool input for session continuity, but omitted from telemetry.
-    pub query: String,
-}
-
-/// Extensible [`CatalogSearchRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`CatalogSearchOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CatalogSearchOptions {
-    #[serde(flatten)]
-    legacy: CatalogSearchRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    categories: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    policy_session_id: Option<String>,
-}
-
-impl CatalogSearchOptions {
-    /// Creates options with the required inputs.
-    pub fn new(contract: CatalogClientContract, query: impl Into<String>) -> Self {
-        Self {
-            legacy: CatalogSearchRequest {
-                contract,
-                query: query.into(),
-                limit: None,
-                kinds: None,
-                page: None,
-            },
-            categories: None,
-            policy_session_id: None,
-        }
-    }
-
-    /// Maximum number of candidates to return. Defaults to 10 when omitted.
-    pub fn limit(mut self, value: i32) -> Self {
-        self.legacy.limit = Some(value);
-        self
-    }
-
-    /// Restrict results to these candidate kinds. Agent Plugins are opt-in and require the `agent-plugin-discovery` capability so protocol-v3 clients generated before that variant cannot receive an unknown result; when omitted, the backwards-compatible MCP server and AI skill kinds are searched.
-    pub fn kinds(mut self, value: Vec<CatalogCandidateKind>) -> Self {
-        self.legacy.kinds = Some(value);
-        self
-    }
-
-    /// Numbered navigation using metadata from an earlier response. Requires catalog-search-pagination and the same query, kinds, categories and effective limit. Omit for a fresh first-page search.
-    pub fn page(mut self, value: CatalogSearchPage) -> Self {
-        self.legacy.page = Some(value);
-        self
-    }
-
-    /// Restrict results to resources in at least one of these server-defined workflow categories, such as `design` or `test`. Requires the `catalog-search-categories` capability. Each value is a lowercase slug; the known set is not exhaustive, and a category the server does not recognise matches nothing. Omit to search every category.
-    pub fn categories(mut self, value: Vec<String>) -> Self {
-        self.categories = Some(value);
-        self
-    }
-
     /// Select an existing attached local session. Requires authenticated, session-bound search.
     /// The runtime never creates, resumes or reconfigures a session to honour this selector.
-    pub fn policy_session_id(mut self, value: impl Into<String>) -> Self {
-        self.policy_session_id = Some(value.into());
-        self
-    }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_session_id: Option<String>,
+    /// Free-text search query. Persisted as tool input for session continuity, but omitted from telemetry.
+    pub query: String,
 }
 
 /// A completed catalog search containing inert candidate summaries. MCP server and AI skill variants carry a single-use handle; the Agent Plugin variant is handleless.
@@ -4665,54 +4494,12 @@ pub struct ConnectorDiscoveryCatalogResult {
 pub struct ConnectorReconcileRequest {
     /// Opaque account selection ID. It must match the account already pinned to the session, if any.
     pub account_id: String,
+    /// Optional Connector name to reinitialize. Requires the targetedReconcile capability.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub force_connector_name: Option<String>,
     /// When true, refresh the catalog before reconciling. A disabled Connector API performs no service request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_catalog: Option<bool>,
-}
-
-/// Extensible [`ConnectorReconcileRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`ConnectorReconcileOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConnectorReconcileOptions {
-    #[serde(flatten)]
-    legacy: ConnectorReconcileRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    force_connector_name: Option<String>,
-}
-
-impl ConnectorReconcileOptions {
-    /// Creates options with the required inputs.
-    pub fn new(account_id: impl Into<String>) -> Self {
-        Self {
-            legacy: ConnectorReconcileRequest {
-                account_id: account_id.into(),
-                refresh_catalog: None,
-            },
-            force_connector_name: None,
-        }
-    }
-
-    /// When true, refresh the catalog before reconciling. A disabled Connector API performs no service request.
-    pub fn refresh_catalog(mut self, value: bool) -> Self {
-        self.legacy.refresh_catalog = Some(value);
-        self
-    }
-
-    /// Optional Connector name to reinitialize. Requires the targetedReconcile capability.
-    pub fn force_connector_name(mut self, value: impl Into<String>) -> Self {
-        self.force_connector_name = Some(value.into());
-        self
-    }
 }
 
 /// Remote session connection parameters.
@@ -4746,6 +4533,9 @@ pub struct EntraAuthConfig {
     /// Application name reported by OneAuth to Microsoft Auth Telemetry System (MATS). Omit or leave blank to disable MATS telemetry without disabling authentication. OneAuth normalizes the name and may group applications into shared event tables.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mats_app_name: Option<String>,
+    /// Native OneAuth application descriptor ID. Omit or leave blank to use clientId. This does not change the OAuth client ID or isolate accounts from other applications.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub one_auth_application_id: Option<String>,
 }
 
 /// Connection-level opt-ins for the `server.connect` handshake. Transport authentication is consumed by the native protocol boundary before dispatch.
@@ -5831,108 +5621,12 @@ pub struct EventLogReadRequest {
     /// Either '*' to receive all event types, or a non-empty list of event types to receive
     #[serde(skip_serializing_if = "Option::is_none")]
     pub types: Option<serde_json::Value>,
+    /// Event stream to read. 'history' (default) returns original events and lazily follows predecessor journals, excluding checkpoint copies. 'replay' reads only the active replay head, including checkpoint state, without opening predecessor journals. Use replay for current state and fast transcript previews; use history to reconstruct the original visible transcript. Cursors must remain within the view that produced them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<EventsReadView>,
     /// Milliseconds to wait for new events when the cursor is at the tail of history. 0 (default) returns immediately even if no events are available. Capped at 30000ms. Ephemeral events that arrive during the wait are delivered in this batch but are NOT replayable on a subsequent read (use a non-zero waitMs in your next call to capture future ephemerals as they happen). This applies to forward reads only: a backward read always returns immediately and ignores `waitMs`, because backward paging covers persisted history only while new events append at the tail (the opposite end from a backward page), so no blocking or ephemeral delivery can occur.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_ms: Option<i32>,
-}
-
-/// Extensible [`EventLogReadRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`EventLogReadOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EventLogReadOptions {
-    #[serde(flatten)]
-    legacy: EventLogReadRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    view: Option<EventsReadView>,
-}
-
-impl EventLogReadOptions {
-    /// Creates options with the required inputs.
-    pub fn new() -> Self {
-        Self {
-            legacy: EventLogReadRequest {
-                cursor: None,
-                max: None,
-                wait_ms: None,
-                types: None,
-                agent_scope: None,
-                agent_ids: None,
-                direction: None,
-                include_ephemeral: None,
-            },
-            view: None,
-        }
-    }
-
-    /// Opaque cursor returned by a previous read in the same view. Omit on the first call to start from the beginning of the selected view.
-    pub fn cursor(mut self, value: impl Into<String>) -> Self {
-        self.legacy.cursor = Some(value.into());
-        self
-    }
-
-    /// Maximum number of events to return in this batch (1–1000, default 200).
-    pub fn max(mut self, value: i64) -> Self {
-        self.legacy.max = Some(value);
-        self
-    }
-
-    /// Milliseconds to wait for new events when the cursor is at the tail of history. 0 (default) returns immediately even if no events are available. Capped at 30000ms. Ephemeral events that arrive during the wait are delivered in this batch but are NOT replayable on a subsequent read (use a non-zero waitMs in your next call to capture future ephemerals as they happen). This applies to forward reads only: a backward read always returns immediately and ignores `waitMs`, because backward paging covers persisted history only while new events append at the tail (the opposite end from a backward page), so no blocking or ephemeral delivery can occur.
-    pub fn wait_ms(mut self, value: i32) -> Self {
-        self.legacy.wait_ms = Some(value);
-        self
-    }
-
-    /// Either '*' to receive all event types, or a non-empty list of event types to receive
-    pub fn types(mut self, value: serde_json::Value) -> Self {
-        self.legacy.types = Some(value);
-        self
-    }
-
-    /// Agent-scope filter: 'primary' returns only main-agent events plus events whose type starts with 'subagent.' (matching the typed-subscription default behavior); 'all' returns events from all agents (matching wildcard-subscription behavior). Default is 'all' to preserve wildcard semantics for catch-up callers.
-    pub fn agent_scope(mut self, value: EventsAgentScope) -> Self {
-        self.legacy.agent_scope = Some(value);
-        self
-    }
-
-    /// Optional non-empty list of subagent identifiers. When provided, only events owned by one of these agents are returned; ownership recognizes the event envelope's agentId plus legacy data.agentId and data.parentToolCallId markers. This filter takes precedence over agentScope.
-    pub fn agent_ids(mut self, value: Vec<String>) -> Self {
-        self.legacy.agent_ids = Some(value);
-        self
-    }
-
-    /// Direction to page through the session's persisted event history. 'forward' (default) pages from the cursor toward newer events (or from the start of history when no cursor is given). 'backward' enables tail-first reads: with no cursor it returns the NEWEST `max` events, and the returned cursor pages toward OLDER events on subsequent backward reads. Events within a returned batch are always in chronological (oldest-to-newest) order, even for a backward read. Backward reads cover PERSISTED history only; ephemeral events are never returned by a backward read. `direction` selects the INITIAL read only: the returned cursor is self-describing, so a continuation read pages in the cursor's own direction regardless of the `direction` passed alongside it — a forward cursor always pages forward and a backward cursor always pages backward. Pass the direction that matches the cursor to avoid confusion.
-    pub fn direction(mut self, value: EventsReadDirection) -> Self {
-        self.legacy.direction = Some(value);
-        self
-    }
-
-    /// When false, skip ephemeral events entirely and return only durable (persisted) events. History-backfill callers that discard ephemerals anyway should set this so the read is bounded by the durable log length instead of racing the ephemeral ring on a busy session. Defaults to true (ephemerals are interleaved with durable events in creation order). Ignored by backward reads, which always cover persisted history only.
-    pub fn include_ephemeral(mut self, value: bool) -> Self {
-        self.legacy.include_ephemeral = Some(value);
-        self
-    }
-
-    /// Event stream to read. 'history' (default) returns original events and lazily follows predecessor journals, excluding checkpoint copies. 'replay' reads only the active replay head, including checkpoint state, without opening predecessor journals. Use replay for current state and fast transcript previews; use history to reconstruct the original visible transcript. Cursors must remain within the view that produced them.
-    pub fn view(mut self, value: EventsReadView) -> Self {
-        self.view = Some(value);
-        self
-    }
-}
-
-impl Default for EventLogReadOptions {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Indicates whether the operation succeeded.
@@ -7210,66 +6904,12 @@ pub struct HooksDiscoverRequest {
     /// When true, omit host-owned user and plugin hook rows and their diagnostics. Managed-policy hooks and trusted repository hooks remain visible, and host disabledHooks still contribute to each remaining row's effective enabled state. This filters sources rather than simulating a host with no settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exclude_host_hooks: Option<bool>,
+    /// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without ambient discovery or repository file-hook enablement, subject to managed/hook disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_directories: Option<Vec<String>>,
     /// Optional project directory paths whose trusted repository and project-expanded plugin hooks should be discovered. When omitted or empty, user, managed-policy, and globally enabled installed or explicit plugin hooks are returned without project expansion.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_paths: Option<Vec<String>>,
-}
-
-/// Extensible [`HooksDiscoverRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`HooksDiscoverOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HooksDiscoverOptions {
-    #[serde(flatten)]
-    legacy: HooksDiscoverRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hook_directories: Option<Vec<String>>,
-}
-
-impl HooksDiscoverOptions {
-    /// Creates options with the required inputs.
-    pub fn new() -> Self {
-        Self {
-            legacy: HooksDiscoverRequest {
-                project_paths: None,
-                exclude_host_hooks: None,
-            },
-            hook_directories: None,
-        }
-    }
-
-    /// Optional project directory paths whose trusted repository and project-expanded plugin hooks should be discovered. When omitted or empty, user, managed-policy, and globally enabled installed or explicit plugin hooks are returned without project expansion.
-    pub fn project_paths(mut self, value: Vec<String>) -> Self {
-        self.legacy.project_paths = Some(value);
-        self
-    }
-
-    /// When true, omit host-owned user and plugin hook rows and their diagnostics. Managed-policy hooks and trusted repository hooks remain visible, and host disabledHooks still contribute to each remaining row's effective enabled state. This filters sources rather than simulating a host with no settings.
-    pub fn exclude_host_hooks(mut self, value: bool) -> Self {
-        self.legacy.exclude_host_hooks = Some(value);
-        self
-    }
-
-    /// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without ambient discovery or repository file-hook enablement, subject to managed/hook disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
-    pub fn hook_directories(mut self, value: Vec<String>) -> Self {
-        self.hook_directories = Some(value);
-        self
-    }
-}
-
-impl Default for HooksDiscoverOptions {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Server-discovered hook actions and partial-load diagnostics from user, repository, plugin, and managed-policy sources. Concrete sessions may include additional session-specific hook sources.
@@ -7809,6 +7449,15 @@ pub struct HostSetSessionCreationPolicyRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostStartRequest {
+    /// Whether remote clients may create new sessions. Defaults to denied when omitted. Does not restrict owner work, publication, or existing sessions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_creating_new_sessions: Option<bool>,
+    /// Explicit admission policy, required by the runtime before hosting. Optional in the wire DTO only to preserve generated client construction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authentication: Option<serde_json::Value>,
+    /// Stable application identity selecting its durable host catalog. Defaults to the persisted runtime compute GUID; must agree with githubEnvironment.computeId when both are supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compute_id: Option<String>,
     /// Registers a GitHub Mission Control environment and enables its relay transport.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_environment: Option<HostGitHubEnvironmentOptions>,
@@ -7823,99 +7472,9 @@ pub struct HostStartRequest {
     /// Ask the owning SDK application to materialize AHP sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_factory: Option<bool>,
-}
-
-/// Extensible [`HostStartRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`HostStartOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HostStartOptions {
-    #[serde(flatten)]
-    legacy: HostStartRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    allow_creating_new_sessions: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    authentication: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    compute_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    workspace: Option<String>,
-}
-
-impl HostStartOptions {
-    /// Creates options with the required inputs.
-    pub fn new(host_id: impl Into<String>) -> Self {
-        Self {
-            legacy: HostStartRequest {
-                host_id: host_id.into(),
-                local_server: None,
-                github_environment: None,
-                session_factory: None,
-                resume_factory: None,
-            },
-            allow_creating_new_sessions: None,
-            authentication: None,
-            compute_id: None,
-            workspace: None,
-        }
-    }
-
-    /// Enables a local WebSocket listener.
-    pub fn local_server(mut self, value: HostLocalServerOptions) -> Self {
-        self.legacy.local_server = Some(value);
-        self
-    }
-
-    /// Registers a GitHub Mission Control environment and enables its relay transport.
-    pub fn github_environment(mut self, value: HostGitHubEnvironmentOptions) -> Self {
-        self.legacy.github_environment = Some(value);
-        self
-    }
-
-    /// Ask the owning SDK application to materialize AHP sessions.
-    pub fn session_factory(mut self, value: bool) -> Self {
-        self.legacy.session_factory = Some(value);
-        self
-    }
-
-    /// Ask the owning application to resume its durable AHP sessions.
-    pub fn resume_factory(mut self, value: bool) -> Self {
-        self.legacy.resume_factory = Some(value);
-        self
-    }
-
-    /// Whether remote clients may create new sessions. Defaults to denied when omitted. Does not restrict owner work, publication, or existing sessions.
-    pub fn allow_creating_new_sessions(mut self, value: bool) -> Self {
-        self.allow_creating_new_sessions = Some(value);
-        self
-    }
-
-    /// Explicit admission policy, required by the runtime before hosting. Optional in the wire DTO only to preserve generated client construction.
-    pub fn authentication(mut self, value: serde_json::Value) -> Self {
-        self.authentication = Some(value);
-        self
-    }
-
-    /// Stable application identity selecting its durable host catalog. Defaults to the persisted runtime compute GUID; must agree with githubEnvironment.computeId when both are supplied.
-    pub fn compute_id(mut self, value: impl Into<String>) -> Self {
-        self.compute_id = Some(value.into());
-        self
-    }
-
     /// Absolute directory on the runtime host to serve through AHP. Defaults to the runtime's configured working directory. Does not change process or session working directories.
-    pub fn workspace(mut self, value: impl Into<String>) -> Self {
-        self.workspace = Some(value.into());
-        self
-    }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 /// Listener readiness, returned only after binding and the supervised participant's SDK handshake.
@@ -8185,66 +7744,12 @@ pub struct InstructionsDiscoverRequest {
     /// When true, omit the host's instruction sources (user/home-level files and plugin rules), leaving only repository and working-directory sources. For multitenant deployments.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exclude_host_instructions: Option<bool>,
+    /// Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without ambient discovery, subject to instruction/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction_directories: Option<Vec<String>>,
     /// Optional list of project directory paths to scan for repository/working-directory instruction sources. When omitted or empty, only user-level and plugin instruction sources are returned (no project scan).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_paths: Option<Vec<String>>,
-}
-
-/// Extensible [`InstructionsDiscoverRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`InstructionsDiscoverOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InstructionsDiscoverOptions {
-    #[serde(flatten)]
-    legacy: InstructionsDiscoverRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    instruction_directories: Option<Vec<String>>,
-}
-
-impl InstructionsDiscoverOptions {
-    /// Creates options with the required inputs.
-    pub fn new() -> Self {
-        Self {
-            legacy: InstructionsDiscoverRequest {
-                project_paths: None,
-                exclude_host_instructions: None,
-            },
-            instruction_directories: None,
-        }
-    }
-
-    /// Optional list of project directory paths to scan for repository/working-directory instruction sources. When omitted or empty, only user-level and plugin instruction sources are returned (no project scan).
-    pub fn project_paths(mut self, value: Vec<String>) -> Self {
-        self.legacy.project_paths = Some(value);
-        self
-    }
-
-    /// When true, omit the host's instruction sources (user/home-level files and plugin rules), leaving only repository and working-directory sources. For multitenant deployments.
-    pub fn exclude_host_instructions(mut self, value: bool) -> Self {
-        self.legacy.exclude_host_instructions = Some(value);
-        self
-    }
-
-    /// Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without ambient discovery, subject to instruction/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
-    pub fn instruction_directories(mut self, value: Vec<String>) -> Self {
-        self.instruction_directories = Some(value);
-        self
-    }
-}
-
-impl Default for InstructionsDiscoverOptions {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Optional project paths to include when enumerating instruction discovery targets.
@@ -8261,66 +7766,12 @@ pub struct InstructionsGetDiscoveryPathsRequest {
     /// When true, omit the host's user-level instruction targets, leaving only repository targets. For multitenant deployments (mirrors `discover`'s `excludeHostInstructions`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exclude_host_instructions: Option<bool>,
+    /// Explicit discovery-only instruction roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction_directories: Option<Vec<String>>,
     /// Optional list of project directory paths. When omitted or empty, only the user-level targets are returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_paths: Option<Vec<String>>,
-}
-
-/// Extensible [`InstructionsGetDiscoveryPathsRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`InstructionsGetDiscoveryPathsOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InstructionsGetDiscoveryPathsOptions {
-    #[serde(flatten)]
-    legacy: InstructionsGetDiscoveryPathsRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    instruction_directories: Option<Vec<String>>,
-}
-
-impl InstructionsGetDiscoveryPathsOptions {
-    /// Creates options with the required inputs.
-    pub fn new() -> Self {
-        Self {
-            legacy: InstructionsGetDiscoveryPathsRequest {
-                project_paths: None,
-                exclude_host_instructions: None,
-            },
-            instruction_directories: None,
-        }
-    }
-
-    /// Optional list of project directory paths. When omitted or empty, only the user-level targets are returned.
-    pub fn project_paths(mut self, value: Vec<String>) -> Self {
-        self.legacy.project_paths = Some(value);
-        self
-    }
-
-    /// When true, omit the host's user-level instruction targets, leaving only repository targets. For multitenant deployments (mirrors `discover`'s `excludeHostInstructions`).
-    pub fn exclude_host_instructions(mut self, value: bool) -> Self {
-        self.legacy.exclude_host_instructions = Some(value);
-        self
-    }
-
-    /// Explicit discovery-only instruction roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.
-    pub fn instruction_directories(mut self, value: Vec<String>) -> Self {
-        self.instruction_directories = Some(value);
-        self
-    }
-}
-
-impl Default for InstructionsGetDiscoveryPathsOptions {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Instruction sources loaded for the session, in merge order.
@@ -9641,62 +9092,12 @@ pub struct MetadataContextInfoRequest {
     /// Provider owning selectedModel. Omit to use the current provider for the current model, or deterministic legacy lookup for a different model.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    /// Whether a zero outputTokenLimit may resolve a live provider's request cap. Defaults to true. Set false for a cached-only measurement that must not start a managed provider; capacity values use advertised limits, while occupied token counts are unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolve_output_token_limit: Option<bool>,
     /// Model identifier used for tokenization. Omit to use the session default. Used both for token counting and to compute display values.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selected_model: Option<String>,
-}
-
-/// Extensible [`MetadataContextInfoRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`MetadataContextInfoOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MetadataContextInfoOptions {
-    #[serde(flatten)]
-    legacy: MetadataContextInfoRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    resolve_output_token_limit: Option<bool>,
-}
-
-impl MetadataContextInfoOptions {
-    /// Creates options with the required inputs.
-    pub fn new(prompt_token_limit: i64, output_token_limit: i64) -> Self {
-        Self {
-            legacy: MetadataContextInfoRequest {
-                prompt_token_limit,
-                output_token_limit,
-                selected_model: None,
-                provider_id: None,
-            },
-            resolve_output_token_limit: None,
-        }
-    }
-
-    /// Model identifier used for tokenization. Omit to use the session default. Used both for token counting and to compute display values.
-    pub fn selected_model(mut self, value: impl Into<String>) -> Self {
-        self.legacy.selected_model = Some(value.into());
-        self
-    }
-
-    /// Provider owning selectedModel. Omit to use the current provider for the current model, or deterministic legacy lookup for a different model.
-    pub fn provider_id(mut self, value: impl Into<String>) -> Self {
-        self.legacy.provider_id = Some(value.into());
-        self
-    }
-
-    /// Whether a zero outputTokenLimit may resolve a live provider's request cap. Defaults to true. Set false for a cached-only measurement that must not start a managed provider; capacity values use advertised limits, while occupied token counts are unchanged.
-    pub fn resolve_output_token_limit(mut self, value: bool) -> Self {
-        self.resolve_output_token_limit = Some(value);
-        self
-    }
 }
 
 /// Token-usage breakdown for the session's current context window
@@ -10254,6 +9655,9 @@ pub struct NetworkResolveProxyResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkSetProviderRequest {
+    /// Present when the client answers `network.authenticateBasic`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authenticate_basic: Option<NetworkAuthenticateBasicOptions>,
     /// Present when the client answers `network.authenticateNegotiate`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authenticate_negotiate: Option<NetworkAuthenticateNegotiateOptions>,
@@ -10263,70 +9667,6 @@ pub struct NetworkSetProviderRequest {
     /// Traffic the callbacks serve; defaults to `connection`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<NetworkScope>,
-}
-
-/// Extensible [`NetworkSetProviderRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`NetworkSetProviderOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NetworkSetProviderOptions {
-    #[serde(flatten)]
-    legacy: NetworkSetProviderRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    authenticate_basic: Option<NetworkAuthenticateBasicOptions>,
-}
-
-impl NetworkSetProviderOptions {
-    /// Creates options with the required inputs.
-    pub fn new() -> Self {
-        Self {
-            legacy: NetworkSetProviderRequest {
-                scope: None,
-                resolve_proxy: None,
-                authenticate_negotiate: None,
-            },
-            authenticate_basic: None,
-        }
-    }
-
-    /// Traffic the callbacks serve; defaults to `connection`.
-    pub fn scope(mut self, value: NetworkScope) -> Self {
-        self.legacy.scope = Some(value);
-        self
-    }
-
-    /// Present when the client answers `network.resolveProxy`.
-    pub fn resolve_proxy(mut self, value: NetworkResolveProxyOptions) -> Self {
-        self.legacy.resolve_proxy = Some(value);
-        self
-    }
-
-    /// Present when the client answers `network.authenticateNegotiate`.
-    pub fn authenticate_negotiate(mut self, value: NetworkAuthenticateNegotiateOptions) -> Self {
-        self.legacy.authenticate_negotiate = Some(value);
-        self
-    }
-
-    /// Present when the client answers `network.authenticateBasic`.
-    pub fn authenticate_basic(mut self, value: NetworkAuthenticateBasicOptions) -> Self {
-        self.authenticate_basic = Some(value);
-        self
-    }
-}
-
-impl Default for NetworkSetProviderOptions {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// External tool calls still waiting for a result.
@@ -12210,6 +11550,9 @@ pub struct SendMessagesRequest {
     /// The UI mode the agent was in when these messages were sent. Defaults to the session's current mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_mode: Option<SendAgentMode>,
+    /// Opaque caller-chosen ID for the turn this batch starts. The runtime copies it unchanged into `params._meta["com.github.copilot/turnId"]` on every MCP `tools/call` the agent makes while serving that turn, including calls from sub-agents it spawns and from Autopilot continuations of it. Visible user steering (`mode: "immediate"`) that a running turn consumes hands it to a successor turn: the steering's value replaces the running turn's from the next model call onward, and steering without one clears it. System and hidden steering leave it unchanged. A turn started without one, including one the runtime starts itself, carries no turn ID. The `user.message` event for each message the send delivers echoes it as `clientTurnId` when the message is consumed, and is persisted like other events; the value stamped on MCP calls is held in memory only and is not restored on resume.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_turn_id: Option<String>,
     /// The user messages to append to the conversation, in order, before running one agent loop. When the batch starts a run, its final message is the primary initiating message; earlier messages provide context, not separate runs or replies. May be empty, in which case a single turn runs over the existing history with no new user message or originatingMessageId.
     pub messages: Vec<SendMessageItem>,
     /// How to deliver the messages. `enqueue` (default) appends to the message queue. `immediate` interjects during an in-progress turn.
@@ -12233,100 +11576,6 @@ pub struct SendMessagesRequest {
     /// If true, await completion of the agentic loop for this turn before returning. Defaults to false (fire-and-forget). When true, the result still contains the same `messageIds`; the caller can rely on the agent having processed the messages before the call resolves. Transport-dependent tail semantics: on a LOCAL (in-process) session the wait additionally blocks until the completed turn's event tail has been dispatched to this session's in-process subscribers, so a subsequent read of subscriber state already reflects the turn; on a REMOTE session the wait resolves once the loop completes and mirrored delivery follows over the wire. Callers that need the stronger local guarantee on remote sessions should await the event stream explicitly.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait: Option<bool>,
-}
-
-/// Extensible [`SendMessagesRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`SendMessagesOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SendMessagesOptions {
-    #[serde(flatten)]
-    legacy: SendMessagesRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    client_turn_id: Option<String>,
-}
-
-impl SendMessagesOptions {
-    /// Creates options with the required inputs.
-    pub fn new(messages: Vec<SendMessageItem>) -> Self {
-        Self {
-            legacy: SendMessagesRequest {
-                messages,
-                mode: None,
-                prepend: None,
-                agent_mode: None,
-                request_headers: None,
-                response_format: None,
-                traceparent: None,
-                tracestate: None,
-                wait: None,
-            },
-            client_turn_id: None,
-        }
-    }
-
-    /// How to deliver the messages. `enqueue` (default) appends to the message queue. `immediate` interjects during an in-progress turn.
-    pub fn mode(mut self, value: SendMode) -> Self {
-        self.legacy.mode = Some(value);
-        self
-    }
-
-    /// If true, adds the messages to the front of the queue instead of the end
-    pub fn prepend(mut self, value: bool) -> Self {
-        self.legacy.prepend = Some(value);
-        self
-    }
-
-    /// The UI mode the agent was in when these messages were sent. Defaults to the session's current mode.
-    pub fn agent_mode(mut self, value: SendAgentMode) -> Self {
-        self.legacy.agent_mode = Some(value);
-        self
-    }
-
-    /// Custom HTTP headers to include in outbound model requests for this turn. Merged with session-level provider headers; per-turn headers augment and overwrite session-level headers with the same key.
-    pub fn request_headers(mut self, value: HashMap<String, String>) -> Self {
-        self.legacy.request_headers = Some(value);
-        self
-    }
-
-    /// Provider-native output format for the whole turn, including an empty message batch and all tool-call iterations. Not inherited by later turns or subagents. Ordinary steering inherits the active format; specifying responseFormat with mode: immediate is an error, even while idle. Returned assistant content remains text; the runtime does not parse or validate it. Unsupported models or schemas produce provider errors.
-    pub fn response_format(mut self, value: SendMessagesRequestResponseFormat) -> Self {
-        self.legacy.response_format = Some(value);
-        self
-    }
-
-    /// W3C Trace Context traceparent header for distributed tracing of this agent turn
-    pub fn traceparent(mut self, value: impl Into<String>) -> Self {
-        self.legacy.traceparent = Some(value.into());
-        self
-    }
-
-    /// W3C Trace Context tracestate header for distributed tracing
-    pub fn tracestate(mut self, value: impl Into<String>) -> Self {
-        self.legacy.tracestate = Some(value.into());
-        self
-    }
-
-    /// If true, await completion of the agentic loop for this turn before returning. Defaults to false (fire-and-forget). When true, the result still contains the same `messageIds`; the caller can rely on the agent having processed the messages before the call resolves. Transport-dependent tail semantics: on a LOCAL (in-process) session the wait additionally blocks until the completed turn's event tail has been dispatched to this session's in-process subscribers, so a subsequent read of subscriber state already reflects the turn; on a REMOTE session the wait resolves once the loop completes and mirrored delivery follows over the wire. Callers that need the stronger local guarantee on remote sessions should await the event stream explicitly.
-    pub fn wait(mut self, value: bool) -> Self {
-        self.legacy.wait = Some(value);
-        self
-    }
-
-    /// Opaque caller-chosen ID for the turn this batch starts. The runtime copies it unchanged into `params._meta["com.github.copilot/turnId"]` on every MCP `tools/call` the agent makes while serving that turn, including calls from sub-agents it spawns and from Autopilot continuations of it. Visible user steering (`mode: "immediate"`) that a running turn consumes hands it to a successor turn: the steering's value replaces the running turn's from the next model call onward, and steering without one clears it. System and hidden steering leave it unchanged. A turn started without one, including one the runtime starts itself, carries no turn ID. The `user.message` event for each message the send delivers echoes it as `clientTurnId` when the message is consumed, and is persisted like other events; the value stamped on MCP calls is held in memory only and is not restored on resume.
-    pub fn client_turn_id(mut self, value: impl Into<String>) -> Self {
-        self.client_turn_id = Some(value.into());
-        self
-    }
 }
 
 /// Result of sending zero or more user messages
@@ -12373,6 +11622,9 @@ pub struct SendRequest {
     /// If false, this message will not trigger a Premium Request Unit charge. User messages default to billable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub billable: Option<bool>,
+    /// Opaque caller-chosen ID for the turn this message starts. The runtime copies it unchanged into `params._meta["com.github.copilot/turnId"]` on every MCP `tools/call` the agent makes while serving that turn, including calls from sub-agents it spawns and from Autopilot continuations of it. Visible user steering (`mode: "immediate"`) that a running turn consumes hands it to a successor turn: the steering's value replaces the running turn's from the next model call onward, and steering without one clears it. System and hidden steering leave it unchanged. A turn started without one, including one the runtime starts itself, carries no turn ID. The `user.message` event for each message the send delivers echoes it as `clientTurnId` when the message is consumed, and is persisted like other events; the value stamped on MCP calls is held in memory only and is not restored on resume.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_turn_id: Option<String>,
     /// If provided, this is shown in the timeline instead of `prompt`
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_prompt: Option<String>,
@@ -12406,135 +11658,6 @@ pub struct SendRequest {
     /// If true, await completion of the agentic loop for this message before returning. Defaults to false (fire-and-forget). When true, the result still contains the same `messageId`; the caller can rely on the agent having processed the message before the call resolves. Transport-dependent tail semantics: on a LOCAL (in-process) session the wait additionally blocks until the completed turn's event tail has been dispatched to this session's in-process subscribers, so a subsequent read of subscriber state already reflects the turn; on a REMOTE session the wait resolves once the loop completes and mirrored delivery follows over the wire. Callers that need the stronger local guarantee on remote sessions should await the event stream explicitly.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait: Option<bool>,
-}
-
-/// Extensible [`SendRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`SendOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SendOptions {
-    #[serde(flatten)]
-    legacy: SendRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    client_turn_id: Option<String>,
-}
-
-impl SendOptions {
-    /// Creates options with the required inputs.
-    pub fn new(prompt: impl Into<String>) -> Self {
-        Self {
-            legacy: SendRequest {
-                prompt: prompt.into(),
-                display_prompt: None,
-                attachments: None,
-                mode: None,
-                prepend: None,
-                billable: None,
-                required_tool: None,
-                source: None,
-                agent_mode: None,
-                request_headers: None,
-                response_format: None,
-                traceparent: None,
-                tracestate: None,
-                wait: None,
-            },
-            client_turn_id: None,
-        }
-    }
-
-    /// If provided, this is shown in the timeline instead of `prompt`
-    pub fn display_prompt(mut self, value: impl Into<String>) -> Self {
-        self.legacy.display_prompt = Some(value.into());
-        self
-    }
-
-    /// Optional attachments (files, directories, selections, blobs, GitHub references) to include with the message
-    pub fn attachments(mut self, value: Vec<serde_json::Value>) -> Self {
-        self.legacy.attachments = Some(value);
-        self
-    }
-
-    /// How to deliver the message. `enqueue` (default) appends to the message queue. `immediate` interjects during an in-progress turn.
-    pub fn mode(mut self, value: SendMode) -> Self {
-        self.legacy.mode = Some(value);
-        self
-    }
-
-    /// If true, adds the message to the front of the queue instead of the end
-    pub fn prepend(mut self, value: bool) -> Self {
-        self.legacy.prepend = Some(value);
-        self
-    }
-
-    /// If false, this message will not trigger a Premium Request Unit charge. User messages default to billable.
-    pub fn billable(mut self, value: bool) -> Self {
-        self.legacy.billable = Some(value);
-        self
-    }
-
-    /// If set, the request will fail if the named tool is not available when this message is among the user messages at the start of the current exchange
-    pub fn required_tool(mut self, value: impl Into<String>) -> Self {
-        self.legacy.required_tool = Some(value.into());
-        self
-    }
-
-    /// Optional provenance tag copied to the resulting user.message event. Must be `user`, `system`, `command-<command-id>` for command-originated messages, `schedule-<numeric-id>` for scheduled prompts, `agent-<agent-id>` for prompts sent by another agent, or `automation-<automation-id>` for turns a host sends on behalf of an automation the user configured. An automation turn defines the session's task like a user message but carries no human authority.
-    pub(crate) fn source(mut self, value: impl Into<String>) -> Self {
-        self.legacy.source = Some(value.into());
-        self
-    }
-
-    /// The UI mode the agent was in when this message was sent. Defaults to the session's current mode.
-    pub fn agent_mode(mut self, value: SendAgentMode) -> Self {
-        self.legacy.agent_mode = Some(value);
-        self
-    }
-
-    /// Custom HTTP headers to include in outbound model requests for this turn. Merged with session-level provider headers; per-turn headers augment and overwrite session-level headers with the same key.
-    pub fn request_headers(mut self, value: HashMap<String, String>) -> Self {
-        self.legacy.request_headers = Some(value);
-        self
-    }
-
-    /// Provider-native output format for this turn, including all tool-call iterations. Not inherited by later turns or subagents. Ordinary steering inherits the active format; specifying responseFormat with mode: immediate is an error, even while idle. Returned assistant content remains text; the runtime does not parse or validate it. Unsupported models or schemas produce provider errors.
-    pub fn response_format(mut self, value: SendRequestResponseFormat) -> Self {
-        self.legacy.response_format = Some(value);
-        self
-    }
-
-    /// W3C Trace Context traceparent header for distributed tracing of this agent turn
-    pub fn traceparent(mut self, value: impl Into<String>) -> Self {
-        self.legacy.traceparent = Some(value.into());
-        self
-    }
-
-    /// W3C Trace Context tracestate header for distributed tracing
-    pub fn tracestate(mut self, value: impl Into<String>) -> Self {
-        self.legacy.tracestate = Some(value.into());
-        self
-    }
-
-    /// If true, await completion of the agentic loop for this message before returning. Defaults to false (fire-and-forget). When true, the result still contains the same `messageId`; the caller can rely on the agent having processed the message before the call resolves. Transport-dependent tail semantics: on a LOCAL (in-process) session the wait additionally blocks until the completed turn's event tail has been dispatched to this session's in-process subscribers, so a subsequent read of subscriber state already reflects the turn; on a REMOTE session the wait resolves once the loop completes and mirrored delivery follows over the wire. Callers that need the stronger local guarantee on remote sessions should await the event stream explicitly.
-    pub fn wait(mut self, value: bool) -> Self {
-        self.legacy.wait = Some(value);
-        self
-    }
-
-    /// Opaque caller-chosen ID for the turn this message starts. The runtime copies it unchanged into `params._meta["com.github.copilot/turnId"]` on every MCP `tools/call` the agent makes while serving that turn, including calls from sub-agents it spawns and from Autopilot continuations of it. Visible user steering (`mode: "immediate"`) that a running turn consumes hands it to a successor turn: the steering's value replaces the running turn's from the next model call onward, and steering without one clears it. System and hidden steering leave it unchanged. A turn started without one, including one the runtime starts itself, carries no turn ID. The `user.message` event for each message the send delivers echoes it as `clientTurnId` when the message is consumed, and is persisted like other events; the value stamped on MCP calls is held in memory only and is not restored on resume.
-    pub fn client_turn_id(mut self, value: impl Into<String>) -> Self {
-        self.client_turn_id = Some(value.into());
-        self
-    }
 }
 
 /// Result of sending a user message
@@ -13564,46 +12687,13 @@ pub struct UIHandlePendingAutoModeSwitchRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIHandlePendingElicitationRequest {
+    /// Who answered and how. When it says a person answered interactively (`source` `human_response` with `responseCapability` `interactive`), the runtime records the answer as the person's own authority for Assisted Permissions, but only from the session's authenticated owning connection or the in-process host; an answer from any other caller settles without it. The runtime decides which answers carry authority. Omit for automated answers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_context: Option<PermissionDecisionContext>,
     /// The unique request ID from the elicitation.requested event
     pub request_id: RequestId,
     /// The elicitation response (accept with form values, decline, or cancel)
     pub result: UIElicitationResponse,
-}
-
-/// Extensible [`UIHandlePendingElicitationRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`UIHandlePendingElicitationOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UIHandlePendingElicitationOptions {
-    #[serde(flatten)]
-    legacy: UIHandlePendingElicitationRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    decision_context: Option<PermissionDecisionContext>,
-}
-
-impl UIHandlePendingElicitationOptions {
-    /// Creates options with the required inputs.
-    pub fn new(request_id: RequestId, result: UIElicitationResponse) -> Self {
-        Self {
-            legacy: UIHandlePendingElicitationRequest { request_id, result },
-            decision_context: None,
-        }
-    }
-
-    /// Who answered and how. When it says a person answered interactively (`source` `human_response` with `responseCapability` `interactive`), the runtime records the answer as the person's own authority for Assisted Permissions, but only from the session's authenticated owning connection or the in-process host; an answer from any other caller settles without it. The runtime decides which answers carry authority. Omit for automated answers.
-    pub fn decision_context(mut self, value: PermissionDecisionContext) -> Self {
-        self.decision_context = Some(value);
-        self
-    }
 }
 
 /// Request ID of a pending `exit_plan_mode.requested` event and the user's response.
@@ -13617,49 +12707,13 @@ impl UIHandlePendingElicitationOptions {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIHandlePendingExitPlanModeRequest {
+    /// Who answered and how. When it says a person answered interactively (`source` `human_response` with `responseCapability` `interactive`), the runtime records the answer as the person's own authority for Assisted Permissions, but only from the session's authenticated owning connection or the in-process host; an answer from any other caller settles without it. The runtime decides which answers carry authority. Omit for automated answers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_context: Option<PermissionDecisionContext>,
     /// The unique request ID from the exit_plan_mode.requested event
     pub request_id: RequestId,
     /// User response for a pending exit-plan-mode request, with approval state, selected action, auto-approve flag, and feedback.
     pub response: UIExitPlanModeResponse,
-}
-
-/// Extensible [`UIHandlePendingExitPlanModeRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`UIHandlePendingExitPlanModeOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UIHandlePendingExitPlanModeOptions {
-    #[serde(flatten)]
-    legacy: UIHandlePendingExitPlanModeRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    decision_context: Option<PermissionDecisionContext>,
-}
-
-impl UIHandlePendingExitPlanModeOptions {
-    /// Creates options with the required inputs.
-    pub fn new(request_id: RequestId, response: UIExitPlanModeResponse) -> Self {
-        Self {
-            legacy: UIHandlePendingExitPlanModeRequest {
-                request_id,
-                response,
-            },
-            decision_context: None,
-        }
-    }
-
-    /// Who answered and how. When it says a person answered interactively (`source` `human_response` with `responseCapability` `interactive`), the runtime records the answer as the person's own authority for Assisted Permissions, but only from the session's authenticated owning connection or the in-process host; an answer from any other caller settles without it. The runtime decides which answers carry authority. Omit for automated answers.
-    pub fn decision_context(mut self, value: PermissionDecisionContext) -> Self {
-        self.decision_context = Some(value);
-        self
-    }
 }
 
 /// Indicates whether the pending UI request was resolved by this call.
@@ -13773,49 +12827,13 @@ pub struct UIUserInputResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIHandlePendingUserInputRequest {
+    /// Who answered and how. When it says a person answered interactively (`source` `human_response` with `responseCapability` `interactive`), the runtime records the answer as the person's own authority for Assisted Permissions, but only from the session's authenticated owning connection or the in-process host; an answer from any other caller settles without it. The runtime decides which answers carry authority. Omit for automated answers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_context: Option<PermissionDecisionContext>,
     /// The unique request ID from the user_input.requested event
     pub request_id: RequestId,
     /// User response for a pending user-input request, with answer text and whether it was typed freeform.
     pub response: UIUserInputResponse,
-}
-
-/// Extensible [`UIHandlePendingUserInputRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`UIHandlePendingUserInputOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UIHandlePendingUserInputOptions {
-    #[serde(flatten)]
-    legacy: UIHandlePendingUserInputRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    decision_context: Option<PermissionDecisionContext>,
-}
-
-impl UIHandlePendingUserInputOptions {
-    /// Creates options with the required inputs.
-    pub fn new(request_id: RequestId, response: UIUserInputResponse) -> Self {
-        Self {
-            legacy: UIHandlePendingUserInputRequest {
-                request_id,
-                response,
-            },
-            decision_context: None,
-        }
-    }
-
-    /// Who answered and how. When it says a person answered interactively (`source` `human_response` with `responseCapability` `interactive`), the runtime records the answer as the person's own authority for Assisted Permissions, but only from the session's authenticated owning connection or the in-process host; an answer from any other caller settles without it. The runtime decides which answers carry authority. Omit for automated answers.
-    pub fn decision_context(mut self, value: PermissionDecisionContext) -> Self {
-        self.decision_context = Some(value);
-        self
-    }
 }
 
 /// Optional recovery-aware enrollment for an in-process Auto-switch handler.
@@ -13845,14 +12863,6 @@ pub struct UIRegisterDirectAutoModeSwitchHandlerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIRegisterDirectAutoModeSwitchHandlerResult {
-    /// Opaque handle representing the registration. Pass this same handle to `unregisterDirectAutoModeSwitchHandler` when the in-process handler is no longer active. Multiple registrations are reference-counted; the server bridge will only dispatch auto-mode-switch requests when no handles are active.
-    pub handle: String,
-}
-
-/// Registers an in-process Auto-switch responder and suppresses server-bridge dispatch to avoid competing responders for the same requestId. When requested, also enrolls the responder for active-request Auto recovery and acknowledges support. Attach the actual listener separately through standard event subscriptions before starting a turn, and release the handle when the responder is removed.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UIRegisterDirectAutoModeSwitchHandlerResultWithAutoModeRecovery {
     /// Positive acknowledgment of recovery-aware enrollment. Absence on an older runtime means recovery is unsupported.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_mode_recovery: Option<bool>,

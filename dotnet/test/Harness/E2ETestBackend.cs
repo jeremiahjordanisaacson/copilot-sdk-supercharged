@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-namespace GitHub.Copilot.Test.Harness;
+namespace Microsoft.Copilot.Test.Harness;
 
 internal enum E2ETestBackend
 {
@@ -47,32 +47,33 @@ internal static class E2ETestBackendConfiguration
 
     internal static void ApplyProvider(
         this E2ETestBackend backend,
-        SessionConfig config,
+        CreateSessionOptions config,
         string proxyUrl)
     {
         if (backend == E2ETestBackend.Capi
-            || config.Provider is not null
-            || config.Providers is not null)
+            || config.Inference.Providers is not null)
         {
             return;
         }
 
         var model = config.Model ??= backend.GetDefaultModel();
-        config.Provider = CreateProvider(backend, proxyUrl, model);
+        config.Inference = ByokTestOptions.Inference(CreateProvider(backend, proxyUrl, model), config.Inference);
+        (config.GitHub.Capi ??= new()).Enabled = false;
     }
 
     internal static void ApplyProvider(
         this E2ETestBackend backend,
-        ResumeSessionConfig config,
+        ResumeSessionOptions config,
         string proxyUrl)
     {
-        if (backend == E2ETestBackend.Capi || config.Provider is not null)
+        if (backend == E2ETestBackend.Capi || config.Inference.Providers is not null)
         {
             return;
         }
 
         var model = config.Model ??= backend.GetDefaultModel();
-        config.Provider = CreateProvider(backend, proxyUrl, model);
+        config.Inference = ByokTestOptions.Inference(CreateProvider(backend, proxyUrl, model), config.Inference);
+        (config.GitHub.Capi ??= new()).Enabled = false;
     }
 
     private static string GetDefaultModel(this E2ETestBackend backend)

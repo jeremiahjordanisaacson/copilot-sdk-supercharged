@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 // Mirrors the E2E portions of dotnet/test/ClientOptionsTests.cs (snapshot category "client_options").
@@ -24,7 +24,7 @@ func TestClientOptionsE2E(t *testing.T) {
 		port := getAvailableTCPPort(t)
 
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.TCPConnection{Path: ctx.CLIPath, Port: port}
+			useTCP(opts, port, "")
 		})
 		t.Cleanup(func() { client.ForceStop() })
 
@@ -58,13 +58,15 @@ func TestClientOptionsE2E(t *testing.T) {
 		}
 
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.WorkingDirectory = clientCwd
+			if !testharness.IsInProcessTransport() {
+				connection := opts.Runtime.(copilot.SpawnedStdioConnection)
+				connection.WorkingDirectory = clientCwd
+				opts.Runtime = connection
+			}
 		})
 		t.Cleanup(func() { client.ForceStop() })
 
-		config := &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		}
+		config := &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}}
 		if testharness.IsInProcessTransport() {
 			config.WorkingDirectory = clientCwd
 		}
@@ -105,17 +107,16 @@ func TestClientOptionsE2E(t *testing.T) {
 		}
 
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.StdioConnection{
-				Path: cliPath,
-				Args: []string{"--capture-file", capturePath},
+			opts.Runtime = copilot.SpawnedStdioConnection{
+				Path:                      cliPath,
+				Args:                      []string{"--capture-file", capturePath},
+				BaseDirectory:             filepath.Join(ctx.WorkDir, "copilot-home-from-option"),
+				SessionIdleTimeoutSeconds: 17,
+				Env:                       append(ctx.Env(), "COPILOT_HOME="+filepath.Join(ctx.WorkDir, "copilot-home-from-env")),
 			}
-			opts.BaseDirectory = filepath.Join(ctx.WorkDir, "copilot-home-from-option")
-			opts.Env = append([]string{}, opts.Env...)
-			opts.Env = append(opts.Env, "COPILOT_HOME="+filepath.Join(ctx.WorkDir, "copilot-home-from-env"))
-			opts.GitHubToken = "process-option-token"
-			opts.LogLevel = "debug"
-			opts.SessionIdleTimeoutSeconds = 17
-			opts.Telemetry = &copilot.TelemetryConfig{
+			opts.GitHub.Token = "process-option-token"
+			opts.Observability.LogLevel = "debug"
+			opts.Observability.Telemetry = &copilot.TelemetryConfig{
 				OTLPEndpoint:   "http://127.0.0.1:4318",
 				OTLPProtocol:   "http/protobuf",
 				FilePath:       telemetryPath,
@@ -123,7 +124,7 @@ func TestClientOptionsE2E(t *testing.T) {
 				SourceName:     "go-sdk-e2e",
 				CaptureContent: copilot.Bool(true),
 			}
-			opts.UseLoggedInUser = copilot.Bool(false)
+			opts.GitHub.UseLoggedInUser = copilot.Bool(false)
 		})
 
 		t.Cleanup(func() { client.ForceStop() })
@@ -168,13 +169,7 @@ func TestClientOptionsE2E(t *testing.T) {
 			}
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			EnableConfigDiscovery:              copilot.Bool(true),
-			EnableOnDemandInstructionDiscovery: copilot.Bool(true),
-			IncludeSubAgentStreamingEvents:     copilot.Bool(false),
-			CustomAgentsLocalOnly:              copilot.Bool(false),
-			OnPermissionRequest:                copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{EnableConfigDiscovery: copilot.Bool(true), Instructions: copilot.CreateSessionInstructionOptions{OnDemandDiscovery: copilot.Bool(true)}, Events: copilot.SessionEventOptions{IncludeSubAgentStreamingEvents: copilot.Bool(false)}, Agents: copilot.SessionAgentOptions{LocalDiscoveryOnly: copilot.Bool(false)}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -195,27 +190,24 @@ func TestClientOptionsE2E(t *testing.T) {
 		if !ok {
 			t.Fatalf("Expected session.create params to be an object, got %T", createReq.Params)
 		}
-		if v, ok := params["enableConfigDiscovery"].(bool); !ok || v != true {
-			t.Errorf("Expected session.create.params.enableConfigDiscovery=true, got %v", params["enableConfigDiscovery"])
+		if v, ok := capturedParam(t, params, "enableConfigDiscovery").(bool); !ok || !v {
+			t.Errorf("Expected enableConfigDiscovery=true, got %v", v)
 		}
-		if v, ok := params["enableOnDemandInstructionDiscovery"].(bool); !ok || v != true {
-			t.Errorf("Expected session.create.params.enableOnDemandInstructionDiscovery=true, got %v", params["enableOnDemandInstructionDiscovery"])
+		if v, ok := capturedParam(t, params, "instructions.onDemandDiscovery").(bool); !ok || !v {
+			t.Errorf("Expected instructions.onDemandDiscovery=true, got %v", v)
 		}
-		if v, ok := params["includeSubAgentStreamingEvents"].(bool); !ok || v != false {
-			t.Errorf("Expected session.create.params.includeSubAgentStreamingEvents=false, got %v", params["includeSubAgentStreamingEvents"])
+		if v, ok := capturedParam(t, params, "events.includeSubAgentStreamingEvents").(bool); !ok || v {
+			t.Errorf("Expected events.includeSubAgentStreamingEvents=false, got %v", v)
 		}
-		if v, ok := params["customAgentsLocalOnly"].(bool); !ok || v != false {
-			t.Errorf("Expected session.create.params.customAgentsLocalOnly=false, got %v", params["customAgentsLocalOnly"])
+		if v, ok := capturedParam(t, params, "agents.localDiscoveryOnly").(bool); !ok || v {
+			t.Errorf("Expected agents.localDiscoveryOnly=false, got %v", v)
 		}
 
 		sessionID := session.SessionID
 		if err := session.Disconnect(); err != nil {
 			t.Fatalf("Disconnect failed: %v", err)
 		}
-		resumed, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			CustomAgentsLocalOnly: copilot.Bool(false),
-			OnPermissionRequest:   copilot.PermissionHandler.ApproveAll,
-		})
+		resumed, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Agents: copilot.SessionAgentOptions{LocalDiscoveryOnly: copilot.Bool(false)}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
 		}
@@ -230,9 +222,8 @@ func TestClientOptionsE2E(t *testing.T) {
 			if !ok {
 				t.Fatalf("Expected session.resume params to be an object, got %T", req.Params)
 			}
-			if v, ok := resumeParams["customAgentsLocalOnly"].(bool); !ok || v != false {
-				t.Errorf("Expected session.resume.params.customAgentsLocalOnly=false, got %v",
-					resumeParams["customAgentsLocalOnly"])
+			if v, ok := capturedParam(t, resumeParams, "agents.localDiscoveryOnly").(bool); !ok || v {
+				t.Errorf("Expected resume agents.localDiscoveryOnly=false, got %v", v)
 			}
 			return
 		}
@@ -249,13 +240,13 @@ func TestClientOptionsE2E(t *testing.T) {
 
 		requests := make(chan *copilot.ExtensionLaunchProviderResolveRequest, 1)
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.StdioConnection{
+			opts.Runtime = copilot.SpawnedStdioConnection{
 				Path: cliPath,
 				Args: []string{"--capture-file", capturePath},
 			}
-			opts.GitHubToken = ""
-			opts.UseLoggedInUser = copilot.Bool(false)
-			opts.ExtensionLaunchProvider = extensionLaunchProviderFunc(func(
+			opts.GitHub.Token = ""
+			opts.GitHub.UseLoggedInUser = copilot.Bool(false)
+			opts.Extensions.LaunchProvider = extensionLaunchProviderFunc(func(
 				request *copilot.ExtensionLaunchProviderResolveRequest,
 			) (*copilot.ExtensionLaunchProviderResolveResult, error) {
 				requests <- request
@@ -313,20 +304,19 @@ func TestClientOptionsE2E(t *testing.T) {
 		}
 
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.StdioConnection{
+			opts.Runtime = copilot.SpawnedStdioConnection{
 				Path: cliPath,
 				Args: []string{"--capture-file", capturePath},
 			}
 			opts.Mode = copilot.ModeEmpty
-			opts.BaseDirectory = ctx.WorkDir
-			opts.UseLoggedInUser = copilot.Bool(false)
+			connection := opts.Runtime.(copilot.SpawnedStdioConnection)
+			connection.BaseDirectory = ctx.WorkDir
+			opts.Runtime = connection
+			opts.GitHub.UseLoggedInUser = copilot.Bool(false)
 		})
 		t.Cleanup(func() { client.ForceStop() })
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			AvailableTools:      []string{"builtin:ask_user"},
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Tools: copilot.SessionToolOptions{AvailableTools: []string{"builtin:ask_user"}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -335,10 +325,7 @@ func TestClientOptionsE2E(t *testing.T) {
 			t.Fatalf("Disconnect failed: %v", err)
 		}
 
-		resumed, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			AvailableTools:      []string{"builtin:ask_user"},
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		resumed, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Tools: copilot.SessionToolOptions{AvailableTools: []string{"builtin:ask_user"}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
 		}
@@ -355,15 +342,13 @@ func TestClientOptionsE2E(t *testing.T) {
 			switch req.Method {
 			case "session.create":
 				foundCreate = true
-				if v, ok := params["customAgentsLocalOnly"].(bool); !ok || !v {
-					t.Errorf("Expected session.create.params.customAgentsLocalOnly=true, got %v",
-						params["customAgentsLocalOnly"])
+				if v, ok := capturedParam(t, params, "agents.localDiscoveryOnly").(bool); !ok || !v {
+					t.Errorf("Expected create agents.localDiscoveryOnly=true, got %v", v)
 				}
 			case "session.resume":
 				foundResume = true
-				if v, ok := params["customAgentsLocalOnly"].(bool); !ok || !v {
-					t.Errorf("Expected session.resume.params.customAgentsLocalOnly=true, got %v",
-						params["customAgentsLocalOnly"])
+				if v, ok := capturedParam(t, params, "agents.localDiscoveryOnly").(bool); !ok || !v {
+					t.Errorf("Expected resume agents.localDiscoveryOnly=true, got %v", v)
 				}
 			}
 		}
@@ -381,9 +366,9 @@ func TestClientOptionsE2E(t *testing.T) {
 		}
 
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.StdioConnection{Path: cliPath, Args: []string{"--capture-file", capturePath}}
-			opts.GitHubToken = "advanced-create-client-token"
-			opts.UseLoggedInUser = copilot.Bool(false)
+			opts.Runtime = copilot.SpawnedStdioConnection{Path: cliPath, Args: []string{"--capture-file", capturePath}}
+			opts.GitHub.Token = "advanced-create-client-token"
+			opts.GitHub.UseLoggedInUser = copilot.Bool(false)
 		})
 		t.Cleanup(func() { client.ForceStop() })
 
@@ -398,54 +383,12 @@ func TestClientOptionsE2E(t *testing.T) {
 		organizationCustomInstructions := "organization guidance"
 		maxAiCredits := float64(42)
 		extensionSDKPath := filepath.Join(ctx.WorkDir, "extension-sdk")
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			SessionID:                          sessionID,
-			Name:                               "go named at create",
-			ClientName:                         "go-sdk-e2e-client",
-			Model:                              "claude-sonnet-5",
-			ReasoningEffort:                    "low",
-			ReasoningSummary:                   copilot.ReasoningSummaryNone,
-			ContextTier:                        copilot.ContextTierLongContext,
-			ConfigDirectory:                    configDirectory,
-			EnableConfigDiscovery:              copilot.Bool(true),
-			SkipEmbeddingRetrieval:             copilot.Bool(true),
-			EmbeddingCacheStorage:              &embeddingCacheStorage,
-			OrganizationCustomInstructions:     &organizationCustomInstructions,
-			EnableOnDemandInstructionDiscovery: copilot.Bool(true),
-			EnableFileHooks:                    copilot.Bool(true),
-			EnableHostGitOperations:            copilot.Bool(false),
-			EnableSessionStore:                 copilot.Bool(false),
-			EnableSkills:                       copilot.Bool(false),
-			WorkingDirectory:                   workingDirectory,
-			Streaming:                          copilot.Bool(true),
-			IncludeSubAgentStreamingEvents:     copilot.Bool(false),
-			AvailableTools:                     []string{"read_file"},
-			ExcludedTools:                      []string{"bash"},
-			ExcludedBuiltInAgents:              []string{"legacy-agent"},
-			EnableSessionTelemetry:             copilot.Bool(false),
-			EnableCitations:                    copilot.Bool(true),
-			SessionLimits:                      &rpc.SessionLimitsConfig{MaxAiCredits: &maxAiCredits},
-			SkipCustomInstructions:             copilot.Bool(true),
-			CustomAgentsLocalOnly:              copilot.Bool(true),
-			CoauthorEnabled:                    copilot.Bool(false),
-			ManageScheduleEnabled:              copilot.Bool(false),
-			GitHubToken:                        "advanced-create-session-token",
-			SkillDirectories:                   []string{"skills"},
-			PluginDirectories:                  []string{"plugins"},
-			InstructionDirectories:             []string{"instructions"},
-			DisabledSkills:                     []string{"disabled-skill"},
-			EnableMCPApps:                      true,
-			Canvases: []copilot.CanvasDeclaration{{
-				ID:          "canvas",
-				DisplayName: "Canvas",
-				Description: "Canvas description",
-				InputSchema: map[string]any{"type": "object"},
-			}},
-			RequestCanvasRenderer: copilot.Bool(true),
-			RequestExtensions:     copilot.Bool(true),
-			ExtensionSDKPath:      &extensionSDKPath,
-			ExtensionInfo:         &copilot.ExtensionInfo{Source: "github-app", Name: "go-e2e-extension"},
-			ExpAssignments:        &copilot.CopilotExpAssignmentResponse{Flights: map[string]string{"feature": "enabled"}, AssignmentContext: "ctx"},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{SessionID: sessionID, Name: "go named at create", ClientName: "go-sdk-e2e-client", Model: "claude-sonnet-5", Inference: copilot.SessionInferenceOptions{ReasoningEffort: "low", ReasoningSummary: copilot.ReasoningSummaryNone, ContextTier: copilot.ContextTierLongContext, EnableCitations: copilot.Bool(true)}, ConfigDirectory: configDirectory, EnableConfigDiscovery: copilot.Bool(true), State: copilot.SessionStateOptions{SkipEmbeddingRetrieval: copilot.Bool(true), EmbeddingCacheStorage: &embeddingCacheStorage, EnableCrossSessionStore: copilot.Bool(false)}, Instructions: copilot.CreateSessionInstructionOptions{OrganizationText: &organizationCustomInstructions, OnDemandDiscovery: copilot.Bool(true), SkipCustomInstructions: copilot.Bool(true), Directories: []string{"instructions"}}, Hooks: copilot.SessionHookOptions{EnableRepositoryHooks: copilot.Bool(true)}, Git: copilot.SessionGitOptions{EnableHostGitOperations: copilot.Bool(false), CoauthorEnabled: copilot.Bool(false)}, Skills: copilot.SessionSkillOptions{Enabled: copilot.Bool(false), Directories: []string{"skills"}, DisabledSkills: []string{"disabled-skill"}}, WorkingDirectory: workingDirectory, Events: copilot.SessionEventOptions{Streaming: copilot.Bool(true), IncludeSubAgentStreamingEvents: copilot.Bool(false)}, Tools: copilot.SessionToolOptions{AvailableTools: []string{"read_file"}, ExcludedTools: []string{"bash"}, ManageScheduleEnabled: copilot.Bool(false)}, Agents: copilot.SessionAgentOptions{ExcludedBuiltinAgents: []string{"legacy-agent"}, LocalDiscoveryOnly: copilot.Bool(true)}, GitHub: copilot.SessionGitHubOptions{TelemetryEnabled: copilot.Bool(false), Token: "advanced-create-session-token"}, Execution: copilot.SessionExecutionOptions{Limits: &rpc.SessionLimitsConfig{MaxAiCredits: &maxAiCredits}}, Plugins: copilot.SessionPluginOptions{Directories: []string{"plugins"}}, MCP: copilot.SessionMCPOptions{EnableApps: true}, Canvases: copilot.SessionCanvasOptions{Definitions: []copilot.CanvasDeclaration{{
+			ID:          "canvas",
+			DisplayName: "Canvas",
+			Description: "Canvas description",
+			InputSchema: map[string]any{"type": "object"},
+		}}, RequestRenderer: copilot.Bool(true)}, Extensions: copilot.SessionExtensionOptions{Enabled: copilot.Bool(true), SDKPath: &extensionSDKPath, Identity: &copilot.ExtensionInfo{Source: "github-app", Name: "go-e2e-extension"}}, Experiments: copilot.SessionExperimentOptions{Assignments: &copilot.CopilotExpAssignmentResponse{Flights: map[string]string{"feature": "enabled"}, AssignmentContext: "ctx"}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -458,68 +401,68 @@ func TestClientOptionsE2E(t *testing.T) {
 			t.Fatalf("Expected session.create params object, got %T", createReq.Params)
 		}
 		expectedValues := map[string]any{
-			"sessionId":                          sessionID,
-			"name":                               "go named at create",
-			"clientName":                         "go-sdk-e2e-client",
-			"model":                              "claude-sonnet-5",
-			"reasoningEffort":                    "low",
-			"reasoningSummary":                   "none",
-			"contextTier":                        "long_context",
-			"configDir":                          configDirectory,
-			"enableConfigDiscovery":              true,
-			"skipEmbeddingRetrieval":             true,
-			"embeddingCacheStorage":              embeddingCacheStorage,
-			"organizationCustomInstructions":     organizationCustomInstructions,
-			"enableOnDemandInstructionDiscovery": true,
-			"enableFileHooks":                    true,
-			"enableHostGitOperations":            false,
-			"enableSessionStore":                 false,
-			"enableSkills":                       false,
-			"workingDirectory":                   workingDirectory,
-			"streaming":                          true,
-			"includeSubAgentStreamingEvents":     false,
-			"enableSessionTelemetry":             false,
-			"enableCitations":                    true,
-			"skipCustomInstructions":             true,
-			"customAgentsLocalOnly":              true,
-			"coauthorEnabled":                    false,
-			"manageScheduleEnabled":              false,
-			"gitHubToken":                        "advanced-create-session-token",
-			"requestMcpApps":                     true,
-			"requestCanvasRenderer":              true,
-			"requestExtensions":                  true,
-			"extensionSdkPath":                   extensionSDKPath,
-			"envValueMode":                       "direct",
+			"sessionId":                             sessionID,
+			"name":                                  "go named at create",
+			"clientName":                            "go-sdk-e2e-client",
+			"model":                                 "claude-sonnet-5",
+			"inference.reasoningEffort":             "low",
+			"inference.reasoningSummary":            "none",
+			"inference.contextTier":                 "long_context",
+			"configDirectory":                       configDirectory,
+			"enableConfigDiscovery":                 true,
+			"state.skipEmbeddingRetrieval":          true,
+			"state.embeddingCacheStorage":           embeddingCacheStorage,
+			"instructions.organizationText":         organizationCustomInstructions,
+			"instructions.onDemandDiscovery":        true,
+			"hooks.enableRepositoryHooks":           true,
+			"git.enableHostGitOperations":           false,
+			"state.enableCrossSessionStore":         false,
+			"skills.enabled":                        false,
+			"workingDirectory":                      workingDirectory,
+			"events.streaming":                      true,
+			"events.includeSubAgentStreamingEvents": false,
+			"github.telemetryEnabled":               false,
+			"inference.enableCitations":             true,
+			"instructions.skipCustomInstructions":   true,
+			"agents.localDiscoveryOnly":             true,
+			"git.coauthorEnabled":                   false,
+			"tools.manageScheduleEnabled":           false,
+			"github.token":                          "advanced-create-session-token",
+			"mcp.enableApps":                        true,
+			"canvases.requestRenderer":              true,
+			"extensions.enabled":                    true,
+			"extensions.sdkPath":                    extensionSDKPath,
+			"mcp.envValueMode":                      "direct",
 		}
 		for key, expected := range expectedValues {
-			if params[key] != expected {
-				t.Fatalf("Expected %s=%#v, got %#v in %#v", key, expected, params[key], params)
+			if actual := capturedParam(t, params, key); actual != expected {
+				t.Fatalf("Expected %s=%#v, got %#v in %#v", key, expected, actual, params)
 			}
 			if _, exists := params["remoteSession"]; exists {
 				t.Fatalf("High-level session creation must omit legacy remoteSession, got %#v", params)
 			}
 		}
-		assertStringArray(t, params["availableTools"], []string{"read_file"})
-		assertStringArray(t, params["excludedTools"], []string{"bash"})
-		assertStringArray(t, params["excludedBuiltinAgents"], []string{"legacy-agent"})
-		assertStringArray(t, params["skillDirectories"], []string{"skills"})
-		assertStringArray(t, params["pluginDirectories"], []string{"plugins"})
-		assertStringArray(t, params["instructionDirectories"], []string{"instructions"})
-		assertStringArray(t, params["disabledSkills"], []string{"disabled-skill"})
-		if params["sessionLimits"].(map[string]any)["maxAiCredits"] != maxAiCredits {
-			t.Fatalf("Expected sessionLimits to be forwarded, got %#v", params["sessionLimits"])
+		assertStringArray(t, capturedParam(t, params, "tools.availableTools"), []string{"read_file"})
+		assertStringArray(t, capturedParam(t, params, "tools.excludedTools"), []string{"bash"})
+		assertStringArray(t, capturedParam(t, params, "agents.excludedBuiltinAgents"), []string{"legacy-agent"})
+		assertStringArray(t, capturedParam(t, params, "skills.directories"), []string{"skills"})
+		assertStringArray(t, capturedParam(t, params, "plugins.directories"), []string{"plugins"})
+		assertStringArray(t, capturedParam(t, params, "instructions.directories"), []string{"instructions"})
+		assertStringArray(t, capturedParam(t, params, "skills.disabledSkills"), []string{"disabled-skill"})
+		if actual := capturedParam(t, params, "execution.limits.maxAiCredits"); actual != maxAiCredits {
+			t.Fatalf("Expected execution.limits.maxAiCredits=%v, got %#v", maxAiCredits, actual)
 		}
-		extensionInfo := params["extensionInfo"].(map[string]any)
+		extensionInfo := capturedParam(t, params, "extensions.identity").(map[string]any)
 		if extensionInfo["source"] != "github-app" || extensionInfo["name"] != "go-e2e-extension" {
 			t.Fatalf("Expected extensionInfo to be forwarded, got %#v", extensionInfo)
 		}
-		canvases := params["canvases"].([]any)
+		canvases := capturedParam(t, params, "canvases.definitions").([]any)
 		canvas := canvases[0].(map[string]any)
 		if canvas["id"] != "canvas" || canvas["displayName"] != "Canvas" || canvas["description"] != "Canvas description" {
 			t.Fatalf("Expected canvas declaration to be forwarded, got %#v", canvas)
 		}
-		if params["expAssignments"].(map[string]any)["Flights"].(map[string]any)["feature"] != "enabled" {
-			t.Fatalf("Expected expAssignments to be forwarded, got %#v", params["expAssignments"])
+		if actual := capturedParam(t, params, "experiments.assignments.Flights.feature"); actual != "enabled" {
+			t.Fatalf("Expected experiment flight=enabled, got %#v", actual)
 		}
 	})
 
@@ -532,9 +475,9 @@ func TestClientOptionsE2E(t *testing.T) {
 		}
 
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.StdioConnection{Path: cliPath, Args: []string{"--capture-file", capturePath}}
-			opts.GitHubToken = "provider-client-token"
-			opts.UseLoggedInUser = copilot.Bool(false)
+			opts.Runtime = copilot.SpawnedStdioConnection{Path: cliPath, Args: []string{"--capture-file", capturePath}}
+			opts.GitHub.Token = "provider-client-token"
+			opts.GitHub.UseLoggedInUser = copilot.Bool(false)
 		})
 		t.Cleanup(func() { client.ForceStop() })
 
@@ -542,19 +485,18 @@ func TestClientOptionsE2E(t *testing.T) {
 			t.Fatalf("Start failed: %v", err)
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Provider: &copilot.ProviderConfig{
-				Type:            "openai",
-				WireAPI:         "responses",
-				Transport:       "websockets",
-				BaseURL:         "https://models.example.test/v1",
-				APIKey:          "provider-key",
-				ModelID:         "base-model",
-				WireModel:       "wire-model",
-				MaxPromptTokens: 1000,
-				MaxOutputTokens: 2000,
-				Headers:         map[string]string{"x-provider": "go"},
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Model: "base-model", GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}}, Inference: byokInference(&copilot.ProviderConfig{
+			Type:            "openai",
+			WireAPI:         "responses",
+			Transport:       "websockets",
+			BaseURL:         "https://models.example.test/v1",
+			APIKey:          "provider-key",
+			ModelID:         "base-model",
+			WireModel:       "wire-model",
+			MaxPromptTokens: 1000,
+			MaxOutputTokens: 2000,
+			Headers:         map[string]string{"x-provider": "go"},
+		}, copilot.SessionInferenceOptions{}),
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -563,20 +505,25 @@ func TestClientOptionsE2E(t *testing.T) {
 
 		createReq := getCapturedRequest(t, capturePath, "session.create")
 		params := createReq.Params.(map[string]any)
-		provider := params["provider"].(map[string]any)
+		provider := capturedParam(t, params, "inference.providers").([]any)[0].(map[string]any)
+		model := capturedParam(t, params, "inference.models").([]any)[0].(map[string]any)
 		for key, expected := range map[string]any{
-			"type":            "openai",
-			"wireApi":         "responses",
-			"transport":       "websockets",
-			"baseUrl":         "https://models.example.test/v1",
-			"apiKey":          "provider-key",
-			"modelId":         "base-model",
-			"wireModel":       "wire-model",
-			"maxPromptTokens": float64(1000),
-			"maxOutputTokens": float64(2000),
+			"type":      "openai",
+			"wireApi":   "responses",
+			"transport": "websockets",
+			"baseUrl":   "https://models.example.test/v1",
+			"apiKey":    "provider-key",
 		} {
 			if provider[key] != expected {
 				t.Fatalf("Expected provider.%s=%#v, got %#v in %#v", key, expected, provider[key], provider)
+			}
+			for key, expected := range map[string]any{
+				"modelId": "base-model", "wireModel": "wire-model",
+				"maxPromptTokens": float64(1000), "maxOutputTokens": float64(2000),
+			} {
+				if model[key] != expected {
+					t.Fatalf("Expected model.%s=%#v, got %#v in %#v", key, expected, model[key], model)
+				}
 			}
 		}
 		if provider["headers"].(map[string]any)["x-provider"] != "go" {
@@ -593,9 +540,9 @@ func TestClientOptionsE2E(t *testing.T) {
 		}
 
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.StdioConnection{Path: cliPath, Args: []string{"--capture-file", capturePath}}
-			opts.GitHubToken = "advanced-resume-client-token"
-			opts.UseLoggedInUser = copilot.Bool(false)
+			opts.Runtime = copilot.SpawnedStdioConnection{Path: cliPath, Args: []string{"--capture-file", capturePath}}
+			opts.GitHub.Token = "advanced-resume-client-token"
+			opts.GitHub.UseLoggedInUser = copilot.Bool(false)
 		})
 		t.Cleanup(func() { client.ForceStop() })
 
@@ -607,37 +554,17 @@ func TestClientOptionsE2E(t *testing.T) {
 		configDirectory := t.TempDir()
 		continuePendingWork := false
 		extensionSDKPath := filepath.Join(ctx.WorkDir, "resume-extension-sdk")
-		session, err := client.ResumeSession(t.Context(), "resume-session-id", &copilot.ResumeSessionConfig{
-			Model:                          "gpt-5-mini",
-			ReasoningEffort:                "low",
-			ReasoningSummary:               copilot.ReasoningSummaryNone,
-			ContextTier:                    copilot.ContextTierLongContext,
-			WorkingDirectory:               workingDirectory,
-			ConfigDirectory:                configDirectory,
-			EnableConfigDiscovery:          copilot.Bool(false),
-			EnableFileHooks:                copilot.Bool(true),
-			SuppressResumeEvent:            true,
-			ContinuePendingWork:            &continuePendingWork,
-			Streaming:                      copilot.Bool(true),
-			IncludeSubAgentStreamingEvents: copilot.Bool(false),
-			GitHubToken:                    "advanced-resume-session-token",
-			Canvases: []copilot.CanvasDeclaration{{
-				ID:          "resume-canvas",
-				DisplayName: "Resume Canvas",
-				Description: "Resume canvas description",
-				InputSchema: map[string]any{"type": "object"},
-			}},
-			OpenCanvases: []rpc.OpenCanvasInstance{{
-				CanvasID:    "resume-canvas",
-				ExtensionID: "github-app/go-e2e-extension",
-				InstanceID:  "resume-instance",
-				Input:       map[string]any{"value": "from-resume"},
-			}},
-			RequestCanvasRenderer: copilot.Bool(true),
-			RequestExtensions:     copilot.Bool(true),
-			ExtensionSDKPath:      &extensionSDKPath,
-			ExtensionInfo:         &copilot.ExtensionInfo{Source: "github-app", Name: "go-e2e-extension"},
-			ExpAssignments:        &copilot.CopilotExpAssignmentResponse{Flights: map[string]string{"resumeFeature": "enabled"}, AssignmentContext: "ctx"},
+		session, err := client.ResumeSession(t.Context(), "resume-session-id", &copilot.ResumeSessionOptions{Model: "gpt-5-mini", Inference: copilot.SessionInferenceOptions{ReasoningEffort: "low", ReasoningSummary: copilot.ReasoningSummaryNone, ContextTier: copilot.ContextTierLongContext}, WorkingDirectory: workingDirectory, ConfigDirectory: configDirectory, EnableConfigDiscovery: copilot.Bool(false), Hooks: copilot.SessionHookOptions{EnableRepositoryHooks: copilot.Bool(true)}, SuppressResumeEvent: true, ContinuePendingWork: &continuePendingWork, Events: copilot.SessionEventOptions{Streaming: copilot.Bool(true), IncludeSubAgentStreamingEvents: copilot.Bool(false)}, GitHub: copilot.SessionGitHubOptions{Token: "advanced-resume-session-token"}, Canvases: copilot.ResumeSessionCanvasOptions{Definitions: []copilot.CanvasDeclaration{{
+			ID:          "resume-canvas",
+			DisplayName: "Resume Canvas",
+			Description: "Resume canvas description",
+			InputSchema: map[string]any{"type": "object"},
+		}}, Open: []rpc.OpenCanvasInstance{{
+			CanvasID:    "resume-canvas",
+			ExtensionID: "github-app/go-e2e-extension",
+			InstanceID:  "resume-instance",
+			Input:       map[string]any{"value": "from-resume"},
+		}}, RequestRenderer: copilot.Bool(true)}, Extensions: copilot.SessionExtensionOptions{Enabled: copilot.Bool(true), SDKPath: &extensionSDKPath, Identity: &copilot.ExtensionInfo{Source: "github-app", Name: "go-e2e-extension"}}, Experiments: copilot.SessionExperimentOptions{Assignments: &copilot.CopilotExpAssignmentResponse{Flights: map[string]string{"resumeFeature": "enabled"}, AssignmentContext: "ctx"}},
 		})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
@@ -647,45 +574,61 @@ func TestClientOptionsE2E(t *testing.T) {
 		resumeReq := getCapturedRequest(t, capturePath, "session.resume")
 		params := resumeReq.Params.(map[string]any)
 		expectedValues := map[string]any{
-			"sessionId":                      "resume-session-id",
-			"model":                          "gpt-5-mini",
-			"reasoningEffort":                "low",
-			"reasoningSummary":               "none",
-			"contextTier":                    "long_context",
-			"workingDirectory":               workingDirectory,
-			"configDir":                      configDirectory,
-			"enableConfigDiscovery":          false,
-			"enableFileHooks":                true,
-			"disableResume":                  true,
-			"continuePendingWork":            false,
-			"streaming":                      true,
-			"includeSubAgentStreamingEvents": false,
-			"gitHubToken":                    "advanced-resume-session-token",
-			"requestCanvasRenderer":          true,
-			"requestExtensions":              true,
-			"extensionSdkPath":               extensionSDKPath,
-			"envValueMode":                   "direct",
+			"sessionId":                             "resume-session-id",
+			"model":                                 "gpt-5-mini",
+			"inference.reasoningEffort":             "low",
+			"inference.reasoningSummary":            "none",
+			"inference.contextTier":                 "long_context",
+			"workingDirectory":                      workingDirectory,
+			"configDirectory":                       configDirectory,
+			"enableConfigDiscovery":                 false,
+			"hooks.enableRepositoryHooks":           true,
+			"suppressResumeEvent":                   true,
+			"continuePendingWork":                   false,
+			"events.streaming":                      true,
+			"events.includeSubAgentStreamingEvents": false,
+			"github.token":                          "advanced-resume-session-token",
+			"canvases.requestRenderer":              true,
+			"extensions.enabled":                    true,
+			"extensions.sdkPath":                    extensionSDKPath,
+			"mcp.envValueMode":                      "direct",
 		}
 		for key, expected := range expectedValues {
-			if params[key] != expected {
-				t.Fatalf("Expected resume %s=%#v, got %#v in %#v", key, expected, params[key], params)
+			if actual := capturedParam(t, params, key); actual != expected {
+				t.Fatalf("Expected resume %s=%#v, got %#v in %#v", key, expected, actual, params)
 			}
 		}
-		openCanvases := params["openCanvases"].([]any)
+		openCanvases := capturedParam(t, params, "canvases.open").([]any)
 		openCanvas := openCanvases[0].(map[string]any)
 		if openCanvas["canvasId"] != "resume-canvas" || openCanvas["extensionId"] != "github-app/go-e2e-extension" ||
 			openCanvas["instanceId"] != "resume-instance" {
 			t.Fatalf("Expected open canvas state to be forwarded, got %#v", openCanvas)
 		}
-		extensionInfo := params["extensionInfo"].(map[string]any)
+		extensionInfo := capturedParam(t, params, "extensions.identity").(map[string]any)
 		if extensionInfo["source"] != "github-app" || extensionInfo["name"] != "go-e2e-extension" {
 			t.Fatalf("Expected extensionInfo on resume, got %#v", extensionInfo)
 		}
-		if params["expAssignments"].(map[string]any)["Flights"].(map[string]any)["resumeFeature"] != "enabled" {
-			t.Fatalf("Expected resume expAssignments to be forwarded, got %#v", params["expAssignments"])
+		if actual := capturedParam(t, params, "experiments.assignments.Flights.resumeFeature"); actual != "enabled" {
+			t.Fatalf("Expected resume experiment flight=enabled, got %#v", actual)
 		}
 	})
 
+}
+
+func capturedParam(t *testing.T, params map[string]any, path string) any {
+	t.Helper()
+	var current any = params
+	for _, key := range strings.Split(path, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			t.Fatalf("Expected object while reading %s, got %#v in %#v", path, current, params)
+		}
+		current, ok = object[key]
+		if !ok {
+			t.Fatalf("Missing %s in captured params: %#v", path, params)
+		}
+	}
+	return current
 }
 
 // ---------------------------------------------------------------------------
@@ -697,57 +640,48 @@ func TestClientOptionsUnit(t *testing.T) {
 	t.Parallel()
 	t.Run("should accept GitHubToken option", func(t *testing.T) {
 		// Mirrors: Should_Accept_GitHubToken_Option
-		opts := copilot.ClientOptions{GitHubToken: "gho_test_token"}
-		if opts.GitHubToken != "gho_test_token" {
-			t.Errorf("Expected GitHubToken=%q, got %q", "gho_test_token", opts.GitHubToken)
+		opts := copilot.ClientOptions{Mode: copilot.ModeCodingAgent, GitHub: copilot.ClientGitHubOptions{Token: "gho_test_token"}}
+		if opts.GitHub.Token != "gho_test_token" {
+			t.Errorf("Expected GitHubToken=%q, got %q", "gho_test_token", opts.GitHub.Token)
 		}
 	})
 
 	t.Run("should default UseLoggedInUser to nil", func(t *testing.T) {
 		// Mirrors: Should_Default_UseLoggedInUser_To_Null
-		opts := copilot.ClientOptions{}
-		if opts.UseLoggedInUser != nil {
-			t.Errorf("Expected UseLoggedInUser to be nil by default, got %v", opts.UseLoggedInUser)
+		opts := copilot.ClientOptions{Mode: copilot.ModeCodingAgent}
+		if opts.GitHub.UseLoggedInUser != nil {
+			t.Errorf("Expected UseLoggedInUser to be nil by default, got %v", opts.GitHub.UseLoggedInUser)
 		}
 	})
 
 	t.Run("should allow explicit UseLoggedInUser false", func(t *testing.T) {
 		// Mirrors: Should_Allow_Explicit_UseLoggedInUser_False
-		opts := copilot.ClientOptions{UseLoggedInUser: copilot.Bool(false)}
-		if opts.UseLoggedInUser == nil || *opts.UseLoggedInUser != false {
-			t.Errorf("Expected UseLoggedInUser=false, got %v", opts.UseLoggedInUser)
+		opts := copilot.ClientOptions{Mode: copilot.ModeCodingAgent, GitHub: copilot.ClientGitHubOptions{UseLoggedInUser: copilot.Bool(false)}}
+		if opts.GitHub.UseLoggedInUser == nil || *opts.GitHub.UseLoggedInUser != false {
+			t.Errorf("Expected UseLoggedInUser=false, got %v", opts.GitHub.UseLoggedInUser)
 		}
 	})
 
 	t.Run("should allow explicit UseLoggedInUser true with GitHubToken", func(t *testing.T) {
 		// Mirrors: Should_Allow_Explicit_UseLoggedInUser_True_With_GitHubToken
-		opts := copilot.ClientOptions{
-			GitHubToken:     "gho_test_token",
-			UseLoggedInUser: copilot.Bool(true),
+		opts := copilot.ClientOptions{Mode: copilot.ModeCodingAgent, GitHub: copilot.ClientGitHubOptions{Token: "gho_test_token", UseLoggedInUser: copilot.Bool(true)}}
+		if opts.GitHub.UseLoggedInUser == nil || *opts.GitHub.UseLoggedInUser != true {
+			t.Errorf("Expected UseLoggedInUser=true, got %v", opts.GitHub.UseLoggedInUser)
 		}
-		if opts.UseLoggedInUser == nil || *opts.UseLoggedInUser != true {
-			t.Errorf("Expected UseLoggedInUser=true, got %v", opts.UseLoggedInUser)
-		}
-		if opts.GitHubToken != "gho_test_token" {
-			t.Errorf("Expected GitHubToken=%q, got %q", "gho_test_token", opts.GitHubToken)
+		if opts.GitHub.Token != "gho_test_token" {
+			t.Errorf("Expected GitHubToken=%q, got %q", "gho_test_token", opts.GitHub.Token)
 		}
 	})
 
-	t.Run("should panic when GitHubToken used with URIConnection", func(t *testing.T) {
+	t.Run("should panic when GitHubToken used with TCPConnection", func(t *testing.T) {
 		assertPanics(t, func() {
-			_ = copilot.NewClient(&copilot.ClientOptions{
-				Connection:  copilot.URIConnection{URL: "localhost:8080"},
-				GitHubToken: "gho_test_token",
-			})
+			_ = copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, GitHub: copilot.ClientGitHubOptions{Token: "gho_test_token"}, Runtime: copilot.TCPConnection{Host: "localhost", Port: 8080}})
 		})
 	})
 
-	t.Run("should panic when UseLoggedInUser used with URIConnection", func(t *testing.T) {
+	t.Run("should panic when UseLoggedInUser used with TCPConnection", func(t *testing.T) {
 		assertPanics(t, func() {
-			_ = copilot.NewClient(&copilot.ClientOptions{
-				Connection:      copilot.URIConnection{URL: "localhost:8080"},
-				UseLoggedInUser: copilot.Bool(false),
-			})
+			_ = copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, GitHub: copilot.ClientGitHubOptions{UseLoggedInUser: copilot.Bool(false)}, Runtime: copilot.TCPConnection{Host: "localhost", Port: 8080}})
 		})
 	})
 
@@ -755,17 +689,17 @@ func TestClientOptionsUnit(t *testing.T) {
 		// Mirrors: Should_Default_SessionIdleTimeoutSeconds_To_Null
 		// Go uses int (no nullable wrapper); the zero value is 0 and is
 		// treated as "unset" by the SDK (no --session-idle-timeout flag).
-		opts := copilot.ClientOptions{}
-		if opts.SessionIdleTimeoutSeconds != 0 {
-			t.Errorf("Expected SessionIdleTimeoutSeconds=0 by default, got %d", opts.SessionIdleTimeoutSeconds)
+		connection := copilot.SpawnedStdioConnection{}
+		if connection.SessionIdleTimeoutSeconds != 0 {
+			t.Errorf("Expected SessionIdleTimeoutSeconds=0 by default, got %d", connection.SessionIdleTimeoutSeconds)
 		}
 	})
 
 	t.Run("should accept SessionIdleTimeoutSeconds option", func(t *testing.T) {
 		// Mirrors: Should_Accept_SessionIdleTimeoutSeconds_Option
-		opts := copilot.ClientOptions{SessionIdleTimeoutSeconds: 600}
-		if opts.SessionIdleTimeoutSeconds != 600 {
-			t.Errorf("Expected SessionIdleTimeoutSeconds=600, got %d", opts.SessionIdleTimeoutSeconds)
+		opts := copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedStdioConnection{SessionIdleTimeoutSeconds: 600}}
+		if opts.Runtime.(copilot.SpawnedStdioConnection).SessionIdleTimeoutSeconds != 600 {
+			t.Errorf("Expected SessionIdleTimeoutSeconds=600, got %d", opts.Runtime.(copilot.SpawnedStdioConnection).SessionIdleTimeoutSeconds)
 		}
 	})
 }
@@ -963,11 +897,11 @@ function handleMessage(message) {
   requests.push({ method: message.method, params: message.params });
   saveCapture();
   if (message.method === "connect") {
-    writeResponse(message.id, { ok: true, protocolVersion: 3, version: "fake" });
+    writeResponse(message.id, { ok: true, protocolVersion: 4, version: "fake" });
     return;
   }
   if (message.method === "ping") {
-    writeResponse(message.id, { message: "pong", protocolVersion: 3, timestamp: Date.now() });
+    writeResponse(message.id, { message: "pong", protocolVersion: 4, timestamp: Date.now() });
     return;
   }
   if (message.method === "registerExtensionLaunchProvider") {

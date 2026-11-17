@@ -3,13 +3,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 using Microsoft.Extensions.AI;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using System.ComponentModel;
 using System.Reflection;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class ScenarioTestingEventSubscriptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : ScenarioTestingE2ETestBase(fixture, "scenario_testing_event_subscriptions", output)
@@ -24,11 +24,8 @@ public class ScenarioTestingEventSubscriptionsE2ETests(E2ETestFixture fixture, I
         using var releaseHandler = new ManualResetEventSlim();
         var events = new List<SessionEvent>();
 
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            Streaming = true,
-            Tools = [AIFunctionFactory.Create(ScenarioLookup, "scenario_event_lookup")],
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { Events = new SessionEventOptions { Streaming = true }, Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(ScenarioLookup, "scenario_event_lookup")] } });
 
         using var subscription = session.On<SessionEvent>(evt =>
         {
@@ -94,23 +91,22 @@ public class ScenarioTestingEventSubscriptionsE2ETests(E2ETestFixture fixture, I
         const string connectionToken = "scenario-client-events-token";
         await using var server = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForTcp(connectionToken: connectionToken),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedTcp(connectionToken: connectionToken)
         });
         await server.StartAsync();
-        var cliUrl = $"localhost:{server.RuntimePort}";
+        var runtimePort = server.RuntimePort!.Value;
 
         var oldEventCount = 0;
         string sessionId;
         await using (var firstClient = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(cliUrl, connectionToken: connectionToken),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp("localhost", runtimePort, connectionToken: connectionToken)
         }))
         {
-            var firstSession = await Ctx.CreateSessionAsync(firstClient, new SessionConfig
-            {
-                Streaming = true,
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-            });
+            var firstSession = await Ctx.CreateSessionAsync(firstClient, new CreateSessionOptions
+            { Events = new SessionEventOptions { Streaming = true }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
             sessionId = firstSession.SessionId;
             using var oldSubscription = firstSession.On<SessionEvent>(_ => Interlocked.Increment(ref oldEventCount));
 
@@ -129,13 +125,11 @@ public class ScenarioTestingEventSubscriptionsE2ETests(E2ETestFixture fixture, I
         var countAfterClose = Volatile.Read(ref oldEventCount);
         await using var secondClient = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(cliUrl, connectionToken: connectionToken),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp("localhost", runtimePort, connectionToken: connectionToken),
         });
-        await using var secondSession = await Ctx.ResumeSessionAsync(secondClient, sessionId, new ResumeSessionConfig
-        {
-            Streaming = true,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var secondSession = await Ctx.ResumeSessionAsync(secondClient, sessionId, new ResumeSessionOptions
+        { Events = new SessionEventOptions { Streaming = true }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var newEvents = new List<SessionEvent>();
         using var newSubscription = secondSession.On<SessionEvent>(evt =>

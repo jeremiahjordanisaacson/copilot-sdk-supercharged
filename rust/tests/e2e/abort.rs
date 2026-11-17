@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::session_events::{AssistantMessageDeltaData, SessionEventType};
-use github_copilot_sdk::tool::ToolHandler;
-use github_copilot_sdk::{Error, SessionConfig, Tool, ToolInvocation, ToolResult};
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::session_events::{AssistantMessageDeltaData, SessionEventType};
+use copilot_sdk::tool::ToolHandler;
+use copilot_sdk::{CreateSessionOptions, Error, Tool, ToolInvocation, ToolResult};
 use serde_json::json;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
@@ -22,7 +22,10 @@ async fn should_abort_during_active_streaming() {
                 ctx.set_default_copilot_user();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(ctx.approve_all_session_config().with_streaming(true))
+                    .create_session(
+                        ctx.approve_all_session_config()
+                            .with_events(|group| group.with_streaming(true)),
+                    )
                     .await
                     .expect("create session");
                 let events = session.subscribe();
@@ -98,26 +101,30 @@ async fn should_abort_during_active_tool_execution() {
                 });
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_tools(vec![
-                                Tool::new("slow_analysis")
-                                    .with_description(
-                                        "A slow analysis tool that blocks until released",
-                                    )
-                                    .with_parameters(json!({
-                                        "type": "object",
-                                        "properties": {
-                                            "value": {
-                                                "type": "string",
-                                                "description": "Value to analyze"
-                                            }
-                                        },
-                                        "required": ["value"]
-                                    }))
-                                    .with_handler(slow_tool),
-                            ]),
+                        CreateSessionOptions::default()
+                            .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_tools(|group| {
+                                group.with_definitions(vec![
+                                    Tool::new("slow_analysis")
+                                        .with_description(
+                                            "A slow analysis tool that blocks until released",
+                                        )
+                                        .with_parameters(json!({
+                                            "type": "object",
+                                            "properties": {
+                                                "value": {
+                                                    "type": "string",
+                                                    "description": "Value to analyze"
+                                                }
+                                            },
+                                            "required": ["value"]
+                                        }))
+                                        .with_handler(slow_tool),
+                                ])
+                            }),
                     )
                     .await
                     .expect("create session");

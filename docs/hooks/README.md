@@ -1,6 +1,6 @@
 # Use hooks
 
-Detailed API reference for each session hook in the GitHub Copilot SDK.
+Detailed API reference for each session hook in the Microsoft Copilot SDK.
 
 * [Hooks overview](./hooks-overview.md): quick start, common patterns, and hook invocation context
 * [Pre-tool use](./pre-tool-use.md): approve, deny, or modify tool calls

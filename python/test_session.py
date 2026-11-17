@@ -22,8 +22,8 @@ from copilot import (
     RuntimeConnection,
     define_tool,
 )
+from copilot._generated.rpc import ServerRpc, TaskAnalyticsClassifyTrajectoryRequest
 from copilot._jsonrpc import JsonRpcClient, JsonRpcError, ProcessExitedError
-from copilot.generated.rpc import ServerRpc, TaskAnalyticsClassifyTrajectoryRequest
 from copilot.session import (
     Attachment,
     CommandDefinition,
@@ -1888,7 +1888,7 @@ async def test_tool_can_force_stop_its_client_without_interrupting_cleanup(monke
     monkeypatch.setattr(
         CopilotClient, "_resolve_inprocess_runtime", lambda self: str(tmp_path / "runtime.so")
     )
-    client = CopilotClient(connection=RuntimeConnection.for_inprocess())
+    client = CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_inprocess())
     rpc_client = Mock(request=AsyncMock(), stop=AsyncMock())
     client._client = rpc_client
     host = Mock()

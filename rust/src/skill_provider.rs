@@ -26,8 +26,7 @@ pub use crate::rpc::SkillProviderDescriptor;
 /// runtime cancels a call, for example after its time limit or when the
 /// session disconnects, the SDK drops the provider future and the runtime
 /// ignores any later result. Register a
-/// provider with [`SessionConfig::with_skill_provider`](crate::SessionConfig::with_skill_provider)
-/// or [`ResumeSessionConfig::with_skill_provider`](crate::ResumeSessionConfig::with_skill_provider).
+/// provider with [`SessionSkillOptions::with_provider`](crate::SessionSkillOptions::with_provider).
 #[async_trait]
 pub trait SkillProvider: Send + Sync + 'static {
     /// Return the catalog of skills this session exposes.

@@ -7,7 +7,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -42,16 +42,9 @@ public sealed partial class ClientSessionLifetimeTests
     private static async Task<JsonElement> AnswerToolCallWithTelemetryAsync(IDictionary<string, object> telemetry)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
-        {
-            Tools = [new ToolResultFunction(new ToolResultObject
-            {
-                TextResultForLlm = "ok",
-                ResultType = "success",
-                ToolTelemetry = telemetry,
-            })],
-        });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [new ToolResultFunction(new ToolResultObject { TextResultForLlm = "ok", ResultType = "success", ToolTelemetry = telemetry, })] } });
 
         await server.SendSessionEventAsync(session.SessionId, "external_tool.requested", new()
         {

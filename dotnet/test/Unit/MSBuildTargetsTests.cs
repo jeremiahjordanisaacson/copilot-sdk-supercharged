@@ -12,11 +12,11 @@ using System.Security.Cryptography;
 using System.Text;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 /// <summary>
 /// Integration tests for the MSBuild targets shipped in
-/// <c>dotnet/src/build/GitHub.Copilot.SDK.targets</c>. Each test creates a throwaway
+/// <c>dotnet/src/build/Microsoft.Copilot.SDK.targets</c>. Each test creates a throwaway
 /// project that imports the targets file directly and invokes <c>dotnet build</c> in
 /// a subprocess so we exercise real MSBuild evaluation.
 /// </summary>
@@ -370,12 +370,12 @@ public class MSBuildTargetsTests
 
         // NuGet imports build/<PackageId>.props and .targets only under the package's own id.
         var defaultEntries = sandbox.GetPackageEntries("default-package");
-        Assert.Contains("build/GitHub.Copilot.SDK.props", defaultEntries);
-        Assert.Contains("build/GitHub.Copilot.SDK.targets", defaultEntries);
+        Assert.Contains("build/Microsoft.Copilot.SDK.props", defaultEntries);
+        Assert.Contains("build/Microsoft.Copilot.SDK.targets", defaultEntries);
         var renamedEntries = sandbox.GetPackageEntries("renamed-package");
         Assert.Contains("build/Example.Copilot.SDK.props", renamedEntries);
         Assert.Contains("build/Example.Copilot.SDK.targets", renamedEntries);
-        Assert.DoesNotContain(renamedEntries, entry => entry.StartsWith("build/GitHub.Copilot.SDK.", StringComparison.Ordinal));
+        Assert.DoesNotContain(renamedEntries, entry => entry.StartsWith("build/Microsoft.Copilot.SDK.", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -413,7 +413,7 @@ public class MSBuildTargetsTests
         if (thisFile is not null && File.Exists(thisFile))
         {
             var candidate = Path.GetFullPath(Path.Combine(
-                Path.GetDirectoryName(thisFile)!, "..", "..", "src", "build", "GitHub.Copilot.SDK.targets"));
+                Path.GetDirectoryName(thisFile)!, "..", "..", "src", "build", "Microsoft.Copilot.SDK.targets"));
             if (File.Exists(candidate))
             {
                 return candidate;
@@ -424,7 +424,7 @@ public class MSBuildTargetsTests
         var dir = AppContext.BaseDirectory;
         for (var i = 0; i < 8 && dir is not null; i++)
         {
-            var candidate = Path.Combine(dir, "src", "build", "GitHub.Copilot.SDK.targets");
+            var candidate = Path.Combine(dir, "src", "build", "Microsoft.Copilot.SDK.targets");
             if (File.Exists(candidate))
             {
                 return candidate;
@@ -433,7 +433,7 @@ public class MSBuildTargetsTests
         }
 
         throw new InvalidOperationException(
-            "Could not locate GitHub.Copilot.SDK.targets relative to test assembly or source file.");
+            "Could not locate Microsoft.Copilot.SDK.targets relative to test assembly or source file.");
     }
 
     private static string GetReleasePlatform()
@@ -688,7 +688,7 @@ public class MSBuildTargetsTests
         public async Task<BuildResult> PackSdkAsync(string outputDir, string? packageId)
         {
             var sdkProjectPath = Path.GetFullPath(
-                Path.Combine(Path.GetDirectoryName(TargetsFilePath)!, "..", "GitHub.Copilot.SDK.csproj"));
+                Path.Combine(Path.GetDirectoryName(TargetsFilePath)!, "..", "Microsoft.Copilot.SDK.csproj"));
             var properties = new Dictionary<string, string>
             {
                 ["CopilotSkipCliDownload"] = "true",

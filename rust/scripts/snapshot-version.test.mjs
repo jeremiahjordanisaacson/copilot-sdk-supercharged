@@ -103,7 +103,7 @@ test("no-option snapshots keep the legacy exact version, URL, and hash format", 
 
 test("local checksum snapshots pin the final unstable URL without publication or sibling metadata", (t) => {
     const version = "1.2.3-unstable.20260923";
-    const url = `https://github.com/github/copilot-sdk/releases/download/runtime-${version}`;
+    const url = `https://github.com/microsoft/copilot-sdk/releases/download/runtime-${version}`;
     const f = fixture(t, version);
     rmSync(join(f.rust, "..", "nodejs"), { recursive: true });
     for (const [script, output, runtime] of scripts) {
@@ -116,7 +116,7 @@ test("local checksum snapshots pin the final unstable URL without publication or
 
 test("URL-only override fetches checksums from the exact selected release", (t) => {
     const version = "1.2.3-unstable.20260923";
-    const url = `https://github.com/github/copilot-sdk/releases/download/runtime-${version}`;
+    const url = `https://github.com/microsoft/copilot-sdk/releases/download/runtime-${version}`;
     const f = fixture(t, version);
     for (const [script, output, runtime] of scripts) {
         const result = f.run(script, ["--release-url", url]);
@@ -155,9 +155,9 @@ test("invalid or mismatched release locations fail before acquisition", (t) => {
     const f = fixture(t, "1.2.3");
     for (const [script] of scripts) {
         for (const url of [
-            "https://github.com/github/copilot-sdk/releases/download/runtime-9.9.9",
+            "https://github.com/microsoft/copilot-sdk/releases/download/runtime-9.9.9",
             "https://github.com/github/copilot-cli/releases/latest",
-            "https://user:token@github.com/github/copilot-sdk/releases/download/runtime-1.2.3",
+            "https://user:token@github.com/microsoft/copilot-sdk/releases/download/runtime-1.2.3",
         ]) {
             const result = f.run(script, ["--release-url", url]);
             assert.notEqual(result.status, 0);

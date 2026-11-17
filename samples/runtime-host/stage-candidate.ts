@@ -74,7 +74,7 @@ await writeFile(
     JSON.stringify(
         {
             ...createRuntimePackageMetadata(platform, version, sources.runtime.commit),
-            name: `@github/copilot-sdk-${platform}`,
+            name: `@microsoft/copilot-sdk-${platform}`,
             private: true,
         },
         null,
@@ -90,7 +90,7 @@ const packResult = JSON.parse(
     }),
 );
 const tarball = join(packed, packResult[0].filename);
-const packageRoot = join(output, "node_modules", "@github", `copilot-sdk-${platform}`);
+const packageRoot = join(output, "node_modules", "@microsoft", `copilot-sdk-${platform}`);
 await mkdir(packageRoot, { recursive: true });
 await extract({ file: tarball, cwd: packageRoot, strip: 1, strict: true });
 await verifyExtractedRuntimePackage(packageRoot, platform);

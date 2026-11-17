@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
 )
 
 // requestCancelledCode is the standard JSON-RPC error code for a request its

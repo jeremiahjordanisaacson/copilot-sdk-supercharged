@@ -14,7 +14,7 @@ The `onErrorOccurred` hook is called when errors occur during session execution.
 
 <!-- docs-validate: hidden -->
 ```ts
-import type { ErrorOccurredHookInput, HookInvocation, ErrorOccurredHookOutput } from "@github/copilot-sdk";
+import type { ErrorOccurredHookInput, HookInvocation, ErrorOccurredHookOutput } from "@microsoft/copilot-sdk";
 type ErrorOccurredHandler = (
   input: ErrorOccurredHookInput,
   invocation: HookInvocation
@@ -64,7 +64,7 @@ ErrorOccurredHandler = Callable[
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
 
 // Aliases let the signature below use the package's own type names.
 type (
@@ -97,7 +97,7 @@ type ErrorOccurredHandler func(
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 public delegate Task<ErrorOccurredHookOutput?> ErrorOccurredHandler(
     ErrorOccurredHookInput input,
@@ -165,14 +165,16 @@ Return `null` or `undefined` to use default error handling. Otherwise, return an
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onErrorOccurred: async (input, invocation) => {
-      console.error(`[${invocation.sessionId}] Error: ${input.error}`);
-      console.error(`  Context: ${input.errorContext}`);
-      console.error(`  Recoverable: ${input.recoverable}`);
-      return null;
+    hooks: {
+        handlers: {
+            onErrorOccurred: async (input, invocation) => {
+                console.error(`[${invocation.sessionId}] Error: ${input.error}`);
+                console.error(`  Context: ${input.errorContext}`);
+                console.error(`  Recoverable: ${input.recoverable}`);
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -185,7 +187,8 @@ const session = await client.createSession({
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
+
 
 async def on_error_occurred(input_data, invocation):
     print(f"[{invocation['session_id']}] Error: {input_data['error']}")
@@ -193,7 +196,11 @@ async def on_error_occurred(input_data, invocation):
     print(f"  Recoverable: {input_data['recoverable']}")
     return None
 
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={"on_error_occurred": on_error_occurred})
+
+session = await client.create_session(
+    permissions={"on_request": PermissionHandler.approve_all},
+    hooks={"handlers": {"on_error_occurred": on_error_occurred}},
+)
 ```
 
 </details>
@@ -208,18 +215,20 @@ package main
 import (
 	"context"
 	"fmt"
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
-	client := copilot.NewClient(nil)
-	session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
-		Hooks: &copilot.SessionHooks{
-			OnErrorOccurred: func(input copilot.ErrorOccurredHookInput, inv copilot.HookInvocation) (*copilot.ErrorOccurredHookOutput, error) {
-				fmt.Printf("[%s] Error: %s\n", inv.SessionID, input.Error)
-				fmt.Printf("  Context: %s\n", input.ErrorContext)
-				fmt.Printf("  Recoverable: %v\n", input.Recoverable)
-				return nil, nil
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+	session, _ := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+		Hooks: copilot.SessionHookOptions{
+			Handlers: &copilot.SessionHooks{
+				OnErrorOccurred: func(input copilot.ErrorOccurredHookInput, inv copilot.HookInvocation) (*copilot.ErrorOccurredHookOutput, error) {
+					fmt.Printf("[%s] Error: %s\n", inv.SessionID, input.Error)
+					fmt.Printf("  Context: %s\n", input.ErrorContext)
+					fmt.Printf("  Recoverable: %v\n", input.Recoverable)
+					return nil, nil
+				},
 			},
 		},
 	})
@@ -228,16 +237,19 @@ func main() {
 ```
 <!-- /docs-validate: hidden -->
 ```go
-session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
-    Hooks: &copilot.SessionHooks{
-        OnErrorOccurred: func(input copilot.ErrorOccurredHookInput, inv copilot.HookInvocation) (*copilot.ErrorOccurredHookOutput, error) {
-            fmt.Printf("[%s] Error: %s\n", inv.SessionID, input.Error)
-            fmt.Printf("  Context: %s\n", input.ErrorContext)
-            fmt.Printf("  Recoverable: %v\n", input.Recoverable)
-            return nil, nil
-        },
-    },
+session, _ := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+	Hooks: copilot.SessionHookOptions{
+		Handlers: &copilot.SessionHooks{
+			OnErrorOccurred: func(input copilot.ErrorOccurredHookInput, inv copilot.HookInvocation) (*copilot.ErrorOccurredHookOutput, error) {
+				fmt.Printf("[%s] Error: %s\n", inv.SessionID, input.Error)
+				fmt.Printf("  Context: %s\n", input.ErrorContext)
+				fmt.Printf("  Recoverable: %v\n", input.Recoverable)
+				return nil, nil
+			},
+		},
+	},
 })
+
 ```
 
 </details>
@@ -246,18 +258,21 @@ session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-var session = await client.CreateSessionAsync(new SessionConfig
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    Hooks = new SessionHooks
+    Hooks = new SessionHookOptions
     {
-        OnErrorOccurred = (input, invocation) =>
+        Handlers = new SessionHooks
         {
-            Console.Error.WriteLine($"[{invocation.SessionId}] Error: {input.Error}");
-            Console.Error.WriteLine($"  Context: {input.ErrorContext}");
-            Console.Error.WriteLine($"  Recoverable: {input.Recoverable}");
-            return Task.FromResult<ErrorOccurredHookOutput?>(null);
-        },
-    },
+            OnErrorOccurred = (input, invocation) =>
+            {
+                Console.Error.WriteLine($"[{invocation.SessionId}] Error: {input.Error}");
+                Console.Error.WriteLine($"  Context: {input.ErrorContext}");
+                Console.Error.WriteLine($"  Recoverable: {input.Recoverable}");
+                return Task.FromResult<ErrorOccurredHookOutput?>(null);
+            },
+        }
+    }
 });
 ```
 
@@ -268,44 +283,62 @@ var session = await client.CreateSessionAsync(new SessionConfig
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.*;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.rpc.*;
 
 public class ErrorHandlingExample {
     public static void main(String[] args) throws Exception {
-        try (var client = new CopilotClient()) {
-            var session = client.createSession(
-                new SessionConfig()
-                    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-            ).get();
+        try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
+            var session = client
+                    .createSession(new CreateSessionOptions()
+                            .setPermissions(new SessionPermissionOptions()
+                                    .setOnRequest(PermissionHandler.APPROVE_ALL)))
+                    .get();
 
-            session.setEventErrorPolicy(EventErrorPolicy.SUPPRESS_AND_LOG_ERRORS);
-            session.setEventErrorHandler((event, ex) -> {
-                System.err.println("[" + session.getSessionId() + "] Error: " + ex.getMessage());
-                System.err.println("  Event: " + event.getType());
-            });
+            session
+                    .setEventErrorPolicy(EventErrorPolicy.SUPPRESS_AND_LOG_ERRORS);
+            session
+                    .setEventErrorHandler((event, ex) -> {
+                        System.err
+                                .println("[" + session
+                                        .getSessionId() + "] Error: "
+                                        + ex
+                                                .getMessage());
+                        System.err
+                                .println("  Event: " + event
+                                        .getType());
+                    });
         }
     }
 }
 ```
 <!-- /docs-validate: hidden -->
 ```java
-import com.github.copilot.*;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.rpc.*;
 
 // Note: Java SDK does not have an onErrorOccurred hook.
 // Use EventErrorPolicy and EventErrorHandler instead:
 
-var session = client.createSession(
-    new SessionConfig()
-        .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-).get();
+var session = client
+        .createSession(new CreateSessionOptions()
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL)))
+        .get();
 
-session.setEventErrorPolicy(EventErrorPolicy.SUPPRESS_AND_LOG_ERRORS);
-session.setEventErrorHandler((event, ex) -> {
-    System.err.println("[" + session.getSessionId() + "] Error: " + ex.getMessage());
-    System.err.println("  Event: " + event.getType());
-});
+session
+        .setEventErrorPolicy(EventErrorPolicy.SUPPRESS_AND_LOG_ERRORS);
+session
+        .setEventErrorHandler((event, ex) -> {
+            System.err
+                    .println("[" + session
+                            .getSessionId() + "] Error: "
+                            + ex
+                                    .getMessage());
+            System.err
+                    .println("  Event: " + event
+                            .getType());
+        });
 ```
 
 </details>
@@ -316,23 +349,25 @@ session.setEventErrorHandler((event, ex) -> {
 import { captureException } from "@sentry/node"; // or your monitoring service
 
 const session = await client.createSession({
-  hooks: {
-    onErrorOccurred: async (input, invocation) => {
-      captureException(new Error(input.error), {
-        tags: {
-          sessionId: invocation.sessionId,
-          errorContext: input.errorContext,
+    hooks: {
+        handlers: {
+            onErrorOccurred: async (input, invocation) => {
+                captureException(new Error(input.error), {
+                    tags: {
+                        sessionId: invocation.sessionId,
+                        errorContext: input.errorContext,
+                    },
+                    extra: {
+                        error: input.error,
+                        recoverable: input.recoverable,
+                        cwd: input.workingDirectory,
+                    },
+                });
+
+                return null;
+            },
         },
-        extra: {
-          error: input.error,
-          recoverable: input.recoverable,
-          cwd: input.workingDirectory,
-        },
-      });
-      
-      return null;
     },
-  },
 });
 ```
 
@@ -340,26 +375,28 @@ const session = await client.createSession({
 
 ```typescript
 const ERROR_MESSAGES: Record<string, string> = {
-  "model_call": "There was an issue communicating with the AI model. Please try again.",
-  "tool_execution": "A tool failed to execute. Please check your inputs and try again.",
-  "system": "A system error occurred. Please try again later.",
-  "user_input": "There was an issue with your input. Please check and try again.",
+    model_call: "There was an issue communicating with the AI model. Please try again.",
+    tool_execution: "A tool failed to execute. Please check your inputs and try again.",
+    system: "A system error occurred. Please try again later.",
+    user_input: "There was an issue with your input. Please check and try again.",
 };
 
 const session = await client.createSession({
-  hooks: {
-    onErrorOccurred: async (input) => {
-      const friendlyMessage = ERROR_MESSAGES[input.errorContext];
-      
-      if (friendlyMessage) {
-        return {
-          userNotification: friendlyMessage,
-        };
-      }
-      
-      return null;
+    hooks: {
+        handlers: {
+            onErrorOccurred: async (input) => {
+                const friendlyMessage = ERROR_MESSAGES[input.errorContext];
+
+                if (friendlyMessage) {
+                    return {
+                        userNotification: friendlyMessage,
+                    };
+                }
+
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -367,16 +404,18 @@ const session = await client.createSession({
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onErrorOccurred: async (input) => {
-      // Suppress tool execution errors that are recoverable
-      if (input.errorContext === "tool_execution" && input.recoverable) {
-        console.log(`Suppressed recoverable error: ${input.error}`);
-        return { suppressOutput: true };
-      }
-      return null;
+    hooks: {
+        handlers: {
+            onErrorOccurred: async (input) => {
+                // Suppress tool execution errors that are recoverable
+                if (input.errorContext === "tool_execution" && input.recoverable) {
+                    console.log(`Suppressed recoverable error: ${input.error}`);
+                    return { suppressOutput: true };
+                }
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -384,30 +423,32 @@ const session = await client.createSession({
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onErrorOccurred: async (input) => {
-      if (input.errorContext === "tool_execution") {
-        return {
-          userNotification: `
+    hooks: {
+        handlers: {
+            onErrorOccurred: async (input) => {
+                if (input.errorContext === "tool_execution") {
+                    return {
+                        userNotification: `
 The tool failed. Here are some recovery suggestions:
 - Check if required dependencies are installed
 - Verify file paths are correct
 - Try a simpler approach
           `.trim(),
-        };
-      }
-      
-      if (input.errorContext === "model_call" && input.error.includes("rate")) {
-        return {
-          errorHandling: "retry",
-          retryCount: 3,
-          userNotification: "Rate limit hit. Retrying...",
-        };
-      }
-      
-      return null;
+                    };
+                }
+
+                if (input.errorContext === "model_call" && input.error.includes("rate")) {
+                    return {
+                        errorHandling: "retry",
+                        retryCount: 3,
+                        userNotification: "Rate limit hit. Retrying...",
+                    };
+                }
+
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -415,38 +456,40 @@ The tool failed. Here are some recovery suggestions:
 
 ```typescript
 interface ErrorStats {
-  count: number;
-  lastOccurred: Date;
-  contexts: string[];
+    count: number;
+    lastOccurred: Date;
+    contexts: string[];
 }
 
 const errorStats = new Map<string, ErrorStats>();
 
 const session = await client.createSession({
-  hooks: {
-    onErrorOccurred: async (input, invocation) => {
-      const key = `${input.errorContext}:${input.error.substring(0, 50)}`;
-      
-      const existing = errorStats.get(key) || {
-        count: 0,
-        lastOccurred: input.timestamp,
-        contexts: [],
-      };
-      
-      existing.count++;
-      existing.lastOccurred = input.timestamp;
-      existing.contexts.push(invocation.sessionId);
-      
-      errorStats.set(key, existing);
-      
-      // Alert if error is recurring
-      if (existing.count >= 5) {
-        console.warn(`Recurring error detected: ${key} (${existing.count} times)`);
-      }
-      
-      return null;
+    hooks: {
+        handlers: {
+            onErrorOccurred: async (input, invocation) => {
+                const key = `${input.errorContext}:${input.error.substring(0, 50)}`;
+
+                const existing = errorStats.get(key) || {
+                    count: 0,
+                    lastOccurred: input.timestamp,
+                    contexts: [],
+                };
+
+                existing.count++;
+                existing.lastOccurred = input.timestamp;
+                existing.contexts.push(invocation.sessionId);
+
+                errorStats.set(key, existing);
+
+                // Alert if error is recurring
+                if (existing.count >= 5) {
+                    console.warn(`Recurring error detected: ${key} (${existing.count} times)`);
+                }
+
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -456,21 +499,23 @@ const session = await client.createSession({
 const CRITICAL_CONTEXTS = ["system", "model_call"];
 
 const session = await client.createSession({
-  hooks: {
-    onErrorOccurred: async (input, invocation) => {
-      if (CRITICAL_CONTEXTS.includes(input.errorContext) && !input.recoverable) {
-        await sendAlert({
-          level: "critical",
-          message: `Critical error in session ${invocation.sessionId}`,
-          error: input.error,
-          context: input.errorContext,
-          timestamp: input.timestamp.toISOString(),
-        });
-      }
-      
-      return null;
+    hooks: {
+        handlers: {
+            onErrorOccurred: async (input, invocation) => {
+                if (CRITICAL_CONTEXTS.includes(input.errorContext) && !input.recoverable) {
+                    await sendAlert({
+                        level: "critical",
+                        message: `Critical error in session ${invocation.sessionId}`,
+                        error: input.error,
+                        context: input.errorContext,
+                        timestamp: input.timestamp.toISOString(),
+                    });
+                }
+
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -480,37 +525,39 @@ const session = await client.createSession({
 const sessionContext = new Map<string, { lastTool?: string; lastPrompt?: string }>();
 
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input, invocation) => {
-      const ctx = sessionContext.get(invocation.sessionId) || {};
-      ctx.lastTool = input.toolName;
-      sessionContext.set(invocation.sessionId, ctx);
-      return { permissionDecision: "allow" };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input, invocation) => {
+                const ctx = sessionContext.get(invocation.sessionId) || {};
+                ctx.lastTool = input.toolName;
+                sessionContext.set(invocation.sessionId, ctx);
+                return { permissionDecision: "allow" };
+            },
+
+            onUserPromptSubmitted: async (input, invocation) => {
+                const ctx = sessionContext.get(invocation.sessionId) || {};
+                ctx.lastPrompt = input.prompt.substring(0, 100);
+                sessionContext.set(invocation.sessionId, ctx);
+                return null;
+            },
+
+            onErrorOccurred: async (input, invocation) => {
+                const ctx = sessionContext.get(invocation.sessionId);
+
+                console.error(`Error in session ${invocation.sessionId}:`);
+                console.error(`  Error: ${input.error}`);
+                console.error(`  Context: ${input.errorContext}`);
+                if (ctx?.lastTool) {
+                    console.error(`  Last tool: ${ctx.lastTool}`);
+                }
+                if (ctx?.lastPrompt) {
+                    console.error(`  Last prompt: ${ctx.lastPrompt}...`);
+                }
+
+                return null;
+            },
+        },
     },
-    
-    onUserPromptSubmitted: async (input, invocation) => {
-      const ctx = sessionContext.get(invocation.sessionId) || {};
-      ctx.lastPrompt = input.prompt.substring(0, 100);
-      sessionContext.set(invocation.sessionId, ctx);
-      return null;
-    },
-    
-    onErrorOccurred: async (input, invocation) => {
-      const ctx = sessionContext.get(invocation.sessionId);
-      
-      console.error(`Error in session ${invocation.sessionId}:`);
-      console.error(`  Error: ${input.error}`);
-      console.error(`  Context: ${input.errorContext}`);
-      if (ctx?.lastTool) {
-        console.error(`  Last tool: ${ctx.lastTool}`);
-      }
-      if (ctx?.lastPrompt) {
-        console.error(`  Last prompt: ${ctx.lastPrompt}...`);
-      }
-      
-      return null;
-    },
-  },
 });
 ```
 

@@ -138,12 +138,18 @@ pub struct FeatureFlagServiceReadParams {
     /// Wait for a different revision or service disposal using the existing change notification.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after_revision: Option<i64>,
+    /// Return only the redacted UI projection, without assignment data or requested evaluations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_only: Option<bool>,
     /// Feature names evaluated with their canonical experiment mappings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flags: Option<Vec<String>>,
     /// Explicit experiment/static queries, in result order.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub overrides: Option<Vec<FeatureFlagExpOverrideQuery>>,
+    /// Original display generation; a replaced service returns an unavailable projection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_id: Option<String>,
     /// Wait for the current assignment. Omission does not wait.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_for_exp_response: Option<bool>,
@@ -160,6 +166,9 @@ pub struct FeatureFlagServiceReadParams {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeatureFlagServiceReadResult {
+    /// Redacted runtime decisions for UI presentation, present only for an available display read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_state: Option<serde_json::Value>,
     /// Requested feature values. Unknown or unset values are absent.
     pub flags: HashMap<String, bool>,
     /// Explicit override results; null means neither source supplies a boolean.

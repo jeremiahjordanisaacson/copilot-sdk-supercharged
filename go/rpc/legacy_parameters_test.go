@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
 )
 
 // Existing catalog requests retain their optional pointer fields and keyed literals.
@@ -45,22 +45,23 @@ func TestLegacyParameterRequestsKeepKeyedLiterals(t *testing.T) {
 	}
 }
 
-func TestExternalToolDefinitionPreservesPositionalLiteral(t *testing.T) {
+func TestExternalToolDefinitionPreservesMetadata(t *testing.T) {
 	definition := ProtocolExternalToolDefinition{
-		nil, "Description", nil, nil, map[string]any{"custom": "kept"}, "lookup",
-		nil, nil, nil, nil, nil,
+		Name:        "lookup",
+		Description: "Description",
+		Metadata:    map[string]any{"custom": "kept"},
 	}
 	data, err := json.Marshal(definition)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := `{"description":"Description","metadata":{"custom":"kept"},"name":"lookup"}`; string(data) != want {
-		t.Fatalf("positional definition = %s, want %s", data, want)
+		t.Fatalf("definition = %s, want %s", data, want)
 	}
 }
 
 func TestLoginBeginKeepsPositionalLiterals(t *testing.T) {
-	request := AuthLoginBeginRequest{nil, LoginProviderKindGitHubDotCom, nil}
+	request := AuthLoginBeginRequest{Kind: LoginProviderKindGitHubDotCom}
 	wire := encodeRequest(t, request)
 	if len(wire) != 1 || wire["kind"] != "githubDotCom" {
 		t.Fatalf("legacy login request changed: %v", wire)
@@ -68,7 +69,7 @@ func TestLoginBeginKeepsPositionalLiterals(t *testing.T) {
 }
 
 func TestPermissionRequiredKeepsPositionalLiterals(t *testing.T) {
-	request := PermissionsSetRequiredRequest{true}
+	request := PermissionsSetRequiredRequest{Required: true}
 	wire := encodeRequest(t, request)
 	if len(wire) != 1 || wire["required"] != true {
 		t.Fatalf("legacy permission requirement changed: %v", wire)
@@ -101,11 +102,11 @@ func TestPermissionRequiredOptionsOnWire(t *testing.T) {
 				var err error
 				if provider {
 					providerID := "provider"
-					options := PermissionsSetRequiredOptions{Required: required, ProviderID: &providerID}
-					result, err = api.SetRequiredWithOptions(ctx, &options)
+					options := PermissionsSetRequiredRequest{Required: required, ProviderID: &providerID}
+					result, err = api.SetRequired(ctx, &options)
 					expected["providerId"] = providerID
 				} else {
-					result, err = api.SetRequired(ctx, &PermissionsSetRequiredRequest{required})
+					result, err = api.SetRequired(ctx, &PermissionsSetRequiredRequest{Required: required})
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -131,11 +132,11 @@ func TestPermissionRequiredOptionsOnWire(t *testing.T) {
 }
 
 func TestPermissionRequirementsKeepPositionalLiteralsAndProviderOptions(t *testing.T) {
-	request := PermissionsSetRequiredRequest{true}
+	request := PermissionsSetRequiredRequest{Required: true}
 	if wire := encodeRequest(t, request); !reflect.DeepEqual(wire, map[string]any{"required": true}) {
 		t.Fatalf("legacy permission requirement changed: %v", wire)
 	}
-	options := PermissionsSetRequiredOptions{Required: false}
+	options := PermissionsSetRequiredRequest{Required: false}
 	if wire := encodeRequest(t, options); !reflect.DeepEqual(wire, map[string]any{"required": false}) {
 		t.Fatalf("provider identity must be omitted by default: %v", wire)
 	}
@@ -165,11 +166,11 @@ func TestPermissionRequirementOptionsOnWire(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	api := NewSessionRPC(client, "permission-session").Permissions
-	if _, err := api.SetRequired(ctx, &PermissionsSetRequiredRequest{true}); err != nil {
+	if _, err := api.SetRequired(ctx, &PermissionsSetRequiredRequest{Required: true}); err != nil {
 		t.Fatal(err)
 	}
 	provider := "provider"
-	if _, err := api.SetRequiredWithOptions(ctx, &PermissionsSetRequiredOptions{
+	if _, err := api.SetRequired(ctx, &PermissionsSetRequiredRequest{
 		Required: false, ProviderID: &provider,
 	}); err != nil {
 		t.Fatal(err)
@@ -193,17 +194,17 @@ func TestPermissionRequirementOptionsOnWire(t *testing.T) {
 	}
 }
 
-func TestSessionInfoKeepsPositionalLiterals(t *testing.T) {
-	data := SessionInfoData{"notification", "message", nil, nil}
+func TestSessionInfoPreservesOptionalMetadata(t *testing.T) {
+	data := SessionInfoData{InfoType: "notification", Message: "message"}
 	wire := encodeRequest(t, data)
 	if len(wire) != 2 || wire["infoType"] != "notification" || wire["message"] != "message" {
-		t.Fatalf("legacy info payload changed: %v", wire)
+		t.Fatalf("info payload changed: %v", wire)
 	}
 	tip, url := "a tip", "https://example.com"
-	data = SessionInfoData{"notification", "message", &tip, &url}
+	data = SessionInfoData{InfoType: "notification", Message: "message", Tip: &tip, URL: &url}
 	wire = encodeRequest(t, data)
 	if wire["tip"] != tip || wire["url"] != url {
-		t.Fatalf("legacy info payload field order changed: %v", wire)
+		t.Fatalf("optional info metadata changed: %v", wire)
 	}
 }
 
@@ -222,7 +223,9 @@ func TestSessionInfoDecodesWithInternalReasoningMetadata(t *testing.T) {
 	}
 	data, ok := event.Data.(*SessionInfoData)
 	if !ok || data.InfoType != "reasoning_effort" || data.Message != "Reasoning effort changed" ||
-		data.Tip == nil || *data.Tip != "a tip" || data.URL == nil || *data.URL != "https://example.com" {
+		data.Tip == nil || *data.Tip != "a tip" || data.URL == nil || *data.URL != "https://example.com" ||
+		data.ResponsesReasoning == nil || data.ResponsesReasoning.Model != "gpt-6-astra" ||
+		data.ResponsesReasoning.InitialEffort != "low" || data.ResponsesReasoning.Effort != "high" {
 		t.Fatalf("info event with internal metadata changed: %#v", event.Data)
 	}
 }
@@ -253,13 +256,17 @@ func TestLoginBeginOptionsOnWire(t *testing.T) {
 			case "legacy":
 				accountID := "cached-account"
 				mode := AuthLoginModeDefault
-				_, err = api.Begin(ctx, &AuthLoginBeginRequest{&accountID, LoginProviderKindGitHubDotCom, &mode})
+				_, err = api.Begin(ctx, &AuthLoginBeginRequest{
+					AccountID: &accountID,
+					Kind:      LoginProviderKindGitHubDotCom,
+					Mode:      &mode,
+				})
 				expected["accountId"] = accountID
 				expected["kind"] = "githubDotCom"
 				expected["mode"] = "default"
 			case "device-code":
 				method := AuthLoginMethodDeviceCode
-				_, err = api.BeginWithOptions(ctx, &AuthLoginBeginOptions{
+				_, err = api.Begin(ctx, &AuthLoginBeginRequest{
 					Kind: LoginProviderKindGitHubDotCom, Method: &method,
 				})
 				expected["kind"] = "githubDotCom"

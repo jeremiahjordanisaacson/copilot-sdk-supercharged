@@ -5,13 +5,13 @@
 //
 // Basic usage:
 //
-//	client := copilot.NewClient(nil)
+//	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 //	if err := client.Start(); err != nil {
 //	    log.Fatal(err)
 //	}
 //	defer client.Stop()
 //
-//	session, err := client.CreateSession(&copilot.SessionConfig{
+//	session, err := client.CreateSession(&copilot.CreateSessionOptions{
 //	    OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 //	    Model: "gpt-5.4",
 //	})
@@ -51,19 +51,16 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 
-	"github.com/github/copilot-sdk/go/internal/embeddedcli"
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/internal/truncbuffer"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/embeddedcli"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/truncbuffer"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
-
-// defaultBearerTokenProviderName is the implicit provider name for the singular,
-// whole-session [ProviderConfig]. Named providers are keyed by their own Name.
-const defaultBearerTokenProviderName = "default"
 
 type cloudSkillProviderError struct{}
 
@@ -102,11 +99,8 @@ func requestedMemoryStore(
 // from the singular provider and any named providers, keyed by provider name. The
 // singular provider uses the implicit name "default"; named providers use their
 // own Name. Returns nil when no callbacks are configured.
-func collectBearerTokenProviders(provider *ProviderConfig, providers []NamedProviderConfig) map[string]BearerTokenProvider {
+func collectBearerTokenProviders(providers []NamedProviderConfig) map[string]BearerTokenProvider {
 	callbacks := make(map[string]BearerTokenProvider)
-	if provider != nil && provider.BearerTokenProvider != nil {
-		callbacks[defaultBearerTokenProviderName] = provider.BearerTokenProvider
-	}
 	for i := range providers {
 		if providers[i].BearerTokenProvider != nil {
 			callbacks[providers[i].Name] = providers[i].BearerTokenProvider
@@ -134,47 +128,53 @@ func validateSessionFSConfig(config *SessionFSConfig) error {
 	return nil
 }
 
-// validateEnvironmentOptions enforces the transport-specific rules for
-// per-client environment, working directory, and telemetry. It panics (fails
-// loud) on a misconfiguration, matching the other SDKs.
-//
-// In-process hosts share the process environment and working directory.
-// Child-process transports accept environment at
-// either the client or connection level, not both.
-func validateEnvironmentOptions(connection RuntimeConnection, opts *ClientOptions) {
+func validateConnectionOptions(connection RuntimeConnection, opts *clientOptions) {
+	if _, ok := connection.(TCPConnection); ok {
+		var runtimeOnlyOptions []string
+		if opts.BaseDirectory != "" {
+			runtimeOnlyOptions = append(runtimeOnlyOptions, "Runtime.BaseDirectory")
+		}
+		if opts.GitHubToken != "" {
+			runtimeOnlyOptions = append(runtimeOnlyOptions, "GitHub.Token")
+		}
+		if opts.UseLoggedInUser != nil {
+			runtimeOnlyOptions = append(runtimeOnlyOptions, "GitHub.UseLoggedInUser")
+		}
+		if opts.LogLevel != "" {
+			runtimeOnlyOptions = append(runtimeOnlyOptions, "Observability.LogLevel")
+		}
+		if opts.Telemetry != nil {
+			runtimeOnlyOptions = append(runtimeOnlyOptions, "Observability.Telemetry")
+		}
+		if opts.SessionIdleTimeoutSeconds != 0 {
+			runtimeOnlyOptions = append(runtimeOnlyOptions, "Runtime.SessionIdleTimeoutSeconds")
+		}
+		if len(runtimeOnlyOptions) != 0 {
+			panic(strings.Join(runtimeOnlyOptions, ", ") + " cannot be used with TCPConnection (external runtime manages its own startup configuration)")
+		}
+	}
 	if _, ok := connection.(InProcessConnection); ok {
-		if opts.Env != nil {
-			panic("Env is not supported with InProcessConnection: environment variables belong to the shared host process. Use typed client/session options or a child-process transport.")
-		}
-		if opts.WorkingDirectory != "" {
-			panic("WorkingDirectory is not supported with InProcessConnection: the native runtime shares the host process working directory. Set SessionConfig.WorkingDirectory instead.")
-		}
 		if opts.Telemetry != nil && !utf8.ValidString(opts.Telemetry.FilePath) {
 			panic("Telemetry.FilePath must be valid UTF-8 with InProcessConnection")
-		}
-		return
-	}
-
-	if cp, ok := connection.(childProcessConnection); ok {
-		if cp.connEnv() != nil && opts.Env != nil {
-			panic("Set environment variables via either the client-level Env option or the connection's Env, not both. Prefer the connection-level Env for child-process transports.")
 		}
 	}
 }
 
 // Client manages the connection to the Copilot CLI server and provides session management.
 //
-// The Client can either spawn a CLI server process or connect to an existing server.
+// The Client hosts the native runtime in-process by default, or uses an explicit
+// subprocess or external-server connection.
 // It handles JSON-RPC communication, session lifecycle, tool execution, and permission requests.
 //
 // Example:
 //
-//	// Create a client with default options (spawns CLI server using stdio)
-//	client := copilot.NewClient(nil)
+//	// Create a client with default transport (hosts the runtime in-process)
+//	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 //
 //	// Or connect to an existing server
 //	client := copilot.NewClient(&copilot.ClientOptions{
-//	    Connection: copilot.URIConnection{URL: "localhost:3000"},
+//	    Mode: copilot.ModeCodingAgent,
+//	    Runtime: copilot.TCPConnection{Host: "localhost", Port: 3000},
 //	})
 //
 //	if err := client.Start(); err != nil {
@@ -182,7 +182,7 @@ func validateEnvironmentOptions(connection RuntimeConnection, opts *ClientOption
 //	}
 //	defer client.Stop()
 type Client struct {
-	options                               ClientOptions
+	options                               clientOptions
 	process                               *exec.Cmd
 	processStdin                          io.WriteCloser
 	client                                *jsonrpc2.Client
@@ -211,21 +211,26 @@ type Client struct {
 	useInProcess                          bool     // true for InProcessConnection (FFI transport)
 	ffiHost                               inProcessHost
 	runOnUiThread                         func(action func() error) error
-	// resolved process options for the spawned runtime (zero values for URIConnection)
+	// resolved process options for the spawned runtime (zero values for TCPConnection)
 	cliPath            string
 	cliArgs            []string
+	environment        []string
+	workingDirectory   string
 	port               int
 	tcpConnectionToken string
 
-	modelsCache               []ModelInfo
+	modelsCache               []Model
 	modelsCacheMux            sync.Mutex
 	lifecycleHandlers         map[uint64]SessionLifecycleHandler
 	typedLifecycleHandlers    map[SessionLifecycleEventType]map[uint64]SessionLifecycleHandler
 	nextLifecycleHandlerID    uint64
 	lifecycleHandlersMux      sync.Mutex
 	startStopMux              sync.RWMutex // protects process and state during start/[force]stop
-	transportMux              sync.Mutex   // guards startup and transport visibility outside startStopMux; see ensureConnected
+	transportMux              sync.Mutex   // guards startup, stop fencing and transport visibility; see ensureConnected
 	startup                   *startupAttempt
+	lastStartup               *startupAttempt
+	stopGeneration            uint64
+	stopsInProgress           int
 	testHookTransportAcquired func() // tests only: runs after ensureConnected acquires a transport
 	processDone               chan struct{}
 	processErrorPtr           *error
@@ -234,7 +239,7 @@ type Client struct {
 	// effectiveConnectionToken is the token sent in `connect`; auto-generated when
 	// the SDK spawns its own CLI in TCP mode.
 	effectiveConnectionToken string
-	onListModels             func(ctx context.Context) ([]ModelInfo, error)
+	onListModels             func(ctx context.Context) ([]Model, error)
 
 	// RPC provides typed server-scoped RPC methods.
 	// This field is nil until the client is connected via Start().
@@ -252,28 +257,33 @@ type sessionOperation struct {
 
 // NewClient creates a new Copilot runtime client with the given options.
 //
-// If options is nil, default options are used (spawns the bundled runtime over
-// stdio). The client is not connected after creation; call [Client.Start] to
+// Options and [ClientOptions.Mode] are required. The client is not connected
+// after creation; call [Client.Start] to
 // connect, or simply call [Client.CreateSession]/[Client.ResumeSession], which
 // auto-start the runtime on first use.
 //
 // Example:
 //
-//	// Default options: bundled runtime over stdio
-//	client := copilot.NewClient(nil)
+//	// Default transport: bundled runtime in-process
+//	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 //
 //	// Custom CLI path over stdio
 //	client := copilot.NewClient(&copilot.ClientOptions{
-//	    Connection: copilot.StdioConnection{Path: "/usr/local/bin/copilot"},
-//	    LogLevel:   "debug",
+//	    Mode: copilot.ModeCodingAgent,
+//	    Runtime: copilot.SpawnedStdioConnection{Path: "/usr/local/bin/copilot"},
+//	    Observability: copilot.ClientObservabilityOptions{LogLevel: "debug"},
 //	})
 //
 //	// Connect to an already-running runtime
 //	client := copilot.NewClient(&copilot.ClientOptions{
-//	    Connection: copilot.URIConnection{URL: "localhost:8080"},
+//	    Mode: copilot.ModeCodingAgent,
+//	    Runtime: copilot.TCPConnection{Host: "localhost", Port: 8080},
 //	})
 func NewClient(options *ClientOptions) *Client {
-	opts := ClientOptions{}
+	if options == nil || (options.Mode != ModeCodingAgent && options.Mode != ModeEmpty) {
+		panic("ClientOptions.Mode is required and must be ModeCodingAgent or ModeEmpty")
+	}
+	opts := *options.normalize()
 
 	client := &Client{
 		options:              opts,
@@ -285,9 +295,6 @@ func NewClient(options *ClientOptions) *Client {
 		useStdio:             true,
 	}
 
-	if options != nil {
-		opts = *options
-	}
 	for _, path := range opts.BuiltinPluginDirectories {
 		if !filepath.IsAbs(path) {
 			panic(fmt.Sprintf("BuiltinPluginDirectories must contain only absolute paths: %s", path))
@@ -295,24 +302,19 @@ func NewClient(options *ClientOptions) *Client {
 	}
 	opts.BuiltinPluginDirectories = append([]string(nil), opts.BuiltinPluginDirectories...)
 
-	// Resolve the connection. An explicit connection always wins; otherwise
-	// honor the same process/environment override as the other SDKs.
+	// Resolve the connection from the host environment unless explicitly supplied.
 	connection := opts.Connection
 	if connection == nil {
-		env := opts.Env
-		if env == nil {
-			env = os.Environ()
-		}
-		connection = resolveDefaultConnection(env)
+		connection = resolveDefaultConnection(os.Environ())
 	}
 	switch conn := connection.(type) {
-	case StdioConnection:
+	case SpawnedStdioConnection:
 		client.useStdio = true
 		client.cliPath = conn.Path
 		if len(conn.Args) > 0 {
 			client.cliArgs = append([]string{}, conn.Args...)
 		}
-	case TCPConnection:
+	case SpawnedTCPConnection:
 		client.useStdio = false
 		client.cliPath = conn.Path
 		if len(conn.Args) > 0 {
@@ -320,13 +322,22 @@ func NewClient(options *ClientOptions) *Client {
 		}
 		client.port = conn.Port
 		client.tcpConnectionToken = conn.ConnectionToken
-	case URIConnection:
-		if conn.URL == "" {
-			panic("URIConnection requires a non-empty URL")
+	case TCPConnection:
+		if conn.Host == "" || strings.ContainsAny(conn.Host, "/\\?#@[]") {
+			panic("TCPConnection Host must be a hostname or IP address without a scheme, port, or path")
 		}
-		host, port := parseCLIURL(conn.URL)
-		client.actualHost = host
-		client.actualPort.Store(int64(port))
+		if strings.Contains(conn.Host, ":") {
+			if address, err := netip.ParseAddr(conn.Host); err != nil || !address.Is6() {
+				panic("TCPConnection Host must be a hostname or IP address without a scheme, port, or path")
+			}
+		} else if strings.ContainsFunc(conn.Host, unicode.IsSpace) {
+			panic("TCPConnection Host must be a hostname or IP address without a scheme, port, or path")
+		}
+		if conn.Port <= 0 || conn.Port > 65535 {
+			panic("TCPConnection Port must be from 1 through 65535")
+		}
+		client.actualHost = conn.Host
+		client.actualPort.Store(int64(conn.Port))
 		client.isExternalServer = true
 		client.useStdio = false
 		client.tcpConnectionToken = conn.ConnectionToken
@@ -346,34 +357,25 @@ func NewClient(options *ClientOptions) *Client {
 	}
 
 	// Validate transport-specific option constraints before resolving defaults.
-	validateEnvironmentOptions(connection, &opts)
-
-	// Validate auth options when connecting to an external runtime.
-	if client.isExternalServer && (opts.GitHubToken != "" || opts.UseLoggedInUser != nil) {
-		panic("GitHubToken and UseLoggedInUser cannot be used with URIConnection (external runtime manages its own auth)")
-	}
+	validateConnectionOptions(connection, &opts)
 	if client.isExternalServer && opts.InternalTestOptions != nil {
 		panic("InternalTestOptions requires a runtime owned by this client")
 	}
 
-	// For child-process transports, a connection-level env takes precedence over
-	// the client-level env (setting both was rejected above). Resolve it before
-	// defaulting so an explicit empty connection env stays authoritative.
+	// Preserve an explicitly empty child environment instead of inheriting.
 	if cp, ok := connection.(childProcessConnection); ok {
-		if env := cp.connEnv(); env != nil {
-			opts.Env = env
-		}
+		client.environment = cp.connEnv()
+		client.workingDirectory = cp.connWorkingDirectory()
 	}
 
-	// Default Env to current environment if not set
-	if opts.Env == nil {
-		opts.Env = os.Environ()
+	if client.environment == nil {
+		client.environment = os.Environ()
 	}
-	opts.Env = append([]string{}, opts.Env...)
+	client.environment = append([]string{}, client.environment...)
 
 	// Check the effective environment for a child-process runtime override.
 	if client.cliPath == "" && !client.useInProcess {
-		if cliPath := getEnvValue(opts.Env, "COPILOT_CLI_PATH"); cliPath != "" {
+		if cliPath := getEnvValue(client.environment, "COPILOT_CLI_PATH"); cliPath != "" {
 			client.cliPath = cliPath
 		}
 	}
@@ -419,6 +421,105 @@ func resolveRuntimeExecutable(explicitPath, bundledRuntimePath string) (string, 
 	return bundledRuntimePath, nil
 }
 
+// exec.Command otherwise searches the parent PATH before Cmd.Env can be set.
+func lookPathInEnvironment(name string, env []string, workingDirectory string) (string, error) {
+	if filepath.Base(name) != name {
+		return name, nil
+	}
+	extensions := []string{""}
+	if runtime.GOOS == "windows" {
+		pathExt := getEnvValue(env, "PATHEXT")
+		if pathExt == "" {
+			pathExt = ".COM;.EXE;.BAT;.CMD"
+		}
+		if filepath.Ext(name) == "" {
+			extensions = nil
+		}
+		extensions = append(extensions, strings.Split(pathExt, ";")...)
+	}
+	lookupErr := exec.ErrNotFound
+	var relativePath string
+	var applicationDirectory string
+	// filepath.Join would fold POSIX ".." segments before following symlinks.
+	join := func(directory, name string) string {
+		if runtime.GOOS == "windows" {
+			return filepath.Join(directory, name)
+		}
+		if directory == "" {
+			return name
+		}
+		if os.IsPathSeparator(directory[len(directory)-1]) {
+			return directory + name
+		}
+		return directory + string(os.PathSeparator) + name
+	}
+	for _, directory := range filepath.SplitList(getEnvValue(env, "PATH")) {
+		if directory == "" {
+			directory = "."
+		}
+		for _, extension := range extensions {
+			candidate := join(directory, name+extension)
+			// Rooted and drive-qualified entries retain their own resolution.
+			if filepath.VolumeName(directory) == "" && !os.IsPathSeparator(directory[0]) {
+				candidate = join(workingDirectory, candidate)
+			}
+			if runtime.GOOS == "windows" {
+				var err error
+				candidate, err = filepath.Abs(candidate)
+				if err != nil {
+					return "", err
+				}
+			} else if !filepath.IsAbs(candidate) {
+				if applicationDirectory == "" {
+					var err error
+					applicationDirectory, err = os.Getwd()
+					if err != nil {
+						return "", err
+					}
+				}
+				candidate = join(applicationDirectory, candidate)
+			}
+			info, err := os.Stat(candidate)
+			if err != nil {
+				if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+					lookupErr = err
+				}
+				continue
+			}
+			if info.IsDir() {
+				continue
+			}
+			path, err := exec.LookPath(candidate)
+			if err != nil {
+				lookupErr = err
+				continue
+			}
+			// Windows accepts a later absolute PATH entry only for the same file.
+			if relativePath != "" {
+				relativeInfo, relativeErr := os.Lstat(relativePath)
+				candidateInfo, candidateErr := os.Lstat(path)
+				if relativeErr != nil || candidateErr != nil || !os.SameFile(relativeInfo, candidateInfo) {
+					return "", &exec.Error{Name: name, Err: exec.ErrDot}
+				}
+			}
+			if !filepath.IsAbs(directory) {
+				if runtime.GOOS != "windows" {
+					return "", &exec.Error{Name: name, Err: exec.ErrDot}
+				}
+				if relativePath == "" {
+					relativePath = path
+				}
+				continue
+			}
+			return path, nil
+		}
+	}
+	if relativePath != "" {
+		lookupErr = exec.ErrDot
+	}
+	return "", &exec.Error{Name: name, Err: lookupErr}
+}
+
 const defaultConnectionEnvVar = "COPILOT_SDK_DEFAULT_CONNECTION"
 
 // resolveDefaultConnection selects the transport when no explicit connection
@@ -427,9 +528,9 @@ const defaultConnectionEnvVar = "COPILOT_SDK_DEFAULT_CONNECTION"
 func resolveDefaultConnection(env []string) RuntimeConnection {
 	value := getEnvValue(env, defaultConnectionEnvVar)
 	switch {
-	case value == "", strings.EqualFold(value, "stdio"):
-		return StdioConnection{}
-	case strings.EqualFold(value, "inprocess"):
+	case strings.EqualFold(value, "stdio"):
+		return SpawnedStdioConnection{}
+	case value == "", strings.EqualFold(value, "inprocess"):
 		return InProcessConnection{}
 	default:
 		panic(fmt.Sprintf(
@@ -441,12 +542,13 @@ func resolveDefaultConnection(env []string) RuntimeConnection {
 }
 
 // getEnvValue looks up a key in an environment slice ([]string of "KEY=VALUE").
+// Keys are case-insensitive on Windows and case-sensitive elsewhere.
 // Returns the value if found, or empty string otherwise.
 func getEnvValue(env []string, key string) string {
-	prefix := key + "="
 	for i := len(env) - 1; i >= 0; i-- {
-		if strings.HasPrefix(env[i], prefix) {
-			return env[i][len(prefix):]
+		name, value, ok := strings.Cut(env[i], "=")
+		if ok && (name == key || runtime.GOOS == "windows" && strings.EqualFold(name, key)) {
+			return value
 		}
 	}
 	return ""
@@ -465,65 +567,13 @@ func setEnvValue(env []string, key string, value string) []string {
 	return append(filtered, key+"="+value)
 }
 
-// parseCLIURL parses a CLI URL into host and port components.
-//
-// Supports raw TCP addresses: "host:port", "[ipv6]:port", "http://host:port", or just "port".
-// Panics if the URL format is invalid or the port is out of range.
-func parseCLIURL(url string) (string, int) {
-	if strings.HasPrefix(strings.ToLower(url), "https://") {
-		panic("HTTPS runtime connections are not supported: this transport uses plaintext TCP, not TLS")
-	}
-
-	// Remove protocol if present
-	cleanURL, _ := strings.CutPrefix(url, "http://")
-
-	// Use the standard parser only for the bracketed IPv6 form. Keep the
-	// existing host:port parsing behavior for all other inputs.
-	if strings.HasPrefix(cleanURL, "[") {
-		host, portStr, err := net.SplitHostPort(cleanURL)
-		if err != nil {
-			panic(fmt.Sprintf("Invalid port in URIConnection: %s", url))
-		}
-		addr, err := netip.ParseAddr(host)
-		if err != nil || !addr.Is6() {
-			panic(fmt.Sprintf("Invalid URIConnection format: %s", url))
-		}
-		port, err := strconv.Atoi(portStr)
-		if err != nil || port <= 0 || port > 65535 {
-			panic(fmt.Sprintf("Invalid port in URIConnection: %s", url))
-		}
-		return host, port
-	}
-
-	// Parse host:port or port format
-	var host string
-	var portStr string
-	if before, after, found := strings.Cut(cleanURL, ":"); found {
-		host = before
-		portStr = after
-	} else {
-		portStr = cleanURL
-	}
-
-	if host == "" {
-		host = "localhost"
-	}
-
-	port, err := strconv.Atoi(portStr)
-	if err != nil || port <= 0 || port > 65535 {
-		panic(fmt.Sprintf("Invalid port in URIConnection: %s", url))
-	}
-
-	return host, port
-}
-
-// Start starts the CLI server (if not using an external server) and establishes
+// Start starts the runtime host (unless using an external server) and establishes
 // a connection.
 //
-// If connecting to an external server (via URIConnection), only establishes the connection.
-// Otherwise, spawns the CLI server process and then connects.
+// If connecting to an external server (via TCPConnection), only establishes the connection.
+// Otherwise, starts an in-process host or the explicitly selected subprocess.
 //
-// CreateSession and ResumeSession call this method automatically when the client is not connected.
+// Management helpers call this method automatically when the client is not connected.
 // Operations called while Start is in progress wait for it and fail with its
 // error if it fails.
 //
@@ -531,14 +581,33 @@ func parseCLIURL(url string) (string, int) {
 //
 // Example:
 //
-//	client := copilot.NewClient(nil)
+//	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 //	if err := client.Start(context.Background()); err != nil {
 //	    log.Fatal("Failed to start:", err)
 //	}
 //	// Now ready to create sessions
-func (c *Client) Start(ctx context.Context) (err error) {
+func (c *Client) Start(ctx context.Context) error {
+	return c.start(ctx, nil)
+}
+
+func (c *Client) start(ctx context.Context, expected *transportGeneration) (err error) {
 	c.startStopMux.Lock()
 	defer c.startStopMux.Unlock()
+
+	if expected != nil {
+		c.transportMux.Lock()
+		stopped := c.stopsInProgress != 0 || c.stopGeneration != expected.stop
+		attempt := c.lastStartup
+		c.transportMux.Unlock()
+		if stopped {
+			return errors.New("client is stopping or was stopped")
+		}
+		// Another caller may have completed startup while this one waited for
+		// startStopMux. Join its outcome instead of retrying a failed attempt.
+		if attempt != expected.startup {
+			return attempt.err
+		}
+	}
 
 	if c.state == stateConnected && c.client != nil {
 		select {
@@ -577,17 +646,18 @@ func (c *Client) Start(ctx context.Context) (err error) {
 	startup := &startupAttempt{done: make(chan struct{})}
 	c.transportMux.Lock()
 	c.startup = startup
+	c.lastStartup = startup
 	c.transportMux.Unlock()
 	defer func() {
 		c.transportMux.Lock()
 		c.startup = nil
-		c.transportMux.Unlock()
 		startup.finish(err)
+		c.transportMux.Unlock()
 	}()
 
 	c.state = stateConnecting
 
-	// Only start CLI server process if not connecting to external server
+	// Only start a runtime host if not connecting to an external server.
 	if !c.isExternalServer {
 		if err := c.startCLIServer(ctx); err != nil {
 			c.process = nil
@@ -715,6 +785,8 @@ func (c *Client) initializeConnection(ctx context.Context) error {
 //	    log.Printf("Cleanup error: %v", err)
 //	}
 func (c *Client) Stop() error {
+	finishStop := c.beginStop()
+	defer finishStop()
 	c.disconnectAhpHosts()
 	var errs []error
 
@@ -849,6 +921,18 @@ func (c *Client) retireTransport() {
 	c.internalRPC = nil
 }
 
+func (c *Client) beginStop() func() {
+	c.transportMux.Lock()
+	c.stopGeneration++
+	c.stopsInProgress++
+	c.transportMux.Unlock()
+	return func() {
+		c.transportMux.Lock()
+		c.stopsInProgress--
+		c.transportMux.Unlock()
+	}
+}
+
 func (c *Client) logDebugTiming(start time.Time, message string) {
 	switch strings.ToLower(c.options.LogLevel) {
 	case "debug", "all":
@@ -887,6 +971,8 @@ func (c *Client) logDebugTiming(start time.Time, message string) {
 //	    client.ForceStop()
 //	}
 func (c *Client) ForceStop() {
+	finishStop := c.beginStop()
+	defer finishStop()
 	c.disconnectAhpHosts()
 	// Kill the process without waiting for startStopMux, which Start may hold.
 	// This unblocks any I/O Start is doing (connect, version check).
@@ -970,6 +1056,11 @@ type startupAttempt struct {
 	once sync.Once
 }
 
+type transportGeneration struct {
+	startup *startupAttempt
+	stop    uint64
+}
+
 // finish publishes the outcome of the attempt; only the first call has effect.
 func (a *startupAttempt) finish(err error) {
 	a.once.Do(func() {
@@ -989,29 +1080,30 @@ func (a *startupAttempt) finish(err error) {
 // retire it through retireTransport. A failed Start publishes its error before
 // closing the transport and keeps startup set until it returns, so callers fail
 // with that error instead of restarting the client during its cleanup.
+// Stop generations fence calls that overlap teardown without preventing a
+// fresh call after Stop or ForceStop has completed from starting again.
 func (c *Client) ensureConnected(ctx context.Context) (*jsonrpc2.Client, error) {
-	return c.acquireTransport(ctx, true)
-}
-
-// connectedTransport is ensureConnected for requests that do not start the
-// client: it waits for an in-progress Start, but fails when the client is
-// disconnected.
-func (c *Client) connectedTransport(ctx context.Context) (*jsonrpc2.Client, error) {
-	return c.acquireTransport(ctx, false)
-}
-
-func (c *Client) acquireTransport(ctx context.Context, autoStart bool) (*jsonrpc2.Client, error) {
 	// Do not take startStopMux: the caller may be the JSON-RPC reader, which
 	// Stop joins while holding that lock.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	c.transportMux.Lock()
+	generation := transportGeneration{startup: c.lastStartup, stop: c.stopGeneration}
+	c.transportMux.Unlock()
 	started := false
 	for {
 		c.transportMux.Lock()
+		stopped := c.stopsInProgress != 0 || c.stopGeneration != generation.stop
 		startup := c.startup
 		var transport *jsonrpc2.Client
 		if startup == nil {
 			transport = c.client
 		}
 		c.transportMux.Unlock()
+		if stopped {
+			return nil, errors.New("client is stopping or was stopped")
+		}
 		if transport != nil {
 			select {
 			case <-transport.ConnectionClosed():
@@ -1038,13 +1130,10 @@ func (c *Client) acquireTransport(ctx context.Context, autoStart bool) (*jsonrpc
 			}
 			return transport, nil
 		}
-		if !autoStart {
-			return nil, errors.New("client not connected")
-		}
 		if started {
 			return nil, errors.New("client is not connected")
 		}
-		if err := c.Start(ctx); err != nil {
+		if err := c.start(ctx, &generation); err != nil {
 			return nil, err
 		}
 		started = true
@@ -1067,7 +1156,7 @@ func (c *Client) acquireTransport(ctx context.Context, autoStart bool) (*jsonrpc
 //	session, err := client.CreateSession(context.Background(), nil)
 //
 //	// Session with model and tools
-//	session, err := client.CreateSession(context.Background(), &copilot.SessionConfig{
+//	session, err := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
 //	    OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 //	    Model: "gpt-5.4",
 //	    Tools: []copilot.Tool{
@@ -1120,54 +1209,16 @@ func validateAskUserVariant(variant AskUserVariant) error {
 	return nil
 }
 
-func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Session, error) {
-	return c.createSession(ctx, config, nil, nil, nil)
-}
-
-// CreateSessionWithPermissionEnvelope creates a session with an explicit
-// lossless permission handler instead of the config's permission handlers.
-// A nil handler retains the config's handlers. Other options remain unchanged.
-// To also supply an MCP auth callback, use [Client.CreateSessionWithPermissionEnvelopeAndMCPAuthRuntimeRefresh].
-func (c *Client) CreateSessionWithPermissionEnvelope(ctx context.Context, config *SessionConfig, handler PermissionHandlerWithEnvelopeFunc) (*Session, error) {
-	return c.createSession(ctx, config, nil, handler, nil)
-}
-
-// CreateSessionWithAutoModeRecovery creates a session with a recovery-aware
-// Auto switch handler. The runtime must acknowledge enrollment.
-func (c *Client) CreateSessionWithAutoModeRecovery(ctx context.Context, config *SessionConfig, options *AutoModeRecoveryOptions) (*Session, error) {
-	return c.CreateSessionWithPermissionEnvelopeAndAutoModeRecovery(ctx, config, nil, options)
-}
-
-// CreateSessionWithPermissionEnvelopeAndAutoModeRecovery creates a session with
-// a lossless permission handler and recovery-aware Auto switch handler.
-// A nil permission handler retains the config's handlers. Recovery options
-// must include OnAutoModeSwitchRequest and may include an MCP auth callback.
-func (c *Client) CreateSessionWithPermissionEnvelopeAndAutoModeRecovery(ctx context.Context, config *SessionConfig, handler PermissionHandlerWithEnvelopeFunc, options *AutoModeRecoveryOptions) (*Session, error) {
-	if options == nil || options.OnAutoModeSwitchRequest == nil {
-		return nil, fmt.Errorf("AutoModeRecovery requires OnAutoModeSwitchRequest")
-	}
-	return c.createSession(ctx, config, options.MCPAuthRuntimeRefreshHandler, handler, options)
-}
-
-// CreateSessionWithMCPAuthRuntimeRefresh creates a session using the opt-in MCP
-// auth handler instead of config.OnMCPAuthRequest. A nil handler uses the legacy
-// callback. All other options and session lifecycle behavior match CreateSession.
-func (c *Client) CreateSessionWithMCPAuthRuntimeRefresh(ctx context.Context, config *SessionConfig, handler MCPAuthRuntimeRefreshHandler) (*Session, error) {
-	return c.createSession(ctx, config, handler, nil, nil)
-}
-
-// CreateSessionWithPermissionEnvelopeAndMCPAuthRuntimeRefresh creates a session
-// with both a lossless permission handler and a capability-aware MCP auth handler.
-// Each non-nil handler overrides its corresponding config callbacks independently.
-// A nil handler retains the config's callbacks for that handler.
-// All other options and session lifecycle behavior match [Client.CreateSession].
-func (c *Client) CreateSessionWithPermissionEnvelopeAndMCPAuthRuntimeRefresh(ctx context.Context, config *SessionConfig, permissionHandler PermissionHandlerWithEnvelopeFunc, runtimeRefreshHandler MCPAuthRuntimeRefreshHandler) (*Session, error) {
-	return c.createSession(ctx, config, runtimeRefreshHandler, permissionHandler, nil)
-}
-
-func (c *Client) createSession(ctx context.Context, config *SessionConfig, runtimeRefreshHandler MCPAuthRuntimeRefreshHandler, permissionEnvelopeHandler PermissionHandlerWithEnvelopeFunc, recovery *AutoModeRecoveryOptions) (*Session, error) {
+func (c *Client) CreateSession(ctx context.Context, input *CreateSessionOptions) (*Session, error) {
+	config := input.normalize()
 	if config == nil {
-		config = &SessionConfig{}
+		config = &sessionOptions{}
+	}
+	runtimeRefreshHandler := config.OnMCPAuthRuntimeRefresh
+	permissionEnvelopeHandler := config.OnPermissionRequestWithEnvelope
+	recovery := config.AutoModeRecovery
+	if recovery && config.OnAutoModeSwitchRequest == nil {
+		return nil, fmt.Errorf("AutoModeRecovery requires OnAutoModeSwitchRequest")
 	}
 	if config.Cloud != nil && config.SkillProvider != nil {
 		return nil, cloudSkillProviderError{}
@@ -1242,7 +1293,7 @@ func (c *Client) createSession(ctx context.Context, config *SessionConfig, runti
 	req.ExcludedTools = excludedTools
 	req.ExcludedBuiltInAgents = config.ExcludedBuiltInAgents
 	req.IncludedBuiltInAgents = config.IncludedBuiltInAgents
-	req.Provider = config.Provider
+	req.DefaultProvider = config.DefaultProvider
 	req.Capi = config.Capi
 	req.Providers = config.Providers
 	req.Models = config.Models
@@ -1320,10 +1371,10 @@ func (c *Client) createSession(ctx context.Context, config *SessionConfig, runti
 	if config.OnExitPlanModeRequest != nil || config.OnAttributedExitPlanModeRequest != nil {
 		req.RequestExitPlanMode = Bool(true)
 	}
-	if config.OnAutoModeSwitchRequest != nil || recovery != nil {
+	if config.OnAutoModeSwitchRequest != nil || recovery {
 		req.RequestAutoModeSwitch = Bool(true)
 	}
-	if recovery != nil {
+	if recovery {
 		req.RequestAutoModeRecovery = Bool(true)
 	}
 	if config.EnableMCPApps {
@@ -1450,9 +1501,6 @@ func (c *Client) createSession(ctx context.Context, config *SessionConfig, runti
 		if config.OnEventWithPermissionEnvelope != nil {
 			s.OnWithPermissionEnvelope(config.OnEventWithPermissionEnvelope)
 		}
-		if recovery != nil && recovery.OnEvent != nil {
-			s.OnWithAutoModeRecovery(recovery.OnEvent)
-		}
 		if len(config.Commands) > 0 {
 			s.registerCommands(config.Commands)
 		}
@@ -1463,10 +1511,7 @@ func (c *Client) createSession(ctx context.Context, config *SessionConfig, runti
 			s.registerAttributedExitPlanModeHandler(handler)
 		}
 		if config.OnAutoModeSwitchRequest != nil {
-			s.registerAutoModeSwitchHandler(config.OnAutoModeSwitchRequest)
-		}
-		if recovery != nil {
-			s.registerAutoModeSwitchHandlerWithAutoModeRecovery(recovery.OnAutoModeSwitchRequest)
+			s.registerAutoModeSwitchHandler(config.OnAutoModeSwitchRequest, recovery)
 		}
 		if config.CanvasHandler != nil {
 			s.registerCanvasHandler(config.CanvasHandler)
@@ -1477,7 +1522,7 @@ func (c *Client) createSession(ctx context.Context, config *SessionConfig, runti
 		if storeMemory != nil {
 			s.registerMemoryStore(storeMemory)
 		}
-		if bearerTokenProviders := collectBearerTokenProviders(config.Provider, config.Providers); bearerTokenProviders != nil {
+		if bearerTokenProviders := collectBearerTokenProviders(config.Providers); bearerTokenProviders != nil {
 			s.registerBearerTokenProviders(bearerTokenProviders)
 		}
 
@@ -1646,13 +1691,13 @@ func (c *Client) createSession(ctx context.Context, config *SessionConfig, runti
 	}
 	session.setCapabilities(response.Capabilities)
 	failSetup := func(err error) (*Session, error) {
-		if useServerGeneratedID && recovery != nil {
+		if useServerGeneratedID && recovery {
 			return nil, c.cleanupFailedSession(ctx, session, err, true, true)
 		}
 		unregisterSession(registeredSessionID, session)
 		return nil, err
 	}
-	if recovery != nil {
+	if recovery {
 		if registrationID != "" {
 			session.setGitHubTokenProviderRegistrationRelease(func() {
 				c.unregisterGitHubTokenProvider(registrationID)
@@ -1681,7 +1726,7 @@ func (c *Client) createSession(ctx context.Context, config *SessionConfig, runti
 		CoauthorEnabled:        config.CoauthorEnabled,
 		ManageScheduleEnabled:  config.ManageScheduleEnabled,
 		IncludedBuiltinSkills:  config.IncludedBuiltinSkills,
-	}, useServerGeneratedID && recovery != nil); err != nil {
+	}, useServerGeneratedID && recovery); err != nil {
 		return failSetup(err)
 	}
 
@@ -1697,75 +1742,15 @@ func (c *Client) createSession(ctx context.Context, config *SessionConfig, runti
 	return session, nil
 }
 
-// ResumeSession resumes an existing conversation session by its ID.
-//
-// This is a convenience method that calls [Client.ResumeSessionWithOptions].
-// Example:
-//
-//	session, err := client.ResumeSession(context.Background(), "session-123", &copilot.ResumeSessionConfig{
-//	    OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-//	})
-func (c *Client) ResumeSession(ctx context.Context, sessionID string, config *ResumeSessionConfig) (*Session, error) {
-	return c.ResumeSessionWithOptions(ctx, sessionID, config)
-}
-
-// ResumeSessionWithOptions resumes an existing conversation session with additional configuration.
-//
-// This allows you to continue a previous conversation, maintaining all conversation history.
-// The session must have been previously created and not deleted.
-//
-// Example:
-//
-//	session, err := client.ResumeSessionWithOptions(context.Background(), "session-123", &copilot.ResumeSessionConfig{
-//	    OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-//	    Tools: []copilot.Tool{myNewTool},
-//	})
-func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string, config *ResumeSessionConfig) (*Session, error) {
-	return c.resumeSession(ctx, sessionID, config, nil, nil, nil)
-}
-
-// ResumeSessionWithPermissionEnvelope resumes a session with an explicit
-// lossless permission handler instead of the config's permission handlers.
-// A nil handler retains the config's handlers. Other options remain unchanged.
-// To also supply an MCP auth callback, use [Client.ResumeSessionWithPermissionEnvelopeAndMCPAuthRuntimeRefresh].
-func (c *Client) ResumeSessionWithPermissionEnvelope(ctx context.Context, sessionID string, config *ResumeSessionConfig, handler PermissionHandlerWithEnvelopeFunc) (*Session, error) {
-	return c.resumeSession(ctx, sessionID, config, nil, handler, nil)
-}
-
-// ResumeSessionWithAutoModeRecovery resumes a session and re-enrolls its
-// recovery-aware Auto switch handler. The runtime must acknowledge enrollment.
-func (c *Client) ResumeSessionWithAutoModeRecovery(ctx context.Context, sessionID string, config *ResumeSessionConfig, options *AutoModeRecoveryOptions) (*Session, error) {
-	return c.ResumeSessionWithPermissionEnvelopeAndAutoModeRecovery(ctx, sessionID, config, nil, options)
-}
-
-// ResumeSessionWithPermissionEnvelopeAndAutoModeRecovery resumes a session with
-// a lossless permission handler and recovery-aware Auto switch handler.
-// A nil permission handler retains the config's handlers. Recovery options
-// must include OnAutoModeSwitchRequest and may include an MCP auth callback.
-func (c *Client) ResumeSessionWithPermissionEnvelopeAndAutoModeRecovery(ctx context.Context, sessionID string, config *ResumeSessionConfig, handler PermissionHandlerWithEnvelopeFunc, options *AutoModeRecoveryOptions) (*Session, error) {
-	if options == nil || options.OnAutoModeSwitchRequest == nil {
+// ResumeSession resumes an existing conversation with its history and configuration.
+func (c *Client) ResumeSession(ctx context.Context, sessionID string, input *ResumeSessionOptions) (*Session, error) {
+	config := input.normalize()
+	runtimeRefreshHandler := config.OnMCPAuthRuntimeRefresh
+	permissionEnvelopeHandler := config.OnPermissionRequestWithEnvelope
+	recovery := config.AutoModeRecovery
+	if recovery && config.OnAutoModeSwitchRequest == nil {
 		return nil, fmt.Errorf("AutoModeRecovery requires OnAutoModeSwitchRequest")
 	}
-	return c.resumeSession(ctx, sessionID, config, options.MCPAuthRuntimeRefreshHandler, handler, options)
-}
-
-// ResumeSessionWithMCPAuthRuntimeRefresh resumes a session using the opt-in MCP
-// auth handler instead of config.OnMCPAuthRequest. A nil handler uses the legacy
-// callback. All other options and session lifecycle behavior match ResumeSessionWithOptions.
-func (c *Client) ResumeSessionWithMCPAuthRuntimeRefresh(ctx context.Context, sessionID string, config *ResumeSessionConfig, handler MCPAuthRuntimeRefreshHandler) (*Session, error) {
-	return c.resumeSession(ctx, sessionID, config, handler, nil, nil)
-}
-
-// ResumeSessionWithPermissionEnvelopeAndMCPAuthRuntimeRefresh resumes a session
-// with both a lossless permission handler and a capability-aware MCP auth handler.
-// Each non-nil handler overrides its corresponding config callbacks independently.
-// A nil handler retains the config's callbacks for that handler.
-// All other options and session lifecycle behavior match [Client.ResumeSessionWithOptions].
-func (c *Client) ResumeSessionWithPermissionEnvelopeAndMCPAuthRuntimeRefresh(ctx context.Context, sessionID string, config *ResumeSessionConfig, permissionHandler PermissionHandlerWithEnvelopeFunc, runtimeRefreshHandler MCPAuthRuntimeRefreshHandler) (*Session, error) {
-	return c.resumeSession(ctx, sessionID, config, runtimeRefreshHandler, permissionHandler, nil)
-}
-
-func (c *Client) resumeSession(ctx context.Context, sessionID string, config *ResumeSessionConfig, runtimeRefreshHandler MCPAuthRuntimeRefreshHandler, permissionEnvelopeHandler PermissionHandlerWithEnvelopeFunc, recovery *AutoModeRecoveryOptions) (*Session, error) {
 	requestedSessionID := sessionID
 	operationSessionID := requestedSessionID
 	unlockSession, err := c.lockSessionOperation(ctx, operationSessionID)
@@ -1780,9 +1765,6 @@ func (c *Client) resumeSession(ctx context.Context, sessionID string, config *Re
 
 	if err := c.waitForAutoModeRecoveryCleanup(ctx, operationSessionID); err != nil {
 		return nil, err
-	}
-	if config == nil {
-		config = &ResumeSessionConfig{}
 	}
 	if config.GitHubToken != "" && config.GitHubTokenProvider != nil {
 		return nil, fmt.Errorf("GitHubToken and GitHubTokenProvider cannot be used together")
@@ -1800,15 +1782,15 @@ func (c *Client) resumeSession(ctx context.Context, sessionID string, config *Re
 		return nil, err
 	}
 
-	resolveAliases := recovery != nil && c.options.SessionFS == nil
+	resolveAliases := recovery && c.options.SessionFS == nil
 	if resolveAliases && isAbbreviatedUUIDPrefix(requestedSessionID) {
 		// Resolve persisted uniqueness before replacing callbacks, and pin the
 		// full ID so resume cannot resolve the prefix to another session later.
-		lookup := &rpc.SessionsFindByPrefixOptions{Prefix: requestedSessionID}
+		lookup := &rpc.SessionsFindByPrefixRequest{Prefix: requestedSessionID}
 		if config.ConfigDirectory != "" {
 			lookup.ConfigDir = &config.ConfigDirectory
 		}
-		resolved, err := rpc.NewServerRPC(transport).Sessions.FindByPrefixWithOptions(ctx, lookup)
+		resolved, err := rpc.NewServerRPC(transport).Sessions.FindByPrefix(ctx, lookup)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve session prefix: %w", err)
 		}
@@ -1847,7 +1829,7 @@ func (c *Client) resumeSession(ctx context.Context, sessionID string, config *Re
 	if config.Tools != nil {
 		req.Tools = toolDefinitionsForWire(config.Tools)
 	}
-	req.Provider = config.Provider
+	req.DefaultProvider = config.DefaultProvider
 	req.Capi = config.Capi
 	req.Providers = config.Providers
 	req.Models = config.Models
@@ -1987,10 +1969,10 @@ func (c *Client) resumeSession(ctx context.Context, sessionID string, config *Re
 	if config.OnExitPlanModeRequest != nil || config.OnAttributedExitPlanModeRequest != nil {
 		req.RequestExitPlanMode = Bool(true)
 	}
-	if config.OnAutoModeSwitchRequest != nil || recovery != nil {
+	if config.OnAutoModeSwitchRequest != nil || recovery {
 		req.RequestAutoModeSwitch = Bool(true)
 	}
-	if recovery != nil {
+	if recovery {
 		req.RequestAutoModeRecovery = Bool(true)
 	}
 	if config.EnableMCPApps {
@@ -2034,9 +2016,6 @@ func (c *Client) resumeSession(ctx context.Context, sessionID string, config *Re
 	if config.OnEventWithPermissionEnvelope != nil {
 		session.OnWithPermissionEnvelope(config.OnEventWithPermissionEnvelope)
 	}
-	if recovery != nil && recovery.OnEvent != nil {
-		session.OnWithAutoModeRecovery(recovery.OnEvent)
-	}
 	if len(config.Commands) > 0 {
 		session.registerCommands(config.Commands)
 	}
@@ -2047,10 +2026,7 @@ func (c *Client) resumeSession(ctx context.Context, sessionID string, config *Re
 		session.registerAttributedExitPlanModeHandler(handler)
 	}
 	if config.OnAutoModeSwitchRequest != nil {
-		session.registerAutoModeSwitchHandler(config.OnAutoModeSwitchRequest)
-	}
-	if recovery != nil {
-		session.registerAutoModeSwitchHandlerWithAutoModeRecovery(recovery.OnAutoModeSwitchRequest)
+		session.registerAutoModeSwitchHandler(config.OnAutoModeSwitchRequest, recovery)
 	}
 	if config.CanvasHandler != nil {
 		session.registerCanvasHandler(config.CanvasHandler)
@@ -2061,7 +2037,7 @@ func (c *Client) resumeSession(ctx context.Context, sessionID string, config *Re
 	if storeMemory != nil {
 		session.registerMemoryStore(storeMemory)
 	}
-	if bearerTokenProviders := collectBearerTokenProviders(config.Provider, config.Providers); bearerTokenProviders != nil {
+	if bearerTokenProviders := collectBearerTokenProviders(config.Providers); bearerTokenProviders != nil {
 		session.registerBearerTokenProviders(bearerTokenProviders)
 	}
 
@@ -2200,7 +2176,7 @@ func (c *Client) resumeSession(ctx context.Context, sessionID string, config *Re
 	session.permissionModeResult = response.PermissionModeResult
 	session.setOpenCanvases(response.OpenCanvases)
 	session.setCapabilities(response.Capabilities)
-	if recovery != nil {
+	if recovery {
 		if registrationID != "" {
 			session.setGitHubTokenProviderRegistrationRelease(func() {
 				c.unregisterGitHubTokenProvider(registrationID)
@@ -2408,7 +2384,7 @@ func requestSessionDeletion(ctx context.Context, transport *jsonrpc2.Client, ses
 //	    log.Fatal(err)
 //	}
 //	if lastID != nil {
-//	    session, err := client.ResumeSession(context.Background(), *lastID, &copilot.ResumeSessionConfig{
+//	    session, err := client.ResumeSession(context.Background(), *lastID, &copilot.ResumeSessionOptions{
 //	        OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 //	    })
 //	}
@@ -2603,6 +2579,7 @@ func (c *Client) RuntimePort() int {
 }
 
 // Ping sends a ping request to the server to verify connectivity.
+// It starts the client if needed.
 //
 // The message parameter is optional and will be echoed back in the response.
 // Returns a PingResponse containing the message and server timestamp, or an error.
@@ -2616,7 +2593,7 @@ func (c *Client) RuntimePort() int {
 //	    log.Printf("Server responded at %s", resp.Timestamp)
 //	}
 func (c *Client) Ping(ctx context.Context, message string) (*PingResponse, error) {
-	transport, err := c.connectedTransport(ctx)
+	transport, err := c.ensureConnected(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2636,9 +2613,10 @@ func ping(ctx context.Context, transport *jsonrpc2.Client, message string) (*Pin
 	return &response, nil
 }
 
-// GetStatus returns CLI status including version and protocol information
+// GetStatus returns CLI status including version and protocol information,
+// starting the client if needed.
 func (c *Client) GetStatus(ctx context.Context) (*GetStatusResponse, error) {
-	transport, err := c.connectedTransport(ctx)
+	transport, err := c.ensureConnected(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2655,9 +2633,9 @@ func (c *Client) GetStatus(ctx context.Context) (*GetStatusResponse, error) {
 	return &response, nil
 }
 
-// GetAuthStatus returns current authentication status
+// GetAuthStatus returns current authentication status, starting the client if needed.
 func (c *Client) GetAuthStatus(ctx context.Context) (*GetAuthStatusResponse, error) {
-	transport, err := c.connectedTransport(ctx)
+	transport, err := c.ensureConnected(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2678,19 +2656,38 @@ func (c *Client) GetAuthStatus(ctx context.Context) (*GetAuthStatusResponse, err
 //
 // Results are cached after the first successful call to avoid rate limiting.
 // The cache is cleared when the client disconnects.
-func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
+// It starts the client if needed, unless a custom OnListModels handler is configured.
+func (c *Client) ListModels(ctx context.Context) ([]Model, error) {
+	var transport *jsonrpc2.Client
+	if c.onListModels == nil {
+		var err error
+		// Startup and failed-start cleanup must not wait on the models lock.
+		transport, err = c.ensureConnected(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Use mutex for locking to prevent race condition with concurrent calls
 	c.modelsCacheMux.Lock()
 	defer c.modelsCacheMux.Unlock()
 
+	if transport != nil {
+		c.transportMux.Lock()
+		current := c.startup == nil && c.client == transport && c.stopsInProgress == 0
+		c.transportMux.Unlock()
+		if !current {
+			return nil, errors.New("client not connected")
+		}
+	}
+
 	// Check cache (already inside lock)
 	if c.modelsCache != nil {
-		result := make([]ModelInfo, len(c.modelsCache))
+		result := make([]Model, len(c.modelsCache))
 		copy(result, c.modelsCache)
 		return result, nil
 	}
 
-	var models []ModelInfo
+	var models []Model
 	if c.onListModels != nil {
 		// Use custom handler instead of CLI RPC
 		var err error
@@ -2699,17 +2696,13 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 			return nil, err
 		}
 	} else {
-		transport, err := c.connectedTransport(ctx)
-		if err != nil {
-			return nil, err
-		}
 		// Cache miss - fetch from backend while holding lock
 		result, err := transport.Request(ctx, "models.list", listModelsRequest{})
 		if err != nil {
 			return nil, err
 		}
 
-		var response listModelsResponse
+		var response rpc.ModelList
 		if err := json.Unmarshal(result, &response); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal models response: %w", err)
 		}
@@ -2717,18 +2710,18 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	}
 
 	// Update cache before releasing lock (copy to prevent external mutation)
-	cache := make([]ModelInfo, len(models))
+	cache := make([]Model, len(models))
 	copy(cache, models)
 	c.modelsCache = cache
 
 	// Return a copy to prevent cache mutation
-	result := make([]ModelInfo, len(models))
+	result := make([]Model, len(models))
 	copy(result, models)
 	return result, nil
 }
 
 // minProtocolVersion is the minimum protocol version this SDK can communicate with.
-const minProtocolVersion = 3
+const minProtocolVersion = 4
 
 // runtimeShutdownTimeout is a variable so tests can shorten it.
 var runtimeShutdownTimeout = 10 * time.Second
@@ -2765,8 +2758,9 @@ func (c *Client) verifyProtocolVersion(ctx context.Context) error {
 	}
 	if c.options.Entra != nil {
 		connectReq.Entra = &rpc.EntraAuthConfig{
-			ClientID:    c.options.Entra.ClientID,
-			MatsAppName: c.options.Entra.MatsAppName,
+			ClientID:             c.options.Entra.ClientID,
+			MatsAppName:          c.options.Entra.MatsAppName,
+			OneAuthApplicationID: c.options.Entra.OneAuthApplicationID,
 		}
 		if c.options.Entra.TokenProvider != nil {
 			connectReq.EntraTokenProvider = Bool(true)
@@ -2918,17 +2912,21 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 		args = append([]string{cliPath}, args...)
 	}
 
+	command, err = lookPathInEnvironment(command, c.environment, c.workingDirectory)
+	if err != nil {
+		return fmt.Errorf("failed to start CLI server: %w", err)
+	}
 	c.process = exec.Command(command, args...)
 
 	// Configure platform-specific process attributes (e.g., hide window on Windows)
 	configureProcAttr(c.process)
 
 	// Set working directory if specified
-	if c.options.WorkingDirectory != "" {
-		c.process.Dir = c.options.WorkingDirectory
+	if c.workingDirectory != "" {
+		c.process.Dir = c.workingDirectory
 	}
 
-	c.process.Env = append([]string{}, c.options.Env...)
+	c.process.Env = append([]string{}, c.environment...)
 	for key, value := range c.options.InternalTestOptions.environment() {
 		c.process.Env = setEnvValue(c.process.Env, key, value)
 	}
@@ -3055,12 +3053,12 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 // to its FFI byte streams.
 func (c *Client) startInProcess(ctx context.Context) error {
 	if !inProcessAvailable {
-		return errors.New("in-process transport unavailable: rebuild with -tags copilot_inprocess on a supported platform")
+		return errors.New("in-process transport unavailable: supported hosts are macOS, Linux, and Windows on amd64 or arm64 without the copilot_no_inprocess build tag; select SpawnedStdioConnection, SpawnedTCPConnection, TCPConnection, or set COPILOT_SDK_DEFAULT_CONNECTION=stdio")
 	}
 
 	cliEntrypoint := c.cliPath
 	if cliEntrypoint == "" {
-		cliEntrypoint = getEnvValue(c.options.Env, "COPILOT_CLI_PATH")
+		cliEntrypoint = getEnvValue(c.environment, "COPILOT_CLI_PATH")
 	}
 	runtimePath := cliEntrypoint
 	if runtimePath == "" {
@@ -3074,7 +3072,7 @@ func (c *Client) startInProcess(ctx context.Context) error {
 		return errors.New("in-process runtime unavailable: build with the bundled embedded runtime or set COPILOT_CLI_PATH to a compatible runtime package")
 	}
 
-	integrationID := strings.TrimSpace(getEnvValue(c.options.Env, "GITHUB_COPILOT_INTEGRATION_ID"))
+	integrationID := strings.TrimSpace(getEnvValue(c.environment, "GITHUB_COPILOT_INTEGRATION_ID"))
 	config := c.inProcessHostConfig(integrationID)
 
 	host, err := createInProcessHost(runtimePath, cliEntrypoint, config)
@@ -3136,8 +3134,8 @@ func (c *Client) inProcessHostConfig(cliLoginSyncIntegrationID string) inProcess
 		args = append(args, "--cli-login-sync-integration-id="+cliLoginSyncIntegrationID)
 	}
 
-	environment := make(map[string]string, len(c.options.Env))
-	for _, entry := range c.options.Env {
+	environment := make(map[string]string, len(c.environment))
+	for _, entry := range c.environment {
 		key, value, ok := strings.Cut(entry, "=")
 		if !ok || key == "" || !utf8.ValidString(key) {
 			continue
@@ -3330,7 +3328,7 @@ func (c *Client) setupNotificationHandler() {
 	c.client.SetRequestHandler("systemMessage.transform", jsonrpc2.RequestHandlerFor(c.handleSystemMessageTransform))
 	c.client.SetRequestContextHandler("skillProvider.list", c.handleSkillProviderList)
 	c.client.SetRequestContextHandler("skillProvider.read", c.handleSkillProviderRead)
-	// Internal experimental callback backing SessionConfig.StoreMemory.
+	// Internal experimental callback backing CreateSessionOptions.StoreMemory.
 	c.client.SetRequestContextHandler("memoryStore.store", c.handleMemoryStore)
 	rpc.RegisterClientSessionAPIHandlers(c.client, func(sessionID string) *rpc.ClientSessionAPIHandlers {
 		c.sessionsMux.Lock()
@@ -3532,7 +3530,7 @@ func (c *Client) waitForAutoModeRecoveryCleanup(ctx context.Context, sessionID s
 }
 
 func (c *Client) requireAutoModeRecovery(ctx context.Context, s *Session, detachOnFailure, deleteOnFailure bool) error {
-	caps := s.CapabilitiesWithAutoModeRecovery()
+	caps := s.Capabilities()
 	if caps.UI != nil && caps.UI.AutoModeRecovery {
 		return nil
 	}
@@ -3877,7 +3875,7 @@ func (c *Client) handleSessionEvent(req sessionEventRequest) {
 	c.sessionsMux.Unlock()
 
 	if ok {
-		session.dispatchEventWithPermissionEnvelope(req.Event.SessionEvent, req.permissionEnvelope, req.sdkHasHandler)
+		session.dispatchEventWithPermissionEnvelope(req.Event, req.permissionEnvelope, req.sdkHasHandler)
 	}
 }
 
@@ -4247,12 +4245,10 @@ func (c *Client) handleAutoModeSwitchRequest(req autoModeSwitchRequest) (*autoMo
 		return nil, &jsonrpc2.Error{Code: -32602, Message: fmt.Sprintf("unknown session %s", req.SessionID)}
 	}
 
-	response, err := session.handleAutoModeSwitchRequest(AutoModeSwitchRequestWithAutoModeRecovery{
-		AutoModeSwitchRequest: AutoModeSwitchRequest{
-			ErrorCode:         req.ErrorCode,
-			RetryAfterSeconds: req.RetryAfterSeconds,
-		},
-		AutoModeRecovery: req.AutoModeRecovery,
+	response, err := session.handleAutoModeSwitchRequest(AutoModeSwitchRequest{
+		ErrorCode:         req.ErrorCode,
+		RetryAfterSeconds: req.RetryAfterSeconds,
+		AutoModeRecovery:  req.AutoModeRecovery,
 	})
 	if err != nil {
 		return nil, &jsonrpc2.Error{Code: -32603, Message: err.Error()}

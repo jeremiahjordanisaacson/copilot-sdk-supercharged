@@ -1,4 +1,4 @@
-//go:build copilot_inprocess && (darwin || linux || windows)
+//go:build !copilot_no_inprocess && (darwin || linux || windows) && (amd64 || arm64)
 
 package testharness
 

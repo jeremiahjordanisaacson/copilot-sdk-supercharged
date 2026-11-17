@@ -136,7 +136,7 @@ pub type CanvasResult<T> = Result<T, CanvasError>;
 /// </div>
 ///
 /// A session installs a single [`CanvasHandler`] (via
-/// [`SessionConfig::with_canvas_handler`](crate::types::SessionConfig::with_canvas_handler)).
+/// [`SessionCanvasOptions::with_handler`](crate::types::SessionCanvasOptions::with_handler)).
 /// The handler receives every inbound `canvas.open` / `canvas.close` /
 /// `canvas.action.invoke` JSON-RPC request the runtime issues for this
 /// session and decides — typically by inspecting

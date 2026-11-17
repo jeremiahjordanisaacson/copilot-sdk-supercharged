@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 internal sealed class ShellAuthenticationCancellation : IDisposable
 {

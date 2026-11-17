@@ -12,8 +12,8 @@ from copilot import (
     CopilotClient,
     CopilotRequestHandler,
     ModelCapabilitiesOverride,
-    ModelLimitsOverride,
-    ModelSupportsOverride,
+    ModelCapabilitiesOverrideLimits,
+    ModelCapabilitiesOverrideSupports,
     RuntimeConnection,
 )
 from copilot.copilot_request_handler import CopilotRequestContext
@@ -26,6 +26,7 @@ from ._copilot_request_helpers import (
     is_inference_url,
 )
 from .testharness import DEFAULT_GITHUB_TOKEN, E2ETestContext
+from .testharness.provider_options import byok_inference
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -194,11 +195,12 @@ class TestSessionConfig:
         self, ctx: E2ETestContext, limit_source: str
     ):
         client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=DEFAULT_GITHUB_TOKEN,
-            request_handler=_RecordingRequestHandler(),
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+            ),
+            github={"token": DEFAULT_GITHUB_TOKEN},
+            models={"request_handler": _RecordingRequestHandler()},
         )
         await client.start()
         try:
@@ -217,7 +219,7 @@ class TestSessionConfig:
                 capabilities = None
                 if limit_source == "capabilities":
                     capabilities = ModelCapabilitiesOverride(
-                        limits=ModelLimitsOverride(
+                        limits=ModelCapabilitiesOverrideLimits(
                             max_prompt_tokens=prompt_limit,
                             max_context_window_tokens=window_limit,
                             max_output_tokens=4096,
@@ -229,10 +231,13 @@ class TestSessionConfig:
 
                 config = {
                     "model": "custom-context-model",
-                    "provider": provider,
-                    "model_capabilities": capabilities,
-                    "on_permission_request": PermissionHandler.approve_all,
-                    "available_tools": [],
+                    "inference": {
+                        **byok_inference(provider, "custom-context-model"),
+                        "capabilities": capabilities,
+                    },
+                    "github": {"capi": {"enabled": False}},
+                    "permissions": {"on_request": PermissionHandler.approve_all},
+                    "tools": {"available_tools": []},
                     "enable_config_discovery": False,
                 }
                 if phase == "create":
@@ -261,11 +266,13 @@ class TestSessionConfig:
             f.write(PNG_1X1)
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="claude-sonnet-5",
-            model_capabilities=ModelCapabilitiesOverride(
-                supports=ModelSupportsOverride(vision=False)
-            ),
+            permissions={"on_request": PermissionHandler.approve_all},
+            inference={
+                "capabilities": ModelCapabilitiesOverride(
+                    supports=ModelCapabilitiesOverrideSupports(vision=False)
+                )
+            },
         )
 
         # Turn 1: vision off — no image_url expected
@@ -277,7 +284,7 @@ class TestSessionConfig:
         await session.set_model(
             "claude-sonnet-5",
             model_capabilities=ModelCapabilitiesOverride(
-                supports=ModelSupportsOverride(vision=True)
+                supports=ModelCapabilitiesOverrideSupports(vision=True)
             ),
         )
 
@@ -295,11 +302,13 @@ class TestSessionConfig:
             f.write(PNG_1X1)
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="claude-sonnet-5",
-            model_capabilities=ModelCapabilitiesOverride(
-                supports=ModelSupportsOverride(vision=True)
-            ),
+            permissions={"on_request": PermissionHandler.approve_all},
+            inference={
+                "capabilities": ModelCapabilitiesOverride(
+                    supports=ModelCapabilitiesOverrideSupports(vision=True)
+                )
+            },
         )
 
         # Turn 1: vision on — image_url expected
@@ -311,7 +320,7 @@ class TestSessionConfig:
         await session.set_model(
             "claude-sonnet-5",
             model_capabilities=ModelCapabilitiesOverride(
-                supports=ModelSupportsOverride(vision=False)
+                supports=ModelCapabilitiesOverrideSupports(vision=False)
             ),
         )
 
@@ -328,8 +337,8 @@ class TestSessionConfig:
 
         requested_session_id = str(uuid.uuid4())
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             session_id=requested_session_id,
+            permissions={"on_request": PermissionHandler.approve_all},
         )
         assert session.session_id == requested_session_id
 
@@ -343,8 +352,7 @@ class TestSessionConfig:
 
     async def test_should_forward_clientname_in_useragent(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            client_name=CLIENT_NAME,
+            client_name=CLIENT_NAME, permissions={"on_request": PermissionHandler.approve_all}
         )
 
         await session.send_and_wait("What is 1+1?")
@@ -357,9 +365,14 @@ class TestSessionConfig:
 
     async def test_should_forward_custom_provider_headers_on_create(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="claude-sonnet-5",
-            provider=_make_proxy_provider(ctx.proxy_url, "create-provider-header"),
+            permissions={"on_request": PermissionHandler.approve_all},
+            inference={
+                **byok_inference(
+                    _make_proxy_provider(ctx.proxy_url, "create-provider-header"), "claude-sonnet-5"
+                )
+            },
+            github={"capi": {"enabled": False}},
         )
 
         message = await session.send_and_wait("What is 1+1?")
@@ -375,15 +388,20 @@ class TestSessionConfig:
 
     async def test_should_forward_custom_provider_headers_on_resume(self, ctx: E2ETestContext):
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session1.session_id
 
         session2 = await ctx.client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
             model="claude-sonnet-5",
-            provider=_make_proxy_provider(ctx.proxy_url, "resume-provider-header"),
+            permissions={"on_request": PermissionHandler.approve_all},
+            inference={
+                **byok_inference(
+                    _make_proxy_provider(ctx.proxy_url, "resume-provider-header"), "claude-sonnet-5"
+                )
+            },
+            github={"capi": {"enabled": False}},
         )
 
         message = await session2.send_and_wait("What is 2+2?")
@@ -400,22 +418,28 @@ class TestSessionConfig:
 
     async def test_should_forward_provider_wire_model(self, ctx: E2ETestContext):
         # Verifies that ProviderConfig.wire_model overrides the model name sent
-        # to the provider API, while SessionConfig.model still drives runtime
+        # to the provider API, while model still drives runtime
         # configuration lookup (capabilities, prompts, reasoning behavior).
         # max_output_tokens is also set here to confirm the SDK accepts it
         # without serialization errors; the CLI does not echo it as
         # `max_tokens` on the OpenAI-style wire request, so we don't assert on
         # it directly (see unit tests for serialization coverage).
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="claude-sonnet-5",
-            provider={
-                "type": "openai",
-                "base_url": ctx.proxy_url,
-                "api_key": "test-provider-key",
-                "wire_model": "test-wire-model",
-                "max_output_tokens": 1024,
+            permissions={"on_request": PermissionHandler.approve_all},
+            inference={
+                **byok_inference(
+                    {
+                        "type": "openai",
+                        "base_url": ctx.proxy_url,
+                        "api_key": "test-provider-key",
+                        "wire_model": "test-wire-model",
+                        "max_output_tokens": 1024,
+                    },
+                    "claude-sonnet-5",
+                )
             },
+            github={"capi": {"enabled": False}},
         )
 
         await session.send_and_wait("What is 1+1?")
@@ -428,17 +452,22 @@ class TestSessionConfig:
         await session.disconnect()
 
     async def test_should_use_provider_model_id_as_wire_model(self, ctx: E2ETestContext):
-        # ProviderConfig.model_id drives both the runtime resolved model AND the wire
-        # model when wire_model is not specified. SessionConfig.model is intentionally
-        # omitted so that model_id is the only model source.
+        # A registered model's model_id is the wire model when wire_model is omitted.
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            provider={
-                "type": "openai",
-                "base_url": ctx.proxy_url,
-                "api_key": "test-provider-key",
-                "model_id": "claude-sonnet-5",
+            model="claude-sonnet-5",
+            permissions={"on_request": PermissionHandler.approve_all},
+            inference={
+                **byok_inference(
+                    {
+                        "type": "openai",
+                        "base_url": ctx.proxy_url,
+                        "api_key": "test-provider-key",
+                        "model_id": "claude-sonnet-5",
+                    },
+                    None,
+                )
             },
+            github={"capi": {"enabled": False}},
         )
 
         await session.send_and_wait("What is 1+1?")
@@ -451,8 +480,8 @@ class TestSessionConfig:
 
     async def test_should_apply_session_limits_on_create(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            session_limits={"max_ai_credits": 30},
+            permissions={"on_request": PermissionHandler.approve_all},
+            execution={"limits": {"max_ai_credits": 30}},
         )
 
         await _send_and_get_next_exchange(session, ctx, "Acknowledge the current session limits.")
@@ -462,12 +491,12 @@ class TestSessionConfig:
 
     async def test_should_apply_session_limits_on_resume(self, ctx: E2ETestContext):
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session2 = await ctx.client.resume_session(
             session1.session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            session_limits={"max_ai_credits": 30},
+            permissions={"on_request": PermissionHandler.approve_all},
+            execution={"limits": {"max_ai_credits": 30}},
         )
 
         await _send_and_get_next_exchange(session2, ctx, "Acknowledge the current session limits.")
@@ -481,15 +510,15 @@ class TestSessionConfig:
         prompt = "What is 1+1?"
 
         baseline_session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         baseline_exchange = await _send_and_get_next_exchange(baseline_session, ctx, prompt)
         assert excluded_agent in _get_task_agent_types(baseline_exchange)
         await baseline_session.disconnect()
 
         excluded_session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            excluded_builtin_agents=[excluded_agent],
+            permissions={"on_request": PermissionHandler.approve_all},
+            agents={"excluded_builtin_agents": [excluded_agent]},
         )
         excluded_exchange = await _send_and_get_next_exchange(excluded_session, ctx, prompt)
         agent_types = _get_task_agent_types(excluded_exchange)
@@ -501,12 +530,12 @@ class TestSessionConfig:
     async def test_should_apply_excluded_built_in_agents_on_resume(self, ctx: E2ETestContext):
         excluded_agent = "explore"
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session2 = await ctx.client.resume_session(
             session1.session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            excluded_builtin_agents=[excluded_agent],
+            permissions={"on_request": PermissionHandler.approve_all},
+            agents={"excluded_builtin_agents": [excluded_agent]},
         )
 
         exchange = await _send_and_get_next_exchange(session2, ctx, "What is 1+1?")
@@ -522,19 +551,23 @@ class TestSessionConfig:
     ):
         handler = _RecordingRequestHandler()
         client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=DEFAULT_GITHUB_TOKEN,
-            request_handler=handler,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+            ),
+            github={"token": DEFAULT_GITHUB_TOKEN},
+            models={"request_handler": handler},
         )
         await client.start()
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
                 model="claude-sonnet-5",
-                enable_citations=True,
-                provider=_create_anthropic_provider(),
+                permissions={"on_request": PermissionHandler.approve_all},
+                inference={
+                    **byok_inference(_create_anthropic_provider(), "claude-sonnet-5"),
+                    "enable_citations": True,
+                },
+                github={"capi": {"enabled": False}},
             )
             try:
                 await session.send_and_wait(
@@ -555,34 +588,40 @@ class TestSessionConfig:
         handler = _RecordingRequestHandler()
         connection_token = "python-citation-resume-token"
         server_client = CopilotClient(
-            connection=RuntimeConnection.for_tcp(
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_tcp(
                 path=ctx.cli_path,
                 connection_token=connection_token,
+                working_directory=ctx.work_dir,
+                env=ctx.get_env(),
             ),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=DEFAULT_GITHUB_TOKEN,
-            request_handler=handler,
+            github={"token": DEFAULT_GITHUB_TOKEN},
+            models={"request_handler": handler},
         )
         await server_client.start()
         try:
             session1 = await server_client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             assert server_client.runtime_port is not None
             resume_client = CopilotClient(
-                connection=RuntimeConnection.for_uri(
-                    f"localhost:{server_client.runtime_port}",
+                mode="coding-agent",
+                runtime=RuntimeConnection.for_tcp(
+                    "localhost",
+                    server_client.runtime_port,
                     connection_token=connection_token,
-                )
+                ),
             )
             try:
                 session2 = await resume_client.resume_session(
                     session1.session_id,
-                    on_permission_request=PermissionHandler.approve_all,
                     model="claude-sonnet-5",
-                    enable_citations=True,
-                    provider=_create_anthropic_provider(),
+                    permissions={"on_request": PermissionHandler.approve_all},
+                    inference={
+                        **byok_inference(_create_anthropic_provider(), "claude-sonnet-5"),
+                        "enable_citations": True,
+                    },
+                    github={"capi": {"enabled": False}},
                 )
                 try:
                     await session2.send_and_wait(
@@ -607,8 +646,7 @@ class TestSessionConfig:
             f.write("I am in the subdirectory")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            working_directory=sub_dir,
+            working_directory=sub_dir, permissions={"on_request": PermissionHandler.approve_all}
         )
 
         message = await session.send_and_wait("Read the file marker.txt and tell me what it says")
@@ -623,14 +661,14 @@ class TestSessionConfig:
             f.write("I am in the resume working directory")
 
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session1.session_id
 
         session2 = await ctx.client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
             working_directory=sub_dir,
+            permissions={"on_request": PermissionHandler.approve_all},
         )
 
         message = await session2.send_and_wait(
@@ -643,15 +681,15 @@ class TestSessionConfig:
 
     async def test_should_apply_systemmessage_on_session_resume(self, ctx: E2ETestContext):
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session1.session_id
 
         resume_instruction = "End the response with RESUME_SYSTEM_MESSAGE_SENTINEL."
         session2 = await ctx.client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
             system_message={"mode": "append", "content": resume_instruction},
+            permissions={"on_request": PermissionHandler.approve_all},
         )
 
         message = await session2.send_and_wait("What is 1+1?")
@@ -677,9 +715,9 @@ class TestSessionConfig:
             f.write(f"Always include {sentinel}.")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             working_directory=project_dir,
-            instruction_directories=[instruction_dir],
+            permissions={"on_request": PermissionHandler.approve_all},
+            instructions={"directories": [instruction_dir]},
         )
 
         await session.send_and_wait("What is 1+1?")
@@ -703,15 +741,14 @@ class TestSessionConfig:
             f.write(f"Always include {sentinel}.")
 
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            working_directory=project_dir,
+            working_directory=project_dir, permissions={"on_request": PermissionHandler.approve_all}
         )
 
         session2 = await ctx.client.resume_session(
             session1.session_id,
-            on_permission_request=PermissionHandler.approve_all,
             working_directory=project_dir,
-            instruction_directories=[instruction_dir],
+            permissions={"on_request": PermissionHandler.approve_all},
+            instructions={"directories": [instruction_dir]},
         )
 
         await session2.send_and_wait("What is 1+1?")
@@ -725,14 +762,14 @@ class TestSessionConfig:
 
     async def test_should_apply_availabletools_on_session_resume(self, ctx: E2ETestContext):
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session1.session_id
 
         session2 = await ctx.client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            available_tools=["view"],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"available_tools": ["view"]},
         )
 
         try:

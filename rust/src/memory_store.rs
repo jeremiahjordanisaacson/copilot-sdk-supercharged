@@ -45,8 +45,7 @@ pub struct StoredMemory {
 ///
 /// </div>
 ///
-/// Register with [`SessionConfig::with_memory_store`](crate::SessionConfig::with_memory_store)
-/// or [`ResumeSessionConfig::with_memory_store`](crate::ResumeSessionConfig::with_memory_store);
+/// Register with [`SessionStateOptions::with_memory_store`](crate::SessionStateOptions::with_memory_store);
 /// it requires memory enabled through `with_memory`, otherwise session setup
 /// fails, and is not supported for cloud sessions. The SDK sends
 /// `hasMemoryStore` on `session.create` / `session.resume` and serves callbacks

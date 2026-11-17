@@ -18,16 +18,14 @@
 //! [`Client::start`](crate::Client::start) returns
 //! an [`ErrorKind::BinaryNotFound`](crate::ErrorKind::BinaryNotFound) error.
 
-use std::env;
-#[cfg(any(feature = "bundled-cli", has_extracted_cli, test))]
-use std::path::Path;
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
-use crate::{ClientOptions, Error, ErrorKind};
+use crate::{Error, ErrorKind, StartupOptions};
 
 /// Resolve the CLI binary, optionally overriding the directory the bundled
 /// CLI is extracted to. Called by `Client::start` to thread
-/// `ClientOptions::bundled_cli_extract_dir` through to
+/// `StartupOptions::bundled_cli_extract_directory` through to
 /// `embeddedcli::install_at`. `extract_dir` only applies when the
 /// `bundled-cli` feature is on — with it off the binary lives at a
 /// build-time-known conventional location and `extract_dir` is ignored
@@ -35,32 +33,20 @@ use crate::{ClientOptions, Error, ErrorKind};
 /// would be exactly equivalent to setting `CliProgram::Path`). Set
 /// `COPILOT_CLI_EXTRACT_DIR` at build time to relocate that extraction;
 /// the same env var is honored at runtime to find binaries written
-/// under it.
+/// under it. `env_cli_path` comes from the effective process environment,
+/// not unconditionally from the host.
 pub(crate) fn copilot_binary_with_extract_dir(
-    options: &ClientOptions,
+    options: &StartupOptions,
     use_runtime_wrapper: bool,
+    env_cli_path: Option<&OsStr>,
 ) -> Result<PathBuf, Error> {
-    let is_cli_path = |key: &std::ffi::OsStr| {
-        if cfg!(windows) {
-            key.as_encoded_bytes()
-                .eq_ignore_ascii_case(b"COPILOT_CLI_PATH")
-        } else {
-            key == "COPILOT_CLI_PATH"
-        }
-    };
-    let cli_path = if options.env_remove.iter().any(|key| is_cli_path(key)) {
-        None
-    } else {
-        options
-            .env
-            .iter()
-            .rev()
-            .find(|(key, _)| is_cli_path(key))
-            .map(|(_, value)| value.clone())
-            .or_else(|| env::var_os("COPILOT_CLI_PATH"))
-    };
-    if let Some(value) = cli_path.filter(|value| !value.is_empty()) {
-        let candidate = std::path::absolute(options.working_directory.join(value))?;
+    if let Some(value) = env_cli_path.filter(|value| !value.is_empty()) {
+        let directory = options
+            .transport
+            .spawned_process()
+            .map(|process| process.working_directory.as_path())
+            .unwrap_or_else(|| Path::new(""));
+        let candidate = std::path::absolute(directory.join(value))?;
         if candidate.is_file() {
             return Ok(candidate);
         }
@@ -71,7 +57,7 @@ pub(crate) fn copilot_binary_with_extract_dir(
         .into());
     }
 
-    let extract_dir = options.bundled_cli_extract_dir.as_deref();
+    let extract_dir = options.bundled_cli_extract_directory.as_deref();
     #[cfg(feature = "bundled-cli")]
     if let Some(path) = bundled_program(extract_dir, use_runtime_wrapper)? {
         return Ok(path);
@@ -93,10 +79,10 @@ pub(crate) fn copilot_binary_with_extract_dir(
     Err(ErrorKind::BinaryNotFound {
         name: binary_name.into(),
         hint: Some(
-            "the Copilot CLI is not bundled in this build of github-copilot-sdk and \
+            "the Copilot CLI is not bundled in this build of copilot-sdk and \
              no applicable path override is set. Either keep the default `bundled-cli` cargo \
              feature enabled, set COPILOT_CLI_PATH, or supply an explicit path via \
-             `CliProgram::Path(...)` on `ClientOptions::program`."
+             `CliProgram::Path(...)` on `SpawnedProcessOptions::program`."
                 .into(),
         ),
     }

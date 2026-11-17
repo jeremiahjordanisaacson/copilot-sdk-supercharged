@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 // connectionState is the internal client connection state.
@@ -22,44 +22,53 @@ const (
 
 // RuntimeConnection describes how a [Client] connects to the Copilot runtime.
 //
-// Construct one with a [StdioConnection], [TCPConnection], [URIConnection], or
-// [InProcessConnection] literal and pass it via [ClientOptions.Connection]. When
-// [ClientOptions.Connection] is nil, COPILOT_SDK_DEFAULT_CONNECTION may select
-// "inprocess" or "stdio"; when unset, the default is an empty [StdioConnection].
+// Construct one with a [SpawnedStdioConnection], [SpawnedTCPConnection], [TCPConnection], or
+// [InProcessConnection] literal and pass it via [ClientOptions.Runtime]. When
+// [ClientOptions.Runtime] is nil, COPILOT_SDK_DEFAULT_CONNECTION may select
+// "inprocess" or "stdio"; when unset, the default is an empty [InProcessConnection].
 type RuntimeConnection interface {
 	runtimeConnection()
 }
 
 // childProcessConnection is implemented by the connection types that spawn a
-// runtime child process ([StdioConnection] and [TCPConnection]). It exposes the
-// per-connection environment so the client can resolve and validate it uniformly
+// runtime child process ([SpawnedStdioConnection] and [SpawnedTCPConnection]). It exposes the
+// process settings so the client can resolve them uniformly
 // regardless of the specific child-process transport.
 type childProcessConnection interface {
 	RuntimeConnection
 	connEnv() []string
+	connWorkingDirectory() string
 }
 
-// StdioConnection spawns a runtime child process and communicates over its
-// stdin/stdout pipes. This is the default when no connection is configured.
-type StdioConnection struct {
+// SpawnedStdioConnection spawns a runtime child process and communicates over its
+// stdin/stdout pipes.
+type SpawnedStdioConnection struct {
+	BaseDirectory             string
+	SessionIdleTimeoutSeconds int
 	// Path is the runtime executable. When empty, the bundled runtime is used.
 	Path string
-	// Args are extra command-line arguments inserted before SDK-managed args.
+	// Args are extra command-line arguments inserted before SDK-managed arguments.
 	Args []string
 	// Env are the environment variables for the runtime process, each of the
-	// form "KEY=VALUE". When set, these take precedence over
-	// [ClientOptions.Env]; setting both is rejected. When nil, the client-level
-	// env (or the current process environment) is used.
+	// form "KEY=VALUE", replacing inherited variables. Nil inherits the current
+	// environment; an empty slice has no inherited variables. The SDK still adds
+	// its managed runtime settings. Duplicate keys use the last value.
 	Env []string
+	// WorkingDirectory is the child process directory. Empty inherits the current directory.
+	WorkingDirectory string
 }
 
-func (StdioConnection) runtimeConnection() {}
+func (SpawnedStdioConnection) runtimeConnection() {}
 
-func (c StdioConnection) connEnv() []string { return c.Env }
+func (c SpawnedStdioConnection) connEnv() []string { return c.Env }
 
-// TCPConnection spawns a runtime child process that listens on a TCP socket
+func (c SpawnedStdioConnection) connWorkingDirectory() string { return c.WorkingDirectory }
+
+// SpawnedTCPConnection spawns a runtime child process that listens on a TCP socket
 // and connects to it.
-type TCPConnection struct {
+type SpawnedTCPConnection struct {
+	BaseDirectory             string
+	SessionIdleTimeoutSeconds int
 	// Port is the TCP port the runtime listens on. 0 (the default) lets the
 	// runtime pick a free port; the chosen port is then available via
 	// [Client.RuntimePort] after [Client.Start] returns.
@@ -70,44 +79,50 @@ type TCPConnection struct {
 	ConnectionToken string
 	// Path is the runtime executable. When empty, the bundled runtime is used.
 	Path string
-	// Args are extra command-line arguments inserted before SDK-managed args.
+	// Args are extra command-line arguments inserted before SDK-managed arguments.
 	Args []string
 	// Env are the environment variables for the runtime process, each of the
-	// form "KEY=VALUE". When set, these take precedence over
-	// [ClientOptions.Env]; setting both is rejected. When nil, the client-level
-	// env (or the current process environment) is used.
+	// form "KEY=VALUE", replacing inherited variables. Nil inherits the current
+	// environment; an empty slice has no inherited variables. The SDK still adds
+	// its managed runtime settings. Duplicate keys use the last value.
 	Env []string
+	// WorkingDirectory is the child process directory. Empty inherits the current directory.
+	WorkingDirectory string
 }
 
-func (TCPConnection) runtimeConnection() {}
+func (SpawnedTCPConnection) runtimeConnection() {}
 
-func (c TCPConnection) connEnv() []string { return c.Env }
+func (c SpawnedTCPConnection) connEnv() []string { return c.Env }
 
-// URIConnection connects to an already-running runtime at the given URL.
-// The SDK does not spawn a process in this mode.
-type URIConnection struct {
-	// URL of the runtime. Accepts "port", "host:port", or a full URL such
-	// as "http://host:port".
-	URL string
+func (c SpawnedTCPConnection) connWorkingDirectory() string { return c.WorkingDirectory }
+
+// TCPConnection connects to an already-running runtime over plaintext TCP.
+// The SDK does not spawn a process or own the runtime's lifetime.
+type TCPConnection struct {
+	// Host is a hostname or IP address without a scheme, port, path, or IPv6 brackets.
+	Host string
+	// Port is the TCP port, from 1 through 65535.
+	Port int
 	// ConnectionToken authenticates the connection; must match what the
 	// remote runtime expects.
 	ConnectionToken string
 }
 
-func (URIConnection) runtimeConnection() {}
+func (TCPConnection) runtimeConnection() {}
 
 // InProcessConnection hosts the Copilot runtime in-process by loading its native
 // runtime library (a Rust cdylib) and driving JSON-RPC over the library's C ABI,
 // instead of spawning a runtime child process.
 //
-// Client-level Env and working directory are rejected by [NewClient];
-// use typed client options, [SessionConfig.WorkingDirectory]
-// or a child-process transport ([StdioConnection] / [TCPConnection]).
+// Env and WorkingDirectory belong only to child-process transports.
+// Use [CreateSessionOptions.WorkingDirectory] to select a session directory.
 //
-// Experimental: the in-process transport is experimental and its API and
-// behavior may change in a future release. Build the application with the
-// copilot_inprocess build tag to enable this transport.
+// This is the default transport on supported hosts: macOS, Linux, and Windows
+// on amd64 or arm64. No build tag is required.
 type InProcessConnection struct {
+	BaseDirectory             string
+	SessionIdleTimeoutSeconds int
+
 	// RunOnUiThread schedules the supplied native action exactly once on the UI
 	// thread (the process main thread on macOS), returning only after it completes.
 	// The action can block while native UI is open. No authentication data crosses
@@ -158,26 +173,22 @@ func (options *InternalTestOptions) environment() map[string]string {
 }
 
 // ClientOptions configures the [Client].
-type ClientOptions struct {
+type clientOptions struct {
 	// InternalTestOptions is unsupported SDK test infrastructure configuration.
 	// Only applies to runtimes owned by this client.
 	InternalTestOptions *InternalTestOptions
 	// Connection describes how to connect to the Copilot runtime. When nil,
 	// COPILOT_SDK_DEFAULT_CONNECTION may select "inprocess" or "stdio";
-	// when unset, defaults to an empty [StdioConnection].
+	// when unset, defaults to an empty [InProcessConnection].
 	Connection RuntimeConnection
-	// WorkingDirectory is the working directory for the runtime process.
-	// If empty, inherits the current process's working directory.
-	// Rejected with [InProcessConnection]; use [SessionConfig.WorkingDirectory].
-	WorkingDirectory string
 	// BaseDirectory is the base directory for Copilot data (session state,
 	// config, etc.). Sets the COPILOT_HOME environment variable on the
 	// spawned runtime. When empty, the runtime defaults to ~/.copilot.
 	// In-process hosts also keep their runtime cache in its "cache" subdirectory.
 	// This does not affect where the Go SDK extracts the embedded CLI
-	// binary; use embeddedcli.Config.Dir to control that install/cache
+	// binary; use embeddedcli.Config.Directory to control that install/cache
 	// location.
-	// Ignored when connecting to an existing runtime via [URIConnection].
+	// Cannot be configured with [TCPConnection].
 	BaseDirectory string
 	// BuiltinPluginDirectories contains absolute paths to trusted plugin
 	// directories bundled by the host. When non-empty, Start replaces the
@@ -206,15 +217,6 @@ type ClientOptions struct {
 	// uses its own default level; the SDK does not pass --log-level.
 	// Recognized values: "none", "error", "warning", "info", "debug", "all".
 	LogLevel string
-	// Env are the environment variables for the runtime process (default:
-	// inherits from current process). Each entry is of the form "KEY=VALUE".
-	// If Env contains duplicate keys, only the last value for each key is used.
-	//
-	// For child-process transports ([StdioConnection] / [TCPConnection]) the
-	// per-connection Env, when set, takes precedence over this field; setting
-	// both is rejected. Env is rejected with [InProcessConnection]; use typed
-	// client/session options instead.
-	Env []string
 	// GitHubToken is the GitHub token to use for authentication.
 	// When provided, the token is passed to the runtime via environment
 	// variable. This takes priority over other authentication methods.
@@ -230,7 +232,7 @@ type ClientOptions struct {
 	// When provided, [Client.ListModels] calls this handler instead of
 	// querying the runtime. Useful in BYOK mode to return models available
 	// from your custom provider.
-	OnListModels func(ctx context.Context) ([]ModelInfo, error)
+	OnListModels func(ctx context.Context) ([]Model, error)
 	// SessionFS configures a custom session filesystem provider.
 	// When provided, the client registers as the session filesystem provider
 	// on connection, routing session-scoped file I/O through per-session
@@ -254,7 +256,7 @@ type ClientOptions struct {
 	// SessionIdleTimeoutSeconds configures the server-wide session idle
 	// timeout in seconds. Sessions without activity for this duration are
 	// automatically cleaned up. Set to 0 or leave unset to disable.
-	// Ignored when connecting to an existing runtime via [URIConnection].
+	// Nonzero values cannot be configured with [TCPConnection].
 	SessionIdleTimeoutSeconds int
 	// ClientInfo declares the integrating application's identity, forwarded to the
 	// runtime on the `server.connect` handshake. Declaring it lets the
@@ -270,12 +272,12 @@ type ClientOptions struct {
 	// Experimental: this API may change or be removed.
 	Entra *EntraAuthOptions
 	// Mode controls the default tool surface and feature flags presented to
-	// sessions created by this client. The zero value ([ModeCopilotCli])
-	// matches legacy CLI defaults. Set to [ModeEmpty] to opt in to
+	// sessions created by this client. Required: select [ModeCodingAgent]
+	// for coding-agent defaults or [ModeEmpty] to opt in to
 	// multi-tenant safe defaults — see [ClientMode] for details.
 	//
 	// When Mode is [ModeEmpty], NewClient requires either BaseDirectory,
-	// SessionFS, or a [URIConnection] so the runtime has persistent storage
+	// SessionFS, or a [TCPConnection] so the runtime has persistent storage
 	// for session state.
 	Mode ClientMode
 }
@@ -739,7 +741,7 @@ type AttributedUserInputResponse struct {
 }
 
 // AttributedUserInputHandler is a [UserInputHandler] whose answers can say
-// who answered. Register it with SessionConfig.OnAttributedUserInputRequest.
+// who answered. Register it with SessionInteractionOptions.OnAttributedUserInputRequest.
 //
 // Experimental: AttributedUserInputHandler is part of an experimental API and
 // may change or be removed.
@@ -876,7 +878,7 @@ type AttributedExitPlanModeResult struct {
 
 // AttributedExitPlanModeRequestHandler is an [ExitPlanModeRequestHandler]
 // whose results can say who reviewed the plan. Register it with
-// SessionConfig.OnAttributedExitPlanModeRequest.
+// SessionInteractionOptions.OnAttributedExitPlanModeRequest.
 //
 // Experimental: AttributedExitPlanModeRequestHandler is part of an
 // experimental API and may change or be removed.
@@ -893,16 +895,11 @@ type AutoModeRecoveryContext struct {
 	OriginatingMessageID *string `json:"originatingMessageId,omitempty"`
 }
 
-// AutoModeSwitchRequest represents a legacy Auto switch offer.
+// AutoModeSwitchRequest describes an Auto switch offer.
 type AutoModeSwitchRequest struct {
 	ErrorCode         *string  `json:"errorCode,omitempty"`
 	RetryAfterSeconds *float64 `json:"retryAfterSeconds,omitempty"`
-}
-
-// AutoModeSwitchRequestWithAutoModeRecovery includes active-request recovery context.
-// AutoModeRecovery is nil for a legacy Auto switch offer.
-type AutoModeSwitchRequestWithAutoModeRecovery struct {
-	AutoModeSwitchRequest
+	// AutoModeRecovery identifies an active-request recovery offer; nil is an ordinary switch.
 	AutoModeRecovery *AutoModeRecoveryContext `json:"autoModeRecovery,omitempty"`
 }
 
@@ -913,24 +910,6 @@ type AutoModeSwitchInvocation struct {
 
 // AutoModeSwitchRequestHandler handles auto-mode-switch requests from the agent.
 type AutoModeSwitchRequestHandler func(request AutoModeSwitchRequest, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error)
-
-// AutoModeSwitchRequestHandlerWithAutoModeRecovery handles both legacy Auto
-// switch offers and active-request recovery offers without resending the input.
-type AutoModeSwitchRequestHandlerWithAutoModeRecovery func(request AutoModeSwitchRequestWithAutoModeRecovery, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error)
-
-// AutoModeRecoveryOptions enrolls a session in runtime-owned active-request recovery.
-// Re-supply these options on resume. Unsupported enrollment fails explicitly.
-type AutoModeRecoveryOptions struct {
-	// OnAutoModeSwitchRequest replaces the legacy Auto switch handler for this enrollment.
-	// Required. The handler must not resend or rewind the request.
-	OnAutoModeSwitchRequest AutoModeSwitchRequestHandlerWithAutoModeRecovery
-	// OnEvent receives recovery-aware events, including
-	// *CapabilitiesChangedDataWithAutoModeRecovery. Legacy OnEvent remains unchanged.
-	OnEvent SessionEventHandler
-	// MCPAuthRuntimeRefreshHandler composes recovery enrollment with the existing
-	// opt-in MCP auth refresh callback instead of the legacy OnMCPAuthRequest.
-	MCPAuthRuntimeRefreshHandler MCPAuthRuntimeRefreshHandler
-}
 
 // PreToolUseHookInput is the input for a pre-tool-use hook
 type PreToolUseHookInput struct {
@@ -1950,8 +1929,18 @@ type SkillProvider interface {
 	ReadSkill(ctx context.Context, name string) (string, error)
 }
 
-// SessionConfig configures a new session
-type SessionConfig struct {
+// CreateSessionOptions configures a new session
+type sessionOptions struct {
+	// OnPermissionRequestWithEnvelope overrides the other permission decision
+	// handlers when non-nil, preserving the complete permission envelope.
+	OnPermissionRequestWithEnvelope PermissionHandlerWithEnvelopeFunc
+	// OnMCPAuthRuntimeRefresh overrides OnMCPAuthRequest when non-nil.
+	OnMCPAuthRuntimeRefresh MCPAuthRuntimeRefreshHandler
+	// AutoModeRecovery enrolls in runtime-owned active-request recovery.
+	// Requires OnAutoModeSwitchRequest; re-supply on resume. The handler must
+	// not resend or rewind the request.
+	AutoModeRecovery bool
+
 	// AllowMultipleToolCalls permits multiple model tool calls per response (default true).
 	// False is a provider hint, not an execution guarantee: all returned calls are
 	// handled and handlers may run concurrently. Re-supply on cold resume.
@@ -2104,8 +2093,8 @@ type SessionConfig struct {
 	// non-streaming sub-agent events and subagent.* lifecycle events are forwarded;
 	// streaming deltas from sub-agents are suppressed. When nil, defaults to true.
 	IncludeSubAgentStreamingEvents *bool
-	// Provider configures a custom model provider (BYOK)
-	Provider *ProviderConfig
+	// DefaultProvider preserves omitted, named, and explicitly cleared routing.
+	DefaultProvider **string
 	// Capi configures provider-scoped CAPI (Copilot API) session options.
 	Capi *CapiSessionOptions
 	// Providers configures named BYOK provider connections. Additive to Copilot
@@ -2125,7 +2114,7 @@ type SessionConfig struct {
 	// telemetry is enabled for eligible GitHub-authenticated sessions, including
 	// custom Provider (BYOK) sessions. Host and account policies still control
 	// uploads. This is independent of the OpenTelemetry
-	// configuration in ClientOptions.Telemetry.
+	// configuration in ClientOptions.Observability.Telemetry.
 	EnableSessionTelemetry *bool
 	// EnableCitations enables native model citations for supported providers.
 	//
@@ -2352,7 +2341,7 @@ type SessionConfig struct {
 	// the host wires extension management tools and per-extension tool dispatch onto
 	// the session.
 	RequestExtensions *bool
-	// ExtensionSDKPath optionally overrides the bundled `@github/copilot-sdk` drop
+	// ExtensionSDKPath optionally overrides the bundled `@microsoft/copilot-sdk` drop
 	// injected into extension subprocesses. When set to an absolute path containing
 	// a valid `copilot-sdk/` folder (with `index.js` and `extension.js` at the
 	// root), the host injects the override into every forked extension; invalid or
@@ -2621,6 +2610,8 @@ type SessionCapabilities struct {
 
 // UICapabilities describes host UI feature support.
 type UICapabilities struct {
+	// AutoModeRecovery acknowledges retained-request Auto recovery. Absent means unsupported.
+	AutoModeRecovery bool `json:"autoModeRecovery,omitempty"`
 	// Elicitation indicates whether the host supports interactive elicitation dialogs.
 	Elicitation bool `json:"elicitation,omitempty"`
 	// MCPApps indicates whether the runtime has accepted the session's MCP Apps
@@ -2632,18 +2623,6 @@ type UICapabilities struct {
 	// Experimental: MCPApps is part of an experimental wire-protocol surface
 	// (SEP-1865) and may change or be removed in a future release.
 	MCPApps bool `json:"mcpApps,omitempty"`
-}
-
-// UICapabilitiesWithAutoModeRecovery extends the legacy UI capability snapshot.
-type UICapabilitiesWithAutoModeRecovery struct {
-	UICapabilities
-	// AutoModeRecovery acknowledges retained-request Auto recovery. Absent means unsupported.
-	AutoModeRecovery bool `json:"autoModeRecovery,omitempty"`
-}
-
-// SessionCapabilitiesWithAutoModeRecovery includes recovery enrollment acknowledgment.
-type SessionCapabilitiesWithAutoModeRecovery struct {
-	UI *UICapabilitiesWithAutoModeRecovery `json:"ui,omitempty"`
 }
 
 // ElicitationAction is the user response to an elicitation request.
@@ -2717,7 +2696,7 @@ type AttributedElicitationResult struct {
 }
 
 // AttributedElicitationHandler is an [ElicitationHandler] whose results can
-// say who answered. Register it with SessionConfig.OnAttributedElicitationRequest.
+// say who answered. Register it with SessionInteractionOptions.OnAttributedElicitationRequest.
 // If it returns an error, the SDK cancels the request without a label.
 //
 // Experimental: AttributedElicitationHandler is part of an experimental API
@@ -2746,8 +2725,18 @@ type SessionUI struct {
 	session *Session
 }
 
-// ResumeSessionConfig configures options when resuming a session
-type ResumeSessionConfig struct {
+// ResumeSessionOptions configures options when resuming a session
+type resumeOptions struct {
+	// OnPermissionRequestWithEnvelope overrides the other permission decision
+	// handlers when non-nil, preserving the complete permission envelope.
+	OnPermissionRequestWithEnvelope PermissionHandlerWithEnvelopeFunc
+	// OnMCPAuthRuntimeRefresh overrides OnMCPAuthRequest when non-nil.
+	OnMCPAuthRuntimeRefresh MCPAuthRuntimeRefreshHandler
+	// AutoModeRecovery enrolls in runtime-owned active-request recovery.
+	// Requires OnAutoModeSwitchRequest; re-supply on resume. The handler must
+	// not resend or rewind the request.
+	AutoModeRecovery bool
+
 	// AllowMultipleToolCalls permits multiple model tool calls per response (default true).
 	// False is a provider hint, not an execution guarantee: all returned calls are
 	// handled and handlers may run concurrently. Re-supply on cold resume.
@@ -2789,8 +2778,8 @@ type ResumeSessionConfig struct {
 	// In ModeEmpty, nil excludes all built-in skills; a non-nil list opts the
 	// named built-ins back in. Skills from other sources remain eligible.
 	IncludedBuiltinSkills []string
-	// Provider configures a custom model provider
-	Provider *ProviderConfig
+	// DefaultProvider preserves omitted, named, and explicitly cleared routing.
+	DefaultProvider **string
 	// Capi configures provider-scoped CAPI (Copilot API) session options.
 	Capi *CapiSessionOptions
 	// Providers configures named BYOK provider connections. Additive to Copilot
@@ -2810,7 +2799,7 @@ type ResumeSessionConfig struct {
 	// GitHub-authenticated sessions, including custom Provider (BYOK) sessions.
 	// When nil, preserves a resident session's choice; otherwise defaults to enabled.
 	// Host and account policies still control uploads. This is independent of the OpenTelemetry
-	// configuration in ClientOptions.Telemetry.
+	// configuration in ClientOptions.Observability.Telemetry.
 	EnableSessionTelemetry *bool
 	// EnableCitations enables native model citations for supported providers.
 	//
@@ -2869,13 +2858,13 @@ type ResumeSessionConfig struct {
 	// this handler takes precedence.
 	OnPermissionRequestWithPrompt PermissionHandlerWithPromptFunc
 	// OnMCPAuthRequest is an optional handler for MCP OAuth requests from MCP servers.
-	// See SessionConfig.OnMCPAuthRequest.
+	// See CreateSessionOptions.MCP.OnAuthRequest.
 	OnMCPAuthRequest MCPAuthHandler
 	// OnUserInputRequest handles legacy question-and-answer requests from the agent
 	// and enables the legacy ask_user tool.
 	OnUserInputRequest UserInputHandler
 	// OnAttributedUserInputRequest is OnUserInputRequest for a host that reports
-	// who answered. See SessionConfig.OnAttributedUserInputRequest.
+	// who answered. See SessionInteractionOptions.OnAttributedUserInputRequest.
 	//
 	// Experimental: OnAttributedUserInputRequest is part of an experimental API
 	// and may change or be removed.
@@ -3062,42 +3051,42 @@ type ResumeSessionConfig struct {
 	// Recovery may discard a torn tail; inspect Session.TranscriptRecovery().
 	AllowTranscriptRecovery *bool
 	// OnEvent is an optional event handler registered before the session.resume RPC
-	// is issued, ensuring early events are delivered. See SessionConfig.OnEvent.
+	// is issued, ensuring early events are delivered. See CreateSessionOptions.Events.OnEvent.
 	OnEvent SessionEventHandler
 	// OnEventWithPermissionEnvelope registers a lossless permission event handler
-	// before the session.resume RPC. See SessionConfig.OnEventWithPermissionEnvelope.
+	// before the session.resume RPC. See CreateSessionOptions.Events.OnEventWithPermissionEnvelope.
 	OnEventWithPermissionEnvelope SessionEventHandler
 	// CreateSessionFSProvider supplies a handler for session filesystem operations.
 	// This takes effect only when ClientOptions.SessionFS is configured.
 	CreateSessionFSProvider func(session *Session) SessionFSProvider
-	// Commands registers slash-commands for this session. See SessionConfig.Commands.
+	// Commands registers slash-commands for this session. See CreateSessionOptions.Interaction.Commands.
 	// An empty non-nil slice replaces the commands previously registered for this
 	// session with none; nil leaves them unchanged.
 	Commands []CommandDefinition
 	// OnElicitationRequest is a handler for elicitation requests from the server.
-	// See SessionConfig.OnElicitationRequest.
+	// See CreateSessionOptions.Interaction.OnElicitationRequest.
 	OnElicitationRequest ElicitationHandler
 	// OnAttributedElicitationRequest is OnElicitationRequest for a host that
-	// reports who answered. See SessionConfig.OnAttributedElicitationRequest.
+	// reports who answered. See SessionInteractionOptions.OnAttributedElicitationRequest.
 	//
 	// Experimental: OnAttributedElicitationRequest is part of an experimental
 	// API and may change or be removed.
 	OnAttributedElicitationRequest AttributedElicitationHandler
 	// OnExitPlanModeRequest is a handler for exit-plan-mode requests from the server.
-	// See SessionConfig.OnExitPlanModeRequest.
+	// See CreateSessionOptions.Interaction.OnExitPlanModeRequest.
 	OnExitPlanModeRequest ExitPlanModeRequestHandler
 	// OnAttributedExitPlanModeRequest is OnExitPlanModeRequest for a host that
-	// reports who reviewed the plan. See SessionConfig.OnAttributedExitPlanModeRequest.
+	// reports who reviewed the plan. See SessionInteractionOptions.OnAttributedExitPlanModeRequest.
 	//
 	// Experimental: OnAttributedExitPlanModeRequest is part of an experimental
 	// API and may change or be removed.
 	OnAttributedExitPlanModeRequest AttributedExitPlanModeRequestHandler
 	// OnAutoModeSwitchRequest is a handler for auto-mode-switch requests from the server.
-	// See SessionConfig.OnAutoModeSwitchRequest.
+	// See CreateSessionOptions.Interaction.OnAutoModeSwitchRequest.
 	OnAutoModeSwitchRequest AutoModeSwitchRequestHandler
 
 	// EnableMCPApps enables MCP Apps (SEP-1865) UI passthrough on resume.
-	// See SessionConfig.EnableMCPApps.
+	// See CreateSessionOptions.MCP.EnableApps.
 	//
 	// Experimental: EnableMCPApps is part of an experimental wire-protocol
 	// surface (SEP-1865) and may change or be removed in a future release.
@@ -3107,7 +3096,7 @@ type ResumeSessionConfig struct {
 	// when MCP Apps and form-backed GitHub tools are enabled.
 	GitHubMCPToolConfig *GitHubMCPToolConfig
 	// Canvases declares canvases this session provides. Sent over the wire on
-	// `session.resume`. See SessionConfig.Canvases.
+	// `session.resume`. See CreateSessionOptions.Canvases.Definitions.
 	Canvases []CanvasDeclaration
 	// OpenCanvases declares canvas instances the caller knows were open before
 	// this resume so the runtime can re-attach them. Sent over the wire on
@@ -3115,20 +3104,20 @@ type ResumeSessionConfig struct {
 	OpenCanvases []rpc.OpenCanvasInstance
 	// RequestCanvasRenderer asks the host to enable canvas rendering for this session.
 	RequestCanvasRenderer *bool
-	// RequestExtensions opts this connection into the extension surface. See SessionConfig.RequestExtensions.
+	// RequestExtensions opts this connection into the extension surface. See CreateSessionOptions.Extensions.Enabled.
 	RequestExtensions *bool
-	// ExtensionSDKPath optionally overrides the bundled `@github/copilot-sdk` drop
-	// injected into extension subprocesses. See SessionConfig.ExtensionSDKPath.
+	// ExtensionSDKPath optionally overrides the bundled `@microsoft/copilot-sdk` drop
+	// injected into extension subprocesses. See CreateSessionOptions.Extensions.SDKPath.
 	ExtensionSDKPath *string
-	// CanvasHandler receives inbound canvas.* requests for this session. See SessionConfig.CanvasHandler.
+	// CanvasHandler receives inbound canvas.* requests for this session. See CreateSessionOptions.Canvases.Handler.
 	CanvasHandler CanvasHandler `json:"-"`
 	// ExtensionInfo identifies the stable extension providing this session's canvases.
 	ExtensionInfo *ExtensionInfo
 	// CanvasProvider is the stable identity for a host/SDK connection that
-	// supplies built-in canvases. See SessionConfig.CanvasProvider.
+	// supplies built-in canvases. See CreateSessionOptions.Canvases.Provider.
 	CanvasProvider *CanvasProviderIdentity
 	// ExpAssignments injects ExP assignment ("flight") data on resume. See
-	// SessionConfig.ExpAssignments. Re-supply on resume so the runtime
+	// CreateSessionOptions.Experiments.Assignments. Re-supply on resume so the runtime
 	// re-applies the assignments after a CLI process restart.
 	//
 	// Internal: ExpAssignments is part of the SDK's internal API surface,
@@ -3136,17 +3125,17 @@ type ResumeSessionConfig struct {
 	// general external use.
 	ExpAssignments *CopilotExpAssignmentResponse
 	// FeatureFlags contains host-resolved feature-flag values to apply on resume.
-	// See SessionConfig.FeatureFlags.
+	// See CreateSessionOptions.Experiments.Flags.
 	FeatureFlags map[string]bool
 	// EnableManagedSettings injects the same opt-in flag on resume. See
-	// SessionConfig.EnableManagedSettings. Re-supply on resume so the runtime
+	// CreateSessionOptions.GitHub.FetchManagedSettings. Re-supply on resume so the runtime
 	// re-applies the managed-settings self-fetch after a CLI process restart.
 	EnableManagedSettings *bool
-	// ExcludedManagedSettings excludes setting paths as on SessionConfig.
+	// ExcludedManagedSettings excludes setting paths as on CreateSessionOptions.
 	// Omitting it restores full enforcement on warm and cold resume.
 	ExcludedManagedSettings []string
 	// EnforceManagedModelDefaults re-applies managed model lock enforcement on
-	// resume. See SessionConfig.EnforceManagedModelDefaults.
+	// resume. See CreateSessionOptions.Policy.EnforceManagedModelDefaults.
 	EnforceManagedModelDefaults *bool
 	// InteractiveUser re-supplies that a human drives this session. It is not
 	// persisted and is ignored if the session is already active in the runtime.
@@ -3154,11 +3143,11 @@ type ResumeSessionConfig struct {
 	// PermissionMode is applied before resumed pending work continues and
 	// before ResumeSession returns. If it is refused (for example by managed
 	// policy), continued work runs under the mode the session's
-	// PermissionModeResult reports. See SessionConfig.PermissionMode. Empty
+	// PermissionModeResult reports. See CreateSessionOptions.Permissions.Mode. Empty
 	// keeps the restored mode.
 	PermissionMode rpc.PermissionMode
 	// ManagedSettings re-injects host-provided managed settings on resume. See
-	// SessionConfig.ManagedSettings. It must be re-supplied on resume: it
+	// CreateSessionOptions.Policy.ManagedSettings. It must be re-supplied on resume: it
 	// replaces the prior injected layer, and omitting it clears that layer so
 	// warm and cold resume behave identically.
 	ManagedSettings *ManagedSettings
@@ -3171,10 +3160,7 @@ type ResumeSessionConfig struct {
 // bearer-token-provider surface and may change or be removed in future SDK or CLI
 // releases.
 type ProviderTokenArgs struct {
-	// ProviderName is the name of the BYOK provider needing a token. For the
-	// singular, whole-session [ProviderConfig] this is the implicit provider name
-	// ("default"); for [NamedProviderConfig] entries it is
-	// [NamedProviderConfig.Name].
+	// ProviderName is the configured [NamedProviderConfig.Name] needing a token.
 	//
 	// The callback closes over its own token scope/audience; the runtime is
 	// provider-agnostic and forwards only the provider name.
@@ -3231,12 +3217,12 @@ type ProviderConfig struct {
 	// ModelID is the well-known model name used by the runtime to look up
 	// agent configuration (tools, prompts, reasoning behavior) and default
 	// token limits. Also used as the wire model when WireModel is not set.
-	// Falls back to SessionConfig.Model.
+	// Falls back to CreateSessionOptions.Model.
 	ModelID string `json:"modelId,omitempty"`
 	// WireModel is the model name sent to the provider API for inference. Use
 	// this when the provider's model name (e.g. an Azure deployment name or a
 	// custom fine-tune name) differs from ModelID.
-	// Falls back to ModelID, then SessionConfig.Model.
+	// Falls back to ModelID, then CreateSessionOptions.Model.
 	WireModel string `json:"wireModel,omitempty"`
 	// MaxPromptTokens overrides the resolved model's default max prompt tokens.
 	// The runtime triggers conversation compaction before sending a request
@@ -3321,6 +3307,8 @@ const (
 // are provider-scoped under the capi namespace because a single session can host
 // multiple providers, such as CAPI and BYOK, so transport choice is provider-level.
 type CapiSessionOptions struct {
+	// Enabled controls Copilot API models independently of GitHub identity.
+	Enabled *bool `json:"enabled,omitempty"`
 	// EnableWebSocketResponses controls whether the CAPI Responses API uses
 	// WebSocket transport. Enabled by default when the model advertises
 	// ws:/responses support; set to Bool(false) to force HTTP Responses transport.
@@ -3362,11 +3350,8 @@ type AzureProviderOptions struct {
 // NamedProviderConfig is a named BYOK provider connection (transport +
 // credentials), referenced by ProviderModelConfig entries via Name.
 //
-// Unlike the singular Provider (which makes the whole session BYOK and bypasses
-// Copilot API authentication), named providers are additive: they coexist with
-// Copilot API auth so models from CAPI and one or more BYOK providers can be
-// mixed within a single session and across sub-agents. Combining Providers and
-// Models with Provider is rejected.
+// Connections coexist with GitHub identity. CapiSessionOptions.Enabled controls
+// Copilot model availability independently.
 //
 // Experimental: NamedProviderConfig is part of an experimental multi-provider
 // BYOK surface and may change or be removed in future SDK or CLI releases.
@@ -3380,6 +3365,8 @@ type NamedProviderConfig struct {
 	LocalModel json.RawMessage `json:"localModel,omitempty"`
 	// WireAPI is the API format (openai/azure only): "completions" or "responses". Defaults to "completions".
 	WireAPI string `json:"wireApi,omitempty"`
+	// Transport is "http" (default) or "websockets" for the OpenAI Responses API.
+	Transport string `json:"transport,omitempty"`
 	// ModelProvider is the product serving this provider's models, reported in
 	// telemetry as model_provider. Allowed values are "openai", "anthropic",
 	// "azure_openai", "ollama", "lm_studio", "foundry_local", and "llama_cpp";
@@ -3389,6 +3376,9 @@ type NamedProviderConfig struct {
 	BaseURL string `json:"baseUrl"`
 	// APIKey is the API key. Optional for local providers like Ollama.
 	APIKey string `json:"apiKey,omitempty"`
+	// APIKeyCommand runs before each request. Failure fails the request without
+	// static-key fallback. Bearer authentication takes precedence.
+	APIKeyCommand string `json:"apiKeyCommand,omitempty"`
 	// BearerToken for authentication. Sets the Authorization header directly.
 	// Takes precedence over APIKey when both are set.
 	BearerToken string `json:"bearerToken,omitempty"`
@@ -3546,32 +3536,16 @@ const (
 // SessionEventHandler is a callback for session events
 type SessionEventHandler func(event SessionEvent)
 
-// ModelVisionLimits contains vision-specific limits
-type ModelVisionLimits struct {
-	SupportedMediaTypes []string `json:"supported_media_types"`
-	MaxPromptImages     int      `json:"max_prompt_images"`
-	MaxPromptImageSize  int      `json:"max_prompt_image_size"`
-}
-
-// ModelLimits contains model limits
-type ModelLimits struct {
-	MaxPromptTokens        *int               `json:"max_prompt_tokens,omitempty"`
-	MaxOutputTokens        *int               `json:"max_output_tokens,omitempty"`
-	MaxContextWindowTokens *int               `json:"max_context_window_tokens,omitempty"`
-	Vision                 *ModelVisionLimits `json:"vision,omitempty"`
-}
-
-// ModelSupports contains model support flags
-type ModelSupports struct {
-	Vision          bool `json:"vision"`
-	ReasoningEffort bool `json:"reasoningEffort"`
-}
-
-// ModelCapabilities contains model capabilities and limits
-type ModelCapabilities struct {
-	Supports ModelSupports `json:"supports"`
-	Limits   ModelLimits   `json:"limits"`
-}
+// Model and its nested types are the generated runtime catalog contract.
+type (
+	Model                         = rpc.Model
+	ModelCapabilities             = rpc.ModelCapabilities
+	ModelCapabilitiesSupports     = rpc.ModelCapabilitiesSupports
+	ModelCapabilitiesLimits       = rpc.ModelCapabilitiesLimits
+	ModelCapabilitiesLimitsVision = rpc.ModelCapabilitiesLimitsVision
+	ModelPolicy                   = rpc.ModelPolicy
+	ModelBilling                  = rpc.ModelBilling
+)
 
 // Type aliases for model capabilities overrides, re-exported from the rpc
 // package for ergonomic use without requiring a separate rpc import.
@@ -3581,32 +3555,6 @@ type (
 	ModelCapabilitiesOverrideLimits       = rpc.ModelCapabilitiesOverrideLimits
 	ModelCapabilitiesOverrideLimitsVision = rpc.ModelCapabilitiesOverrideLimitsVision
 )
-
-// ModelPolicy contains model policy state
-type ModelPolicy struct {
-	State string `json:"state"`
-	Terms string `json:"terms"`
-}
-
-// ModelBilling contains model billing information
-type ModelBilling struct {
-	Multiplier  *float64                     `json:"multiplier,omitempty"`
-	TokenPrices *rpc.ModelBillingTokenPrices `json:"tokenPrices,omitempty"`
-}
-
-// ModelInfo contains information about an available model
-type ModelInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	// Native serving provider. Absent for unattributed and configured BYOK models.
-	Provider                  *rpc.ModelProviderRef `json:"provider,omitempty"`
-	Capabilities              ModelCapabilities     `json:"capabilities"`
-	Policy                    *ModelPolicy          `json:"policy,omitempty"`
-	Billing                   *ModelBilling         `json:"billing,omitempty"`
-	Metadata                  map[string]any        `json:"metadata,omitempty"`
-	SupportedReasoningEfforts []string              `json:"supportedReasoningEfforts,omitempty"`
-	DefaultReasoningEffort    string                `json:"defaultReasoningEffort,omitempty"`
-}
 
 // SessionContext contains working directory context for a session
 type SessionContext struct {
@@ -3694,10 +3642,10 @@ type createSessionRequest struct {
 	ExcludedTools                      []string                       `json:"excludedTools,omitempty"`
 	ExcludedBuiltInAgents              []string                       `json:"excludedBuiltinAgents,omitempty"`
 	IncludedBuiltInAgents              []string                       `json:"includedBuiltinAgents,omitzero"`
-	Provider                           *ProviderConfig                `json:"provider,omitempty"`
+	DefaultProvider                    **string                       `json:"defaultProvider,omitempty"`
 	Capi                               *CapiSessionOptions            `json:"capi,omitempty"`
-	Providers                          []NamedProviderConfig          `json:"providers,omitempty"`
-	Models                             []ProviderModelConfig          `json:"models,omitempty"`
+	Providers                          []NamedProviderConfig          `json:"providers,omitzero"`
+	Models                             []ProviderModelConfig          `json:"models,omitzero"`
 	EnableSessionTelemetry             *bool                          `json:"enableSessionTelemetry,omitempty"`
 	EnableCitations                    *bool                          `json:"enableCitations,omitempty"`
 	EnableFileChangeTracking           *bool                          `json:"enableFileChangeTracking,omitempty"`
@@ -3791,10 +3739,10 @@ type wireCommand struct {
 
 // createSessionResponse is the response from session.create
 type createSessionResponse struct {
-	SessionID            string                                   `json:"sessionId"`
-	WorkspacePath        string                                   `json:"workspacePath"`
-	Capabilities         *SessionCapabilitiesWithAutoModeRecovery `json:"capabilities,omitempty"`
-	PermissionModeResult *rpc.PermissionsSetModeResult            `json:"permissionModeResult,omitempty"`
+	SessionID            string                        `json:"sessionId"`
+	WorkspacePath        string                        `json:"workspacePath"`
+	Capabilities         *SessionCapabilities          `json:"capabilities,omitempty"`
+	PermissionModeResult *rpc.PermissionsSetModeResult `json:"permissionModeResult,omitempty"`
 }
 
 // resumeSessionRequest is the request for session.resume
@@ -3812,10 +3760,10 @@ type resumeSessionRequest struct {
 	ExcludedTools                      []string                       `json:"excludedTools,omitempty"`
 	ExcludedBuiltInAgents              []string                       `json:"excludedBuiltinAgents,omitempty"`
 	IncludedBuiltInAgents              []string                       `json:"includedBuiltinAgents,omitzero"`
-	Provider                           *ProviderConfig                `json:"provider,omitempty"`
+	DefaultProvider                    **string                       `json:"defaultProvider,omitempty"`
 	Capi                               *CapiSessionOptions            `json:"capi,omitempty"`
-	Providers                          []NamedProviderConfig          `json:"providers,omitempty"`
-	Models                             []ProviderModelConfig          `json:"models,omitempty"`
+	Providers                          []NamedProviderConfig          `json:"providers,omitzero"`
+	Models                             []ProviderModelConfig          `json:"models,omitzero"`
 	EnableSessionTelemetry             *bool                          `json:"enableSessionTelemetry,omitempty"`
 	EnableCitations                    *bool                          `json:"enableCitations,omitempty"`
 	EnableFileChangeTracking           *bool                          `json:"enableFileChangeTracking,omitempty"`
@@ -3904,12 +3852,12 @@ type resumeSessionRequest struct {
 
 // resumeSessionResponse is the response from session.resume
 type resumeSessionResponse struct {
-	SessionID            string                                   `json:"sessionId"`
-	WorkspacePath        string                                   `json:"workspacePath"`
-	Capabilities         *SessionCapabilitiesWithAutoModeRecovery `json:"capabilities,omitempty"`
-	OpenCanvases         []rpc.OpenCanvasInstance                 `json:"openCanvases,omitempty"`
-	TranscriptRecovery   *TranscriptRecoveryReport                `json:"transcriptRecovery,omitempty"`
-	PermissionModeResult *rpc.PermissionsSetModeResult            `json:"permissionModeResult,omitempty"`
+	SessionID            string                        `json:"sessionId"`
+	WorkspacePath        string                        `json:"workspacePath"`
+	Capabilities         *SessionCapabilities          `json:"capabilities,omitempty"`
+	OpenCanvases         []rpc.OpenCanvasInstance      `json:"openCanvases,omitempty"`
+	TranscriptRecovery   *TranscriptRecoveryReport     `json:"transcriptRecovery,omitempty"`
+	PermissionModeResult *rpc.PermissionsSetModeResult `json:"permissionModeResult,omitempty"`
 }
 
 // TranscriptRecoveryReport describes the repair performed while resuming a session.
@@ -4020,11 +3968,6 @@ type GetAuthStatusResponse struct {
 // listModelsRequest is the request for models.list
 type listModelsRequest struct{}
 
-// listModelsResponse is the response from models.list
-type listModelsResponse struct {
-	Models []ModelInfo `json:"models"`
-}
-
 // sessionGetMessagesRequest is the request for session.getMessages
 type sessionGetMessagesRequest struct {
 	SessionID string `json:"sessionId"`
@@ -4072,8 +4015,8 @@ type sessionSendResponse struct {
 
 // sessionEventRequest is the request for session event notifications
 type sessionEventRequest struct {
-	SessionID string                           `json:"sessionId"`
-	Event     SessionEventWithAutoModeRecovery `json:"event"`
+	SessionID string       `json:"sessionId"`
+	Event     SessionEvent `json:"event"`
 
 	permissionEnvelope *PermissionRequestEnvelope
 	sdkHasHandler      *bool

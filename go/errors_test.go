@@ -10,12 +10,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func TestRPCErrorData(t *testing.T) {
@@ -49,7 +50,7 @@ func TestRPCErrorData(t *testing.T) {
 				var err error
 				switch method {
 				case "session.create":
-					_, err = client.CreateSession(ctx, &copilot.SessionConfig{})
+					_, err = client.CreateSession(ctx, &copilot.CreateSessionOptions{})
 				case "status.get":
 					_, err = client.GetStatus(ctx)
 				case "models.list":
@@ -100,7 +101,10 @@ func TestRPCErrorData(t *testing.T) {
 }
 
 func TestRPCErrorNonRPCFailure(t *testing.T) {
-	client := copilot.NewClient(&copilot.ClientOptions{})
+	client := copilot.NewClient(&copilot.ClientOptions{
+		Mode:    copilot.ModeCodingAgent,
+		Runtime: copilot.SpawnedStdioConnection{Path: filepath.Join(t.TempDir(), "missing-runtime")},
+	})
 	_, err := client.GetStatus(t.Context())
 	var rpcErr *copilot.RPCError
 	if err == nil || errors.As(err, &rpcErr) {
@@ -132,9 +136,7 @@ func newRPCErrorClient(t *testing.T, data string) *copilot.Client {
 		}
 	})
 
-	client := copilot.NewClient(&copilot.ClientOptions{
-		Connection: copilot.URIConnection{URL: listener.Addr().String()},
-	})
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.TCPConnection{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port}})
 	t.Cleanup(client.ForceStop)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
@@ -172,7 +174,7 @@ func serveRPCErrorPeer(listener net.Listener, data string) error {
 		var response string
 		switch request.Method {
 		case "connect":
-			response = `"result":{"ok":true,"protocolVersion":3,"version":"test"}`
+			response = `"result":{"ok":true,"protocolVersion":4,"version":"test"}`
 		case "status.get", "session.create", "models.list":
 			response = `"error":{"code":-32000,"message":"request rejected"`
 			if data != "" {

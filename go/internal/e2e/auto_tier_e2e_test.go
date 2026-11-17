@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 // Mirrors nodejs/test/e2e/auto_tier.e2e.test.ts (snapshot category "auto_tier").
@@ -59,10 +59,7 @@ func TestAutoTierE2E(t *testing.T) {
 	newAutoSession := func(t *testing.T) *copilot.Session {
 		t.Helper()
 		_, client := newAutoClient(t)
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Model:               "auto",
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Model: "auto", Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -160,23 +157,17 @@ func TestAutoTierE2E(t *testing.T) {
 
 	t.Run("should restore and override fast auto tier on cold resume", func(t *testing.T) {
 		ctx, client := newAutoClient(t)
-		fastSession, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Model:               "auto",
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Capi: &copilot.CapiSessionOptions{
-				AutoTier:                 copilot.AutoTierFast,
-				EnableWebSocketResponses: copilot.Bool(false),
-			},
+		fastSession, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Model: "auto", Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{
+			AutoTier:                 copilot.AutoTierFast,
+			EnableWebSocketResponses: copilot.Bool(false),
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession(fast) failed: %v", err)
 		}
-		tierlessSession, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Model:               "auto",
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Capi: &copilot.CapiSessionOptions{
-				EnableWebSocketResponses: copilot.Bool(false),
-			},
+		tierlessSession, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Model: "auto", Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{
+			EnableWebSocketResponses: copilot.Bool(false),
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession(tierless) failed: %v", err)
@@ -220,15 +211,11 @@ func TestAutoTierE2E(t *testing.T) {
 		if err := restoredClient.Start(t.Context()); err != nil {
 			t.Fatalf("Start restored client failed: %v", err)
 		}
-		restoredFast, err := restoredClient.ResumeSession(t.Context(), fastSessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		restoredFast, err := restoredClient.ResumeSession(t.Context(), fastSessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("ResumeSession(fast) failed: %v", err)
 		}
-		restoredTierless, err := restoredClient.ResumeSession(t.Context(), tierlessSessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		restoredTierless, err := restoredClient.ResumeSession(t.Context(), tierlessSessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("ResumeSession(tierless) failed: %v", err)
 		}
@@ -257,13 +244,10 @@ func TestAutoTierE2E(t *testing.T) {
 		if err := overrideClient.Start(t.Context()); err != nil {
 			t.Fatalf("Start override client failed: %v", err)
 		}
-		overridden, err := overrideClient.ResumeSession(t.Context(), fastSessionID, &copilot.ResumeSessionConfig{
-			Model:               "auto",
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Capi: &copilot.CapiSessionOptions{
-				AutoTier:                 copilot.AutoTierBalance,
-				EnableWebSocketResponses: copilot.Bool(false),
-			},
+		overridden, err := overrideClient.ResumeSession(t.Context(), fastSessionID, &copilot.ResumeSessionOptions{Model: "auto", Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{
+			AutoTier:                 copilot.AutoTierBalance,
+			EnableWebSocketResponses: copilot.Bool(false),
+		}},
 		})
 		if err != nil {
 			t.Fatalf("ResumeSession(override) failed: %v", err)
@@ -283,13 +267,10 @@ func TestAutoTierE2E(t *testing.T) {
 
 	t.Run("should commit fast auto tier after successful turn", func(t *testing.T) {
 		_, client := newAutoClient(t)
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Model:               "auto",
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Capi: &copilot.CapiSessionOptions{
-				AutoTier:                 copilot.AutoTierEfficiency,
-				EnableWebSocketResponses: copilot.Bool(false),
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Model: "auto", Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{
+			AutoTier:                 copilot.AutoTierEfficiency,
+			EnableWebSocketResponses: copilot.Bool(false),
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -354,13 +335,10 @@ func TestAutoTierE2E(t *testing.T) {
 
 	t.Run("should preserve effective tier when fast activation fails", func(t *testing.T) {
 		ctx, client := newAutoClient(t)
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Model:               "auto",
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Capi: &copilot.CapiSessionOptions{
-				AutoTier:                 copilot.AutoTierEfficiency,
-				EnableWebSocketResponses: copilot.Bool(false),
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Model: "auto", Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{
+			AutoTier:                 copilot.AutoTierEfficiency,
+			EnableWebSocketResponses: copilot.Bool(false),
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -445,9 +423,7 @@ func TestAutoTierE2E(t *testing.T) {
 		if err := resumedClient.Start(t.Context()); err != nil {
 			t.Fatalf("Start resumed client failed: %v", err)
 		}
-		resumed, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		resumed, err := resumedClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
 		}

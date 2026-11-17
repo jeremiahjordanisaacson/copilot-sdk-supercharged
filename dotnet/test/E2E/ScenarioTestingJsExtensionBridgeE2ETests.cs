@@ -2,15 +2,15 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using System.Diagnostics;
 using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
-using RpcExtension = GitHub.Copilot.Rpc.Extension;
+using RpcExtension = Microsoft.Copilot.Rpc.Extension;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : ScenarioTestingE2ETestBase(fixture, "scenario_testing_js_extension_bridge", output)
@@ -23,9 +23,9 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
         var fixture = await CreateExtensionFixtureAsync();
         await using var client = CreateExtensionClient(fixture, CopilotClientMode.Empty);
         var config = CreateSessionConfig(fixture.ProjectDirectory);
-        config.AvailableTools = new ToolSet();
-        config.EnableSessionStore = false;
-        config.SkipCustomInstructions = true;
+        config.Tools.AvailableTools = new ToolSet();
+        config.State.EnableCrossSessionStore = false;
+        config.Instructions.SkipCustomInstructions = true;
 
         await using var session = await Ctx.CreateSessionAsync(client, config);
 
@@ -186,7 +186,7 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
             extensionId: fixture.ExtensionId,
             input: new Dictionary<string, object> { ["value"] = "before" });
 
-        var exception = await Assert.ThrowsAsync<IOException>(() =>
+        var exception = await Assert.ThrowsAsync<RemoteRpcException>(() =>
             session.Rpc.Canvas.Action.InvokeAsync(
                 instanceId: "js-scenario-canvas-error",
                 actionName: "fail",
@@ -201,7 +201,7 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
 
     private CopilotClient CreateExtensionClient(
         ExtensionFixture fixture,
-        CopilotClientMode mode = CopilotClientMode.CopilotCli)
+        CopilotClientMode mode = CopilotClientMode.CodingAgent)
     {
         var environment = Ctx.GetEnvironment();
         environment["COPILOT_CLI_ENABLED_FEATURE_FLAGS"] = "EXTENSIONS";
@@ -212,19 +212,24 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
             options: new CopilotClientOptions
             {
                 Mode = mode,
-                BaseDirectory = mode == CopilotClientMode.Empty ? Ctx.HomeDir : null,
-                Connection = RuntimeConnection.ForStdio(
-                    args: ["--yolo"]),
+                Runtime = RuntimeConnection.ForSpawnedStdio(
+                    args: ["--yolo"], baseDirectory: mode == CopilotClientMode.Empty ? Ctx.HomeDir : null)
             },
             environment: environment);
     }
 
-    private static SessionConfig CreateSessionConfig(string workingDirectory) => new()
+    private static CreateSessionOptions CreateSessionConfig(string workingDirectory) => new()
     {
-        EnableConfigDiscovery = true,
-        RequestExtensions = true,
         WorkingDirectory = workingDirectory,
-        OnPermissionRequest = PermissionHandler.ApproveAll,
+        EnableConfigDiscovery = true,
+        Extensions = new SessionExtensionOptions
+        {
+            Enabled = true
+        },
+        Permissions = new SessionPermissionOptions
+        {
+            OnRequest = PermissionHandler.ApproveAll
+        }
     };
 
     private async Task<ExtensionFixture> CreateExtensionFixtureAsync(
@@ -316,7 +321,7 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
                         input);
                     return true;
                 }
-                catch (IOException exception)
+                catch (RemoteRpcException exception)
                     when (exception.Message.Contains("is not registered", StringComparison.OrdinalIgnoreCase))
                 {
                     return false;
@@ -430,7 +435,7 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
 
     private const string ExtensionScript = """
         import { appendFileSync } from "node:fs";
-        import { CanvasError, createCanvas, joinSession } from "@github/copilot-sdk/extension";
+        import { CanvasError, createCanvas, joinSession } from "@microsoft/copilot-sdk/extension";
 
         const traceFile = process.env.SCENARIO_EXTENSION_TRACE_FILE;
         const workingDirectory = process.env.SCENARIO_EXTENSION_WORKING_DIRECTORY;
@@ -506,8 +511,8 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
         try {
           session = await joinSession({
             workingDirectory,
-            tools: [],
-            canvases: [canvas]
+            tools: { definitions: [] },
+            canvases: { definitions: [canvas] }
           });
           console.error("[sdk-extension-test] joined");
 

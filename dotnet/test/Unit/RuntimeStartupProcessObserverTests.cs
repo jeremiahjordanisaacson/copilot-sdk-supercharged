@@ -6,12 +6,12 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
-using GitHub.Copilot.Test.E2E;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.E2E;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed class RuntimeStartupProcessObserverTests
 {
@@ -31,9 +31,10 @@ public sealed class RuntimeStartupProcessObserverTests
             await File.WriteAllTextAsync(scriptPath, script);
             await using var client = new CopilotClient(new CopilotClientOptions
             {
-                Connection = RuntimeConnection.ForStdio(path: "node",
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = RuntimeConnection.ForSpawnedStdio(path: "node",
                     args: [scriptPath, "--capture-file", capturePath, "--pid-file", pidPath, "--exit-file", exitPath]),
-                UseLoggedInUser = false,
+                GitHub = new ClientGitHubOptions { UseLoggedInUser = false }
             });
             // Startup is a precondition for the process-lifetime assertions, not a latency contract.
             await client.StartAsync();

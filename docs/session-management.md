@@ -68,7 +68,7 @@ Configuring scope does not add editor-side or proxy-side creation and close hand
 ## Creation
 
 ```typescript
-import type { CopilotSession } from "@github/copilot-sdk";
+import type { CopilotSession } from "@microsoft/copilot-sdk";
 
 declare const parent: CopilotSession; // a root session your host created
 
@@ -113,7 +113,7 @@ There is no separate ancestry registry.
 Close is enabled by default when the session-management group is enabled:
 
 ```typescript
-import type { CopilotSession, SessionManagementCreateResult } from "@github/copilot-sdk";
+import type { CopilotSession, SessionManagementCreateResult } from "@microsoft/copilot-sdk";
 
 declare const parent: CopilotSession;
 declare const created: SessionManagementCreateResult; // returned by parent.rpc.management.create
@@ -125,7 +125,7 @@ Enabling the main group enables list, create, message, close and self-renaming.
 Disable close in that same request's `tools` override or in a later request:
 
 ```typescript
-import type { CopilotSession } from "@github/copilot-sdk";
+import type { CopilotSession } from "@microsoft/copilot-sdk";
 
 declare const parent: CopilotSession;
 

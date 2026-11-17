@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 var positional = copilot.PermissionRequestRead{"Read a file", nil, "/workspace/file.txt", nil, nil, nil, nil, nil}

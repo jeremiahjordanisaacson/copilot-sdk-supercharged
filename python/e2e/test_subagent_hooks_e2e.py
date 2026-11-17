@@ -24,7 +24,7 @@ from copilot import (
     SubagentStopHookOutput,
 )
 from copilot.client import CopilotClient, RuntimeConnection
-from copilot.generated.rpc import UpdateSubagentSettingsRequest
+from copilot.rpc import UpdateSubagentSettingsRequest
 from copilot.session import PermissionHandler
 
 from .inference_request import user_message_text
@@ -171,23 +171,26 @@ class TestSubagentHooks:
             "fake-token-for-e2e-tests" if os.environ.get("GITHUB_ACTIONS") == "true" else None
         )
         client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=env,
-            github_token=github_token,
-            request_handler=request_handler,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=env
+            ),
+            github={"token": github_token},
+            models={"request_handler": request_handler},
         )
 
         try:
             session = await client.create_session(
                 session_id=parent_session_id,
                 model=REPLAY_MODEL,
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all},
                 hooks={
-                    "on_pre_tool_use": on_pre_tool_use,
-                    "on_post_tool_use": on_post_tool_use,
-                    "on_subagent_start": on_subagent_start,
-                    "on_subagent_stop": on_subagent_stop,
+                    "handlers": {
+                        "on_pre_tool_use": on_pre_tool_use,
+                        "on_post_tool_use": on_post_tool_use,
+                        "on_subagent_start": on_subagent_start,
+                        "on_subagent_stop": on_subagent_stop,
+                    }
                 },
             )
             try:

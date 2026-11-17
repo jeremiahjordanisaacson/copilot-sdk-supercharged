@@ -1,0 +1,120 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+package com.microsoft.copilot;
+import com.microsoft.copilot.rpc.CapiSessionOptions;
+import com.microsoft.copilot.rpc.SessionGitHubOptions;
+
+import org.junit.jupiter.api.Tag;
+
+import static com.microsoft.copilot.CopilotRequestTestSupport.SYNTHETIC_TEXT;
+import static com.microsoft.copilot.CopilotRequestTestSupport.assistantText;
+import static com.microsoft.copilot.CopilotRequestTestSupport.newLlmClient;
+import static com.microsoft.copilot.CopilotRequestTestSupport.setupCapiAuth;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+import com.microsoft.copilot.CopilotRequestTestSupport.InterceptedRequest;
+import com.microsoft.copilot.CopilotRequestTestSupport.RecordingRequestHandler;
+import com.microsoft.copilot.generated.AssistantMessageEvent;
+import com.microsoft.copilot.rpc.MessageOptions;
+import com.microsoft.copilot.rpc.PermissionHandler;
+import com.microsoft.copilot.rpc.ProviderConfig;
+
+/**
+ * Verifies that the triggering session id is threaded into every inference
+ * request context, for both CAPI and BYOK sessions, and that per-session ids
+ * differ.
+ */
+@Tag("e2e")
+public class CopilotRequestSessionIdE2ETest {
+
+    private static E2ETestContext ctx;
+
+    @BeforeAll
+    static void setup() throws Exception {
+        ctx = E2ETestContext.create();
+    }
+
+    @AfterAll
+    static void teardown() throws Exception {
+        if (ctx != null) {
+            ctx.close();
+        }
+    }
+
+    @Test
+    void threadsSessionIdForCapiAndByok() throws Exception {
+        setupCapiAuth(ctx);
+        RecordingRequestHandler handler = new RecordingRequestHandler(SYNTHETIC_TEXT);
+
+        try (CopilotClient client = newLlmClient(ctx, handler)) {
+            // CAPI session.
+            CopilotSession capiSession = client.createSession(ctx.newSessionConfig().setPermissions(
+                    ctx.newSessionConfig().getPermissions().setOnRequest(PermissionHandler.APPROVE_ALL))).get();
+            String capiSessionId = capiSession.getSessionId();
+
+            AssistantMessageEvent capiResult = capiSession.sendAndWait(new MessageOptions().setPrompt("Say OK."))
+                    .get(60, TimeUnit.SECONDS);
+            capiSession.close();
+
+            List<InterceptedRequest> capiInference = handler.inferenceRequests();
+            assertFalse(capiInference.isEmpty(), "Expected at least one intercepted inference request");
+            for (InterceptedRequest r : capiInference) {
+                assertEquals(capiSessionId, r.sessionId(), "CAPI inference request must carry the session id");
+                assertAgentMetadata(r);
+            }
+            assertTrue(assistantText(capiResult).contains("OK from the synthetic"),
+                    "Expected synthetic content in CAPI assistant reply, got " + assistantText(capiResult));
+
+            // BYOK session.
+            int before = handler.inferenceRequests().size();
+            ProviderConfig provider = new ProviderConfig().setType("openai").setWireApi("responses")
+                    .setBaseUrl("https://byok.invalid/v1").setApiKey("byok-secret").setModelId("claude-sonnet-5")
+                    .setWireModel("claude-sonnet-5");
+            CopilotSession byokSession = client
+                    .createSession(ctx.newSessionConfig().setModel("claude-sonnet-5")
+                            .setPermissions(
+                                    ctx.newSessionConfig().getPermissions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setInference(ByokTestOptions.inference(ctx.newSessionConfig().getInference(), provider))
+                            .setGitHub(new SessionGitHubOptions().setCapi(new CapiSessionOptions().setEnabled(false))))
+                    .get();
+            String byokSessionId = byokSession.getSessionId();
+
+            AssistantMessageEvent byokResult = byokSession.sendAndWait(new MessageOptions().setPrompt("Say OK."))
+                    .get(60, TimeUnit.SECONDS);
+            byokSession.close();
+
+            List<InterceptedRequest> byokInference = handler.inferenceRequests();
+            assertTrue(byokInference.size() > before, "Expected at least one intercepted BYOK inference request");
+            for (InterceptedRequest r : byokInference.subList(before, byokInference.size())) {
+                assertEquals(byokSessionId, r.sessionId(), "BYOK inference request must carry the session id");
+                assertAgentMetadata(r);
+            }
+            assertNotEquals(capiSessionId, byokSessionId, "Expected per-session ids to differ between turns");
+            assertTrue(assistantText(byokResult).contains("OK from the synthetic"),
+                    "Expected synthetic content in BYOK assistant reply, got " + assistantText(byokResult));
+        }
+    }
+
+    private static void assertAgentMetadata(InterceptedRequest request) {
+        assertNotNull(request.agentId(), "Inference request must carry an agent id");
+        assertFalse(request.agentId().isEmpty(), "Inference request must carry an agent id");
+        assertNotNull(request.agentInvocationId(), "Inference request must carry an invocation id");
+        assertFalse(request.agentInvocationId().isEmpty(), "Inference request must carry an invocation id");
+        assertNotEquals(request.agentId(), request.agentInvocationId(), "Invocation and agent ids must differ");
+        assertNotNull(request.interactionType(), "Inference request must carry an interaction type");
+        assertFalse(request.interactionType().isEmpty(), "Inference request must carry an interaction type");
+    }
+}

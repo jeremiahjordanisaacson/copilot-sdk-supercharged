@@ -1,0 +1,560 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+package com.microsoft.copilot;
+
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.rpc.ClientModelOptions;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import javax.net.ssl.SSLSession;
+
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.RuntimeConnection;
+
+class CopilotRequestHandlerProtocolTest {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final int DEADLINE_SECONDS = 5;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void upstreamObservesAbnormalWebSocketClosure(boolean reset) throws Exception {
+        try (var upstream = new FakeUpstreamServer("unused", "unused")) {
+            try (var socket = new Socket("127.0.0.1", upstream.port())) {
+                socket.setSoTimeout(DEADLINE_SECONDS * 1000);
+                var out = socket.getOutputStream();
+                out.write(("GET /responses HTTP/1.1\r\n" + "Host: 127.0.0.1\r\n" + "Upgrade: websocket\r\n"
+                        + "Connection: Upgrade\r\n" + "Sec-WebSocket-Version: 13\r\n"
+                        + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                out.flush();
+                var header = new ByteArrayOutputStream();
+                while (!header.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) {
+                    int b = socket.getInputStream().read();
+                    assertNotEquals(-1, b, "Unexpected WebSocket handshake EOF");
+                    header.write(b);
+                }
+                assertTrue(header.toString(StandardCharsets.US_ASCII).startsWith("HTTP/1.1 101 "),
+                        header.toString(StandardCharsets.US_ASCII));
+                if (reset) {
+                    socket.setSoLinger(true, 0);
+                } else {
+                    // End mid-mask so the frame reader exits through its exceptional path.
+                    out.write(new byte[]{(byte) 0x81, (byte) 0x84, 0, 0});
+                    out.flush();
+                    socket.shutdownOutput();
+                }
+            }
+            upstream.awaitWebSocketClose(DEADLINE_SECONDS, TimeUnit.SECONDS);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http", "websocket-open", "websocket-message", "websocket-handshake"})
+    void callbackFailureFinalizesResponse(String callback) throws Exception {
+        BlockingQueue<String> closed = new LinkedBlockingQueue<>();
+        var handler = new CopilotRequestHandler() {
+            @Override
+            protected HttpResponse<InputStream> sendRequest(HttpRequest request, CopilotRequestContext ctx) {
+                throw new AssertionError("callback failed");
+            }
+
+            @Override
+            protected CopilotWebSocketHandler openWebSocket(CopilotRequestContext ctx) {
+                if (callback.equals("websocket-open")) {
+                    throw new AssertionError("callback failed");
+                }
+                if (callback.equals("websocket-handshake")) {
+                    return new CopilotWebSocketForwarder(ctx.withUrl("invalid://upstream.test"));
+                }
+                return new CopilotWebSocketHandler(ctx) {
+                    @Override
+                    public void sendRequestMessage(CopilotWebSocketMessage message) {
+                        throw new AssertionError("callback failed");
+                    }
+
+                    @Override
+                    public void close() {
+                        try {
+                            super.close();
+                        } finally {
+                            closed.add(ctx.requestId());
+                        }
+                    }
+                };
+            }
+        };
+        try (var peer = new ProtocolPeer(handler)) {
+            for (String requestId : List.of("first-failure", "next-failure")) {
+                boolean websocket = !callback.equals("http");
+                peer.startRequest(requestId, null, websocket);
+                if (!websocket) {
+                    peer.sendChunk(requestId, "", null, true);
+                }
+                JsonNode head = peer.nextMethod();
+                assertEquals("llmInference.httpResponseStart", head.path("method").asText());
+                assertEquals(callback.equals("websocket-message") ? 101 : 502,
+                        head.path("params").path("status").asInt());
+                peer.ack(head);
+                if (callback.equals("websocket-message")) {
+                    peer.sendChunk(requestId, "message", null, true);
+                }
+                JsonNode error = peer.nextMethod();
+                assertEquals("llmInference.httpResponseChunk", error.path("method").asText());
+                assertEquals(requestId, error.path("params").path("requestId").asText());
+                assertTrue(error.path("params").path("end").asBoolean(), error.toString());
+                String expectedError = switch (callback) {
+                    case "websocket-message" -> "java.lang.AssertionError: callback failed";
+                    case "websocket-handshake" -> "invalid URI scheme: invalid";
+                    default -> "callback failed";
+                };
+                assertEquals(expectedError, error.path("params").path("error").path("message").asText());
+                peer.ack(error);
+                if (callback.equals("websocket-message")) {
+                    assertEquals(requestId, closed.poll(DEADLINE_SECONDS, TimeUnit.SECONDS));
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"response-exception", "response-assertion", "request-exception", "request-assertion"})
+    void forwardingCallbackFailureFinalizesResponseAndClosesUpstream(String callback) throws Exception {
+        BlockingQueue<String> closed = new LinkedBlockingQueue<>();
+        try (var upstream = new FakeUpstreamServer("unused", "upstream response")) {
+            var handler = new CopilotRequestHandler() {
+                @Override
+                protected CopilotWebSocketHandler openWebSocket(CopilotRequestContext ctx) {
+                    return new CopilotWebSocketForwarder(ctx.withUrl(upstream.wsUrl())) {
+                        @Override
+                        public void sendRequestMessage(CopilotWebSocketMessage message) throws Exception {
+                            if (callback.startsWith("request")) {
+                                failCallback();
+                            }
+                            super.sendRequestMessage(message);
+                        }
+
+                        @Override
+                        public void sendResponseMessage(CopilotWebSocketMessage message) throws Exception {
+                            failCallback();
+                        }
+
+                        private void failCallback() throws Exception {
+                            if (callback.endsWith("assertion")) {
+                                throw new AssertionError("forwarding callback failed");
+                            }
+                            throw new Exception("forwarding callback failed");
+                        }
+
+                        @Override
+                        public void close() {
+                            try {
+                                super.close();
+                            } finally {
+                                closed.add(ctx.requestId());
+                            }
+                        }
+                    };
+                }
+            };
+            try (var peer = new ProtocolPeer(handler)) {
+                peer.startRequest("forwarding-failure", null, true);
+                JsonNode head = peer.nextMethod();
+                assertEquals(101, head.path("params").path("status").asInt());
+                peer.ack(head);
+                peer.sendChunk("forwarding-failure", "request", null, false);
+                JsonNode error = peer.nextMethod();
+                assertEquals("llmInference.httpResponseChunk", error.path("method").asText());
+                assertTrue(error.path("params").path("end").asBoolean(), error.toString());
+                String expectedError = switch (callback) {
+                    case "request-assertion" -> "java.lang.AssertionError: forwarding callback failed";
+                    case "response-exception" -> "java.lang.Exception: forwarding callback failed";
+                    default -> "forwarding callback failed";
+                };
+                assertEquals(expectedError, error.path("params").path("error").path("message").asText());
+                peer.ack(error);
+                assertEquals("forwarding-failure", closed.poll(DEADLINE_SECONDS, TimeUnit.SECONDS));
+                upstream.awaitWebSocketClose(DEADLINE_SECONDS, TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void framesAfterRequestFinishedAreIgnored() throws Exception {
+        var handler = new MetadataHandler(false);
+        try (var peer = new ProtocolPeer(handler)) {
+            peer.startRequest("finished", null, false);
+            peer.sendChunk("finished", "request-body", null, true);
+            peer.ack(peer.nextMethod());
+            JsonNode end = peer.nextMethod();
+            assertTrue(end.path("params").path("end").asBoolean());
+            peer.ack(end);
+
+            Map<?, ?> pending = peer.pendingRequests();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(DEADLINE_SECONDS);
+            while (!pending.isEmpty() && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertTrue(pending.isEmpty(), "finished request was not removed: " + pending.keySet());
+
+            // Frames the runtime can still send, such as its cancel of a response it
+            // rejected over the size limit after the handler ended it.
+            ObjectNode cancel = MAPPER.createObjectNode().put("requestId", "finished").put("data", "")
+                    .put("cancel", true).put("end", true);
+            peer.expectSuccessfulResponse(peer.request("llmInference.httpRequestChunk", cancel));
+            peer.expectSuccessfulResponse(peer.sendChunk("finished", "late", null, false));
+            assertTrue(pending.isEmpty(), "late frames left entries: " + pending.keySet());
+        }
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"logical-invocation", ""})
+    void httpStartPreservesInvocationIdentityAcrossPhysicalRetries(String invocationId) throws Exception {
+        var handler = new MetadataHandler(false);
+        try (var peer = new ProtocolPeer(handler)) {
+            for (String requestId : List.of("physical-first", "physical-retry")) {
+                peer.startRequest(requestId, invocationId, false);
+                peer.sendChunk(requestId, "request-body", null, true);
+                JsonNode head = peer.nextMethod();
+                assertEquals(200, head.path("params").path("status").asInt());
+                assertEquals("present", head.path("params").path("headers").path("x-response").get(0).asText());
+                peer.ack(head);
+                JsonNode end = peer.nextMethod();
+                assertTrue(end.path("params").path("end").asBoolean());
+                assertFalse(end.path("params").has("error"), end.toString());
+                peer.ack(end);
+                CopilotRequestContext ctx = handler.contexts.poll(DEADLINE_SECONDS, TimeUnit.SECONDS);
+                assertNotNull(ctx);
+                assertEquals(invocationId, ctx.agentInvocationId());
+                assertEquals(invocationId, ctx.withUrl("http://rewritten.test").agentInvocationId());
+                assertEquals(invocationId, ctx.withHeaders(Map.of()).agentInvocationId());
+                assertSame(ctx.cancellation(), ctx.withUrl("http://rewritten.test").cancellation());
+                assertEquals(requestId, ctx.requestId());
+                assertEquals("session", ctx.sessionId());
+                assertEquals("trajectory", ctx.agentId());
+                assertEquals("parent", ctx.parentAgentId());
+                assertEquals("conversation-agent", ctx.interactionType());
+                assertEquals(List.of("one", "two"), ctx.headers().get("x-multiple"));
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void websocketRetainsQueuedAndLiveInvocationIdentityAndLegacyHooks(boolean legacy) throws Exception {
+        var handler = new MetadataHandler(legacy);
+        try (var peer = new ProtocolPeer(handler)) {
+            peer.sendChunk("reused-socket", "queued", "queued-invocation", false);
+            peer.startRequest("reused-socket", "opening-invocation", true);
+            JsonNode head = peer.nextMethod();
+            assertEquals(101, head.path("params").path("status").asInt());
+            assertFalse(head.path("params").has("headers"), head.toString());
+            peer.ack(head);
+            CopilotRequestContext connection = handler.contexts.poll(DEADLINE_SECONDS, TimeUnit.SECONDS);
+            assertNotNull(connection);
+            assertEquals("opening-invocation", connection.agentInvocationId());
+            assertEquals("opening-invocation", connection.withHeaders(Map.of()).agentInvocationId());
+            assertMessage(handler, connection, "queued", "queued-invocation", legacy, false);
+
+            for (String id : new String[]{"later-invocation", "later-invocation", null, ""}) {
+                boolean binary = "later-invocation".equals(id);
+                peer.sendChunk("reused-socket", "message", id, false, binary);
+                assertMessage(handler, connection, "message", id, legacy, binary);
+            }
+            assertEquals("opening-invocation", connection.agentInvocationId());
+            peer.sendChunk("reused-socket", "", null, true);
+            JsonNode end = peer.nextMethod();
+            assertTrue(end.path("params").path("end").asBoolean());
+            assertFalse(end.path("params").has("error"), end.toString());
+            peer.ack(end);
+        }
+    }
+
+    private static void assertMessage(MetadataHandler handler, CopilotRequestContext connection, String text, String id,
+            boolean legacy, boolean binary) throws Exception {
+        ReceivedMessage received = handler.messages.poll(DEADLINE_SECONDS, TimeUnit.SECONDS);
+        assertNotNull(received);
+        assertEquals(text, received.message().text());
+        assertEquals(binary, received.message().binary());
+        if (legacy) {
+            assertNull(received.context());
+        } else {
+            CopilotRequestContext ctx = received.context();
+            assertNotNull(ctx);
+            assertNotSame(connection, ctx);
+            assertEquals(id, ctx.agentInvocationId());
+            assertEquals(connection.requestId(), ctx.requestId());
+            assertEquals(connection.sessionId(), ctx.sessionId());
+            assertEquals(connection.agentId(), ctx.agentId());
+            assertSame(connection.cancellation(), ctx.cancellation());
+        }
+    }
+
+    private record ReceivedMessage(CopilotWebSocketMessage message, CopilotRequestContext context) {
+    }
+
+    private static final class MetadataHandler extends CopilotRequestHandler {
+        private final boolean legacy;
+        private final BlockingQueue<CopilotRequestContext> contexts = new LinkedBlockingQueue<>();
+        private final BlockingQueue<ReceivedMessage> messages = new LinkedBlockingQueue<>();
+
+        MetadataHandler(boolean legacy) {
+            this.legacy = legacy;
+        }
+
+        @Override
+        protected HttpResponse<InputStream> sendRequest(HttpRequest request, CopilotRequestContext ctx) {
+            contexts.add(ctx);
+            assertEquals(List.of("one", "two"), request.headers().allValues("x-multiple"));
+            assertEquals(12, request.bodyPublisher().orElseThrow().contentLength());
+            return new EmptyResponse(new ByteArrayInputStream(new byte[0]), request);
+        }
+
+        @Override
+        protected CopilotWebSocketHandler openWebSocket(CopilotRequestContext ctx) {
+            contexts.add(ctx);
+            return legacy ? new LegacySocket(ctx, messages) : new ContextSocket(ctx, messages);
+        }
+    }
+
+    private static class LegacySocket extends CopilotWebSocketHandler {
+        protected final BlockingQueue<ReceivedMessage> messages;
+
+        LegacySocket(CopilotRequestContext ctx, BlockingQueue<ReceivedMessage> messages) {
+            super(ctx);
+            this.messages = messages;
+        }
+
+        @Override
+        public void sendRequestMessage(CopilotWebSocketMessage message) {
+            messages.add(new ReceivedMessage(message, null));
+        }
+    }
+
+    private static final class ContextSocket extends LegacySocket {
+        ContextSocket(CopilotRequestContext ctx, BlockingQueue<ReceivedMessage> messages) {
+            super(ctx, messages);
+        }
+
+        @Override
+        public void sendRequestMessage(CopilotWebSocketMessage message, CopilotRequestContext ctx) {
+            messages.add(new ReceivedMessage(message, ctx));
+        }
+    }
+
+    private static final class ProtocolPeer implements AutoCloseable {
+        private final CopilotClient client;
+        private final Socket socket;
+        private int nextId = 100000;
+
+        ProtocolPeer(CopilotRequestHandler handler) throws Exception {
+            try (var listener = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+                listener.setSoTimeout(DEADLINE_SECONDS * 1000);
+                client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+                        .setRuntime(RuntimeConnection.forTcp("127.0.0.1", listener.getLocalPort()))
+                        .setModels(new ClientModelOptions().setRequestHandler(handler)));
+                var starting = client.start();
+                socket = listener.accept();
+                socket.setSoTimeout(DEADLINE_SECONDS * 1000);
+                JsonNode connect = nextMethod();
+                assertEquals("connect", connect.path("method").asText());
+                respond(connect, MAPPER.valueToTree(Map.of("ok", true, "protocolVersion", 4, "version", "test")));
+                JsonNode provider = nextMethod();
+                assertEquals("llmInference.setProvider", provider.path("method").asText());
+                respond(provider, MAPPER.valueToTree(Map.of("success", true)));
+                starting.get(DEADLINE_SECONDS, TimeUnit.SECONDS);
+            }
+        }
+
+        void startRequest(String requestId, String invocationId, boolean websocket) throws Exception {
+            ObjectNode params = MAPPER.createObjectNode().put("requestId", requestId)
+                    .put("method", websocket ? "GET" : "POST").put("url", "http://unused.test")
+                    .put("sessionId", "session").put("agentId", "trajectory").put("parentAgentId", "parent")
+                    .put("interactionType", "conversation-agent").put("transport", websocket ? "websocket" : "http");
+            params.set("headers", MAPPER.valueToTree(Map.of("x-multiple", List.of("one", "two"))));
+            if (invocationId != null) {
+                params.put("agentInvocationId", invocationId);
+            }
+            request("llmInference.httpRequestStart", params);
+        }
+
+        int sendChunk(String requestId, String data, String invocationId, boolean end) throws Exception {
+            return sendChunk(requestId, data, invocationId, end, false);
+        }
+
+        int sendChunk(String requestId, String data, String invocationId, boolean end, boolean binary)
+                throws Exception {
+            if (binary) {
+                data = Base64.getEncoder().encodeToString(data.getBytes(StandardCharsets.UTF_8));
+            }
+            ObjectNode params = MAPPER.createObjectNode().put("requestId", requestId).put("data", data).put("end", end);
+            params.put("binary", binary);
+            if (invocationId != null) {
+                params.put("agentInvocationId", invocationId);
+            }
+            return request("llmInference.httpRequestChunk", params);
+        }
+
+        Map<?, ?> pendingRequests() throws Exception {
+            var future = (java.util.concurrent.CompletableFuture<?>) field(client, "connectionFuture");
+            Object connection = future.get(DEADLINE_SECONDS, TimeUnit.SECONDS);
+            JsonRpcClient rpc = (JsonRpcClient) fieldOfType(connection, JsonRpcClient.class);
+            var handlers = (Map<?, ?>) field(rpc, "notificationHandlers");
+            Object lambda = handlers.get("llmInference.httpRequestChunk");
+            Object adapter = fieldOfType(lambda, LlmInferenceAdapter.class);
+            return (Map<?, ?>) field(adapter, "pending");
+        }
+
+        private static Object field(Object owner, String name) throws Exception {
+            for (Class<?> c = owner.getClass(); c != null; c = c.getSuperclass()) {
+                try {
+                    var f = c.getDeclaredField(name);
+                    f.setAccessible(true);
+                    return f.get(owner);
+                } catch (NoSuchFieldException e) {
+                    // keep looking in the superclass
+                }
+            }
+            throw new NoSuchFieldException(name);
+        }
+
+        private static Object fieldOfType(Object owner, Class<?> type) throws Exception {
+            for (var f : owner.getClass().getDeclaredFields()) {
+                f.setAccessible(true);
+                Object value = f.get(owner);
+                if (type.isInstance(value)) {
+                    return value;
+                }
+            }
+            throw new NoSuchFieldException(type.getName() + " in " + owner.getClass());
+        }
+
+        int request(String method, JsonNode params) throws Exception {
+            int id = nextId++;
+            ObjectNode frame = MAPPER.createObjectNode().put("jsonrpc", "2.0").put("id", id).put("method", method);
+            frame.set("params", params);
+            write(frame);
+            return id;
+        }
+
+        void expectSuccessfulResponse(int id) throws Exception {
+            while (true) {
+                JsonNode frame = readFrame();
+                assertFalse(frame.has("method"), frame.toString());
+                assertFalse(frame.has("error"), frame.toString());
+                assertTrue(frame.has("result"), frame.toString());
+                if (frame.path("id").asInt() == id) {
+                    return;
+                }
+            }
+        }
+
+        JsonNode nextMethod() throws Exception {
+            while (true) {
+                JsonNode frame = readFrame();
+                if (frame.has("method")) {
+                    return frame;
+                }
+                assertFalse(frame.has("error"), frame.toString());
+            }
+        }
+
+        private JsonNode readFrame() throws Exception {
+            InputStream in = socket.getInputStream();
+            var header = new ByteArrayOutputStream();
+            while (!header.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) {
+                int b = in.read();
+                assertNotEquals(-1, b, "Unexpected protocol EOF");
+                header.write(b);
+            }
+            String text = header.toString(StandardCharsets.US_ASCII);
+            int length = Integer.parseInt(text.split("\r\n")[0].split(":")[1].trim());
+            byte[] body = in.readNBytes(length);
+            assertEquals(length, body.length);
+            return MAPPER.readTree(body);
+        }
+
+        void ack(JsonNode frame) throws Exception {
+            respond(frame, MAPPER.valueToTree(Map.of("accepted", true)));
+        }
+
+        void respond(JsonNode frame, JsonNode result) throws Exception {
+            ObjectNode reply = MAPPER.createObjectNode().put("jsonrpc", "2.0");
+            reply.set("id", frame.get("id"));
+            reply.set("result", result);
+            write(reply);
+        }
+
+        void write(JsonNode frame) throws Exception {
+            byte[] body = MAPPER.writeValueAsBytes(frame);
+            var out = socket.getOutputStream();
+            out.write(("Content-Length: " + body.length + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            out.write(body);
+            out.flush();
+        }
+
+        @Override
+        public void close() throws Exception {
+            try {
+                client.forceStop().get(DEADLINE_SECONDS, TimeUnit.SECONDS);
+            } finally {
+                socket.close();
+                client.close();
+            }
+        }
+    }
+
+    private record EmptyResponse(InputStream body, HttpRequest request) implements HttpResponse<InputStream> {
+        @Override
+        public int statusCode() {
+            return 200;
+        }
+        @Override
+        public Optional<HttpResponse<InputStream>> previousResponse() {
+            return Optional.empty();
+        }
+        @Override
+        public HttpHeaders headers() {
+            return HttpHeaders.of(Map.of("x-response", List.of("present")), (name, value) -> true);
+        }
+        @Override
+        public Optional<SSLSession> sslSession() {
+            return Optional.empty();
+        }
+        @Override
+        public URI uri() {
+            return request.uri();
+        }
+        @Override
+        public HttpClient.Version version() {
+            return HttpClient.Version.HTTP_1_1;
+        }
+    }
+}

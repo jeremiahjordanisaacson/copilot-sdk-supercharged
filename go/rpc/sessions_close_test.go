@@ -10,16 +10,15 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
 )
 
 var _ interface {
 	Close(context.Context, *SessionsCloseRequest) (*SessionsCloseResult, error)
-	CloseWithOptions(context.Context, *SessionsCloseOptions) (*SessionsCloseResult, error)
 } = (*ServerSessionsAPI)(nil)
 
-func TestSessionsClosePreservesUnkeyedRequestLiterals(t *testing.T) {
-	request := SessionsCloseRequest{"legacy"}
+func TestSessionsCloseOmitsUnspecifiedDetach(t *testing.T) {
+	request := SessionsCloseRequest{SessionID: "legacy"}
 	data, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
@@ -55,17 +54,17 @@ func TestSessionsCloseOptionsPreserveWireContract(t *testing.T) {
 	})
 
 	sessions := NewServerRPC(client).Sessions
-	legacy := SessionsCloseRequest{"legacy"}
+	legacy := SessionsCloseRequest{SessionID: "legacy"}
 	if _, err := sessions.Close(t.Context(), &legacy); err != nil {
 		t.Fatal(err)
 	}
-	options := SessionsCloseOptions{SessionID: "legacy"}
-	if _, err := sessions.CloseWithOptions(t.Context(), &options); err != nil {
+	options := SessionsCloseRequest{SessionID: "legacy"}
+	if _, err := sessions.Close(t.Context(), &options); err != nil {
 		t.Fatal(err)
 	}
 	for _, detach := range []bool{false, true} {
-		options := SessionsCloseOptions{SessionID: "legacy", DetachSessionEndHooks: &detach}
-		if _, err := sessions.CloseWithOptions(t.Context(), &options); err != nil {
+		options := SessionsCloseRequest{SessionID: "legacy", DetachSessionEndHooks: &detach}
+		if _, err := sessions.Close(t.Context(), &options); err != nil {
 			t.Fatal(err)
 		}
 		if options.SessionID != "legacy" || options.DetachSessionEndHooks == nil || *options.DetachSessionEndHooks != detach {
@@ -85,9 +84,9 @@ func TestSessionsCloseOptionsPreserveWireContract(t *testing.T) {
 	}
 }
 
-func ExampleSessionsCloseOptions() {
+func ExampleSessionsCloseRequest() {
 	detach := true
-	options := SessionsCloseOptions{SessionID: "session", DetachSessionEndHooks: &detach}
+	options := SessionsCloseRequest{SessionID: "session", DetachSessionEndHooks: &detach}
 	data, _ := json.Marshal(options)
 	fmt.Println(string(data))
 	// Output: {"detachSessionEndHooks":true,"sessionId":"session"}

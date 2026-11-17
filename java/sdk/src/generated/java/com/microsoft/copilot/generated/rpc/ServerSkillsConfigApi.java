@@ -1,0 +1,51 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: api.schema.json
+
+package com.microsoft.copilot.generated.rpc;
+
+import com.microsoft.copilot.CopilotExperimental;
+import java.util.concurrent.CompletableFuture;
+import javax.annotation.processing.Generated;
+
+/**
+ * API methods for the {@code skills.config} namespace.
+ *
+ * @since 1.0.0
+ */
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+public final class ServerSkillsConfigApi {
+
+    private final RpcCaller caller;
+
+    /** @param caller the RPC transport function */
+    ServerSkillsConfigApi(RpcCaller caller) {
+        this.caller = caller;
+    }
+
+    /**
+     * Replaces the global list of disabled skills.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<Void> setDisabledSkills(SkillsConfigSetDisabledSkillsParams params) {
+        return caller.invoke("skills.config.setDisabledSkills", params, Void.class);
+    }
+
+    /**
+     * Atomically adds or removes one skill from the disabled list.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<Void> setSkillDisabled(SkillsConfigSetSkillDisabledParams params) {
+        return caller.invoke("skills.config.setSkillDisabled", params, Void.class);
+    }
+
+}

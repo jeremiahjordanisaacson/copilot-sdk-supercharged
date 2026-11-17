@@ -2,12 +2,12 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class SessionTodosChangedE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "session_todos_changed", output)
@@ -17,10 +17,8 @@ public class SessionTodosChangedE2ETests(E2ETestFixture fixture, ITestOutputHelp
     [Fact]
     public async Task Fires_Session_Todos_Changed_And_Exposes_Rows_And_Dependencies()
     {
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         using var todosChangedTask = TestHelper.ObserveEvent<SessionTodosChangedEvent>(session);
 

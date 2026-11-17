@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::rpc::{
+use copilot_sdk::rpc::{
     CommandsListRequest, CommandsRespondToQueuedCommandRequest, EnqueueCommandParams,
     EnqueueCommandResult, ExecuteCommandParams, RegisterEventInterestParams,
     ReleaseEventInterestParams, SlashCommandKind,
 };
-use github_copilot_sdk::session_events::{CommandQueuedData, SessionEventType};
-use github_copilot_sdk::{CommandContext, CommandDefinition, CommandHandler, RequestId};
+use copilot_sdk::session_events::{CommandQueuedData, SessionEventType};
+use copilot_sdk::{CommandContext, CommandDefinition, CommandHandler, RequestId};
 use serde_json::json;
 use tokio::sync::mpsc;
 
@@ -24,10 +24,15 @@ async fn session_commands_list_returns_builtins_and_respects_client_command_filt
                 ctx.set_default_copilot_user();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(ctx.approve_all_session_config().with_commands(vec![
-                        CommandDefinition::new("rust-e2e-command", Arc::new(NoopCommandHandler))
+                    .create_session(ctx.approve_all_session_config().with_interaction(|group| {
+                        group.with_commands(vec![
+                            CommandDefinition::new(
+                                "rust-e2e-command",
+                                Arc::new(NoopCommandHandler),
+                            )
                             .with_description("Rust E2E command"),
-                    ]))
+                        ])
+                    }))
                     .await
                     .expect("create session");
 
@@ -96,13 +101,15 @@ async fn session_commands_execute_runs_registered_command_handler() {
                 let (tx, mut rx) = mpsc::unbounded_channel();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(ctx.approve_all_session_config().with_commands(vec![
-                        CommandDefinition::new(
-                            "rust-execute",
-                            Arc::new(RecordingCommandHandler { tx }),
-                        )
-                        .with_description("Records command invocations"),
-                    ]))
+                    .create_session(ctx.approve_all_session_config().with_interaction(|group| {
+                        group.with_commands(vec![
+                            CommandDefinition::new(
+                                "rust-execute",
+                                Arc::new(RecordingCommandHandler { tx }),
+                            )
+                            .with_description("Records command invocations"),
+                        ])
+                    }))
                     .await
                     .expect("create session");
 
@@ -223,7 +230,7 @@ struct NoopCommandHandler;
 
 #[async_trait]
 impl CommandHandler for NoopCommandHandler {
-    async fn on_command(&self, _ctx: CommandContext) -> Result<(), github_copilot_sdk::Error> {
+    async fn on_command(&self, _ctx: CommandContext) -> Result<(), copilot_sdk::Error> {
         Ok(())
     }
 }
@@ -234,14 +241,14 @@ struct RecordingCommandHandler {
 
 #[async_trait]
 impl CommandHandler for RecordingCommandHandler {
-    async fn on_command(&self, ctx: CommandContext) -> Result<(), github_copilot_sdk::Error> {
+    async fn on_command(&self, ctx: CommandContext) -> Result<(), copilot_sdk::Error> {
         self.tx.send(ctx).expect("record command context");
         Ok(())
     }
 }
 
 fn assert_command(
-    commands: &[github_copilot_sdk::rpc::SlashCommandInfo],
+    commands: &[copilot_sdk::rpc::SlashCommandInfo],
     name: &str,
     kind: SlashCommandKind,
 ) {

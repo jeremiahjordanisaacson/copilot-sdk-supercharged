@@ -2,11 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "hooks", output)
 {
@@ -15,16 +15,22 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
     {
         var preToolUseInputs = new List<PreToolUseHookInput>();
         CopilotSession? session = null;
-        session = await CreateSessionAsync(new SessionConfig
+        session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Hooks = new SessionHooks
+            Permissions = new SessionPermissionOptions
             {
-                OnPreToolUse = (input, invocation) =>
+                OnRequest = PermissionHandler.ApproveAll
+            },
+            Hooks = new SessionHookOptions
+            {
+                Handlers = new SessionHooks
                 {
-                    preToolUseInputs.Add(input);
-                    Assert.Equal(session!.SessionId, invocation.SessionId);
-                    return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput { PermissionDecision = "allow" });
+                    OnPreToolUse = (input, invocation) =>
+                    {
+                        preToolUseInputs.Add(input);
+                        Assert.Equal(session!.SessionId, invocation.SessionId);
+                        return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput { PermissionDecision = "allow" });
+                    }
                 }
             }
         });
@@ -49,16 +55,22 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
     {
         var postToolUseInputs = new List<PostToolUseHookInput>();
         CopilotSession? session = null;
-        session = await CreateSessionAsync(new SessionConfig
+        session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Hooks = new SessionHooks
+            Permissions = new SessionPermissionOptions
             {
-                OnPostToolUse = (input, invocation) =>
+                OnRequest = PermissionHandler.ApproveAll
+            },
+            Hooks = new SessionHookOptions
+            {
+                Handlers = new SessionHooks
                 {
-                    postToolUseInputs.Add(input);
-                    Assert.Equal(session!.SessionId, invocation.SessionId);
-                    return Task.FromResult<PostToolUseHookOutput?>(null);
+                    OnPostToolUse = (input, invocation) =>
+                    {
+                        postToolUseInputs.Add(input);
+                        Assert.Equal(session!.SessionId, invocation.SessionId);
+                        return Task.FromResult<PostToolUseHookOutput?>(null);
+                    }
                 }
             }
         });
@@ -85,20 +97,26 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
         var preToolUseInputs = new List<PreToolUseHookInput>();
         var postToolUseInputs = new List<PostToolUseHookInput>();
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Hooks = new SessionHooks
+            Permissions = new SessionPermissionOptions
             {
-                OnPreToolUse = (input, invocation) =>
+                OnRequest = PermissionHandler.ApproveAll
+            },
+            Hooks = new SessionHookOptions
+            {
+                Handlers = new SessionHooks
                 {
-                    preToolUseInputs.Add(input);
-                    return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput { PermissionDecision = "allow" });
-                },
-                OnPostToolUse = (input, invocation) =>
-                {
-                    postToolUseInputs.Add(input);
-                    return Task.FromResult<PostToolUseHookOutput?>(null);
+                    OnPreToolUse = (input, invocation) =>
+                    {
+                        preToolUseInputs.Add(input);
+                        return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput { PermissionDecision = "allow" });
+                    },
+                    OnPostToolUse = (input, invocation) =>
+                    {
+                        postToolUseInputs.Add(input);
+                        return Task.FromResult<PostToolUseHookOutput?>(null);
+                    }
                 }
             }
         });
@@ -129,16 +147,22 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
     {
         var preToolUseInputs = new List<PreToolUseHookInput>();
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Hooks = new SessionHooks
+            Permissions = new SessionPermissionOptions
             {
-                OnPreToolUse = (input, invocation) =>
+                OnRequest = PermissionHandler.ApproveAll
+            },
+            Hooks = new SessionHookOptions
+            {
+                Handlers = new SessionHooks
                 {
-                    preToolUseInputs.Add(input);
-                    // Deny all tool calls
-                    return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput { PermissionDecision = "deny" });
+                    OnPreToolUse = (input, invocation) =>
+                    {
+                        preToolUseInputs.Add(input);
+                        // Deny all tool calls
+                        return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput { PermissionDecision = "deny" });
+                    }
                 }
             }
         });

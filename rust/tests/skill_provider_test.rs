@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use github_copilot_sdk::skill_provider::{SkillProvider, SkillProviderDescriptor};
-use github_copilot_sdk::types::{CloudSessionOptions, SessionConfig, SessionId, Tool};
-use github_copilot_sdk::{Client, ClientMode, Error, ErrorKind, ResumeSessionConfig};
+use copilot_sdk::skill_provider::{SkillProvider, SkillProviderDescriptor};
+use copilot_sdk::types::{CloudSessionOptions, CreateSessionOptions, SessionId, Tool};
+use copilot_sdk::{Client, ClientMode, Error, ErrorKind, ResumeSessionOptions};
 use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, duplex};
 use tokio::sync::Notify;
@@ -52,7 +52,7 @@ async fn read_framed_untimed(reader: &mut (impl AsyncRead + Unpin)) -> Value {
 }
 
 fn make_client() -> (Client, FakeServer) {
-    make_client_with_mode(ClientMode::default())
+    make_client_with_mode(ClientMode::CodingAgent)
 }
 
 fn make_client_with_mode(mode: ClientMode) -> (Client, FakeServer) {
@@ -242,8 +242,8 @@ fn requested_session_id(request: &Value) -> &str {
 async fn create_session(
     client: &Client,
     server: &mut FakeServer,
-    config: SessionConfig,
-) -> github_copilot_sdk::session::Session {
+    config: CreateSessionOptions,
+) -> copilot_sdk::session::Session {
     let handle = tokio::spawn({
         let client = client.clone();
         async move { client.create_session(config).await.unwrap() }
@@ -281,10 +281,7 @@ async fn respond_to_resume(server: &mut FakeServer) {
     server.respond(&reload, json!({})).await;
 }
 
-async fn disconnect_session(
-    session: &github_copilot_sdk::session::Session,
-    server: &mut FakeServer,
-) {
+async fn disconnect_session(session: &copilot_sdk::session::Session, server: &mut FakeServer) {
     let disconnect = session.disconnect();
     tokio::pin!(disconnect);
     let detach = tokio::select! {
@@ -319,13 +316,13 @@ fn assert_session_not_found(response: &Value, session_id: &str) {
 async fn create_and_resume_payloads_flag_only_when_provider_is_supplied() {
     let (client, mut server) = make_client();
 
-    let session = create_session(&client, &mut server, SessionConfig::default()).await;
+    let session = create_session(&client, &mut server, CreateSessionOptions::default()).await;
     let resume = tokio::spawn({
         let client = client.clone();
         let session_id = session.id().clone();
         async move {
             client
-                .resume_session(ResumeSessionConfig::new(session_id))
+                .resume_session(ResumeSessionOptions::new(session_id))
                 .await
                 .unwrap()
         }
@@ -339,13 +336,16 @@ async fn create_and_resume_payloads_flag_only_when_provider_is_supplied() {
         let provider = provider.clone();
         async move {
             client
-                .create_session(SessionConfig::default().with_skill_provider(provider))
+                .create_session(
+                    CreateSessionOptions::default()
+                        .with_skills(|group| group.with_provider(provider)),
+                )
                 .await
                 .unwrap()
         }
     });
     let create_request = server.read_request().await;
-    assert_eq!(create_request["params"]["hasSkillProvider"], true);
+    assert_eq!(create_request["params"]["skills"]["hasProvider"], true);
     assert!(create_request["params"].get("skillProvider").is_none());
     server.session_id = requested_session_id(&create_request).to_string();
     server
@@ -362,14 +362,17 @@ async fn create_and_resume_payloads_flag_only_when_provider_is_supplied() {
         let session_id = session_with_provider.id().clone();
         async move {
             client
-                .resume_session(ResumeSessionConfig::new(session_id).with_skill_provider(provider))
+                .resume_session(
+                    ResumeSessionOptions::new(session_id)
+                        .with_skills(|group| group.with_provider(provider)),
+                )
                 .await
                 .unwrap()
         }
     });
     let resume_request = server.read_request().await;
     assert_eq!(resume_request["method"], "session.resume");
-    assert_eq!(resume_request["params"]["hasSkillProvider"], true);
+    assert_eq!(resume_request["params"]["skills"]["hasProvider"], true);
     assert!(resume_request["params"].get("skillProvider").is_none());
     server
         .respond(
@@ -394,18 +397,18 @@ async fn empty_mode_keeps_enable_skills_default_with_provider() {
         async move {
             client
                 .create_session(
-                    SessionConfig::default()
-                        .with_available_tools(Vec::<String>::new())
-                        .with_tools(Vec::<Tool>::new())
-                        .with_skill_provider(provider),
+                    CreateSessionOptions::default()
+                        .with_tools(|group| group.with_available_tools(Vec::<String>::new()))
+                        .with_tools(|group| group.with_definitions(Vec::<Tool>::new()))
+                        .with_skills(|group| group.with_provider(provider)),
                 )
                 .await
                 .unwrap()
         }
     });
     let request = server.read_request().await;
-    assert_eq!(request["params"]["enableSkills"], false);
-    assert_eq!(request["params"]["hasSkillProvider"], true);
+    assert_eq!(request["params"]["skills"]["enabled"], false);
+    assert_eq!(request["params"]["skills"]["hasProvider"], true);
     server.session_id = requested_session_id(&request).to_string();
     server
         .respond(
@@ -429,9 +432,9 @@ async fn serves_early_create_and_resume_callbacks() {
         async move {
             client
                 .create_session(
-                    SessionConfig::default()
+                    CreateSessionOptions::default()
                         .with_session_id("early-create")
-                        .with_skill_provider(provider),
+                        .with_skills(|group| group.with_provider(provider)),
                 )
                 .await
                 .unwrap()
@@ -462,8 +465,8 @@ async fn serves_early_create_and_resume_callbacks() {
         async move {
             client
                 .resume_session(
-                    ResumeSessionConfig::new(SessionId::new("early-resume"))
-                        .with_skill_provider(resume_provider),
+                    ResumeSessionOptions::new(SessionId::new("early-resume"))
+                        .with_skills(|group| group.with_provider(resume_provider)),
                 )
                 .await
                 .unwrap()
@@ -498,8 +501,8 @@ async fn cloud_sessions_reject_provider_before_rpc() {
     let calls = provider.calls.clone();
     let error = match client
         .create_session(
-            SessionConfig::default()
-                .with_skill_provider(provider)
+            CreateSessionOptions::default()
+                .with_skills(|group| group.with_provider(provider))
                 .with_cloud(CloudSessionOptions::default()),
         )
         .await
@@ -541,7 +544,7 @@ async fn dispatches_list_read_empty_and_not_found() {
     let session = create_session(
         &client,
         &mut server,
-        SessionConfig::default().with_skill_provider(provider),
+        CreateSessionOptions::default().with_skills(|group| group.with_provider(provider)),
     )
     .await;
     let session_id = session.id().to_string();
@@ -595,9 +598,9 @@ async fn dispatches_list_read_empty_and_not_found() {
     let empty_session = create_session(
         &client,
         &mut server,
-        SessionConfig::default()
+        CreateSessionOptions::default()
             .with_session_id("empty-catalog")
-            .with_skill_provider(empty),
+            .with_skills(|group| group.with_provider(empty)),
     )
     .await;
     server
@@ -618,10 +621,12 @@ async fn provider_errors_are_generic_and_invalid_params_are_rejected() {
     let session = create_session(
         &client,
         &mut server,
-        SessionConfig::default().with_skill_provider(Arc::new(FailingProvider {
-            fail_list: true,
-            secret,
-        })),
+        CreateSessionOptions::default().with_skills(|group| {
+            group.with_provider(Arc::new(FailingProvider {
+                fail_list: true,
+                secret,
+            }))
+        }),
     )
     .await;
     let session_id = session.id().to_string();
@@ -641,12 +646,14 @@ async fn provider_errors_are_generic_and_invalid_params_are_rejected() {
     let read_session = create_session(
         &client,
         &mut server,
-        SessionConfig::default()
+        CreateSessionOptions::default()
             .with_session_id("failing-read")
-            .with_skill_provider(Arc::new(FailingProvider {
-                fail_list: false,
-                secret,
-            })),
+            .with_skills(|group| {
+                group.with_provider(Arc::new(FailingProvider {
+                    fail_list: false,
+                    secret,
+                }))
+            }),
     )
     .await;
     server
@@ -684,10 +691,12 @@ async fn cancel_request_drops_provider_future_and_reports_cancellation() {
     let session = create_session(
         &client,
         &mut server,
-        SessionConfig::default().with_skill_provider(Arc::new(BlockingProvider {
-            entered: entered.clone(),
-            dropped: dropped.clone(),
-        })),
+        CreateSessionOptions::default().with_skills(|group| {
+            group.with_provider(Arc::new(BlockingProvider {
+                entered: entered.clone(),
+                dropped: dropped.clone(),
+            }))
+        }),
     )
     .await;
 
@@ -724,10 +733,12 @@ async fn connection_close_drops_provider_future() {
     let session = create_session(
         &client,
         &mut server,
-        SessionConfig::default().with_skill_provider(Arc::new(BlockingProvider {
-            entered: entered.clone(),
-            dropped: dropped.clone(),
-        })),
+        CreateSessionOptions::default().with_skills(|group| {
+            group.with_provider(Arc::new(BlockingProvider {
+                entered: entered.clone(),
+                dropped: dropped.clone(),
+            }))
+        }),
     )
     .await;
 
@@ -747,7 +758,7 @@ async fn connection_close_drops_provider_future() {
 #[tokio::test]
 async fn missing_provider_reports_generic_error() {
     let (client, mut server) = make_client();
-    let session = create_session(&client, &mut server, SessionConfig::default()).await;
+    let session = create_session(&client, &mut server, CreateSessionOptions::default()).await;
     let session_id = session.id().to_string();
     server
         .send_request(
@@ -768,7 +779,7 @@ async fn teardown_and_failed_open_stop_serving_provider() {
     let session = create_session(
         &client,
         &mut server,
-        SessionConfig::default().with_skill_provider(provider),
+        CreateSessionOptions::default().with_skills(|group| group.with_provider(provider)),
     )
     .await;
     let session_id = session.id().to_string();
@@ -781,9 +792,9 @@ async fn teardown_and_failed_open_stop_serving_provider() {
         async move {
             client
                 .create_session(
-                    SessionConfig::default()
+                    CreateSessionOptions::default()
                         .with_session_id("failed-open")
-                        .with_skill_provider(failed_provider),
+                        .with_skills(|group| group.with_provider(failed_provider)),
                 )
                 .await
         }
@@ -826,7 +837,7 @@ async fn dropped_session_answers_provider_callbacks_with_an_error() {
     let session = create_session(
         &client,
         &mut server,
-        SessionConfig::default().with_skill_provider(provider),
+        CreateSessionOptions::default().with_skills(|group| group.with_provider(provider)),
     )
     .await;
     let session_id = session.id().to_string();
@@ -856,7 +867,7 @@ async fn resume_rebinds_provider() {
     let session = create_session(
         &client,
         &mut server,
-        SessionConfig::default().with_skill_provider(original),
+        CreateSessionOptions::default().with_skills(|group| group.with_provider(original)),
     )
     .await;
     let session_id = session.id().clone();
@@ -870,7 +881,8 @@ async fn resume_rebinds_provider() {
         async move {
             client
                 .resume_session(
-                    ResumeSessionConfig::new(session_id).with_skill_provider(replacement),
+                    ResumeSessionOptions::new(session_id)
+                        .with_skills(|group| group.with_provider(replacement)),
                 )
                 .await
                 .unwrap()
@@ -899,7 +911,7 @@ async fn failed_resume_restores_the_resident_provider() {
     let session = create_session(
         &client,
         &mut server,
-        SessionConfig::default().with_skill_provider(resident),
+        CreateSessionOptions::default().with_skills(|group| group.with_provider(resident)),
     )
     .await;
     let session_id = session.id().clone();
@@ -912,7 +924,8 @@ async fn failed_resume_restores_the_resident_provider() {
         async move {
             client
                 .resume_session(
-                    ResumeSessionConfig::new(session_id).with_skill_provider(replacement),
+                    ResumeSessionOptions::new(session_id)
+                        .with_skills(|group| group.with_provider(replacement)),
                 )
                 .await
         }

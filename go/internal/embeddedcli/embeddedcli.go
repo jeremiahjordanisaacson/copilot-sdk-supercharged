@@ -16,12 +16,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/flock"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/flock"
 )
 
 // Config defines the inputs used to install and locate the embedded Copilot CLI.
 //
-// Cli and CliHash are required. If Dir is empty, the CLI is installed into the
+// Cli and CliHash are required. If Directory is empty, the CLI is installed into the
 // per-user cache directory or a protected fallback cache.
 // When Version is set, the CLI is installed into a
 // version-specific child directory so multiple versions can coexist. License,
@@ -60,8 +60,8 @@ type Config struct {
 	LinuxMuslRuntimeAssets         io.Reader
 	LinuxMuslRuntimeAssetsHash     []byte
 
-	Dir     string
-	Version string
+	Directory string
+	Version   string
 }
 
 func Setup(cfg Config) {
@@ -333,7 +333,7 @@ func installRuntime() (path string, err error) {
 }
 
 func configuredInstallDir() (string, error) {
-	installDir := config.Dir
+	installDir := config.Directory
 	if installDir == "" {
 		if copilotHome := os.Getenv("COPILOT_HOME"); copilotHome != "" {
 			installDir = filepath.Join(copilotHome, "cache", "copilot-sdk")
@@ -342,7 +342,7 @@ func configuredInstallDir() (string, error) {
 			if installDir, cacheErr = os.UserCacheDir(); cacheErr != nil {
 				var err error
 				if installDir, err = fallbackCacheDir(); err != nil {
-					return "", fmt.Errorf("user cache unavailable (%v); configure the user cache or set COPILOT_HOME or embeddedcli.Config.Dir: %w", cacheErr, err)
+					return "", fmt.Errorf("user cache unavailable (%v); configure the user cache or set COPILOT_HOME or embeddedcli.Config.Directory: %w", cacheErr, err)
 				}
 			}
 			installDir = filepath.Join(installDir, "copilot-sdk")

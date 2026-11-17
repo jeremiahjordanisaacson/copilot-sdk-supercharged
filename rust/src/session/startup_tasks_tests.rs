@@ -56,8 +56,13 @@ async fn cancelled_nested_handlers_do_not_send_fallback_before_outer_abort() {
 async fn check_aborted_nested_dispatches(nested_first: bool) {
     let (client_write, mut server_read) = tokio::io::duplex(8192);
     let (_server_write, client_read) = tokio::io::duplex(8192);
-    let client =
-        crate::Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
+    let client = crate::Client::from_streams(
+        crate::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        std::env::temp_dir(),
+    )
+    .unwrap();
     let (entered_tx, mut entered_rx) = tokio::sync::mpsc::unbounded_channel();
     let handler = Arc::new(PendingNestedCallback(entered_tx));
     let handlers = SessionHandlers {
@@ -212,8 +217,13 @@ async fn deferred_callback_after_guard_drop_cannot_register_or_replace_retry() {
     for retry in [false, true] {
         let (client_write, _server_read) = tokio::io::duplex(8192);
         let (_server_write, client_read) = tokio::io::duplex(8192);
-        let client =
-            crate::Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
+        let client = crate::Client::from_streams(
+            crate::ClientMode::CodingAgent,
+            client_read,
+            client_write,
+            std::env::temp_dir(),
+        )
+        .unwrap();
         let stash = Arc::new(parking_lot::Mutex::new(None));
         let (guard, callback) = PendingSessionRegistration::deferred(
             client.clone(),

@@ -142,7 +142,7 @@ pub use github_token::{
 };
 /// Re-export of [`indexmap::IndexMap`], used for order-preserving maps in the
 /// public API (e.g. [`Tool::parameters`](types::Tool::parameters) and
-/// `SessionConfig::mcp_servers`) so serialized key order stays deterministic.
+/// `CreateSessionOptions::mcp_servers`) so serialized key order stays deterministic.
 pub use indexmap::IndexMap;
 // JSON-RPC wire types are internal transport details.
 // External callers interact via Client/Session methods, not raw RPC.
@@ -182,13 +182,16 @@ use tracing::Instrument;
 use tracing::{debug, error, info, warn};
 pub use types::*;
 
+mod client_options;
+pub use client_options::*;
+
 mod sdk_protocol_version;
 pub use sdk_protocol_version::{SDK_PROTOCOL_VERSION, get_sdk_protocol_version};
 pub use startup_timings::StartupTimings;
 pub use subscription::{EventSubscription, LifecycleSubscription};
 
 /// Minimum protocol version this SDK can communicate with.
-const MIN_PROTOCOL_VERSION: u32 = 3;
+const MIN_PROTOCOL_VERSION: u32 = 4;
 const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[cfg(feature = "runtime")]
@@ -203,32 +206,32 @@ fn record_optional_millis(span: &tracing::Span, field: &'static str, value: Opti
     }
 }
 
-/// How the SDK communicates with the CLI server.
+/// How the SDK connects to the Copilot runtime.
+#[cfg(any(feature = "runtime", test))]
 #[derive(Debug, Default)]
-#[non_exhaustive]
-pub enum Transport {
+enum Transport {
     /// Resolve the transport from `COPILOT_SDK_DEFAULT_CONNECTION`, falling
-    /// back to [`Transport::Stdio`] when the variable is unset.
+    /// back to [`Transport::InProcess`] when the variable is unset.
     #[default]
     Default,
-    /// Communicate over stdin/stdout pipes (default).
-    Stdio,
+    /// Spawn the runtime and communicate over stdin/stdout pipes.
+    SpawnedStdio(SpawnedProcessOptions),
     /// Host the runtime in-process over FFI (no child process).
     ///
     /// Loads the native runtime library and speaks JSON-RPC over its C ABI.
-    /// This is **experimental**. Per-client [`ClientOptions::program`],
-    /// [`ClientOptions::extra_args`], [`ClientOptions::working_directory`],
-    /// [`ClientOptions::env`] and [`ClientOptions::env_remove`]
-    /// are not supported because native
-    /// runtime code shares the host process. Typed runtime options such as
-    /// authentication, telemetry, log level, and [`ClientOptions::base_directory`] remain
+    /// This is the default transport. Process options belong only to spawned
+    /// transports because native runtime code shares the host process.
+    /// Typed runtime options such as
+    /// authentication, telemetry, log level, and [`OwnedRuntimeOptions::base_directory`] remain
     /// supported.
     ///
     /// Requires the `in-process` Cargo feature, enabled by either
-    /// `bundled-in-process` or `local-runtime`.
+    /// the default `bundled-in-process` feature or `local-runtime`.
     InProcess,
     /// Spawn the CLI with `--port` and connect via TCP.
-    Tcp {
+    SpawnedTcp {
+        /// Configuration of the child process owned by this connection.
+        process: SpawnedProcessOptions,
         /// Port to listen on (0 for OS-assigned).
         port: u16,
         /// Optional connection token. When `None` and the SDK is spawning
@@ -236,8 +239,8 @@ pub enum Transport {
         /// loopback listener is safe by default.
         connection_token: Option<String>,
     },
-    /// Connect to an already-running CLI server (no process spawning).
-    External {
+    /// Connect over plaintext TCP without spawning or owning the runtime.
+    Tcp {
         /// Hostname or IP of the running server.
         host: String,
         /// Port of the running server.
@@ -246,6 +249,17 @@ pub enum Transport {
         /// was started with a token, ignored otherwise.
         connection_token: Option<String>,
     },
+}
+
+#[cfg(any(feature = "runtime", test))]
+impl Transport {
+    #[cfg(any(feature = "runtime", feature = "in-process", test))]
+    fn spawned_process(&self) -> Option<&SpawnedProcessOptions> {
+        match self {
+            Self::SpawnedStdio(process) | Self::SpawnedTcp { process, .. } => Some(process),
+            _ => None,
+        }
+    }
 }
 
 /// How the SDK locates the GitHub Copilot CLI binary.
@@ -264,6 +278,133 @@ pub enum CliProgram {
 impl From<PathBuf> for CliProgram {
     fn from(path: PathBuf) -> Self {
         Self::Path(path)
+    }
+}
+
+/// Process configuration for [`RuntimeConnection::SpawnedStdio`] and [`RuntimeConnection::SpawnedTcp`].
+///
+/// Omitting [`Self::env`] inherits the host environment; supplying it replaces
+/// that environment, including when empty. [`Self::env_remove`] applies to that
+/// base environment before typed startup options and SDK-required settings.
+/// These settings never change the host process or an attached runtime.
+/// A live in-process auth owner cannot be assigned to a child process.
+///
+/// ```compile_fail
+/// use copilot_sdk::SpawnedProcessOptions;
+/// let mut process = SpawnedProcessOptions::new();
+/// process.auth_owner = None;
+/// ```
+#[derive(Clone, Default)]
+pub struct SpawnedProcessOptions {
+    /// Settings for this client-owned runtime.
+    pub owned: OwnedRuntimeOptions,
+    /// How to locate the child-process runtime.
+    ///
+    /// [`CliProgram::Resolve`] uses `COPILOT_CLI_PATH`, then the bundled
+    /// `copilot-runtime` wrapper or the build-time extraction cache.
+    pub program: CliProgram,
+    /// Arguments placed before SDK-managed server, transport, and runtime flags.
+    ///
+    /// Include an interpreter's script path here when [`Self::program`] selects
+    /// an interpreter. SDK-managed flags follow these arguments.
+    pub args: Vec<OsString>,
+    /// Working directory for the child process. An empty path uses the host's
+    /// current directory at startup.
+    pub working_directory: PathBuf,
+    /// Replacement child environment. `None` inherits; `Some(vec![])` does not.
+    /// Explicit typed startup options override equivalent environment entries.
+    pub env: Option<Vec<(OsString, OsString)>>,
+    /// Names to remove from the base environment, before SDK-managed settings.
+    pub env_remove: Vec<OsString>,
+}
+
+impl std::fmt::Debug for SpawnedProcessOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SpawnedProcessOptions")
+            .finish_non_exhaustive()
+    }
+}
+
+impl SpawnedProcessOptions {
+    /// Construct process options with runtime resolution and inherited cwd/environment.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Update shared owned-runtime settings.
+    pub fn with_owned(
+        mut self,
+        configure: impl FnOnce(OwnedRuntimeOptions) -> OwnedRuntimeOptions,
+    ) -> Self {
+        self.owned = configure(self.owned);
+        self
+    }
+
+    /// Select the child-process runtime. See [`CliProgram`].
+    pub fn with_program(mut self, program: impl Into<CliProgram>) -> Self {
+        self.program = program.into();
+        self
+    }
+
+    /// Set arguments placed before the SDK-managed flags.
+    pub fn with_args<I, S>(mut self, args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<OsString>,
+    {
+        self.args = args.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Set the child process's working directory.
+    pub fn with_working_directory(mut self, working_directory: impl Into<PathBuf>) -> Self {
+        self.working_directory = working_directory.into();
+        self
+    }
+
+    /// Replace the child environment. An empty iterator clears inherited variables.
+    /// To extend inheritance explicitly, pass `std::env::vars_os().chain(overrides)`.
+    pub fn with_env<I, K, V>(mut self, env: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<OsString>,
+        V: Into<OsString>,
+    {
+        self.env = Some(env.into_iter().map(|(k, v)| (k.into(), v.into())).collect());
+        self
+    }
+
+    /// Remove variables from the base environment, before SDK-managed settings.
+    pub fn with_env_remove<I, S>(mut self, names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<OsString>,
+    {
+        self.env_remove = names.into_iter().map(Into::into).collect();
+        self
+    }
+
+    #[cfg(feature = "runtime")]
+    fn environment_variable(&self, name: &str) -> Option<OsString> {
+        let matches = |key: &OsString| {
+            if cfg!(windows) {
+                key.as_encoded_bytes().eq_ignore_ascii_case(name.as_bytes())
+            } else {
+                key == name
+            }
+        };
+        if self.env_remove.iter().any(matches) {
+            return None;
+        }
+        match &self.env {
+            Some(env) => env
+                .iter()
+                .rev()
+                .find(|(key, _)| matches(key))
+                .map(|(_, value)| value.clone()),
+            None => std::env::var_os(name),
+        }
     }
 }
 
@@ -393,37 +534,16 @@ impl InternalTestOptions {
 
 /// Options for starting a [`Client`].
 ///
-/// When `program` is [`CliProgram::Resolve`] (the default), [`Client::start`]
-/// uses a nonempty effective `COPILOT_CLI_PATH` or fails if invalid. Otherwise,
-/// managed child-process transports use the bundled `copilot-runtime` wrapper. In-process
-/// transport loads the wrapper's adjacent runtime library. With `bundled-cli`
-/// disabled, the corresponding artifact is resolved from the build-time
-/// extraction cache.
-///
-/// Set `program` to [`CliProgram::Path`] to use an explicit binary instead.
-/// This skips auto-resolution entirely.
+/// Process configuration belongs to [`SpawnedProcessOptions`] on spawned
+/// transports. In-process transport loads the resolved runtime's adjacent native
+/// library; attached TCP transport does not resolve or start a runtime.
 #[non_exhaustive]
-pub struct ClientOptions {
+#[cfg(any(feature = "runtime", test))]
+struct StartupOptions {
     /// Unsupported SDK test infrastructure configuration for an owned runtime.
     /// Supplied values override startup configuration without changing the host environment.
     #[doc(hidden)]
     pub internal_test_options: Option<InternalTestOptions>,
-    /// How to locate the child-process runtime.
-    pub program: CliProgram,
-    /// Arguments prepended before `--server` (e.g. the script path for node).
-    pub prefix_args: Vec<OsString>,
-    /// Working directory for the CLI process.
-    ///
-    /// Setting this option is not supported with [`Transport::InProcess`].
-    pub working_directory: PathBuf,
-    /// Environment variables for the child process.
-    ///
-    /// Nonempty values are unsupported with [`Transport::InProcess`].
-    pub env: Vec<(OsString, OsString)>,
-    /// Environment variable names to remove from the child process.
-    pub env_remove: Vec<OsString>,
-    /// Extra flags for child-process transports.
-    pub extra_args: Vec<String>,
     /// Absolute paths to trusted plugin directories bundled by the host.
     ///
     /// When non-empty, [`Client::start`] replaces the runtime's complete
@@ -469,7 +589,7 @@ pub struct ClientOptions {
     /// without making a `models.list` RPC. This is the BYOK escape hatch
     /// for environments where the model catalog is provisioned separately
     /// from the GitHub Copilot CLI (e.g. external inference servers selected via
-    /// [`Transport::External`]).
+    /// [`Transport::Tcp`]).
     pub on_list_models: Option<Arc<dyn ListModelsHandler>>,
     /// Custom session filesystem provider configuration.
     ///
@@ -477,7 +597,7 @@ pub struct ClientOptions {
     /// [`Client::start`] to register a virtualizable filesystem layer with
     /// the CLI. Each session created on this client must supply its own
     /// [`SessionFsProvider`] via
-    /// [`SessionConfig::with_session_fs_provider`](crate::SessionConfig::with_session_fs_provider).
+    /// [`CreateSessionOptions::with_session_fs_provider`](crate::CreateSessionOptions::with_session_fs_provider).
     pub session_fs: Option<SessionFsConfig>,
     /// Connection-level Copilot request handler configuration.
     ///
@@ -567,15 +687,11 @@ pub struct ClientOptions {
     /// native binder. The SDK retains it until its host closes. This cannot
     /// be combined with an attached server, a borrowed session, or [`Self::github_token`].
     pub in_process_auth_owner: Option<Arc<dyn InProcessAuthOwner>>,
-    /// Deprecated legacy v1 remote-control compatibility option. This enables
-    /// export and polling-based steering for SDK-managed runtimes; it is
-    /// ignored when connecting to an external server via [`Transport::External`].
-    pub enable_remote_sessions: bool,
     /// Override the directory where the bundled CLI binary is extracted on
     /// first use.
     ///
     /// When `None` (the default), the SDK extracts the embedded CLI to
-    /// `<platform cache dir>/github-copilot-sdk/cli/<version>/copilot[.exe]`,
+    /// `<platform cache dir>/copilot-sdk/cli/<version>/copilot[.exe]`,
     /// where the cache dir is the OS's LocalAppData known folder on
     /// Windows, `~/Library/Caches/` on macOS,
     /// `$XDG_CACHE_HOME` (or `~/.cache/`) on Linux. Use this knob to
@@ -589,9 +705,9 @@ pub struct ClientOptions {
     /// extraction, set `COPILOT_CLI_EXTRACT_DIR` (honored symmetrically
     /// at build and runtime); to point the runtime at a different
     /// binary altogether, use [`CliProgram::Path`] or `COPILOT_CLI_PATH`.
-    pub bundled_cli_extract_dir: Option<PathBuf>,
-    /// SDK-level mode controlling whether sessions get CLI-style defaults
-    /// (the default) or are stripped to a minimal/safe baseline. See
+    pub bundled_cli_extract_directory: Option<PathBuf>,
+    /// Required SDK-level mode controlling whether sessions get CLI-style defaults
+    /// or are stripped to a minimal/safe baseline. See
     /// [`ClientMode`] for the contract and trade-offs.
     pub mode: ClientMode,
     /// Declares the integrating application's identity, forwarded to the runtime on
@@ -697,16 +813,11 @@ impl ClientInfo {
     }
 }
 
-impl std::fmt::Debug for ClientOptions {
+#[cfg(any(feature = "runtime", test))]
+impl std::fmt::Debug for StartupOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClientOptions")
-            .field("program", &self.program)
-            .field("prefix_args", &self.prefix_args)
-            .field("working_directory", &self.working_directory)
-            .field("env", &self.env)
-            .field("env_remove", &self.env_remove)
+        f.debug_struct("StartupOptions")
             .field("disable_client_telemetry", &self.disable_client_telemetry)
-            .field("extra_args", &self.extra_args)
             .field(
                 "builtin_plugin_directories",
                 &self.builtin_plugin_directories,
@@ -762,8 +873,10 @@ impl std::fmt::Debug for ClientOptions {
                 "in_process_runtime_library_path",
                 &self.in_process_runtime_library_path,
             )
-            .field("enable_remote_sessions", &self.enable_remote_sessions)
-            .field("bundled_cli_extract_dir", &self.bundled_cli_extract_dir)
+            .field(
+                "bundled_cli_extract_directory",
+                &self.bundled_cli_extract_directory,
+            )
             .field("client_info", &self.client_info)
             .field("entra", &self.entra)
             .finish()
@@ -773,7 +886,7 @@ impl std::fmt::Debug for ClientOptions {
 /// Custom handler for [`Client::list_models`].
 ///
 /// Implementations override the default `models.list` RPC, returning a
-/// caller-supplied catalog of models. Set via [`ClientOptions::on_list_models`].
+/// caller-supplied catalog of models. Set via [`ClientModelOptions::on_list_models`].
 ///
 /// Implementations must be `Send + Sync` because [`Client`] is shared across
 /// tasks. Errors returned by [`list_models`](Self::list_models) are propagated
@@ -922,7 +1035,7 @@ impl OtlpHttpProtocol {
 
 /// OpenTelemetry startup configuration for the owned Copilot runtime.
 ///
-/// When [`ClientOptions::telemetry`] is `Some(...)`, the SDK sets
+/// When [`ClientObservabilityOptions::telemetry`] is `Some(...)`, the SDK sets
 /// `COPILOT_OTEL_ENABLED=true` plus any populated fields below as the
 /// corresponding `OTEL_*` / `COPILOT_OTEL_*` environment variables. The
 /// CLI's built-in OpenTelemetry exporter consumes these at startup. The
@@ -941,9 +1054,9 @@ impl OtlpHttpProtocol {
 /// | [`source_name`]      | `COPILOT_OTEL_SOURCE_NAME`                            |
 /// | [`capture_content`]  | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT` (and legacy boolean alias) |
 ///
-/// For subprocesses, caller-supplied entries in [`ClientOptions::env`] override these, so a
-/// developer can pin any individual variable to a different value while
-/// keeping the rest of the config managed by [`TelemetryConfig`].
+/// For subprocesses, these typed settings override equivalent entries and
+/// removals in [`SpawnedProcessOptions`]. Leave a field unset to configure
+/// its variable through the environment instead.
 ///
 /// Marked `#[non_exhaustive]` so future CLI-side telemetry knobs can be
 /// added without breaking callers.
@@ -1035,16 +1148,11 @@ impl TelemetryConfig {
     }
 }
 
-impl Default for ClientOptions {
+#[cfg(any(feature = "runtime", test))]
+impl Default for StartupOptions {
     fn default() -> Self {
         Self {
             internal_test_options: None,
-            program: CliProgram::Resolve,
-            prefix_args: Vec::new(),
-            working_directory: PathBuf::new(),
-            env: Vec::new(),
-            env_remove: Vec::new(),
-            extra_args: Vec::new(),
             builtin_plugin_directories: Vec::new(),
             transport: Transport::default(),
             run_on_ui_thread: None,
@@ -1067,299 +1175,11 @@ impl Default for ClientOptions {
             in_process_session_binding: None,
             in_process_runtime_library_path: None,
             in_process_auth_owner: None,
-            enable_remote_sessions: false,
-            bundled_cli_extract_dir: None,
-            mode: ClientMode::default(),
+            bundled_cli_extract_directory: None,
+            mode: ClientMode::CodingAgent,
             client_info: None,
             entra: None,
         }
-    }
-}
-
-impl ClientOptions {
-    /// Configure unsupported SDK test infrastructure overrides.
-    #[doc(hidden)]
-    pub fn with_internal_test_options(mut self, options: InternalTestOptions) -> Self {
-        self.internal_test_options = Some(options);
-        self
-    }
-
-    /// Construct a new [`ClientOptions`] with default values.
-    ///
-    /// Equivalent to [`ClientOptions::default`]; provided as a documented
-    /// construction entry point for the builder chain. The struct is
-    /// `#[non_exhaustive]`, so external callers cannot use struct-literal
-    /// syntax — use this builder or [`Default::default`] plus mut-let.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use github_copilot_sdk::{ClientOptions, LogLevel};
-    /// let opts = ClientOptions::new()
-    ///     .with_log_level(LogLevel::Debug)
-    ///     .with_github_token("ghp_…");
-    /// ```
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// How to locate the child-process runtime. See [`CliProgram`].
-    pub fn with_program(mut self, program: impl Into<CliProgram>) -> Self {
-        self.program = program.into();
-        self
-    }
-
-    /// Arguments prepended before `--server` (e.g. the script path for node).
-    pub fn with_prefix_args<I, S>(mut self, args: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<OsString>,
-    {
-        self.prefix_args = args.into_iter().map(Into::into).collect();
-        self
-    }
-
-    /// Working directory for the CLI process.
-    pub fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
-        self.working_directory = cwd.into();
-        self
-    }
-
-    /// Environment variables to set on the child process.
-    pub fn with_env<I, K, V>(mut self, env: I) -> Self
-    where
-        I: IntoIterator<Item = (K, V)>,
-        K: Into<OsString>,
-        V: Into<OsString>,
-    {
-        self.env = env.into_iter().map(|(k, v)| (k.into(), v.into())).collect();
-        self
-    }
-
-    /// Environment variable names to remove from the child process.
-    pub fn with_env_remove<I, S>(mut self, names: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<OsString>,
-    {
-        self.env_remove = names.into_iter().map(Into::into).collect();
-        self
-    }
-
-    /// Extra CLI flags appended after the transport-specific arguments.
-    pub fn with_extra_args<I, S>(mut self, args: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.extra_args = args.into_iter().map(Into::into).collect();
-        self
-    }
-
-    /// Set trusted plugin directories bundled by the host.
-    ///
-    /// Every path must be absolute; invalid paths are rejected by
-    /// [`Client::start`].
-    pub fn with_builtin_plugin_directories<I, P>(mut self, paths: I) -> Self
-    where
-        I: IntoIterator<Item = P>,
-        P: Into<PathBuf>,
-    {
-        self.builtin_plugin_directories = paths.into_iter().map(Into::into).collect();
-        self
-    }
-
-    /// Transport mode used to communicate with the CLI server. See [`Transport`].
-    pub fn with_transport(mut self, transport: Transport) -> Self {
-        self.transport = transport;
-        self
-    }
-
-    /// GitHub token for authentication. The SDK passes the token to the
-    /// CLI via `--auth-token-env COPILOT_SDK_AUTH_TOKEN`.
-    pub fn with_github_token(mut self, token: impl Into<String>) -> Self {
-        self.github_token = Some(token.into());
-        self
-    }
-
-    /// Whether the CLI should fall back to the logged-in `gh` user when
-    /// no token is provided. See the field docs for default semantics.
-    pub fn with_use_logged_in_user(mut self, use_logged_in: bool) -> Self {
-        self.use_logged_in_user = Some(use_logged_in);
-        self
-    }
-
-    /// Disable Copilot-owned uploads without affecting independently configured OpenTelemetry.
-    pub fn with_disable_client_telemetry(mut self, disabled: bool) -> Self {
-        self.disable_client_telemetry = disabled;
-        self
-    }
-
-    /// Log level passed to the CLI server via `--log-level`.
-    pub fn with_log_level(mut self, level: LogLevel) -> Self {
-        self.log_level = Some(level);
-        self
-    }
-
-    /// Server-wide idle timeout for sessions (seconds). Pass `0` to leave
-    /// sessions running indefinitely (the CLI default).
-    pub fn with_session_idle_timeout_seconds(mut self, seconds: u64) -> Self {
-        self.session_idle_timeout_seconds = Some(seconds);
-        self
-    }
-
-    /// Override [`Client::list_models`] with a caller-supplied handler.
-    /// The handler is wrapped in `Arc` internally.
-    pub fn with_list_models_handler<H>(mut self, handler: H) -> Self
-    where
-        H: ListModelsHandler + 'static,
-    {
-        self.on_list_models = Some(Arc::new(handler));
-        self
-    }
-
-    /// Custom session filesystem provider configuration.
-    pub fn with_session_fs(mut self, config: SessionFsConfig) -> Self {
-        self.session_fs = Some(config);
-        self
-    }
-
-    /// Register a connection-level Copilot request handler. The runtime will
-    /// route its model-layer HTTP and WebSocket traffic through the handler
-    /// configured here instead of issuing the calls itself. The handler is
-    /// wrapped in `Arc` internally.
-    pub fn with_request_handler<H>(mut self, handler: H) -> Self
-    where
-        H: crate::copilot_request_handler::CopilotRequestHandler,
-    {
-        self.request_handler = Some(Arc::new(handler));
-        self
-    }
-
-    /// Register a connection-level extension launch profile provider.
-    ///
-    /// The provider is wrapped in [`Arc`] internally and registered with the
-    /// runtime before [`Client::start`] returns.
-    pub fn with_extension_launch_provider<P>(mut self, provider: P) -> Self
-    where
-        P: crate::extension_launch_provider::ExtensionLaunchProvider,
-    {
-        self.extension_launch_provider = Some(Arc::new(provider));
-        self
-    }
-
-    /// Take over parts of the runtime's networking from the SDK host; see
-    /// [`NetworkConfig`](crate::network::NetworkConfig).
-    ///
-    /// The configured callbacks are registered with the runtime before
-    /// [`Client::start`] returns. By default they serve only requests made for
-    /// sessions this client creates or resumes; use
-    /// [`NetworkConfig::with_scope`](crate::network::NetworkConfig::with_scope)
-    /// with [`NetworkScope::Runtime`](crate::network::NetworkScope::Runtime) to
-    /// also serve the runtime's shared background traffic. A client created with
-    /// [`Client::from_streams`] registers them with [`Client::register_network`].
-    ///
-    /// **Experimental.** May change or be removed in future releases.
-    pub fn with_network(mut self, config: crate::network::NetworkConfig) -> Self {
-        self.network = Some(config);
-        self
-    }
-
-    /// Install a connection-global human confirmation handler (experimental).
-    pub fn with_installation_confirmation_handler<H>(mut self, handler: H) -> Self
-    where
-        H: crate::installation_confirmation::InstallationConfirmationHandler,
-    {
-        self.installation_confirmation_handler = Some(Arc::new(handler));
-        self
-    }
-
-    /// Register a connection-level GitHub telemetry forwarding callback
-    /// (internal/experimental). Registering a callback auto-enables telemetry
-    /// forwarding on every session created or resumed on this client; the
-    /// callback fires for each forwarded `gitHubTelemetry.event` notification.
-    /// The callback is wrapped in `Arc` internally.
-    #[doc(hidden)]
-    pub fn with_on_github_telemetry<F>(mut self, callback: F) -> Self
-    where
-        F: Fn(crate::github_telemetry::GitHubTelemetryNotification) + Send + Sync + 'static,
-    {
-        self.on_github_telemetry = Some(Arc::new(callback));
-        self
-    }
-
-    /// Set the [`TraceContextProvider`] used to inject W3C Trace Context
-    /// headers on outbound `session.create` / `session.resume` /
-    /// `session.send` requests. The provider is wrapped in `Arc` internally.
-    pub fn with_trace_context_provider<P>(mut self, provider: P) -> Self
-    where
-        P: TraceContextProvider + 'static,
-    {
-        self.on_get_trace_context = Some(Arc::new(provider));
-        self
-    }
-
-    /// OpenTelemetry startup config for the owned runtime.
-    pub fn with_telemetry(mut self, config: TelemetryConfig) -> Self {
-        self.telemetry = Some(config);
-        self
-    }
-
-    /// Override the directory where the CLI persists its state. Set as
-    /// `COPILOT_HOME` on the spawned CLI process.
-    pub fn with_base_directory(mut self, dir: impl Into<PathBuf>) -> Self {
-        self.base_directory = Some(dir.into());
-        self
-    }
-
-    /// Enable the deprecated legacy v1 remote-control compatibility mode.
-    ///
-    /// This option is temporary and may be removed in a future release.
-    #[deprecated(
-        note = "Legacy v1 remote-control compatibility is temporary and may be removed in a future release"
-    )]
-    pub fn with_enable_remote_sessions(mut self, enabled: bool) -> Self {
-        self.enable_remote_sessions = enabled;
-        self
-    }
-
-    /// Override the directory where bundled CLI and runtime artifacts are
-    /// extracted on first use. See [`Self::bundled_cli_extract_dir`].
-    ///
-    /// Only applies when the `bundled-cli` cargo feature is on. With
-    /// `bundled-cli` disabled (`default-features = false`), set
-    /// `COPILOT_CLI_EXTRACT_DIR` to relocate the build-time extraction
-    /// (honored symmetrically at build and runtime), or use
-    /// [`CliProgram::Path`] / `COPILOT_CLI_PATH` to point at a different
-    /// binary at runtime.
-    pub fn with_bundled_cli_extract_dir(mut self, dir: impl Into<PathBuf>) -> Self {
-        self.bundled_cli_extract_dir = Some(dir.into());
-        self
-    }
-
-    /// Set the SDK [`ClientMode`]. Use [`ClientMode::Empty`] for any
-    /// scenario where CLI-like ambient behavior is unsafe (e.g. multi-user
-    /// servers). Empty mode additionally requires [`Self::base_directory`]
-    /// or [`Self::session_fs`] to be set, validated at [`Client::start`].
-    pub fn with_mode(mut self, mode: ClientMode) -> Self {
-        self.mode = mode;
-        self
-    }
-
-    /// Declare the integrating application's identity, forwarded to the runtime on
-    /// the `server.connect` handshake so its telemetry is attributed to a
-    /// consistent surface. See [`Self::client_info`].
-    pub fn with_client_info(mut self, client_info: ClientInfo) -> Self {
-        self.client_info = Some(client_info);
-        self
-    }
-
-    /// Configure the host's Microsoft Entra application for its sessions.
-    ///
-    /// **Experimental.** May change or be removed in future releases.
-    pub fn with_entra(mut self, entra: impl Into<types::EntraAuthOptions>) -> Self {
-        self.entra = Some(entra.into());
-        self
     }
 }
 
@@ -1401,45 +1221,13 @@ fn generate_connection_token() -> String {
 }
 
 /// Environment variable that overrides the transport used when the caller
-/// leaves [`ClientOptions::transport`] at [`Transport::Default`].
+/// calls [`RuntimeConnection::for_default`].
 /// Accepts `"inprocess"` or `"stdio"` (case-insensitive); unset preserves
-/// stdio. Any other value is an error.
-#[cfg(feature = "runtime")]
+/// in-process hosting. Any other value is an error.
 const DEFAULT_CONNECTION_ENV_VAR: &str = "COPILOT_SDK_DEFAULT_CONNECTION";
 
-/// Resolve a transport override from [`DEFAULT_CONNECTION_ENV_VAR`].
-#[cfg(feature = "runtime")]
-fn resolve_default_transport(options: &ClientOptions) -> Result<Transport> {
-    let configured = options
-        .env
-        .iter()
-        .find(|(key, _)| {
-            key.to_string_lossy()
-                .eq_ignore_ascii_case(DEFAULT_CONNECTION_ENV_VAR)
-        })
-        .map(|(_, value)| value.to_string_lossy().into_owned());
-    let process = std::env::var(DEFAULT_CONNECTION_ENV_VAR).ok();
-    resolve_default_transport_value(configured.as_deref().or(process.as_deref()))
-}
-
-#[cfg(feature = "runtime")]
-fn resolve_default_transport_value(value: Option<&str>) -> Result<Transport> {
-    match value {
-        None => Ok(Transport::Stdio),
-        Some(v) if v.is_empty() || v.eq_ignore_ascii_case("stdio") => Ok(Transport::Stdio),
-        Some(v) if v.eq_ignore_ascii_case("inprocess") => Ok(Transport::InProcess),
-        Some(v) => Err(Error::with_message(
-            ErrorKind::InvalidConfig,
-            format!(
-                "invalid {DEFAULT_CONNECTION_ENV_VAR} value '{v}'. \
-                 Expected 'inprocess', 'stdio', or unset."
-            ),
-        )),
-    }
-}
-
 #[cfg(any(feature = "in-process", test))]
-fn inprocess_environment(options: &ClientOptions) -> Result<Vec<(String, String)>> {
+fn inprocess_environment(options: &StartupOptions) -> Result<Vec<(String, String)>> {
     let mut environment = Vec::new();
     if let Some(base_directory) = &options.base_directory {
         let value = base_directory.to_str().ok_or_else(|| {
@@ -1483,64 +1271,59 @@ fn inprocess_environment(options: &ClientOptions) -> Result<Vec<(String, String)
     Ok(environment)
 }
 
-#[cfg(any(feature = "in-process", test))]
-fn validate_inprocess_options(options: &ClientOptions) -> Result<()> {
-    if !matches!(&options.program, CliProgram::Resolve) {
-        return Err(Error::with_message(
-            ErrorKind::InvalidConfig,
-            "ClientOptions::program is not supported with Transport::InProcess; \
-             set COPILOT_CLI_PATH only when using an externally provisioned runtime package",
-        ));
-    }
-    if !options.extra_args.is_empty() {
-        return Err(Error::with_message(
-            ErrorKind::InvalidConfig,
-            "ClientOptions::extra_args is not supported with Transport::InProcess; \
-             use typed client options instead",
-        ));
-    }
-
-    if !options.working_directory.as_os_str().is_empty() {
-        return Err(Error::with_message(
-            ErrorKind::InvalidConfig,
-            "ClientOptions::working_directory is not supported with Transport::InProcess; \
-             set SessionConfig::working_directory instead",
-        ));
-    }
-
-    let unsupported = if !options.env.is_empty() {
-        Some("env")
-    } else if !options.env_remove.is_empty() {
-        Some("env_remove")
-    } else if !options.prefix_args.is_empty() {
-        Some("prefix_args")
-    } else {
-        None
+#[cfg(any(feature = "runtime", test))]
+fn validate_runtime_startup_options(options: &StartupOptions) -> Result<()> {
+    let connection = match &options.transport {
+        Transport::Tcp { .. } => "an attached Transport::Tcp server",
+        Transport::InProcess if options.in_process_server_id.is_some() => {
+            "an existing in_process_server_id"
+        }
+        _ => return Ok(()),
     };
-
-    if let Some(option) = unsupported {
+    let incompatible = [
+        ("github.token", options.github_token.is_some()),
+        (
+            "github.use_logged_in_user",
+            options.use_logged_in_user.is_some(),
+        ),
+        ("observability.log_level", options.log_level.is_some()),
+        (
+            "runtime.owned.session_idle_timeout_seconds",
+            options.session_idle_timeout_seconds.is_some(),
+        ),
+        ("observability.telemetry", options.telemetry.is_some()),
+        (
+            "observability.disable_client_telemetry",
+            options.disable_client_telemetry,
+        ),
+        (
+            "runtime.owned.base_directory",
+            options.base_directory.is_some(),
+        ),
+        (
+            "internal_test_options",
+            options.internal_test_options.is_some(),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(name, configured)| configured.then_some(name))
+    .collect::<Vec<_>>();
+    if !incompatible.is_empty() {
         return Err(Error::with_message(
             ErrorKind::InvalidConfig,
             format!(
-                "ClientOptions::{option} is not supported with Transport::InProcess; \
-                 configure process-global settings on the host process instead"
+                "ClientOptions configuration requires an owned runtime: {}; \
+                 remove these options when connecting to {connection} \
+                 and configure the existing runtime instead",
+                incompatible.join(", "),
             ),
         ));
     }
-
-    if options.in_process_server_id.is_some() && options.telemetry.is_some() {
-        return Err(Error::with_message(
-            ErrorKind::InvalidConfig,
-            "ClientOptions::telemetry requires an owned runtime; \
-             it cannot configure an existing in_process_server_id",
-        ));
-    }
-
     Ok(())
 }
 
 #[cfg(any(feature = "runtime", feature = "in-process", test))]
-fn telemetry_environment(options: &ClientOptions) -> Vec<(&'static str, OsString)> {
+fn telemetry_environment(options: &StartupOptions) -> Vec<(&'static str, OsString)> {
     let mut environment = Vec::new();
     if let Some(telemetry) = &options.telemetry {
         environment.push(("COPILOT_OTEL_ENABLED", "true".into()));
@@ -1560,32 +1343,14 @@ fn telemetry_environment(options: &ClientOptions) -> Vec<(&'static str, OsString
             environment.push(("COPILOT_OTEL_SOURCE_NAME", source.into()));
         }
         if let Some(capture) = telemetry.capture_content {
-            // A synthesized standard mode must not defeat an existing legacy env override.
-            let legacy_key = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT";
-            let is_legacy_key = |key: &OsString| {
-                if cfg!(windows) {
-                    key.as_encoded_bytes()
-                        .eq_ignore_ascii_case(legacy_key.as_bytes())
-                } else {
-                    key == legacy_key
-                }
-            };
-            let capture = !options.env_remove.iter().any(is_legacy_key)
-                && options
-                    .env
-                    .iter()
-                    .rev()
-                    .find(|(key, _)| is_legacy_key(key))
-                    .map_or(capture, |(_, value)| {
-                        value
-                            .to_str()
-                            .is_some_and(|value| value.eq_ignore_ascii_case("true"))
-                    });
             environment.push((
                 "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT",
                 if capture { "SPAN_ONLY" } else { "NO_CONTENT" }.into(),
             ));
-            environment.push((legacy_key, if capture { "true" } else { "false" }.into()));
+            environment.push((
+                "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT",
+                if capture { "true" } else { "false" }.into(),
+            ));
         }
     }
     environment
@@ -1661,7 +1426,7 @@ struct ClientInner {
     session_fs_binary_declared: bool,
     session_fs_read_file_range_declared: bool,
     /// Inbound `llmInference.*` dispatcher, installed when
-    /// [`ClientOptions::request_handler`] is set.
+    /// [`StartupOptions::request_handler`] is set.
     llm_inference: OnceLock<Arc<copilot_request_handler::CopilotRequestDispatcher>>,
     extension_launch_provider: Arc<extension_launch_provider::ExtensionLaunchProviderDispatcher>,
     installation_confirmation: Arc<installation_confirmation::InstallationConfirmationDispatcher>,
@@ -1669,7 +1434,7 @@ struct ClientInner {
     shell_authentication_requests: shell_authentication::PendingShellAuthenticationRequests,
     entra_token: Arc<entra::EntraTokenDispatcher>,
     /// Connection-level GitHub telemetry forwarding callback, set from
-    /// [`ClientOptions::on_github_telemetry`]. Drives the
+    /// [`StartupOptions::on_github_telemetry`]. Drives the
     /// `enableGitHubTelemetryForwarding` wire flag and the
     /// `gitHubTelemetry.event` notification dispatch.
     on_github_telemetry: Option<crate::github_telemetry::GitHubTelemetryCallback>,
@@ -1680,7 +1445,7 @@ struct ClientInner {
     /// explicit token.
     effective_connection_token: Option<String>,
     /// Application identity forwarded on the `connect` handshake, set from
-    /// [`ClientOptions::client_info`]. `None` keeps the runtime's default
+    /// [`StartupOptions::client_info`]. `None` keeps the runtime's default
     /// telemetry attribution.
     client_info: Option<ClientInfo>,
     entra: Option<types::EntraAuthOptions>,
@@ -1851,12 +1616,13 @@ impl Client {
         Ok(())
     }
 
-    /// Start a CLI server process with the given options.
+    /// Start a runtime host or connect to an external server with the given options.
     ///
-    /// For [`Transport::Stdio`], spawns the CLI with `--stdio` and communicates
-    /// over stdin/stdout pipes. For [`Transport::Tcp`], spawns with `--port`
+    /// By default, loads the native runtime in-process over its C ABI.
+    /// For [`RuntimeConnection::SpawnedStdio`], spawns the CLI with `--stdio` and communicates
+    /// over stdin/stdout pipes. For [`RuntimeConnection::SpawnedTcp`], spawns with `--port`
     /// and connects via TCP once the server reports it is listening. For
-    /// [`Transport::External`], connects to an already-running server.
+    /// [`RuntimeConnection::Tcp`], connects to an already-running server.
     ///
     /// After establishing the connection, calls [`verify_protocol_version`](Self::verify_protocol_version)
     /// to ensure the CLI server speaks a compatible protocol version.
@@ -1867,12 +1633,10 @@ impl Client {
     /// backend.
     #[cfg(feature = "runtime")]
     pub async fn start(options: ClientOptions) -> Result<Self> {
+        let options = options.into_startup()?;
         let start_time = Instant::now();
         let mut timings = StartupTimings::default();
         let mut options = options;
-        if matches!(options.transport, Transport::Default) {
-            options.transport = resolve_default_transport(&options)?;
-        }
         if options.in_process_auth_owner.is_some()
             && (!matches!(options.transport, Transport::InProcess)
                 || options.in_process_server_id.is_some()
@@ -1896,18 +1660,18 @@ impl Client {
                 "run_on_ui_thread is supported only with Transport::InProcess",
             ));
         }
+        #[cfg(not(feature = "in-process"))]
         if matches!(options.transport, Transport::InProcess) {
-            #[cfg(not(feature = "in-process"))]
-            {
-                return Err(Error::with_message(
-                    ErrorKind::InvalidConfig,
-                    "Transport::InProcess requires the `in-process` Cargo feature",
-                ));
-            }
-            #[cfg(feature = "in-process")]
-            validate_inprocess_options(&options)?;
+            return Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "Transport::InProcess requires the `in-process` Cargo feature",
+            ));
         }
+        validate_runtime_startup_options(&options)?;
         if options.mode == ClientMode::Empty
+            && !matches!(options.transport, Transport::Tcp { .. })
+            && !(matches!(options.transport, Transport::InProcess)
+                && options.in_process_server_id.is_some())
             && options.base_directory.is_none()
             && options.session_fs.is_none()
         {
@@ -1944,39 +1708,34 @@ impl Client {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        // Auth options only make sense when the SDK spawns the CLI; with an
-        // external server, the server manages its own auth.
-        if matches!(options.transport, Transport::External { .. }) {
-            if options.internal_test_options.is_some() {
-                return Err(Error::with_message(
-                    ErrorKind::InvalidConfig,
-                    "internal_test_options requires a runtime owned by this client",
-                ));
-            }
-            if options.github_token.is_some() {
-                return Err(Error::with_message(
-                    ErrorKind::InvalidConfig,
-                    "invalid client configuration: github_token cannot be used with \
-                     Transport::External (external server manages its own auth)",
-                ));
-            }
-            if options.use_logged_in_user == Some(true) {
-                return Err(Error::with_message(
-                    ErrorKind::InvalidConfig,
-                    "invalid client configuration: use_logged_in_user cannot be used with \
-                     Transport::External (external server manages its own auth)",
-                ));
-            }
+        if let Transport::Tcp { host, port, .. } = &options.transport
+            && (host.is_empty()
+                || host
+                    .chars()
+                    .any(|c| c.is_whitespace() || "/\\?#@[]".contains(c))
+                || (host.contains(':')
+                    && host
+                        .split_once('%')
+                        .map_or(host.as_str(), |(address, _)| address)
+                        .parse::<std::net::Ipv6Addr>()
+                        .is_err())
+                || *port == 0)
+        {
+            return Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "TCP connection requires a hostname or IP address without a scheme, port, or path, \
+                 and a nonzero port",
+            ));
         }
         // Validate token shape. Stdio variants no longer carry a token
-        // (enforced by the type). For Tcp/External, empty-string is
+        // (enforced by the type). For SpawnedTcp/Tcp, empty-string is
         // rejected eagerly.
         match &options.transport {
-            Transport::Tcp {
+            Transport::SpawnedTcp {
                 connection_token: Some(t),
                 ..
             }
-            | Transport::External {
+            | Transport::Tcp {
                 connection_token: Some(t),
                 ..
             } if t.is_empty() => {
@@ -1988,20 +1747,20 @@ impl Client {
             _ => {}
         }
         // Capture (and where needed, auto-generate) the token actually sent
-        // to the server. For Tcp, the SDK auto-generates one when the
+        // to the server. For SpawnedTcp, the SDK auto-generates one when the
         // caller leaves it unset so the loopback listener is safe by
         // default.
         let effective_connection_token: Option<String> = match &mut options.transport {
             Transport::Default => unreachable!("default transport resolved above"),
-            Transport::Stdio | Transport::InProcess => None,
-            Transport::Tcp {
+            Transport::SpawnedStdio(_) | Transport::InProcess => None,
+            Transport::SpawnedTcp {
                 connection_token, ..
             } => Some(
                 connection_token
                     .get_or_insert_with(generate_connection_token)
                     .clone(),
             ),
-            Transport::External {
+            Transport::Tcp {
                 connection_token, ..
             } => connection_token.clone(),
         };
@@ -2022,48 +1781,67 @@ impl Client {
             .as_ref()
             .and_then(|c| c.capabilities.as_ref())
             .is_some_and(|caps| caps.read_file_range);
-        let program = if matches!(options.transport, Transport::External { .. })
+        let program = if matches!(options.transport, Transport::Tcp { .. })
             || (matches!(options.transport, Transport::InProcess)
                 && options.in_process_runtime_library_path.is_some())
         {
             None
         } else {
-            Some(match &options.program {
-                CliProgram::Path(path) => {
-                    info!(path = %path.display(), "using explicit copilot CLI path");
-                    path.clone()
-                }
-                CliProgram::Resolve => {
-                    let resolve_start = Instant::now();
-                    let resolved = resolve::copilot_binary_with_extract_dir(&options, true)?;
-                    let resolve_elapsed = resolve_start.elapsed();
-                    timings.program_resolve_ms = Some(StartupTimings::millis(resolve_elapsed));
-                    debug!(
-                        elapsed_ms = resolve_elapsed.as_millis(),
-                        "Client::start CLI program resolution complete"
-                    );
-                    info!(path = %resolved.display(), "resolved copilot runtime");
-                    #[cfg(windows)]
-                    {
-                        if let Some(ext) =
-                            resolved.extension().and_then(|e| e.to_str()).filter(|ext| {
-                                ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat")
-                            })
-                        {
-                            warn!(
-                                path = %resolved.display(),
-                                ext = %ext,
-                                "resolved copilot CLI is a .cmd/.bat wrapper; \
-                                 this may cause console window flashes on Windows"
-                            );
-                        }
+            Some(
+                match options
+                    .transport
+                    .spawned_process()
+                    .map(|process| &process.program)
+                {
+                    Some(CliProgram::Path(path)) => {
+                        info!(path = %path.display(), "using explicit copilot CLI path");
+                        path.clone()
                     }
-                    resolved
-                }
-            })
+                    Some(CliProgram::Resolve) | None => {
+                        let resolve_start = Instant::now();
+                        let env_cli_path = match options.transport.spawned_process() {
+                            Some(process) => process.environment_variable("COPILOT_CLI_PATH"),
+                            None => std::env::var_os("COPILOT_CLI_PATH"),
+                        };
+                        let resolved = resolve::copilot_binary_with_extract_dir(
+                            &options,
+                            true,
+                            env_cli_path.as_deref(),
+                        )?;
+                        let resolve_elapsed = resolve_start.elapsed();
+                        timings.program_resolve_ms = Some(StartupTimings::millis(resolve_elapsed));
+                        debug!(
+                            elapsed_ms = resolve_elapsed.as_millis(),
+                            "Client::start CLI program resolution complete"
+                        );
+                        info!(path = %resolved.display(), "resolved copilot runtime");
+                        #[cfg(windows)]
+                        {
+                            if let Some(ext) =
+                                resolved.extension().and_then(|e| e.to_str()).filter(|ext| {
+                                    ext.eq_ignore_ascii_case("cmd")
+                                        || ext.eq_ignore_ascii_case("bat")
+                                })
+                            {
+                                warn!(
+                                    path = %resolved.display(),
+                                    ext = %ext,
+                                    "resolved copilot CLI is a .cmd/.bat wrapper; \
+                                     this may cause console window flashes on Windows"
+                                );
+                            }
+                        }
+                        resolved
+                    }
+                },
+            )
         };
         let working_directory = {
-            let cwd = options.working_directory.clone();
+            let cwd = options
+                .transport
+                .spawned_process()
+                .map(|process| process.working_directory.clone())
+                .unwrap_or_default();
             if cwd.as_os_str().is_empty() {
                 std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
             } else {
@@ -2074,7 +1852,7 @@ impl Client {
         let transport_setup_start = Instant::now();
         let client = match options.transport {
             Transport::Default => unreachable!("default transport resolved above"),
-            Transport::External {
+            Transport::Tcp {
                 ref host,
                 port,
                 connection_token: _,
@@ -2110,7 +1888,8 @@ impl Client {
                     false,
                 )?
             }
-            Transport::Tcp {
+            Transport::SpawnedTcp {
+                ref process,
                 port,
                 connection_token: _,
             } => {
@@ -2119,6 +1898,7 @@ impl Client {
                         .as_deref()
                         .expect("spawned transports resolve a CLI program"),
                     &options,
+                    process,
                     &working_directory,
                     port,
                 )
@@ -2154,12 +1934,13 @@ impl Client {
                     false,
                 )?
             }
-            Transport::Stdio => {
+            Transport::SpawnedStdio(ref process) => {
                 let (mut child, tree, spawn_elapsed) = Self::spawn_stdio(
                     program
                         .as_deref()
                         .expect("spawned transports resolve a CLI program"),
                     &options,
+                    process,
                     &working_directory,
                 )?;
                 timings.process_spawn_ms = Some(StartupTimings::millis(spawn_elapsed));
@@ -2203,7 +1984,6 @@ impl Client {
                             .map(str::to_string),
                     );
                     args.extend(Self::session_idle_timeout_args(&options));
-                    args.extend(Self::remote_args(&options));
                     if options.github_token.is_some() {
                         args.extend([
                             "--auth-token-env".to_string(),
@@ -2467,11 +2247,12 @@ impl Client {
     /// Useful for testing or connecting to a server over a custom transport.
     /// Register network callbacks for it with [`Self::register_network`].
     pub fn from_streams(
+        mode: ClientMode,
         reader: impl AsyncRead + Unpin + Send + 'static,
         writer: impl AsyncWrite + Unpin + Send + 'static,
         cwd: PathBuf,
     ) -> Result<Self> {
-        Self::from_streams_with_entra(reader, writer, cwd, None)
+        Self::from_streams_with_entra(mode, reader, writer, cwd, None)
     }
 
     /// Create a client from a custom transport with optional host Entra configuration.
@@ -2483,12 +2264,13 @@ impl Client {
     ///
     /// **Experimental.** May change or be removed in future releases.
     pub fn from_streams_with_entra(
+        mode: ClientMode,
         reader: impl AsyncRead + Unpin + Send + 'static,
         writer: impl AsyncWrite + Unpin + Send + 'static,
         cwd: PathBuf,
         entra: Option<EntraAuthConfig>,
     ) -> Result<Self> {
-        Self::from_streams_with_entra_options(reader, writer, cwd, entra.map(Into::into))
+        Self::from_streams_with_entra_options(mode, reader, writer, cwd, entra.map(Into::into))
     }
 
     /// Create a custom-transport client with optional host-owned Entra acquisition.
@@ -2497,6 +2279,7 @@ impl Client {
     ///
     /// **Experimental.** May change or be removed in future releases.
     pub fn from_streams_with_entra_options(
+        mode: ClientMode,
         reader: impl AsyncRead + Unpin + Send + 'static,
         writer: impl AsyncWrite + Unpin + Send + 'static,
         cwd: PathBuf,
@@ -2517,7 +2300,7 @@ impl Client {
             None,
             None,
             None,
-            ClientMode::default(),
+            mode,
             None,
             entra,
             false,
@@ -2555,7 +2338,7 @@ impl Client {
             None,
             None,
             None,
-            ClientMode::default(),
+            ClientMode::CodingAgent,
             None,
             None,
             false,
@@ -2587,7 +2370,7 @@ impl Client {
             None,
             None,
             None,
-            ClientMode::default(),
+            ClientMode::CodingAgent,
             None,
             None,
             false,
@@ -2603,7 +2386,7 @@ impl Client {
         cwd: PathBuf,
         handler: Arc<dyn crate::installation_confirmation::InstallationConfirmationHandler>,
     ) -> Result<Self> {
-        let client = Self::from_streams(reader, writer, cwd)?;
+        let client = Self::from_streams(ClientMode::CodingAgent, reader, writer, cwd)?;
         client
             .inner
             .installation_confirmation
@@ -2640,7 +2423,7 @@ impl Client {
             Some(provider),
             None,
             None,
-            ClientMode::default(),
+            ClientMode::CodingAgent,
             None,
             None,
             false,
@@ -2672,7 +2455,7 @@ impl Client {
             None,
             None,
             token,
-            ClientMode::default(),
+            ClientMode::CodingAgent,
             None,
             None,
             false,
@@ -2704,7 +2487,7 @@ impl Client {
             None,
             Some(on_github_telemetry),
             None,
-            ClientMode::default(),
+            ClientMode::CodingAgent,
             None,
             None,
             false,
@@ -2747,7 +2530,7 @@ impl Client {
             None,
             None,
             None,
-            ClientMode::default(),
+            ClientMode::CodingAgent,
             client_info,
             None,
             false,
@@ -2963,19 +2746,31 @@ impl Client {
     }
 
     #[cfg(feature = "runtime")]
-    fn build_command(program: &Path, options: &ClientOptions, working_directory: &Path) -> Command {
+    fn build_command(
+        program: &Path,
+        options: &StartupOptions,
+        process: &SpawnedProcessOptions,
+        working_directory: &Path,
+    ) -> Command {
         let mut command = Command::new(program);
         command.kill_on_drop(true);
-        for arg in &options.prefix_args {
-            command.arg(arg);
+        command.args(&process.args);
+        if let Some(environment) = &process.env {
+            command.env_clear();
+            for (key, value) in environment {
+                command.env(key, value);
+            }
         }
-        // Inject the SDK auth token first so explicit `env` / `env_remove`
-        // entries can override or strip it.
+        for key in &process.env_remove {
+            command.env_remove(key);
+        }
+        if let Some(test_options) = &options.internal_test_options {
+            command.envs(test_options.environment());
+        }
+        // Explicit typed options and required settings win over the base environment.
         if let Some(token) = &options.github_token {
             command.env("COPILOT_SDK_AUTH_TOKEN", token);
         }
-        // Inject telemetry env vars before user env so callers can still
-        // override individual variables via `options.env`.
         command.envs(telemetry_environment(options));
         if let Some(dir) = &options.base_directory {
             command.env("COPILOT_HOME", dir);
@@ -2985,21 +2780,12 @@ impl Client {
         if options.mode == ClientMode::Empty {
             command.env("COPILOT_DISABLE_KEYTAR", "1");
         }
-        if let Transport::Tcp {
+        if let Transport::SpawnedTcp {
             connection_token: Some(token),
             ..
         } = &options.transport
         {
             command.env("COPILOT_CONNECTION_TOKEN", token);
-        }
-        for (key, value) in &options.env {
-            command.env(key, value);
-        }
-        for key in &options.env_remove {
-            command.env_remove(key);
-        }
-        if let Some(test_options) = &options.internal_test_options {
-            command.envs(test_options.environment());
         }
         if options.disable_client_telemetry {
             command.env("COPILOT_TELEMETRY_DISABLED", "true");
@@ -3015,15 +2801,15 @@ impl Client {
         command
     }
 
-    /// Returns the CLI auth flags derived from [`ClientOptions::github_token`]
-    /// and [`ClientOptions::use_logged_in_user`].
+    /// Returns the CLI auth flags derived from [`StartupOptions::github_token`]
+    /// and [`StartupOptions::use_logged_in_user`].
     ///
     /// When a token is set, adds `--auth-token-env COPILOT_SDK_AUTH_TOKEN`.
     /// When the effective `use_logged_in_user` is `false` (either explicitly
     /// or because a token was provided without an override), adds
     /// `--no-auto-login`.
     #[cfg(feature = "runtime")]
-    fn auth_args(options: &ClientOptions) -> Vec<&'static str> {
+    fn auth_args(options: &StartupOptions) -> Vec<&'static str> {
         let mut args: Vec<&'static str> = Vec::new();
         if options.github_token.is_some() {
             args.push("--auth-token-env");
@@ -3039,10 +2825,10 @@ impl Client {
     }
 
     /// Returns `--session-idle-timeout <secs>` when
-    /// [`ClientOptions::session_idle_timeout_seconds`] is `Some(n)` with
+    /// [`StartupOptions::session_idle_timeout_seconds`] is `Some(n)` with
     /// `n > 0`. Otherwise returns an empty vector.
     #[cfg(feature = "runtime")]
-    fn session_idle_timeout_args(options: &ClientOptions) -> Vec<String> {
+    fn session_idle_timeout_args(options: &StartupOptions) -> Vec<String> {
         match options.session_idle_timeout_seconds {
             Some(secs) if secs > 0 => {
                 vec!["--session-idle-timeout".to_string(), secs.to_string()]
@@ -3052,16 +2838,7 @@ impl Client {
     }
 
     #[cfg(feature = "runtime")]
-    fn remote_args(options: &ClientOptions) -> Vec<String> {
-        if options.enable_remote_sessions {
-            vec!["--remote".to_string()]
-        } else {
-            Vec::new()
-        }
-    }
-
-    #[cfg(feature = "runtime")]
-    fn log_level_args(options: &ClientOptions) -> Vec<&'static str> {
+    fn log_level_args(options: &StartupOptions) -> Vec<&'static str> {
         match options.log_level {
             Some(level) => vec!["--log-level", level.as_str()],
             None => Vec::new(),
@@ -3107,18 +2884,17 @@ impl Client {
     #[cfg(feature = "runtime")]
     fn spawn_stdio(
         program: &Path,
-        options: &ClientOptions,
+        options: &StartupOptions,
+        process: &SpawnedProcessOptions,
         working_directory: &Path,
     ) -> Result<(Child, Option<process_tree::ProcessTree>, Duration)> {
         info!(cwd = ?working_directory, program = %program.display(), "spawning copilot CLI (stdio)");
-        let mut command = Self::build_command(program, options, working_directory);
+        let mut command = Self::build_command(program, options, process, working_directory);
         command
             .args(["--server", "--stdio", "--no-auto-update"])
             .args(Self::log_level_args(options))
             .args(Self::auth_args(options))
             .args(Self::session_idle_timeout_args(options))
-            .args(Self::remote_args(options))
-            .args(&options.extra_args)
             .stdin(Stdio::piped());
         let spawn_start = Instant::now();
         let (child, tree) = Self::spawn_cli(&mut command, program, working_directory)?;
@@ -3133,7 +2909,8 @@ impl Client {
     #[cfg(feature = "runtime")]
     async fn spawn_tcp(
         program: &Path,
-        options: &ClientOptions,
+        options: &StartupOptions,
+        process: &SpawnedProcessOptions,
         working_directory: &Path,
         port: u16,
     ) -> Result<(
@@ -3144,14 +2921,12 @@ impl Client {
         Duration,
     )> {
         info!(cwd = ?working_directory, program = %program.display(), port = %port, "spawning copilot CLI (tcp)");
-        let mut command = Self::build_command(program, options, working_directory);
+        let mut command = Self::build_command(program, options, process, working_directory);
         command
             .args(["--server", "--port", &port.to_string(), "--no-auto-update"])
             .args(Self::log_level_args(options))
             .args(Self::auth_args(options))
             .args(Self::session_idle_timeout_args(options))
-            .args(Self::remote_args(options))
-            .args(&options.extra_args)
             .stdin(Stdio::null());
         let spawn_start = Instant::now();
         let (mut child, tree) = Self::spawn_cli(&mut command, program, working_directory)?;
@@ -3606,7 +3381,7 @@ impl Client {
     /// # Handshake sequence
     ///
     /// 1. Sends the `connect` JSON-RPC method, forwarding the
-    ///    [`Transport`]'s `connection_token` (or the auto-generated
+    ///    [`RuntimeConnection`]'s `connection_token` (or the auto-generated
     ///    token for SDK-spawned TCP servers) as the `token` param. This
     ///    is the canonical handshake used by all SDK languages and is
     ///    what the CLI uses to enforce loopback authentication when
@@ -3781,8 +3556,8 @@ impl Client {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(client: &github_copilot_sdk::Client) -> Result<(), github_copilot_sdk::Error> {
-    /// use github_copilot_sdk::types::SessionId;
+    /// # async fn example(client: &copilot_sdk::Client) -> Result<(), copilot_sdk::Error> {
+    /// use copilot_sdk::types::SessionId;
     /// if let Some(metadata) = client.get_session_metadata(&SessionId::new("session-123")).await? {
     ///     println!("Session started at: {}", metadata.start_time);
     /// }
@@ -3903,7 +3678,7 @@ impl Client {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(client: &github_copilot_sdk::Client) -> Result<(), github_copilot_sdk::Error> {
+    /// # async fn example(client: &copilot_sdk::Client) -> Result<(), copilot_sdk::Error> {
     /// if let Some(last_id) = client.get_last_session_id().await? {
     ///     println!("Last session: {last_id}");
     /// }
@@ -3955,26 +3730,26 @@ impl Client {
 
     /// List available models.
     ///
-    /// When [`ClientOptions::on_list_models`] is set, returns the handler's
+    /// When [`ClientModelOptions::on_list_models`] is set, returns the handler's
     /// result without making a `models.list` RPC. Otherwise asks the CLI for
     /// the models available to its current account. In either case, the first
     /// successful result is cached for the lifetime of this client, so the
     /// handler must not return a different catalog for each user.
     ///
-    /// Without [`ClientOptions::on_list_models`] the CLI needs an account to
+    /// Without [`ClientModelOptions::on_list_models`] the CLI needs an account to
     /// answer. For an SDK-owned runtime, a client with no
-    /// [`ClientOptions::github_token`] and with
-    /// [`ClientOptions::use_logged_in_user`] set to `false` has none, so this
-    /// call fails with `Not authenticated`. With [`Transport::External`], the
+    /// [`ClientGitHubOptions::token`] and with
+    /// [`ClientGitHubOptions::use_logged_in_user`] set to `false` has none, so this
+    /// call fails with `Not authenticated`. With [`RuntimeConnection::Tcp`], the
     /// server manages its own authentication; these client options do not
     /// control the account used for model listing.
     ///
     /// Tokens given to sessions (for example through
-    /// [`SessionConfig::with_github_token_provider`](crate::SessionConfig::with_github_token_provider))
+    /// [`SessionGitHubOptions::with_token_provider`](crate::SessionGitHubOptions::with_token_provider))
     /// are only used by those sessions and do not help here. Such a client
     /// can instead:
     ///
-    /// - supply its own catalog through [`ClientOptions::on_list_models`], or
+    /// - supply its own catalog through [`ClientModelOptions::on_list_models`], or
     /// - list the models available to one user by passing that user's token to
     ///   [`ClientRpcModels::list_with_params`](crate::rpc::ClientRpcModels::list_with_params).
     ///   That call is experimental, bypasses the cache, and resolves only the
@@ -3982,10 +3757,10 @@ impl Client {
     ///
     /// ```no_run
     /// # async fn example(
-    /// #     client: &github_copilot_sdk::Client,
+    /// #     client: &copilot_sdk::Client,
     /// #     user_token: String,
-    /// # ) -> Result<(), github_copilot_sdk::Error> {
-    /// use github_copilot_sdk::rpc::ModelsListRequest;
+    /// # ) -> Result<(), copilot_sdk::Error> {
+    /// use copilot_sdk::rpc::ModelsListRequest;
     ///
     /// let models = client
     ///     .rpc()
@@ -4014,7 +3789,7 @@ impl Client {
         Ok(models.clone())
     }
 
-    /// Invoke [`ClientOptions::on_get_trace_context`] when configured,
+    /// Invoke [`StartupOptions::on_get_trace_context`] when configured,
     /// otherwise return [`TraceContext::default()`].
     pub(crate) async fn resolve_trace_context(&self) -> TraceContext {
         if let Some(provider) = &self.inner.on_get_trace_context {
@@ -4245,7 +4020,7 @@ impl Client {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(client: github_copilot_sdk::Client) {
+    /// # async fn example(client: copilot_sdk::Client) {
     /// // Try graceful shutdown first; fall back to force_stop if hung.
     /// match tokio::time::timeout(
     ///     std::time::Duration::from_secs(5),
@@ -4313,7 +4088,7 @@ impl Client {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(client: github_copilot_sdk::Client) {
+    /// # async fn example(client: copilot_sdk::Client) {
     /// let mut events = client.subscribe_lifecycle();
     /// tokio::spawn(async move {
     ///     while let Ok(event) = events.recv().await {

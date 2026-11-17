@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 type hostAuthBoundary struct {
@@ -70,10 +70,7 @@ func (b *hostAuthBoundary) client(t *testing.T) *copilot.Client {
 	for key, value := range env {
 		environment = append(environment, key+"="+value)
 	}
-	client := copilot.NewClient(&copilot.ClientOptions{
-		Connection: copilot.StdioConnection{Path: testharness.CLIPath()},
-		Env:        environment, WorkingDirectory: b.work, UseLoggedInUser: copilot.Bool(false),
-	})
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, GitHub: copilot.ClientGitHubOptions{UseLoggedInUser: copilot.Bool(false)}, Runtime: copilot.SpawnedStdioConnection{Path: testharness.CLIPath(), Env: environment, WorkingDirectory: b.work}})
 	t.Cleanup(func() {
 		if err := client.Stop(); err != nil {
 			t.Error(err)
@@ -170,12 +167,13 @@ func TestHostAuthenticationBYOKCreateAndColdResumeE2E(t *testing.T) {
 					Authentication: policy, LocalServer: &rpc.HostLocalServerOptions{Token: copilot.String("independent-websocket-secret")},
 					AllowCreatingNewSessions: copilot.Bool(!resume),
 					CreateSession: func(ctx context.Context, request copilot.AhpSessionCreateRequest) (*copilot.Session, error) {
-						if err := check(request.Authentication, request.Config.GitHubToken); err != nil {
+						if err := check(request.Authentication, request.Config.GitHub.Token); err != nil {
 							return nil, err
 						}
-						request.Config.Provider, request.Config.Model = provider, "local-model"
-						request.Config.ExtensionSDKPath = copilot.String(testharness.RepoPath("nodejs", "dist"))
-						request.Config.OnPermissionRequest = copilot.PermissionHandler.ApproveAll
+						request.Config.Inference, request.Config.Model = byokInference(provider, request.Config.Inference), "local-model"
+						request.Config.GitHub.Capi = &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}
+						request.Config.Extensions.SDKPath = copilot.String(testharness.RepoPath("nodejs", "dist"))
+						request.Config.Permissions.OnRequest = copilot.PermissionHandler.ApproveAll
 						session, err := owner.CreateSession(ctx, request.Config)
 						if err == nil {
 							durableID.Store(session.SessionID)
@@ -184,16 +182,17 @@ func TestHostAuthenticationBYOKCreateAndColdResumeE2E(t *testing.T) {
 						return session, err
 					},
 					ResumeSession: func(ctx context.Context, request copilot.AhpSessionResumeRequest) (*copilot.Session, error) {
-						if err := check(request.Authentication, request.Config.GitHubToken); err != nil {
+						if err := check(request.Authentication, request.Config.GitHub.Token); err != nil {
 							return nil, err
 						}
 						if request.SessionID != durableID.Load() {
 							return nil, fmt.Errorf("resumed %q, expected %q", request.SessionID, durableID.Load())
 						}
-						request.Config.Provider, request.Config.Model = provider, "local-model"
-						request.Config.ExtensionSDKPath = copilot.String(testharness.RepoPath("nodejs", "dist"))
-						request.Config.OnPermissionRequest = copilot.PermissionHandler.ApproveAll
-						session, err := owner.ResumeSessionWithOptions(ctx, request.SessionID, request.Config)
+						request.Config.Inference, request.Config.Model = byokInference(provider, request.Config.Inference), "local-model"
+						request.Config.GitHub.Capi = &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}
+						request.Config.Extensions.SDKPath = copilot.String(testharness.RepoPath("nodejs", "dist"))
+						request.Config.Permissions.OnRequest = copilot.PermissionHandler.ApproveAll
+						session, err := owner.ResumeSession(ctx, request.SessionID, request.Config)
 						if err == nil {
 							original.Store(session)
 						}

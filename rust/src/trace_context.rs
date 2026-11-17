@@ -10,7 +10,7 @@
 //!   [`MessageOptions::tracestate`](crate::types::MessageOptions::tracestate),
 //!   which take precedence when set.
 //! - **Ambient callback** via
-//!   [`ClientOptions::on_get_trace_context`](crate::ClientOptions::on_get_trace_context),
+//!   [`ClientObservabilityOptions::on_get_trace_context`](crate::ClientObservabilityOptions::on_get_trace_context),
 //!   which the SDK invokes before `session.create`, `session.resume`, and
 //!   `session.send` whenever the per-turn override is absent.
 //!
@@ -74,7 +74,7 @@ impl TraceContext {
 /// session RPCs.
 ///
 /// Set via
-/// [`ClientOptions::on_get_trace_context`](crate::ClientOptions::on_get_trace_context).
+/// [`ClientObservabilityOptions::on_get_trace_context`](crate::ClientObservabilityOptions::on_get_trace_context).
 /// The SDK invokes [`get_trace_context`](Self::get_trace_context) before
 /// each `session.create`, `session.resume`, and `session.send` whenever
 /// the call site does not carry a per-turn override.

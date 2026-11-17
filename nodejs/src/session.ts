@@ -70,7 +70,7 @@ import type {
     ModelCapabilitiesOverride,
     SectionTransformFn,
     SessionCapabilities,
-    SessionConfig,
+    CreateSessionOptions,
     SessionEvent,
     SessionEventHandler,
     SessionEventPayload,
@@ -510,9 +510,9 @@ const TOOL_SEARCH_TOOL_NAME = "tool_search_tool";
  *
  * // Subscribe to events
  * session.on((event) => {
- *   if (event.type === "assistant.message") {
- *     console.log(event.data.content);
- *   }
+ *     if (event.type === "assistant.message") {
+ *         console.log(event.data.content);
+ *     }
  * });
  *
  * // Send a message and wait for completion
@@ -819,7 +819,7 @@ export class CopilotSession {
     }
 
     /**
-     * Outcome of the `permissionMode` requested when this session was created
+     * Outcome of the `permissions.mode` requested when this session was created
      * or resumed: whether it was applied, and the authoritative mode the
      * session started in. Undefined when no mode was requested.
      */
@@ -2067,7 +2067,7 @@ export class CopilotSession {
      * @param tools - An array of tool definitions with their handlers, or undefined to clear all tools
      * @internal This method is typically called internally when creating a session with tools.
      */
-    registerTools(tools?: SessionConfig["tools"]): void {
+    registerTools(tools?: NonNullable<CreateSessionOptions["tools"]>["definitions"]): void {
         this.assertConnected();
         this.toolHandlers.clear();
         if (!tools) {
@@ -2120,7 +2120,7 @@ export class CopilotSession {
      * @param canvases - Canvases created via `createCanvas`, or undefined to clear all canvases
      * @internal Called by the SDK when creating/resuming a session with `canvases`.
      */
-    registerCanvases(canvases?: Canvas[]): void {
+    registerCanvases(canvases?: readonly Canvas[]): void {
         this.assertConnected();
         this.canvases.clear();
         if (!canvases || canvases.length === 0) {
@@ -2446,7 +2446,7 @@ export class CopilotSession {
      * @param commands - An array of command definitions with handlers, or undefined to clear
      * @internal This method is typically called internally when creating/resuming a session.
      */
-    registerCommands(commands?: { name: string; handler: CommandHandler }[]): void {
+    registerCommands(commands?: readonly { name: string; handler: CommandHandler }[]): void {
         this.assertConnected();
         this.commandHandlers.clear();
         if (!commands) {
@@ -2578,7 +2578,7 @@ export class CopilotSession {
     /**
      * Sets the open-canvas snapshot for this session.
      *
-     * @param instances - The `openCanvases` array from the `session.resume` response.
+     * @param instances - The `canvases.open` array from the `session.resume` response.
      * @internal This method is typically called internally when resuming a session.
      */
     setOpenCanvases(instances: OpenCanvasInstance[]): void {
@@ -3357,7 +3357,9 @@ export class CopilotSession {
      * ]);
      * ```
      */
-    async setTools(tools: NonNullable<SessionConfig["tools"]>): Promise<void> {
+    async setTools(
+        tools: NonNullable<NonNullable<CreateSessionOptions["tools"]>["definitions"]>
+    ): Promise<void> {
         this.assertConnected();
         const definitions = tools.map(toToolDefinition);
         const replacement = this.setToolsQueue.then(async () => {

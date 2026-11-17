@@ -166,7 +166,7 @@ connection. Tool and hook functions stay in your application.
 <summary><strong>TypeScript</strong></summary>
 
 ```ts
-import { approveAll, type CopilotClient } from "@github/copilot-sdk";
+import { approveAll, type CopilotClient } from "@microsoft/copilot-sdk";
 
 async function startApplicationHost(client: CopilotClient) {
     return client.startAhpHost({
@@ -176,7 +176,10 @@ async function startApplicationHost(client: CopilotClient) {
             signal.throwIfAborted();
             return client.createSession({
                 ...config,
-                onPermissionRequest: approveAll,
+                permissions: {
+                    ...config.permissions,
+                    onRequest: approveAll,
+                },
             });
         },
         onSessionReleased: async (originalSession) => {
@@ -192,8 +195,8 @@ async function startApplicationHost(client: CopilotClient) {
 
 ```rust
 use std::sync::Arc;
-use github_copilot_sdk::{AhpHost, AhpHostAuthentication, AhpHostOptions, AhpSessionRequest, Client, Error};
-use github_copilot_sdk::rpc::HostLocalServerOptions;
+use copilot_sdk::{AhpHost, AhpHostAuthentication, AhpHostOptions, AhpSessionRequest, Client, Error};
+use copilot_sdk::rpc::HostLocalServerOptions;
 
 async fn start_application_host(owner: &Client) -> Result<AhpHost, Error> {
     owner
@@ -225,15 +228,23 @@ async fn start_application_host(owner: &Client) -> Result<AhpHost, Error> {
 
 ```python
 from copilot import (
-    AhpHostAuthentication, AhpHostOptions, AhpSessionCreateRequest, CopilotClient, CopilotSession,
+    AhpHostAuthentication,
+    AhpHostOptions,
+    AhpSessionCreateRequest,
+    CopilotClient,
+    CopilotSession,
     PermissionHandler,
 )
 from copilot.rpc import HostLocalServerOptions
 
+
 async def start_application_host(client: CopilotClient):
     async def create(request: AhpSessionCreateRequest):
         config = request.config.copy()
-        config["on_permission_request"] = PermissionHandler.approve_all
+        config["permissions"] = {
+            **(config.get("permissions") or {}),
+            "on_request": PermissionHandler.approve_all,
+        }
         return await client.create_session(**config)
 
     async def release(session: CopilotSession):
@@ -258,8 +269,8 @@ package main
 
 import (
     "context"
-    copilot "github.com/github/copilot-sdk/go"
-    "github.com/github/copilot-sdk/go/rpc"
+    copilot "github.com/microsoft/copilot-sdk/go/v2"
+    "github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func startApplicationHost(ctx context.Context, client *copilot.Client) (*copilot.AhpHost, error) {
@@ -267,7 +278,7 @@ func startApplicationHost(ctx context.Context, client *copilot.Client) (*copilot
         Authentication: copilot.AhpHostAuthentication{Mode: "github"},
         LocalServer: &rpc.HostLocalServerOptions{},
         CreateSession: func(ctx context.Context, request copilot.AhpSessionCreateRequest) (*copilot.Session, error) {
-            request.Config.OnPermissionRequest = copilot.PermissionHandler.ApproveAll
+            request.Config.Permissions.OnRequest = copilot.PermissionHandler.ApproveAll
             return client.CreateSession(ctx, request.Config)
         },
         OnSessionReleased: func(session *copilot.Session) error {
@@ -284,25 +295,24 @@ func main() {}
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
 using System.Threading.Tasks;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 static class HostingExample
 {
-    public static Task<AhpHost> StartApplicationHostAsync(CopilotClient client) =>
-        client.StartAhpHostAsync(new AhpHostOptions
-        {
-            Authentication = new AhpHostAuthentication.GitHub(),
-            LocalServer = new(),
-            CreateSession = request =>
+    public static Task<AhpHost> StartApplicationHostAsync(CopilotClient client) => client.StartAhpHostAsync(new AhpHostOptions
+    {
+        Authentication = new AhpHostAuthentication.GitHub(),
+        LocalServer = new(),
+        CreateSession = request =>
             {
                 request.CancellationToken.ThrowIfCancellationRequested();
-                request.Config.OnPermissionRequest = PermissionHandler.ApproveAll;
+                request.Config.Permissions.OnRequest = PermissionHandler.ApproveAll;
                 return client.CreateSessionAsync(request.Config, request.CancellationToken);
             },
-            OnSessionReleased = session => session.DisposeAsync().AsTask()
-        });
+        OnSessionReleased = session => session.DisposeAsync().AsTask()
+    });
 }
 ```
 
@@ -311,27 +321,40 @@ static class HostingExample
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.AhpHost;
-import com.github.copilot.AhpHostAuthentication;
-import com.github.copilot.AhpHostOptions;
-import com.github.copilot.AllowCopilotExperimental;
-import com.github.copilot.CopilotClient;
-import com.github.copilot.generated.rpc.HostLocalServerOptions;
-import com.github.copilot.rpc.PermissionHandler;
+import com.microsoft.copilot.AhpHost;
+import com.microsoft.copilot.AhpHostAuthentication;
+import com.microsoft.copilot.AhpHostOptions;
+import com.microsoft.copilot.AllowCopilotExperimental;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.generated.rpc.HostLocalServerOptions;
+import com.microsoft.copilot.rpc.PermissionHandler;
 import java.util.concurrent.CompletableFuture;
 
 @AllowCopilotExperimental
 class HostingExample {
     static CompletableFuture<AhpHost> startApplicationHost(CopilotClient client) {
-        return client.startAhpHost(new AhpHostOptions()
-                .setAuthentication(AhpHostAuthentication.github())
-                .setLocalServer(HostLocalServerOptions.builder().build())
-                .setCreateSession(request -> client.createSession(request.config()
-                        .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)))
-                .setOnSessionReleased(session -> {
-                    session.close();
-                    return CompletableFuture.completedFuture(null);
-                }));
+        return client
+                .startAhpHost(new AhpHostOptions()
+                        .setAuthentication(AhpHostAuthentication
+                                .github())
+                        .setLocalServer(HostLocalServerOptions
+                                .builder()
+                                .build())
+                        .setCreateSession(request -> {
+                            var config = request
+                                    .config();
+                            config
+                                    .getPermissions()
+                                    .setOnRequest(PermissionHandler.APPROVE_ALL);
+                            return client
+                                    .createSession(config);
+                        })
+                        .setOnSessionReleased(session -> {
+                            session
+                                    .close();
+                            return CompletableFuture
+                                    .completedFuture(null);
+                        }));
     }
 }
 ```
@@ -371,7 +394,7 @@ no custom session-listing callback.
 
 Node's optional `resumeSession` callback receives an `AhpSessionResumeRequest`
 with `sessionId`, host-selected `config`, and an abort `signal`. Return the
-object from `client.resumeSession(sessionId, { ...config, onPermissionRequest, ... })`,
+object from `client.resumeSession(sessionId, { ...config, permissions: { ...config.permissions, onRequest: onPermissionRequest }, ... })`,
 adding the application's tools, hooks, and handlers needed after a runtime restart.
 These functions are application code, not serialized catalog data.
 If the application retained its original session on the owning client, the
@@ -379,7 +402,7 @@ callback can return that object instead of creating another resumed wrapper.
 It must still match the requested session identity and workspace.
 
 Rust exposes `with_resume_session` and the `AhpSessionResumeFactory` trait.
-Its `AhpSessionResumeRequest` carries a `ResumeSessionConfig` and a cooperative
+Its `AhpSessionResumeRequest` carries a `ResumeSessionOptions` and a cooperative
 `cancellation_token`. Use the supplied request-scoped `Client` to call
 `resume_session(request.config)` with your application handlers, and return the
 result in an `Arc<Session>`.
@@ -548,7 +571,7 @@ dependency is runtime-free; do not patch that dependency to the runtime-bearing
 SDK build or stage a separate host executable.
 
 Build both the runtime launcher and its native provider from the runtime
-checkout. Point the SDK's `RuntimeConnection.forStdio({ path })` at that local
+checkout. Point the SDK's `RuntimeConnection.forSpawnedStdio({ path })` at that local
 launcher. A local JavaScript launcher loading a released native provider is
 not a local runtime build.
 
@@ -618,7 +641,7 @@ uv run pytest test_host.py e2e/test_runtime_host_e2e.py
 go test -race ./... -run 'Ahp|RuntimeHost'
 
 # From src/sdk/dotnet
-dotnet test test/GitHub.Copilot.SDK.Test.csproj -p:CopilotSkipCliDownload=true \
+dotnet test test/Microsoft.Copilot.SDK.Test.csproj -p:CopilotSkipCliDownload=true \
   --filter 'FullyQualifiedName~ClientSessionLifetimeTests.Ahp_|FullyQualifiedName~RuntimeHostE2ETests'
 
 # From src/sdk/java, using JDK 25+

@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestClient_CustomizationDirectoryAdapters(t *testing.T) {
@@ -55,27 +55,11 @@ func TestClient_CustomizationDirectoryAdapters(t *testing.T) {
 					return response, nil
 				})
 			}
-			_, err := client.CreateSession(t.Context(), &SessionConfig{
-				WorkingDirectory:       "request-cwd",
-				EnableConfigDiscovery:  Bool(false),
-				EnableFileHooks:        Bool(false),
-				SkillDirectories:       directories["skillDirectories"],
-				AgentDirectories:       directories["agentDirectories"],
-				InstructionDirectories: directories["instructionDirectories"],
-				HookDirectories:        directories["hookDirectories"],
-			})
+			_, err := client.CreateSession(t.Context(), &CreateSessionOptions{WorkingDirectory: "request-cwd", EnableConfigDiscovery: Bool(false), Hooks: SessionHookOptions{EnableRepositoryHooks: Bool(false), Directories: directories["hookDirectories"]}, Skills: SessionSkillOptions{Directories: directories["skillDirectories"]}, Agents: SessionAgentOptions{Directories: directories["agentDirectories"]}, Instructions: CreateSessionInstructionOptions{Directories: directories["instructionDirectories"]}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = client.ResumeSessionWithOptions(t.Context(), "resumed", &ResumeSessionConfig{
-				WorkingDirectory:       "resume-cwd",
-				EnableConfigDiscovery:  Bool(false),
-				EnableFileHooks:        Bool(false),
-				SkillDirectories:       directories["skillDirectories"],
-				AgentDirectories:       directories["agentDirectories"],
-				InstructionDirectories: directories["instructionDirectories"],
-				HookDirectories:        directories["hookDirectories"],
-			})
+			_, err = client.ResumeSession(t.Context(), "resumed", &ResumeSessionOptions{WorkingDirectory: "resume-cwd", EnableConfigDiscovery: Bool(false), Hooks: SessionHookOptions{EnableRepositoryHooks: Bool(false), Directories: directories["hookDirectories"]}, Skills: SessionSkillOptions{Directories: directories["skillDirectories"]}, Agents: SessionAgentOptions{Directories: directories["agentDirectories"]}, Instructions: SessionInstructionOptions{Directories: directories["instructionDirectories"]}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,8 +68,8 @@ func TestClient_CustomizationDirectoryAdapters(t *testing.T) {
 				if err := json.Unmarshal(<-requests, &payload); err != nil {
 					t.Fatal(err)
 				}
-				for _, key := range []string{"skillDirectories", "agentDirectories", "instructionDirectories", "hookDirectories"} {
-					value, present := payload[key]
+				for key, group := range map[string]string{"skillDirectories": "skills", "agentDirectories": "agents", "instructionDirectories": "instructions", "hookDirectories": "hooks"} {
+					value, present := sessionWireGroup(payload, group)["directories"]
 					if tt.roots == nil {
 						if present {
 							t.Errorf("unexpected %s: %s", key, value)
@@ -100,14 +84,15 @@ func TestClient_CustomizationDirectoryAdapters(t *testing.T) {
 						}
 					}
 				}
-				for _, key := range []string{"enableConfigDiscovery", "enableFileHooks"} {
-					if string(payload[key]) != "false" {
-						t.Errorf("%s = %s, want false", key, payload[key])
-					}
+				if string(payload["enableConfigDiscovery"]) != "false" {
+					t.Errorf("enableConfigDiscovery = %s, want false", payload["enableConfigDiscovery"])
 				}
-				for _, key := range []string{"additionalDirectories", "customAgents", "hooks"} {
-					if _, present := payload[key]; present {
-						t.Errorf("unexpected %s in %s", key, payload[key])
+				if value := sessionWireGroup(payload, "hooks")["enableRepositoryHooks"]; string(value) != "false" {
+					t.Errorf("hooks.enableRepositoryHooks = %s, want false", value)
+				}
+				for group, key := range map[string]string{"filesystem": "additionalDirectories", "agents": "definitions", "hooks": "hasHandlers"} {
+					if _, present := sessionWireGroup(payload, group)[key]; present {
+						t.Errorf("unexpected %s.%s in %s", group, key, payload[group])
 					}
 				}
 			}

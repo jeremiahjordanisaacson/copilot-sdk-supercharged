@@ -1,0 +1,57 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+/**
+ * Core classes for the Microsoft Copilot SDK for Java.
+ *
+ * <p>
+ * This package provides the main entry points for interacting with GitHub
+ * Copilot programmatically. The SDK enables Java applications to leverage
+ * Copilot's agentic capabilities, including multi-turn conversations, tool
+ * execution, and AI-powered code generation.
+ *
+ * <h2>Main Classes</h2>
+ * <ul>
+ * <li>{@link com.microsoft.copilot.CopilotClient} - The main client for
+ * connecting to and communicating with the Copilot CLI. Manages the lifecycle
+ * of the CLI process and provides methods for creating sessions, querying
+ * models, and checking authentication status.</li>
+ * <li>{@link com.microsoft.copilot.CopilotSession} - Represents a single
+ * conversation session with Copilot. Sessions maintain context across multiple
+ * messages and support streaming responses, tool invocations, and event
+ * handling.</li>
+ * <li>{@link com.microsoft.copilot.JsonRpcClient} - Low-level JSON-RPC client
+ * for communication with the Copilot CLI process.</li>
+ * </ul>
+ *
+ * <h2>Quick Start</h2>
+ *
+ * <pre>{@code
+ * try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
+ * 	client.start().get();
+ *
+ * 	var session = client.createSession(new CreateSessionOptions().setModel("gpt-5.4")).get();
+ *
+ * 	session.on(AssistantMessageEvent.class, msg -> {
+ * 		System.out.println(msg.getData().content());
+ * 	});
+ *
+ * 	session.send(new MessageOptions().setPrompt("Hello, Copilot!")).get();
+ * }
+ * }</pre>
+ *
+ * <h2>Related Packages</h2>
+ * <ul>
+ * <li>{@link com.microsoft.copilot.generated} - Auto-generated event types
+ * emitted during session processing</li>
+ * <li>{@link com.microsoft.copilot.rpc} - Configuration and data transfer
+ * objects</li>
+ * </ul>
+ *
+ * @see com.microsoft.copilot.CopilotClient
+ * @see com.microsoft.copilot.CopilotSession
+ * @see <a href="https://github.com/github/copilot-sdk/tree/main/java">GitHub
+ *      Repository</a>
+ */
+package com.microsoft.copilot;

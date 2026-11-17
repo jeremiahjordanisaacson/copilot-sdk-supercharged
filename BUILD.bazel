@@ -151,7 +151,7 @@ genrule(
         "//src/native/schema-codegen:generated/session-events.schema.json",
         ".editorconfig",
         "dotnet/global.json",
-        "dotnet/src/GitHub.Copilot.SDK.csproj",
+        "dotnet/src/Microsoft.Copilot.SDK.csproj",
         "scripts/codegen/csharp.ts",
     ] + HAND_WRITTEN_DOTNET_INPUTS + SHARED_CODEGEN_INPUTS,
     outs = ["projections/dotnet.tar"],

@@ -5,15 +5,15 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Text.Json;
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
 
 public class ScenarioTestingSessionSetupE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : ScenarioTestingE2ETestBase(fixture, "scenario_testing_session_setup", output)
@@ -27,127 +27,44 @@ public class ScenarioTestingSessionSetupE2ETests(E2ETestFixture fixture, ITestOu
         var (cliPath, capturePath) = await CreateFakeRuntimeAsync("capture");
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(
                 path: cliPath,
                 args: ["--capture-file", capturePath, "--behavior", "capture"]),
-            UseLoggedInUser = false,
+            GitHub = new ClientGitHubOptions { UseLoggedInUser = false }
         });
 
         var sessionId = $"scenario-client-composed-{Guid.NewGuid():N}";
-        await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
+        await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
         {
             SessionId = sessionId,
             ClientName = "scenario-client",
             Model = "claude-sonnet-5",
-            ReasoningEffort = "high",
-            ReasoningSummary = ReasoningSummary.Detailed,
-            ContextTier = ContextTier.LongContext,
-            Streaming = true,
-            IncludeSubAgentStreamingEvents = false,
-            SystemMessage = new SystemMessageConfig
+            SystemMessage = new SystemMessageConfig { Mode = SystemMessageMode.Append, Content = "SCENARIO_COMPOSED_SYSTEM_MESSAGE", },
+            Inference = new SessionInferenceOptions { ReasoningEffort = "high", ReasoningSummary = ReasoningSummary.Detailed, ContextTier = ContextTier.LongContext, Providers = [new NamedProviderConfig { Name = "scenario-provider", Type = "openai", WireApi = "responses", BaseUrl = "https://provider.example.test/v1", BearerTokenProvider = _ => Task.FromResult("scenario-provider-token"), },], Models = [new ProviderModelConfig { Provider = "scenario-provider", Id = "scenario-model", ModelId = "claude-sonnet-5", WireModel = "scenario-wire-model", },] },
+            Events = new SessionEventOptions
             {
-                Mode = SystemMessageMode.Append,
-                Content = "SCENARIO_COMPOSED_SYSTEM_MESSAGE",
+                Streaming = true,
+                IncludeSubAgentStreamingEvents = false,
+                OnEvent = _ =>
+        {
+        }
             },
             EnableConfigDiscovery = true,
-            EnableSessionTelemetry = false,
-            EnableExperimentalMode = true,
-            SkipCustomInstructions = false,
-            CustomAgentsLocalOnly = true,
-            CoauthorEnabled = false,
-            ManageScheduleEnabled = false,
-            SkipEmbeddingRetrieval = true,
-            EmbeddingCacheStorage = EmbeddingCacheStorageMode.InMemory,
-            OrganizationCustomInstructions = "SCENARIO_ORG_INSTRUCTIONS",
-            EnableOnDemandInstructionDiscovery = false,
-            EnableFileHooks = false,
-            EnableHostGitOperations = false,
-            EnableSessionStore = false,
-            EnableSkills = false,
-            AvailableTools = ["scenario_tool"],
-            ExcludedTools = ["shell"],
-            Tools = [AIFunctionFactory.Create(() => "unused", "scenario_tool")],
-            Commands =
-            [
-                new CommandDefinition
-                {
-                    Name = "scenario-command",
-                    Description = "Scenario command",
-                    Handler = _ => Task.CompletedTask,
-                },
-            ],
-            McpServers = new Dictionary<string, McpServerConfig>
-            {
-                ["scenario-mcp"] = new McpStdioServerConfig
-                {
-                    Command = "node",
-                    Args = ["scenario-mcp.mjs"],
-                    Tools = ["*"],
-                },
-            },
-            CustomAgents =
-            [
-                new CustomAgentConfig
-                {
-                    Name = "scenario-agent",
-                    DisplayName = "Scenario Agent",
-                    Description = "scenario client agent",
-                    Prompt = "Act as the scenario agent.",
-                    Tools = ["scenario_tool"],
-                },
-            ],
-            DefaultAgent = new DefaultAgentConfig { ExcludedTools = ["edit"] },
-            Agent = "scenario-agent",
-            Providers =
-            [
-                new NamedProviderConfig
-                {
-                    Name = "scenario-provider",
-                    Type = "openai",
-                    WireApi = "responses",
-                    BaseUrl = "https://provider.example.test/v1",
-                    BearerTokenProvider = _ => Task.FromResult("scenario-provider-token"),
-                },
-            ],
-            Models =
-            [
-                new ProviderModelConfig
-                {
-                    Provider = "scenario-provider",
-                    Id = "scenario-model",
-                    ModelId = "claude-sonnet-5",
-                    WireModel = "scenario-wire-model",
-                },
-            ],
-            EnableMcpApps = true,
-            GitHubMcpToolConfig = new GitHubMcpToolConfig
-            {
-                EnableAllTools = false,
-                AdditionalTools = ["issues.get"],
-                DisableFormDeferral = true,
-            },
-            RequestCanvasRenderer = true,
-            RequestExtensions = true,
-            ExtensionSdkPath = "scenario-extension-sdk",
-            ExtensionInfo = new ExtensionInfo { Source = "scenario-client", Name = "desktop" },
-            CanvasProvider = new CanvasProviderIdentity { Id = "scenario:builtin:desktop", Name = "scenario client" },
-            Canvases =
-            [
-                new CanvasDeclaration
-                {
-                    Id = "scenario-canvas",
-                    DisplayName = "Scenario Canvas",
-                    Description = "Scenario-hosted canvas",
-                },
-            ],
-            CanvasHandler = new NoOpCanvasHandler(),
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            OnUserInputRequest = (_, _) => Task.FromResult(new UserInputResponse { Answer = "yes" }),
-            OnElicitationRequest = _ => Task.FromResult(new ElicitationResult { Action = UIElicitationResponseAction.Accept }),
-            OnExitPlanModeRequest = (_, _) => Task.FromResult(new ExitPlanModeResult { Approved = true }),
-            OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No),
-            OnMcpAuthRequest = _ => Task.FromResult<McpAuthResult?>(McpAuthResult.Cancel()),
-            OnEvent = _ => { },
+            GitHub = new SessionGitHubOptions { TelemetryEnabled = false, Mcp = new GitHubMcpToolConfig { EnableAllTools = false, AdditionalTools = ["issues.get"], DisableFormDeferral = true, } },
+            Experiments = new SessionExperimentOptions { EnableExperimentalMode = true },
+            Instructions = new CreateSessionInstructionOptions { SkipCustomInstructions = false, OrganizationText = "SCENARIO_ORG_INSTRUCTIONS", OnDemandDiscovery = false },
+            Agents = new SessionAgentOptions { LocalDiscoveryOnly = true, Definitions = [new CustomAgentConfig { Name = "scenario-agent", DisplayName = "Scenario Agent", Description = "scenario client agent", Prompt = "Act as the scenario agent.", Tools = ["scenario_tool"], },], Default = new DefaultAgentConfig { ExcludedTools = ["edit"] }, Selected = "scenario-agent" },
+            Git = new SessionGitOptions { CoauthorEnabled = false, EnableHostGitOperations = false },
+            Tools = new SessionToolOptions { ManageScheduleEnabled = false, AvailableTools = ["scenario_tool"], ExcludedTools = ["shell"], Definitions = [AIFunctionFactory.Create(() => "unused", "scenario_tool")] },
+            State = new SessionStateOptions { SkipEmbeddingRetrieval = true, EmbeddingCacheStorage = EmbeddingCacheStorageMode.InMemory, EnableCrossSessionStore = false },
+            Hooks = new SessionHookOptions { EnableRepositoryHooks = false },
+            Skills = new SessionSkillOptions { Enabled = false },
+            Interaction = new SessionInteractionOptions { Commands = [new CommandDefinition { Name = "scenario-command", Description = "Scenario command", Handler = _ => Task.CompletedTask, },], OnUserInputRequest = (_, _) => Task.FromResult(new UserInputResponse { Answer = "yes" }), OnElicitationRequest = _ => Task.FromResult(new ElicitationResult { Action = UIElicitationResponseAction.Accept }), OnExitPlanModeRequest = (_, _) => Task.FromResult(new ExitPlanModeResult { Approved = true }), OnAutoModeSwitchRequest = (_, _) => Task.FromResult(AutoModeSwitchResponse.No) },
+            Mcp = new SessionMcpOptions { Servers = new Dictionary<string, McpServerConfig> { ["scenario-mcp"] = new McpStdioServerConfig { Command = "node", Args = ["scenario-mcp.mjs"], Tools = ["*"], }, }, EnableApps = true, OnAuthRequest = _ => Task.FromResult<McpAuthResult?>(McpAuthResult.Cancel()) },
+            Canvases = new SessionCanvasOptions { RequestRenderer = true, Provider = new CanvasProviderIdentity { Id = "scenario:builtin:desktop", Name = "scenario client" }, Definitions = [new CanvasDeclaration { Id = "scenario-canvas", DisplayName = "Scenario Canvas", Description = "Scenario-hosted canvas", },], Handler = new NoOpCanvasHandler() },
+            Extensions = new SessionExtensionOptions { Enabled = true, SdkPath = "scenario-extension-sdk", Identity = new ExtensionInfo { Source = "scenario-client", Name = "desktop" } },
+            Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }
         });
 
         using var capture = await WaitForCaptureAsync(
@@ -160,55 +77,55 @@ public class ScenarioTestingSessionSetupE2ETests(E2ETestFixture fixture, ITestOu
         Assert.Equal(sessionId, request.GetProperty("sessionId").GetString());
         Assert.Equal("scenario-client", request.GetProperty("clientName").GetString());
         Assert.Equal("claude-sonnet-5", request.GetProperty("model").GetString());
-        Assert.Equal("high", request.GetProperty("reasoningEffort").GetString());
-        Assert.Equal("detailed", request.GetProperty("reasoningSummary").GetString());
-        Assert.Equal("long_context", request.GetProperty("contextTier").GetString());
-        Assert.True(request.GetProperty("streaming").GetBoolean());
-        Assert.False(request.GetProperty("includeSubAgentStreamingEvents").GetBoolean());
+        Assert.Equal("high", request.GetProperty("inference").GetProperty("reasoningEffort").GetString());
+        Assert.Equal("detailed", request.GetProperty("inference").GetProperty("reasoningSummary").GetString());
+        Assert.Equal("long_context", request.GetProperty("inference").GetProperty("contextTier").GetString());
+        Assert.True(request.GetProperty("events").GetProperty("streaming").GetBoolean());
+        Assert.False(request.GetProperty("events").GetProperty("includeSubAgentStreamingEvents").GetBoolean());
         Assert.Equal("SCENARIO_COMPOSED_SYSTEM_MESSAGE", request.GetProperty("systemMessage").GetProperty("content").GetString());
         Assert.True(request.GetProperty("enableConfigDiscovery").GetBoolean());
-        Assert.False(request.GetProperty("enableSessionTelemetry").GetBoolean());
-        Assert.True(request.GetProperty("isExperimentalMode").GetBoolean());
-        Assert.True(request.GetProperty("customAgentsLocalOnly").GetBoolean());
-        Assert.True(request.GetProperty("skipEmbeddingRetrieval").GetBoolean());
-        Assert.Equal("in-memory", request.GetProperty("embeddingCacheStorage").GetString());
-        Assert.Equal("SCENARIO_ORG_INSTRUCTIONS", request.GetProperty("organizationCustomInstructions").GetString());
-        Assert.False(request.GetProperty("enableOnDemandInstructionDiscovery").GetBoolean());
-        Assert.False(request.GetProperty("enableFileHooks").GetBoolean());
-        Assert.False(request.GetProperty("enableHostGitOperations").GetBoolean());
-        Assert.False(request.GetProperty("enableSessionStore").GetBoolean());
-        Assert.False(request.GetProperty("enableSkills").GetBoolean());
-        Assert.Equal("scenario_tool", request.GetProperty("availableTools")[0].GetString());
-        Assert.Equal("shell", request.GetProperty("excludedTools")[0].GetString());
-        Assert.Equal("scenario_tool", request.GetProperty("tools")[0].GetProperty("name").GetString());
-        Assert.Equal("scenario-command", request.GetProperty("commands")[0].GetProperty("name").GetString());
-        Assert.Equal("node", request.GetProperty("mcpServers").GetProperty("scenario-mcp").GetProperty("command").GetString());
-        Assert.Equal("scenario-agent", request.GetProperty("customAgents")[0].GetProperty("name").GetString());
-        Assert.Equal("scenario-agent", request.GetProperty("agent").GetString());
-        Assert.Equal("edit", request.GetProperty("defaultAgent").GetProperty("excludedTools")[0].GetString());
-        Assert.Equal("scenario-provider", request.GetProperty("providers")[0].GetProperty("name").GetString());
-        Assert.True(request.GetProperty("providers")[0].GetProperty("hasBearerTokenProvider").GetBoolean());
-        Assert.Equal("scenario-model", request.GetProperty("models")[0].GetProperty("id").GetString());
+        Assert.False(request.GetProperty("github").GetProperty("telemetryEnabled").GetBoolean());
+        Assert.True(request.GetProperty("experiments").GetProperty("enableExperimentalMode").GetBoolean());
+        Assert.True(request.GetProperty("agents").GetProperty("localDiscoveryOnly").GetBoolean());
+        Assert.True(request.GetProperty("state").GetProperty("skipEmbeddingRetrieval").GetBoolean());
+        Assert.Equal("in-memory", request.GetProperty("state").GetProperty("embeddingCacheStorage").GetString());
+        Assert.Equal("SCENARIO_ORG_INSTRUCTIONS", request.GetProperty("instructions").GetProperty("organizationText").GetString());
+        Assert.False(request.GetProperty("instructions").GetProperty("onDemandDiscovery").GetBoolean());
+        Assert.False(request.GetProperty("hooks").GetProperty("enableRepositoryHooks").GetBoolean());
+        Assert.False(request.GetProperty("git").GetProperty("enableHostGitOperations").GetBoolean());
+        Assert.False(request.GetProperty("state").GetProperty("enableCrossSessionStore").GetBoolean());
+        Assert.False(request.GetProperty("skills").GetProperty("enabled").GetBoolean());
+        Assert.Equal("scenario_tool", request.GetProperty("tools").GetProperty("availableTools")[0].GetString());
+        Assert.Equal("shell", request.GetProperty("tools").GetProperty("excludedTools")[0].GetString());
+        Assert.Equal("scenario_tool", request.GetProperty("tools").GetProperty("definitions")[0].GetProperty("name").GetString());
+        Assert.Equal("scenario-command", request.GetProperty("interaction").GetProperty("commands")[0].GetProperty("name").GetString());
+        Assert.Equal("node", request.GetProperty("mcp").GetProperty("servers").GetProperty("scenario-mcp").GetProperty("command").GetString());
+        Assert.Equal("scenario-agent", request.GetProperty("agents").GetProperty("definitions")[0].GetProperty("name").GetString());
+        Assert.Equal("scenario-agent", request.GetProperty("agents").GetProperty("selected").GetString());
+        Assert.Equal("edit", request.GetProperty("agents").GetProperty("default").GetProperty("excludedTools")[0].GetString());
+        Assert.Equal("scenario-provider", request.GetProperty("inference").GetProperty("providers")[0].GetProperty("name").GetString());
+        Assert.True(request.GetProperty("inference").GetProperty("providers")[0].GetProperty("hasBearerTokenProvider").GetBoolean());
+        Assert.Equal("scenario-model", request.GetProperty("inference").GetProperty("models")[0].GetProperty("id").GetString());
         Assert.False(request.TryGetProperty("remoteSession", out _));
-        Assert.True(request.GetProperty("requestMcpApps").GetBoolean());
-        Assert.False(request.GetProperty("githubMcpToolConfig").GetProperty("enableAllTools").GetBoolean());
-        Assert.True(request.GetProperty("githubMcpToolConfig").GetProperty("disableFormDeferral").GetBoolean());
-        Assert.True(request.GetProperty("requestCanvasRenderer").GetBoolean());
-        Assert.True(request.GetProperty("requestExtensions").GetBoolean());
-        Assert.Equal("scenario-extension-sdk", request.GetProperty("extensionSdkPath").GetString());
-        Assert.Equal("desktop", request.GetProperty("extensionInfo").GetProperty("name").GetString());
-        Assert.Equal("scenario:builtin:desktop", request.GetProperty("canvasProvider").GetProperty("id").GetString());
-        Assert.Equal("scenario-canvas", request.GetProperty("canvases")[0].GetProperty("id").GetString());
-        Assert.True(request.GetProperty("requestPermission").GetBoolean());
-        Assert.True(request.GetProperty("requestUserInput").GetBoolean());
-        Assert.True(request.GetProperty("requestElicitation").GetBoolean());
-        Assert.True(request.GetProperty("requestExitPlanMode").GetBoolean());
-        Assert.True(request.GetProperty("requestAutoModeSwitch").GetBoolean());
+        Assert.True(request.GetProperty("mcp").GetProperty("enableApps").GetBoolean());
+        Assert.False(request.GetProperty("github").GetProperty("mcp").GetProperty("enableAllTools").GetBoolean());
+        Assert.True(request.GetProperty("github").GetProperty("mcp").GetProperty("disableFormDeferral").GetBoolean());
+        Assert.True(request.GetProperty("canvases").GetProperty("requestRenderer").GetBoolean());
+        Assert.True(request.GetProperty("extensions").GetProperty("enabled").GetBoolean());
+        Assert.Equal("scenario-extension-sdk", request.GetProperty("extensions").GetProperty("sdkPath").GetString());
+        Assert.Equal("desktop", request.GetProperty("extensions").GetProperty("identity").GetProperty("name").GetString());
+        Assert.Equal("scenario:builtin:desktop", request.GetProperty("canvases").GetProperty("provider").GetProperty("id").GetString());
+        Assert.Equal("scenario-canvas", request.GetProperty("canvases").GetProperty("definitions")[0].GetProperty("id").GetString());
+        Assert.True(request.GetProperty("permissions").GetProperty("request").GetBoolean());
+        Assert.True(request.GetProperty("interaction").GetProperty("requestUserInput").GetBoolean());
+        Assert.True(request.GetProperty("interaction").GetProperty("requestElicitation").GetBoolean());
+        Assert.True(request.GetProperty("interaction").GetProperty("requestExitPlanMode").GetBoolean());
+        Assert.True(request.GetProperty("interaction").GetProperty("requestAutoModeSwitch").GetBoolean());
         Assert.Equal(sessionId, optionsUpdate.GetProperty("sessionId").GetString());
-        Assert.False(optionsUpdate.GetProperty("skipCustomInstructions").GetBoolean());
-        Assert.True(optionsUpdate.GetProperty("customAgentsLocalOnly").GetBoolean());
-        Assert.False(optionsUpdate.GetProperty("coauthorEnabled").GetBoolean());
-        Assert.False(optionsUpdate.GetProperty("manageScheduleEnabled").GetBoolean());
+        Assert.False(optionsUpdate.GetProperty("instructions").GetProperty("skipCustomInstructions").GetBoolean());
+        Assert.True(optionsUpdate.GetProperty("agents").GetProperty("localDiscoveryOnly").GetBoolean());
+        Assert.False(optionsUpdate.GetProperty("git").GetProperty("coauthorEnabled").GetBoolean());
+        Assert.False(optionsUpdate.GetProperty("tools").GetProperty("manageScheduleEnabled").GetBoolean());
     }
 
     [Fact]
@@ -218,37 +135,17 @@ public class ScenarioTestingSessionSetupE2ETests(E2ETestFixture fixture, ITestOu
         var (cliPath, capturePath) = await CreateFakeRuntimeAsync("capture");
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(
                 path: cliPath,
                 args: ["--capture-file", capturePath, "--behavior", "capture"]),
-            UseLoggedInUser = false,
+            GitHub = new ClientGitHubOptions { UseLoggedInUser = false }
         });
 
-        await using var sparse = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            SessionId = "scenario-sparse",
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
-        await using var disabled = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            SessionId = "scenario-disabled",
-            EnableSessionTelemetry = false,
-            EnableExperimentalMode = false,
-            SkipCustomInstructions = false,
-            CustomAgentsLocalOnly = false,
-            CoauthorEnabled = false,
-            ManageScheduleEnabled = false,
-            EnableConfigDiscovery = false,
-            SkipEmbeddingRetrieval = false,
-            EnableOnDemandInstructionDiscovery = false,
-            EnableFileHooks = false,
-            EnableHostGitOperations = false,
-            EnableSessionStore = false,
-            EnableSkills = false,
-            RequestCanvasRenderer = false,
-            RequestExtensions = false,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var sparse = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { SessionId = "scenario-sparse", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
+        await using var disabled = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { SessionId = "scenario-disabled", GitHub = new SessionGitHubOptions { TelemetryEnabled = false }, Experiments = new SessionExperimentOptions { EnableExperimentalMode = false }, Instructions = new CreateSessionInstructionOptions { SkipCustomInstructions = false, OnDemandDiscovery = false }, Agents = new SessionAgentOptions { LocalDiscoveryOnly = false }, Git = new SessionGitOptions { CoauthorEnabled = false, EnableHostGitOperations = false }, Tools = new SessionToolOptions { ManageScheduleEnabled = false }, EnableConfigDiscovery = false, State = new SessionStateOptions { SkipEmbeddingRetrieval = false, EnableCrossSessionStore = false }, Hooks = new SessionHookOptions { EnableRepositoryHooks = false }, Skills = new SessionSkillOptions { Enabled = false }, Canvases = new SessionCanvasOptions { RequestRenderer = false }, Extensions = new SessionExtensionOptions { Enabled = false }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         using var capture = await WaitForCaptureAsync(
             capturePath,
@@ -260,32 +157,33 @@ public class ScenarioTestingSessionSetupE2ETests(E2ETestFixture fixture, ITestOu
         var sparseRequest = requests["scenario-sparse"];
         var disabledRequest = requests["scenario-disabled"];
 
-        string[] fields =
+        (string Group, string Field)[] fields =
         [
-            "enableSessionTelemetry",
-            "isExperimentalMode",
-            "customAgentsLocalOnly",
-            "enableConfigDiscovery",
-            "skipEmbeddingRetrieval",
-            "enableOnDemandInstructionDiscovery",
-            "enableFileHooks",
-            "enableHostGitOperations",
-            "enableSessionStore",
-            "enableSkills",
-            "requestCanvasRenderer",
-            "requestExtensions",
+            ("github", "telemetryEnabled"),
+            ("experiments", "enableExperimentalMode"),
+            ("agents", "localDiscoveryOnly"),
+            ("state", "skipEmbeddingRetrieval"),
+            ("instructions", "onDemandDiscovery"),
+            ("hooks", "enableRepositoryHooks"),
+            ("git", "enableHostGitOperations"),
+            ("state", "enableCrossSessionStore"),
+            ("skills", "enabled"),
+            ("canvases", "requestRenderer"),
+            ("extensions", "enabled"),
         ];
 
-        Assert.All(fields, field => Assert.False(sparseRequest.TryGetProperty(field, out _)));
-        Assert.All(fields, field => Assert.False(disabledRequest.GetProperty(field).GetBoolean()));
+        Assert.All(fields, field => Assert.False(sparseRequest.GetProperty(field.Group).TryGetProperty(field.Field, out _)));
+        Assert.All(fields, field => Assert.False(disabledRequest.GetProperty(field.Group).GetProperty(field.Field).GetBoolean()));
+        Assert.False(sparseRequest.TryGetProperty("enableConfigDiscovery", out _));
+        Assert.False(disabledRequest.GetProperty("enableConfigDiscovery").GetBoolean());
 
         var optionsUpdate = Assert.Single(GetRequests(capture.RootElement, "session.options.update"))
             .GetProperty("params");
         Assert.Equal("scenario-disabled", optionsUpdate.GetProperty("sessionId").GetString());
-        Assert.False(optionsUpdate.GetProperty("skipCustomInstructions").GetBoolean());
-        Assert.False(optionsUpdate.GetProperty("customAgentsLocalOnly").GetBoolean());
-        Assert.False(optionsUpdate.GetProperty("coauthorEnabled").GetBoolean());
-        Assert.False(optionsUpdate.GetProperty("manageScheduleEnabled").GetBoolean());
+        Assert.False(optionsUpdate.GetProperty("instructions").GetProperty("skipCustomInstructions").GetBoolean());
+        Assert.False(optionsUpdate.GetProperty("agents").GetProperty("localDiscoveryOnly").GetBoolean());
+        Assert.False(optionsUpdate.GetProperty("git").GetProperty("coauthorEnabled").GetBoolean());
+        Assert.False(optionsUpdate.GetProperty("tools").GetProperty("manageScheduleEnabled").GetBoolean());
     }
 
     [Fact]
@@ -294,14 +192,17 @@ public class ScenarioTestingSessionSetupE2ETests(E2ETestFixture fixture, ITestOu
         var requestedSessionId = Guid.NewGuid().ToString();
         var sessionStarted = new TaskCompletionSource<SessionStartEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await using var session = await CreateSessionAsync(new SessionConfig
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
         {
             SessionId = requestedSessionId,
-            OnEvent = evt =>
+            Events = new SessionEventOptions
             {
-                if (evt is SessionStartEvent start)
-                    sessionStarted.TrySetResult(start);
-            },
+                OnEvent = evt =>
+        {
+            if (evt is SessionStartEvent start)
+                sessionStarted.TrySetResult(start);
+        }
+            }
         });
 
         var start = await sessionStarted.Task.WaitAsync(TestTimeout);
@@ -342,98 +243,87 @@ public class ScenarioTestingSessionSetupE2ETests(E2ETestFixture fixture, ITestOu
 
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(
                 path: cliPath,
                 args: ["--capture-file", capturePath, "--behavior", "callbacks"]),
-            UseLoggedInUser = false,
+            GitHub = new ClientGitHubOptions { UseLoggedInUser = false }
         });
-        await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
+        await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
         {
             SessionId = "scenario-handler-session",
-            Tools = [AIFunctionFactory.Create(() => { Mark("tool"); return "tool-result"; }, "scenario_tool")],
-            Commands =
-            [
-                new CommandDefinition
-                {
-                    Name = "scenario-command",
-                    Handler = _ =>
-                    {
-                        Mark("command");
-                        return Task.CompletedTask;
-                    },
-                },
-            ],
-            Providers =
-            [
-                new NamedProviderConfig
-                {
-                    Name = "scenario-provider",
-                    Type = "openai",
-                    BaseUrl = "https://provider.example.test/v1",
-                    BearerTokenProvider = _ =>
-                    {
-                        Mark("provider-token");
-                        return Task.FromResult("provider-token");
-                    },
-                },
-            ],
-            Models =
-            [
-                new ProviderModelConfig
-                {
-                    Provider = "scenario-provider",
-                    Id = "scenario-model",
-                    ModelId = "claude-sonnet-5",
-                },
-            ],
-            Canvases = [new CanvasDeclaration { Id = "scenario-canvas", DisplayName = "Scenario Canvas" }],
-            CanvasProvider = new CanvasProviderIdentity { Id = "scenario:builtin:desktop", Name = "scenario client" },
-            CanvasHandler = new CallbackCanvasHandler(() => Mark("canvas")),
-            OnPermissionRequest = (_, _) =>
+            Tools = new SessionToolOptions
             {
-                Mark("permission");
-                return Task.FromResult(PermissionDecision.ApproveOnce());
+                Definitions = [AIFunctionFactory.Create(() =>
+{
+    Mark("tool");
+    return "tool-result";
+}, "scenario_tool")]
             },
-            OnUserInputRequest = (_, _) =>
+            Interaction = new SessionInteractionOptions
             {
-                Mark("user-input");
-                return Task.FromResult(new UserInputResponse { Answer = "approved" });
+                Commands = [new CommandDefinition { Name = "scenario-command", Handler = _ =>
+{
+    Mark("command");
+    return Task.CompletedTask;
+}, }, ],
+                OnUserInputRequest = (_, _) =>
+{
+    Mark("user-input");
+    return Task.FromResult(new UserInputResponse { Answer = "approved" });
+},
+                OnElicitationRequest = _ =>
+{
+    Mark("elicitation");
+    return Task.FromResult(new ElicitationResult { Action = UIElicitationResponseAction.Accept, Content = new Dictionary<string, object> { ["value"] = "accepted" }, });
+},
+                OnExitPlanModeRequest = (_, _) =>
+{
+    Mark("exit-plan");
+    return Task.FromResult(new ExitPlanModeResult { Approved = true, SelectedAction = "interactive", });
+},
+                OnAutoModeSwitchRequest = (_, _) =>
+{
+    Mark("auto-mode");
+    return Task.FromResult(AutoModeSwitchResponse.No);
+}
             },
-            OnElicitationRequest = _ =>
+            Inference = new SessionInferenceOptions
             {
-                Mark("elicitation");
-                return Task.FromResult(new ElicitationResult
-                {
-                    Action = UIElicitationResponseAction.Accept,
-                    Content = new Dictionary<string, object> { ["value"] = "accepted" },
-                });
+                Providers = [new NamedProviderConfig { Name = "scenario-provider", Type = "openai", BaseUrl = "https://provider.example.test/v1", BearerTokenProvider = _ =>
+{
+    Mark("provider-token");
+    return Task.FromResult("provider-token");
+}, }, ],
+                Models = [new ProviderModelConfig { Provider = "scenario-provider", Id = "scenario-model", ModelId = "claude-sonnet-5", },]
             },
-            OnExitPlanModeRequest = (_, _) =>
+            Canvases = new SessionCanvasOptions { Definitions = [new CanvasDeclaration { Id = "scenario-canvas", DisplayName = "Scenario Canvas" }], Provider = new CanvasProviderIdentity { Id = "scenario:builtin:desktop", Name = "scenario client" }, Handler = new CallbackCanvasHandler(() => Mark("canvas")) },
+            Permissions = new SessionPermissionOptions
             {
-                Mark("exit-plan");
-                return Task.FromResult(new ExitPlanModeResult
-                {
-                    Approved = true,
-                    SelectedAction = "interactive",
-                });
+                OnRequest = (_, _) =>
+{
+    Mark("permission");
+    return Task.FromResult(PermissionDecision.ApproveOnce());
+}
             },
-            OnAutoModeSwitchRequest = (_, _) =>
+            Mcp = new SessionMcpOptions
             {
-                Mark("auto-mode");
-                return Task.FromResult(AutoModeSwitchResponse.No);
+                OnAuthRequest = _ =>
+{
+    Mark("mcp-auth");
+    return Task.FromResult<McpAuthResult?>(McpAuthResult.Cancel());
+}
             },
-            OnMcpAuthRequest = _ =>
+            Events = new SessionEventOptions
             {
-                Mark("mcp-auth");
-                return Task.FromResult<McpAuthResult?>(McpAuthResult.Cancel());
-            },
-            OnEvent = evt =>
-            {
-                if (evt is SessionInfoEvent { Data.Message: "SCENARIO_HANDLER_EVENT" })
-                {
-                    Mark("event");
-                }
-            },
+                OnEvent = evt =>
+{
+    if (evt is SessionInfoEvent { Data.Message: "SCENARIO_HANDLER_EVENT" })
+    {
+        Mark("event");
+    }
+}
+            }
         });
 
         await allObserved.Task.WaitAsync(TestTimeout);
@@ -482,20 +372,24 @@ public class ScenarioTestingSessionSetupE2ETests(E2ETestFixture fixture, ITestOu
         var milestonesLock = new object();
         var startObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await using var session = await CreateSessionAsync(new SessionConfig
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            McpServers = CreateTestMcpServers(ServerName),
-            OnEvent = evt =>
+            Mcp = new SessionMcpOptions { Servers = CreateTestMcpServers(ServerName) },
+            Events = new SessionEventOptions
             {
-                if (evt is SessionStartEvent)
+                OnEvent = evt =>
+        {
+            if (evt is SessionStartEvent)
+            {
+                lock (milestonesLock)
                 {
-                    lock (milestonesLock)
-                    {
-                        milestones.Add("session-start");
-                    }
-                    startObserved.TrySetResult();
+                    milestones.Add("session-start");
                 }
-            },
+
+                startObserved.TrySetResult();
+            }
+        }
+            }
         });
 
         await startObserved.Task.WaitAsync(TestTimeout);
@@ -742,7 +636,7 @@ public class ScenarioTestingSessionSetupE2ETests(E2ETestFixture fixture, ITestOu
           saveCapture();
 
           if (message.method === "connect") {
-            respond(message.id, { ok: true, protocolVersion: 3, version: "fake" });
+            respond(message.id, { ok: true, protocolVersion: 4, version: "fake" });
             return;
           }
 
@@ -777,7 +671,7 @@ public class ScenarioTestingSessionSetupE2ETests(E2ETestFixture fixture, ITestOu
             respond(message.id, {
               message: "pong",
               timestamp: new Date().toISOString(),
-              protocolVersion: 3
+              protocolVersion: 4
             });
             return;
           }
@@ -809,4 +703,4 @@ public class ScenarioTestingSessionSetupE2ETests(E2ETestFixture fixture, ITestOu
         """;
 }
 
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001

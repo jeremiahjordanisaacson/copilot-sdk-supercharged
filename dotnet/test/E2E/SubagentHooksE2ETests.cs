@@ -5,14 +5,14 @@
 using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Text.Json;
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
-#pragma warning disable GHCP001 // The LLM inference surface is intentionally experimental.
+#pragma warning disable MCPSDK001 // The LLM inference surface is intentionally experimental.
 
 public class SubagentHooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "subagent_hooks", output)
@@ -43,54 +43,53 @@ public class SubagentHooksE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         env["COPILOT_EXP_COPILOT_CLI_SESSION_BASED_SUBAGENTS"] = "true";
         await using var client = Ctx.CreateClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(),
-            RequestHandler = requestHandler
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(),
+            Models = new ClientModelOptions { RequestHandler = requestHandler }
         }, environment: env);
 
-        await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
+        await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
         {
             SessionId = parentSessionId,
             Model = ReplayModel,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Hooks = new SessionHooks
+            Permissions = new SessionPermissionOptions
             {
-                OnPreToolUse = (input, invocation) =>
-                {
-                    hookLog.Add(("pre", input.ToolName, input.SessionId));
-                    return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput
-                    {
-                        PermissionDecision = "allow"
-                    });
-                },
-                OnPostToolUse = async (input, invocation) =>
-                {
-                    hookLog.Add(("post", input.ToolName, input.SessionId));
-                    // A fast child can inject its result before the fixture's waiting reply is requested.
-                    if (input.ToolName == "view" && input.SessionId != parentSessionId)
-                    {
-                        await parentWaiting.Task;
-                    }
-                    return null;
-                },
-                OnSubagentStart = (input, invocation) =>
-                {
-                    starts.Enqueue((input, invocation.SessionId));
-                    lifecycle.Enqueue("start");
-                    return Task.FromResult<SubagentStartHookOutput?>(new SubagentStartHookOutput
-                    {
-                        AdditionalContext = ChildContext
-                    });
-                },
-                OnSubagentStop = (input, invocation) =>
-                {
-                    stops.Enqueue((input, invocation.SessionId));
-                    lifecycle.Enqueue("stop");
-                    return Task.FromResult<SubagentStopHookOutput?>(new SubagentStopHookOutput
-                    {
-                        ModifiedResponse = StopResponsePrefix + input.Response
-                    });
-                },
+                OnRequest = PermissionHandler.ApproveAll
             },
+            Hooks = new SessionHookOptions
+            {
+                Handlers = new SessionHooks
+                {
+                    OnPreToolUse = (input, invocation) =>
+                    {
+                        hookLog.Add(("pre", input.ToolName, input.SessionId));
+                        return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput { PermissionDecision = "allow" });
+                    },
+                    OnPostToolUse = async (input, invocation) =>
+                    {
+                        hookLog.Add(("post", input.ToolName, input.SessionId));
+                        // A fast child can inject its result before the fixture's waiting reply is requested.
+                        if (input.ToolName == "view" && input.SessionId != parentSessionId)
+                        {
+                            await parentWaiting.Task;
+                        }
+
+                        return null;
+                    },
+                    OnSubagentStart = (input, invocation) =>
+                    {
+                        starts.Enqueue((input, invocation.SessionId));
+                        lifecycle.Enqueue("start");
+                        return Task.FromResult<SubagentStartHookOutput?>(new SubagentStartHookOutput { AdditionalContext = ChildContext });
+                    },
+                    OnSubagentStop = (input, invocation) =>
+                    {
+                        stops.Enqueue((input, invocation.SessionId));
+                        lifecycle.Enqueue("stop");
+                        return Task.FromResult<SubagentStopHookOutput?>(new SubagentStopHookOutput { ModifiedResponse = StopResponsePrefix + input.Response });
+                    },
+                }
+            }
         });
 
         // Keep the built-in agent on the capture's model, not its changing default.

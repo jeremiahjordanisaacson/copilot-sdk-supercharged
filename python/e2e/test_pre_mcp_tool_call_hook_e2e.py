@@ -42,9 +42,9 @@ class TestPreMcpToolCallHook:
             return {"metaToUse": {"injected": "by-hook", "source": "test"}}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            mcp_servers=meta_echo_mcp_config(),
-            hooks={"on_pre_mcp_tool_call": on_pre_mcp_tool_call},
+            permissions={"on_request": PermissionHandler.approve_all},
+            mcp={"servers": meta_echo_mcp_config()},
+            hooks={"handlers": {"on_pre_mcp_tool_call": on_pre_mcp_tool_call}},
         )
         try:
             response = await session.send_and_wait(
@@ -71,9 +71,9 @@ class TestPreMcpToolCallHook:
             return {"metaToUse": {"completely": "replaced"}}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            mcp_servers=meta_echo_mcp_config(),
-            hooks={"on_pre_mcp_tool_call": on_pre_mcp_tool_call},
+            permissions={"on_request": PermissionHandler.approve_all},
+            mcp={"servers": meta_echo_mcp_config()},
+            hooks={"handlers": {"on_pre_mcp_tool_call": on_pre_mcp_tool_call}},
         )
         try:
             response = await session.send_and_wait(
@@ -98,9 +98,9 @@ class TestPreMcpToolCallHook:
             return {"metaToUse": None}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            mcp_servers=meta_echo_mcp_config(),
-            hooks={"on_pre_mcp_tool_call": on_pre_mcp_tool_call},
+            permissions={"on_request": PermissionHandler.approve_all},
+            mcp={"servers": meta_echo_mcp_config()},
+            hooks={"handlers": {"on_pre_mcp_tool_call": on_pre_mcp_tool_call}},
         )
         try:
             response = await session.send_and_wait(

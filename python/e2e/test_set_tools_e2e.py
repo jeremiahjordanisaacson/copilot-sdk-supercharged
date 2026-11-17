@@ -90,8 +90,8 @@ class TestSetTools:
         replacement_lookups: list[int] = []
         vegetable_lookups: list[int] = []
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[lookup_fruit("apple", original_lookups), retired_lookup()],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [lookup_fruit("apple", original_lookups), retired_lookup()]},
         )
 
         first = await session.send_and_wait(FRUIT_PROMPT, timeout=30)
@@ -131,8 +131,8 @@ class TestSetTools:
     async def test_replaces_tools_on_a_resumed_session(self, ctx: E2ETestContext):
         created_lookups: list[int] = []
         created = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[lookup_fruit("apple", created_lookups)],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [lookup_fruit("apple", created_lookups)]},
         )
         session_id = created.session_id
         first = await created.send_and_wait(FRUIT_PROMPT, timeout=30)
@@ -145,8 +145,8 @@ class TestSetTools:
         vegetable_lookups: list[int] = []
         resumed = await ctx.client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[lookup_fruit("apple", fruit_lookups)],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [lookup_fruit("apple", fruit_lookups)]},
         )
         await resumed.set_tools([lookup_vegetable(vegetable_lookups)])
 
@@ -173,8 +173,8 @@ class TestSetTools:
         replacement_lookups: list[int] = []
         invalid_calls: list[int] = []
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[lookup_fruit("apple", original_lookups)],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [lookup_fruit("apple", original_lookups)]},
         )
 
         with pytest.raises(Exception):

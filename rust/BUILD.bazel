@@ -5,8 +5,8 @@ load("//src/sdk/rust:sdk_targets.bzl", "sdk_targets")
 package(default_visibility = ["//visibility:public"])
 
 alias(
-    name = "github_copilot_sdk",
-    actual = ":github-copilot-sdk-local-runtime",
+    name = "copilot_sdk",
+    actual = ":copilot-sdk-local-runtime",
     tags = ["manual"],
 )
 

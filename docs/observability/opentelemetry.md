@@ -4,19 +4,22 @@ This guide shows how to add OpenTelemetry tracing to your Copilot SDK applicatio
 
 ## Built-in telemetry support
 
-The SDK has built-in support for configuring OpenTelemetry on the CLI process and propagating W3C Trace Context between the SDK and CLI. Provide a `TelemetryConfig` when creating the client to opt in:
+The SDK has built-in support for configuring OpenTelemetry on the runtime and propagating W3C Trace Context between the SDK and runtime. Provide a `TelemetryConfig` when creating the client to opt in:
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 <!-- docs-validate: strict -->
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-  telemetry: {
-    otlpEndpoint: "http://localhost:4318",
-  },
+    mode: "coding-agent",
+    observability: {
+        telemetry: {
+            otlpEndpoint: "http://localhost:4318",
+        },
+    },
 });
 ```
 
@@ -29,9 +32,12 @@ const client = new CopilotClient({
 from copilot import CopilotClient
 
 client = CopilotClient(
-    telemetry={
-        "otlp_endpoint": "http://localhost:4318",
-    },
+    mode="coding-agent",
+    observability={
+        "telemetry": {
+            "otlp_endpoint": "http://localhost:4318",
+        }
+    }
 )
 ```
 
@@ -45,13 +51,16 @@ client = CopilotClient(
 package main
 
 import (
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
 	client := copilot.NewClient(&copilot.ClientOptions{
-		Telemetry: &copilot.TelemetryConfig{
-			OTLPEndpoint: "http://localhost:4318",
+		Mode: copilot.ModeCodingAgent,
+		Observability: copilot.ClientObservabilityOptions{
+			Telemetry: &copilot.TelemetryConfig{
+				OTLPEndpoint: "http://localhost:4318",
+			},
 		},
 	})
 	_ = client
@@ -61,10 +70,14 @@ func main() {
 
 ```go
 client := copilot.NewClient(&copilot.ClientOptions{
-    Telemetry: &copilot.TelemetryConfig{
-        OTLPEndpoint: "http://localhost:4318",
-    },
+	Mode: copilot.ModeCodingAgent,
+	Observability: copilot.ClientObservabilityOptions{
+		Telemetry: &copilot.TelemetryConfig{
+			OTLPEndpoint: "http://localhost:4318",
+		},
+	},
 })
+
 ```
 
 </details>
@@ -75,10 +88,14 @@ client := copilot.NewClient(&copilot.ClientOptions{
 ```csharp
 var client = new CopilotClient(new CopilotClientOptions
 {
-    Telemetry = new TelemetryConfig
+    Mode = CopilotClientMode.CodingAgent,
+    Observability = new ClientObservabilityOptions
     {
-        OtlpEndpoint = "http://localhost:4318",
-    },
+        Telemetry = new TelemetryConfig
+        {
+            OtlpEndpoint = "http://localhost:4318",
+        }
+    }
 });
 ```
 
@@ -88,13 +105,13 @@ var client = new CopilotClient(new CopilotClientOptions
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 
-var client = new CopilotClient(new CopilotClientOptions()
-    .setTelemetry(new TelemetryConfig()
-        .setOtlpEndpoint("http://localhost:4318"))
-);
+var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+        .setObservability(new ClientObservabilityOptions()
+                .setTelemetry(new TelemetryConfig()
+                        .setOtlpEndpoint("http://localhost:4318"))));
 ```
 
 </details>
@@ -103,12 +120,13 @@ var client = new CopilotClient(new CopilotClientOptions()
 <summary><strong>Rust</strong></summary>
 
 ```rust
-use github_copilot_sdk::{Client, ClientOptions, TelemetryConfig};
+use copilot_sdk::{Client, ClientOptions, TelemetryConfig};
 
-let client = Client::start(ClientOptions::new()
-    .with_telemetry(TelemetryConfig::new()
-        .with_otlp_endpoint("http://localhost:4318"))
-).await?;
+let client = Client::start(ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_observability(|__sdk_group| {
+    __sdk_group
+        .with_telemetry(TelemetryConfig::new().with_otlp_endpoint("http://localhost:4318"))
+}))
+.await?;
 ```
 
 </details>
@@ -194,7 +212,7 @@ process attributes have Release Candidate stability.
 
 ### Trace context propagation
 
-> **Most users don't need this.** The `TelemetryConfig` above is all you need to collect traces from the CLI. The trace context propagation described in this section is an **advanced feature** for applications that create their own OpenTelemetry spans and want them to appear in the **same distributed trace** as the CLI's spans.
+> **Most users don't need this.** The `TelemetryConfig` above is all you need to collect traces from the runtime. The trace context propagation described in this section is an **advanced feature** for applications that create their own OpenTelemetry spans and want them to appear in the **same distributed trace** as the runtime's spans.
 
 The SDK can propagate W3C Trace Context (`traceparent`/`tracestate`) on JSON-RPC payloads so that your application's spans and the CLI's spans are linked in one distributed trace. This is useful when, for example, you want to see a "handle tool call" span in your app nested inside the CLI's "execute tool" span, or show the SDK call as a child of your request-handling span.
 
@@ -208,16 +226,19 @@ For **Node.js**, provide an `onGetTraceContext` callback on the client options. 
 
 <!-- docs-validate: strict -->
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 import { propagation, context } from "@opentelemetry/api";
 
 const client = new CopilotClient({
-  telemetry: { otlpEndpoint: "http://localhost:4318" },
-  onGetTraceContext: () => {
-    const carrier: Record<string, string> = {};
-    propagation.inject(context.active(), carrier);
-    return carrier; // { traceparent: "00-...", tracestate: "..." }
-  },
+    mode: "coding-agent",
+    observability: {
+        telemetry: { otlpEndpoint: "http://localhost:4318" },
+        onGetTraceContext: () => {
+            const carrier: Record<string, string> = {};
+            propagation.inject(context.active(), carrier);
+            return carrier; // { traceparent: "00-...", tracestate: "..." }
+        },
+    },
 });
 ```
 
@@ -229,7 +250,7 @@ When the CLI invokes a tool handler, the `traceparent` and `tracestate` from the
 
 * **Go**: The `ToolInvocation.TraceContext` field is a `context.Context` with the trace already restored—use it directly as the parent for your spans.
 * **Python**: Trace context is automatically restored around the handler via `trace_context()`—child spans are parented to the CLI's span automatically.
-* **.NET**: Configure `AddSource("github.copilot")` to export `copilot.tool_handler` parents under CLI spans; without listeners, only context propagates.
+* **.NET**: Configure `AddSource("microsoft.copilot")` to export `copilot.tool_handler` parents under CLI spans; without listeners, only context propagates.
 * **Node.js**: Since the SDK has no OpenTelemetry dependency, `traceparent` and `tracestate` are passed as raw strings on the `ToolInvocation` object. Restore the context manually if needed:
 
 <!-- docs-validate: strict -->
@@ -237,69 +258,77 @@ When the CLI invokes a tool handler, the `traceparent` and `tracestate` from the
 ```typescript
 declare function doWork(args: unknown): Promise<string>;
 
-import { defineTool } from "@github/copilot-sdk";
+import { defineTool } from "@microsoft/copilot-sdk";
 import { propagation, context, trace } from "@opentelemetry/api";
 
 const myTool = defineTool("my-tool", {
-  description: "Do work",
-  handler: async (args, invocation) => {
-    // Restore the CLI's trace context as the active context
-    const carrier = {
-      traceparent: invocation.traceparent,
-      tracestate: invocation.tracestate,
-    };
-    const parentCtx = propagation.extract(context.active(), carrier);
+    description: "Do work",
+    handler: async (args, invocation) => {
+        // Restore the CLI's trace context as the active context
+        const carrier = {
+            traceparent: invocation.traceparent,
+            tracestate: invocation.tracestate,
+        };
+        const parentCtx = propagation.extract(context.active(), carrier);
 
-    // Create a child span under the CLI's span
-    const tracer = trace.getTracer("my-app");
-    return context.with(parentCtx, () =>
-      tracer.startActiveSpan("my-tool", async (span) => {
-        try {
-          const result = await doWork(args);
-          return result;
-        } finally {
-          span.end();
-        }
-      })
-    );
-  },
+        // Create a child span under the CLI's span
+        const tracer = trace.getTracer("my-app");
+        return context.with(parentCtx, () =>
+            tracer.startActiveSpan("my-tool", async (span) => {
+                try {
+                    const result = await doWork(args);
+                    return result;
+                } finally {
+                    span.end();
+                }
+            }),
+        );
+    },
 });
 
 // Tool handlers are registered when the session is created.
-const session = await client.createSession({ tools: [myTool] });
+const session = await client.createSession({
+    tools: {
+        definitions: [myTool],
+    },
+});
 ```
 <!-- /docs-validate: hidden -->
 ```typescript
-import { defineTool } from "@github/copilot-sdk";
+import { defineTool } from "@microsoft/copilot-sdk";
 import { propagation, context, trace } from "@opentelemetry/api";
 
 const myTool = defineTool("my-tool", {
-  description: "Do work",
-  handler: async (args, invocation) => {
-    // Restore the CLI's trace context as the active context
-    const carrier = {
-      traceparent: invocation.traceparent,
-      tracestate: invocation.tracestate,
-    };
-    const parentCtx = propagation.extract(context.active(), carrier);
+    description: "Do work",
+    handler: async (args, invocation) => {
+        // Restore the CLI's trace context as the active context
+        const carrier = {
+            traceparent: invocation.traceparent,
+            tracestate: invocation.tracestate,
+        };
+        const parentCtx = propagation.extract(context.active(), carrier);
 
-    // Create a child span under the CLI's span
-    const tracer = trace.getTracer("my-app");
-    return context.with(parentCtx, () =>
-      tracer.startActiveSpan("my-tool", async (span) => {
-        try {
-          const result = await doWork(args);
-          return result;
-        } finally {
-          span.end();
-        }
-      })
-    );
-  },
+        // Create a child span under the CLI's span
+        const tracer = trace.getTracer("my-app");
+        return context.with(parentCtx, () =>
+            tracer.startActiveSpan("my-tool", async (span) => {
+                try {
+                    const result = await doWork(args);
+                    return result;
+                } finally {
+                    span.end();
+                }
+            }),
+        );
+    },
 });
 
 // Tool handlers are registered when the session is created.
-const session = await client.createSession({ tools: [myTool] });
+const session = await client.createSession({
+    tools: {
+        definitions: [myTool],
+    },
+});
 ```
 
 ### Per-language dependencies
@@ -307,7 +336,7 @@ const session = await client.createSession({ tools: [myTool] });
 | Language | Dependency | Notes |
 |---|---|---|
 | Node.js |—| No dependency; provide `onGetTraceContext` callback for outbound propagation |
-| Python | `opentelemetry-api` | Install with `pip install "github-copilot-sdk[telemetry]"` |
+| Python | `opentelemetry-api` | Install with `pip install "microsoft-copilot-sdk[telemetry]"` |
 | Go | `go.opentelemetry.io/otel` | Required dependency |
 | .NET |—| Uses built-in `System.Diagnostics.Activity` |
 | Java | `io.opentelemetry:opentelemetry-api` | Add this dependency for SDK-based setup; trace context injection is automatic when the OpenTelemetry Java agent or SDK is configured |

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
 )
 
 type structuredInventory struct {

@@ -5,12 +5,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::rpc::SkillSource;
-use github_copilot_sdk::session_events::{SessionEventType, ToolExecutionCompleteData};
-use github_copilot_sdk::{
-    CloudSessionOptions, Error, ErrorKind, ResumeSessionConfig, SessionConfig, SessionEvent,
-    SkillProvider, SkillProviderDescriptor,
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::rpc::SkillSource;
+use copilot_sdk::session_events::{SessionEventType, ToolExecutionCompleteData};
+use copilot_sdk::{
+    CloudSessionOptions, CreateSessionOptions, Error, ErrorKind, ResumeSessionOptions,
+    SessionEvent, SkillProvider, SkillProviderDescriptor,
 };
 use tokio::sync::Notify;
 
@@ -36,7 +36,7 @@ async fn should_load_provider_skill_lazily_through_skill_tool() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_skill_provider(provider.clone()),
+                            .with_skills(|group| group.with_provider(provider.clone())),
                     )
                     .await
                     .expect("create session");
@@ -90,8 +90,8 @@ async fn should_load_provider_and_file_based_skills_together() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_skill_directories([skills_dir])
-                            .with_skill_provider(provider.clone()),
+                            .with_skills(|group| group.with_directories([skills_dir]))
+                            .with_skills(|group| group.with_provider(provider.clone())),
                     )
                     .await
                     .expect("create session");
@@ -155,7 +155,7 @@ async fn should_rebind_skill_provider_on_resume() {
                 let first = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_skill_provider(original.clone()),
+                            .with_skills(|group| group.with_provider(original.clone())),
                     )
                     .await
                     .expect("create session");
@@ -174,10 +174,10 @@ async fn should_rebind_skill_provider_on_resume() {
 
                 let session = client
                     .resume_session(
-                        ResumeSessionConfig::new(session_id)
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_skill_provider(replacement.clone()),
+                        ResumeSessionOptions::new(session_id)
+                            .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+                            .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+                            .with_skills(|group| group.with_provider(replacement.clone())),
                     )
                     .await
                     .expect("resume session");
@@ -223,7 +223,7 @@ async fn should_report_provider_read_failure_without_leaking_details() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_skill_provider(provider.clone()),
+                            .with_skills(|group| group.with_provider(provider.clone())),
                     )
                     .await
                     .expect("create session");
@@ -270,7 +270,7 @@ async fn should_report_missing_provider_skill_as_not_found() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_skill_provider(provider.clone()),
+                            .with_skills(|group| group.with_provider(provider.clone())),
                     )
                     .await
                     .expect("create session");
@@ -317,8 +317,8 @@ async fn should_keep_provider_dormant_when_skills_disabled() {
             let session = client
                 .create_session(
                     ctx.approve_all_session_config()
-                        .with_enable_skills(false)
-                        .with_skill_provider(provider.clone()),
+                        .with_skills(|group| group.with_enabled(false))
+                        .with_skills(|group| group.with_provider(provider.clone())),
                 )
                 .await
                 .expect("create session");
@@ -354,7 +354,7 @@ async fn should_unbind_provider_when_resumed_without_one() {
             let first = client
                 .create_session(
                     ctx.approve_all_session_config()
-                        .with_skill_provider(provider.clone()),
+                        .with_skills(|group| group.with_provider(provider.clone())),
                 )
                 .await
                 .expect("create session");
@@ -369,9 +369,11 @@ async fn should_unbind_provider_when_resumed_without_one() {
 
             let session = client
                 .resume_session(
-                    ResumeSessionConfig::new(first.id().clone())
-                        .with_permission_handler(Arc::new(ApproveAllHandler))
-                        .with_github_token(super::support::DEFAULT_TEST_TOKEN),
+                    ResumeSessionOptions::new(first.id().clone())
+                        .with_permissions(|group| {
+                            group.with_on_request(Arc::new(ApproveAllHandler))
+                        })
+                        .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN)),
                 )
                 .await
                 .expect("resume session");
@@ -403,13 +405,12 @@ async fn should_cancel_a_blocked_provider_call_when_the_session_disconnects() {
             let dropped = Arc::new(Notify::new());
             let client = ctx.start_client().await;
             let session = client
-                .create_session(
-                    ctx.approve_all_session_config()
-                        .with_skill_provider(Arc::new(BlockingSkillProvider {
-                            entered: entered.clone(),
-                            dropped: dropped.clone(),
-                        })),
-                )
+                .create_session(ctx.approve_all_session_config().with_skills(|group| {
+                    group.with_provider(Arc::new(BlockingSkillProvider {
+                        entered: entered.clone(),
+                        dropped: dropped.clone(),
+                    }))
+                }))
                 .await
                 .expect("create session");
 
@@ -451,11 +452,13 @@ async fn should_reject_skill_provider_for_cloud_sessions() {
 
             let result = client
                 .create_session(
-                    SessionConfig::default()
-                        .with_permission_handler(Arc::new(ApproveAllHandler))
-                        .with_github_token(super::support::DEFAULT_TEST_TOKEN)
+                    CreateSessionOptions::default()
+                        .with_permissions(|group| {
+                            group.with_on_request(Arc::new(ApproveAllHandler))
+                        })
+                        .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
                         .with_cloud(CloudSessionOptions::default())
-                        .with_skill_provider(provider.clone()),
+                        .with_skills(|group| group.with_provider(provider.clone())),
                 )
                 .await;
 
@@ -633,7 +636,7 @@ fn assert_no_secret(events: &[SessionEvent], secret: &str) {
     );
 }
 
-fn assert_no_sdk_skills(skills: &[github_copilot_sdk::rpc::Skill]) {
+fn assert_no_sdk_skills(skills: &[copilot_sdk::rpc::Skill]) {
     assert!(
         skills.iter().all(|skill| skill.source != SkillSource::Sdk),
         "expected no SDK skills, got {skills:?}"

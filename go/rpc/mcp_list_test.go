@@ -6,15 +6,50 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"testing"
+	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
 )
 
 var _ interface {
 	List(context.Context) (*MCPServerList, error)
 	ListConfigured(context.Context) (*MCPConfiguredServerList, error)
 } = (*MCPAPI)(nil)
+
+func TestMCPDiscoverNilRequestSendsEmptyObject(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	client := jsonrpc2.NewClient(clientConn, clientConn)
+	server := jsonrpc2.NewClient(serverConn, serverConn)
+	requests := make(chan json.RawMessage, 1)
+	server.SetRequestHandler("mcp.discover", func(params json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
+		requests <- append(json.RawMessage(nil), params...)
+		return json.RawMessage(`{"servers":[]}`), nil
+	})
+	client.Start()
+	server.Start()
+	t.Cleanup(func() {
+		client.Stop()
+		server.Stop()
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, err := NewServerRPC(client).MCP.Discover(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case params := <-requests:
+		if string(params) != "{}" {
+			t.Fatalf("nil discovery request sent %s, want {}", params)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
 
 func TestMCPListUsesParameterlessWireContract(t *testing.T) {
 	clientToServerReader, clientToServerWriter := io.Pipe()

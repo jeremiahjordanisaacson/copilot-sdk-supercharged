@@ -17,7 +17,7 @@ from copilot.client import (
     _session_ids_overlap,
 )
 from copilot.session import PermissionHandler, SessionCapabilities
-from copilot.session_events import CapabilitiesChangedUI, session_event_from_dict
+from copilot.session_events import session_event_from_dict
 
 AUTO_MODE_RECOVERY = {
     "requestId": "offer-1",
@@ -26,15 +26,6 @@ AUTO_MODE_RECOVERY = {
     "interactionId": "interaction-1",
     "originatingMessageId": "user-1",
 }
-
-
-def test_ui_capability_positional_arguments_keep_their_original_meaning():
-    capabilities = CapabilitiesChangedUI(True, False, True)
-    assert capabilities.to_dict() == {"canvases": True, "elicitation": False, "mcpApps": True}
-    assert capabilities.auto_mode_recovery is None
-    recovered = CapabilitiesChangedUI.from_dict({"autoModeRecovery": True, "canvases": False})
-    assert recovered.auto_mode_recovery is True
-    assert recovered.canvases is False
 
 
 class Runtime:
@@ -56,13 +47,13 @@ class Runtime:
 
 
 def client_for(runtime):
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1"))
+    client = CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1))
     client._client = runtime
     return client
 
 
 async def open_session(client, resume, **kwargs):
-    kwargs["on_permission_request"] = PermissionHandler.approve_all
+    kwargs["permissions"] = {"on_request": PermissionHandler.approve_all}
     if resume:
         return await client.resume_session("session-1", **kwargs)
     return await client.create_session(**kwargs)
@@ -102,11 +93,13 @@ async def test_post_create_failure_rolls_back_only_server_assigned_sessions(
         await client.create_session(
             cloud=CloudSessionOptions() if cloud else None,
             session_id=None if cloud else "caller-owned",
-            on_permission_request=PermissionHandler.approve_all,
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
-            on_mcp_auth_request=lambda _request, _invocation: None,
-            skip_custom_instructions=True,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
+            mcp={"on_auth_request": lambda _request, _invocation: None},
+            instructions={"skip_custom_instructions": True},
         )
     assert client._sessions == {}
     deletions = [params for method, params in runtime.requests if method == "session.delete"]
@@ -152,11 +145,13 @@ async def test_cancelled_cloud_setup_returns_before_owned_rollback(setup_method,
     created = asyncio.create_task(
         client.create_session(
             cloud=CloudSessionOptions(),
-            on_permission_request=PermissionHandler.approve_all,
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
-            on_mcp_auth_request=lambda _request, _invocation: None,
-            skip_custom_instructions=True,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
+            mcp={"on_auth_request": lambda _request, _invocation: None},
+            instructions={"skip_custom_instructions": True},
         )
     )
     resumed = None
@@ -170,7 +165,7 @@ async def test_cancelled_cloud_setup_returns_before_owned_rollback(setup_method,
         assert client._sessions["cancelled-cloud"] is owner
         resumed = asyncio.create_task(
             client.resume_session(
-                "cancelled-cloud", on_permission_request=PermissionHandler.approve_all
+                "cancelled-cloud", permissions={"on_request": PermissionHandler.approve_all}
             )
         )
         async with asyncio.timeout(5):
@@ -231,10 +226,12 @@ async def test_cloud_setup_fences_server_assigned_id(threaded, cancel_waiter):
     created = asyncio.create_task(
         client.create_session(
             cloud=CloudSessionOptions(),
-            on_permission_request=PermissionHandler.approve_all,
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
-            on_mcp_auth_request=lambda _request, _invocation: None,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
+            mcp={"on_auth_request": lambda _request, _invocation: None},
         )
     )
     resumed = None
@@ -244,9 +241,11 @@ async def test_cloud_setup_fences_server_assigned_id(threaded, cancel_waiter):
         resumed = asyncio.create_task(
             client.resume_session(
                 "cloud-session",
-                on_permission_request=PermissionHandler.approve_all,
-                auto_mode_recovery=True,
-                on_auto_mode_switch_request=lambda _request, _invocation: "no",
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "auto_mode_recovery": True,
+                    "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+                },
             )
         )
         async with asyncio.timeout(5):
@@ -267,9 +266,11 @@ async def test_cloud_setup_fences_server_assigned_id(threaded, cancel_waiter):
             resumed = asyncio.create_task(
                 client.resume_session(
                     "cloud-session",
-                    on_permission_request=PermissionHandler.approve_all,
-                    auto_mode_recovery=True,
-                    on_auto_mode_switch_request=lambda _request, _invocation: "no",
+                    permissions={"on_request": PermissionHandler.approve_all},
+                    interaction={
+                        "auto_mode_recovery": True,
+                        "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+                    },
                 )
             )
         release.set()
@@ -306,14 +307,16 @@ async def test_prefix_lookup_uses_configured_storage(recovery):
     session = await client.resume_session(
         "abcdef12",
         config_directory="configured-home",
-        on_permission_request=PermissionHandler.approve_all,
-        auto_mode_recovery=recovery,
-        on_auto_mode_switch_request=lambda _request, _invocation: "no",
+        permissions={"on_request": PermissionHandler.approve_all},
+        interaction={
+            "auto_mode_recovery": recovery,
+            "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+        },
     )
     try:
         assert session.session_id == (canonical if recovery else "abcdef12")
         resume = next(params for method, params in runtime.requests if method == "session.resume")
-        assert resume["configDir"] == "configured-home"
+        assert resume["configDirectory"] == "configured-home"
         assert resume["sessionId"] == (canonical if recovery else "abcdef12")
         assert sum(method == "sessions.findByPrefix" for method, _ in runtime.requests) == int(
             recovery
@@ -342,9 +345,11 @@ async def test_exact_hex_provider_resume_skips_host_lookup(recovery):
         session = await client.resume_session(
             "abcdef0",
             config_directory="configured-home",
-            auto_mode_recovery=recovery,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
-            create_session_fs_handler=lambda _session: object(),
+            interaction={
+                "auto_mode_recovery": recovery,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
+            state={"create_session_fs_provider": lambda _session: object()},
         )
         assert session.session_id == "abcdef0"
         assert not any(method == "sessions.findByPrefix" for method, _ in requests)
@@ -358,7 +363,10 @@ async def test_requires_handler_before_starting(resume):
     with patch.object(client, "start", new_callable=AsyncMock) as start:
         with pytest.raises(ValueError, match="requires on_auto_mode_switch_request"):
             await open_session(
-                client, resume, auto_mode_recovery=True, on_event=lambda _event: None
+                client,
+                resume,
+                interaction={"auto_mode_recovery": True},
+                events={"on_event": lambda _event: None},
             )
         start.assert_not_awaited()
 
@@ -374,10 +382,12 @@ async def test_legacy_handler_does_not_enroll(resume):
         received.append(request)
         return "yes_always"
 
-    session = await open_session(client, resume, on_auto_mode_switch_request=handler)
+    session = await open_session(
+        client, resume, interaction={"on_auto_mode_switch_request": handler}
+    )
     try:
-        assert runtime.requests[0][1]["requestAutoModeSwitch"] is True
-        assert "requestAutoModeRecovery" not in runtime.requests[0][1]
+        assert runtime.requests[0][1]["interaction"]["requestAutoModeSwitch"] is True
+        assert "requestAutoModeRecovery" not in runtime.requests[0][1].get("interaction", {})
         result = await client._handle_auto_mode_switch_request(
             {"sessionId": session.session_id, "errorCode": "user_weekly_rate_limited"}
         )
@@ -397,8 +407,10 @@ async def test_unsupported_enrollment_detaches_and_unregisters(resume, caps):
         await open_session(
             client,
             resume,
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
         )
     assert [method for method, _ in runtime.requests] == [
         "session.resume" if resume else "session.create",
@@ -431,9 +443,11 @@ async def test_rejected_cloud_enrollment_deletes_server_assigned_session(cleanup
             cloud=CloudSessionOptions(
                 repository=CloudSessionRepository(owner="github", name="copilot-sdk", branch="main")
             ),
-            on_permission_request=PermissionHandler.approve_all,
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
         )
     assert runtime.requests[-2:] == [
         ("session.detach", {"sessionId": "cloud-recovery-rejected"}),
@@ -476,8 +490,10 @@ async def test_cancelled_cloud_enrollment_keeps_reuse_behind_deletion():
             cloud=CloudSessionOptions(
                 repository=CloudSessionRepository(owner="github", name="copilot-sdk", branch="main")
             ),
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
         )
     )
     retry = None
@@ -487,7 +503,7 @@ async def test_cancelled_cloud_enrollment_keeps_reuse_behind_deletion():
     async def reuse():
         retry_started.set()
         return await client.resume_session(
-            "cloud-recovery-rejected", on_permission_request=PermissionHandler.approve_all
+            "cloud-recovery-rejected", permissions={"on_request": PermissionHandler.approve_all}
         )
 
     try:
@@ -520,15 +536,17 @@ async def test_rejected_resume_keeps_the_resumed_callback_owner():
     resident = await open_session(
         client,
         False,
-        on_auto_mode_switch_request=lambda _request, _invocation: "yes_always",
+        interaction={"on_auto_mode_switch_request": lambda _request, _invocation: "yes_always"},
     )
     try:
         with pytest.raises(RuntimeError, match="does not support auto_mode_recovery"):
             await client.resume_session(
                 resident.session_id,
-                on_permission_request=PermissionHandler.approve_all,
-                auto_mode_recovery=True,
-                on_auto_mode_switch_request=lambda _request, _invocation: "no",
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "auto_mode_recovery": True,
+                    "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+                },
             )
         assert all(method != "session.detach" for method, _ in runtime.requests)
         assert client._sessions[resident.session_id] is not resident
@@ -570,9 +588,8 @@ async def test_cancelled_enrollment_keeps_callbacks_until_cleanup_settles(resume
         open_session(
             client,
             resume,
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=handler,
-            hooks={"on_session_end": end_hook},
+            interaction={"auto_mode_recovery": True, "on_auto_mode_switch_request": handler},
+            hooks={"handlers": {"on_session_end": end_hook}},
         )
     )
     try:
@@ -638,8 +655,10 @@ async def test_unsupported_enrollment_does_not_wait_for_detach(resume, cancel_re
         open_session(
             client,
             resume,
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
         )
     )
     try:
@@ -694,8 +713,10 @@ async def test_cancellation_before_cleanup_write_still_detaches(resume):
         open_session(
             client,
             resume,
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
         )
     )
     try:
@@ -736,9 +757,11 @@ async def test_late_cleanup_finishes_before_same_id_reuse(resume, retry_resume):
         open_session(
             client,
             resume,
-            **({} if resume else {"session_id": session_id}),
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
+            **{} if resume else {"session_id": session_id},
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
         )
     )
     replacement = None
@@ -748,7 +771,7 @@ async def test_late_cleanup_finishes_before_same_id_reuse(resume, retry_resume):
     async def reuse():
         retry_started.set()
         return await open_session(
-            client, retry_resume, **({} if retry_resume else {"session_id": session_id})
+            client, retry_resume, **{} if retry_resume else {"session_id": session_id}
         )
 
     try:
@@ -767,7 +790,7 @@ async def test_late_cleanup_finishes_before_same_id_reuse(resume, retry_resume):
         await asyncio.wait_for(retry_started.wait(), 5)
         # An unrelated round trip can complete while this ID's detach is held.
         unrelated = await client.create_session(
-            session_id="unrelated", on_permission_request=PermissionHandler.approve_all
+            session_id="unrelated", permissions={"on_request": PermissionHandler.approve_all}
         )
         release_cleanup.set()
         replacement = await asyncio.wait_for(retry, 5)
@@ -818,8 +841,10 @@ async def test_public_deletion_waits_for_cleanup_and_fences_resume():
         open_session(
             client,
             True,
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
         )
     )
 
@@ -888,12 +913,12 @@ async def test_public_deletion_preserves_owner_from_replacement_connection():
     old_runtime = DeletingRuntime()
     client = client_for(old_runtime)
     original = await client.create_session(
-        session_id="session-1", on_permission_request=PermissionHandler.approve_all
+        session_id="session-1", permissions={"on_request": PermissionHandler.approve_all}
     )
     replacement_runtime = Runtime()
     replacement_client = client_for(replacement_runtime)
     replacement = await replacement_client.create_session(
-        session_id="session-1", on_permission_request=PermissionHandler.approve_all
+        session_id="session-1", permissions={"on_request": PermissionHandler.approve_all}
     )
     deleting = asyncio.create_task(client.delete_session("session-1"))
     try:
@@ -951,17 +976,18 @@ async def test_failed_cleanup_blocks_same_id_reuse_until_connection_retires(resu
         open_session(
             client,
             resume,
-            **({} if resume else {"session_id": "session-1"}),
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
+            **{} if resume else {"session_id": "session-1"},
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
         )
     )
 
     async def reuse():
         retry_started.set()
         return await client.resume_session(
-            "session-1",
-            on_permission_request=PermissionHandler.approve_all,
+            "session-1", permissions={"on_request": PermissionHandler.approve_all}
         )
 
     retry = None
@@ -1017,7 +1043,7 @@ async def test_failed_cleanup_blocks_same_id_reuse_until_connection_retires(resu
         assert client._sessions["session-1"] is replacement
         assert not replacement._destroyed
         assert [method for method, _ in next_runtime.requests] == ["session.resume"]
-        assert "requestAutoModeRecovery" not in next_runtime.requests[0][1]
+        assert "requestAutoModeRecovery" not in next_runtime.requests[0][1].get("interaction", {})
     finally:
         release_cleanup.set()
         release_transport_stop.set()
@@ -1073,8 +1099,10 @@ async def test_same_id_initialization_waits_before_replacing_provisional_owner(r
             client,
             False,
             session_id="session-1",
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
         )
     )
     retry = None
@@ -1083,7 +1111,7 @@ async def test_same_id_initialization_waits_before_replacing_provisional_owner(r
     async def reuse():
         retry_started.set()
         return await open_session(
-            client, retry_resume, **({} if retry_resume else {"session_id": "session-1"})
+            client, retry_resume, **{} if retry_resume else {"session_id": "session-1"}
         )
 
     try:
@@ -1123,11 +1151,13 @@ async def test_complete_context_round_trip(resume):
         return "yes"
 
     session = await open_session(
-        client, resume, auto_mode_recovery=True, on_auto_mode_switch_request=handler
+        client,
+        resume,
+        interaction={"auto_mode_recovery": True, "on_auto_mode_switch_request": handler},
     )
     try:
-        assert runtime.requests[0][1]["requestAutoModeRecovery"] is True
-        assert runtime.requests[0][1]["requestAutoModeSwitch"] is True
+        assert runtime.requests[0][1]["interaction"]["requestAutoModeRecovery"] is True
+        assert runtime.requests[0][1]["interaction"]["requestAutoModeSwitch"] is True
         assert session.capabilities["ui"]["autoModeRecovery"] is True
         offer = {
             "errorCode": "model_overloaded",
@@ -1254,7 +1284,7 @@ async def session_fs_peer(on_create=None, on_request=None, *, session_fs=True):
     server = await asyncio.start_server(accept, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     client = CopilotClient(
-        connection=RuntimeConnection.for_uri(f"127.0.0.1:{port}"),
+        mode="coding-agent",
         session_fs={
             "initial_working_directory": "/workspace",
             "session_state_path": "/sessions",
@@ -1262,6 +1292,7 @@ async def session_fs_peer(on_create=None, on_request=None, *, session_fs=True):
         }
         if session_fs
         else None,
+        runtime=RuntimeConnection.for_tcp("127.0.0.1", port),
     )
     await client._connect_via_tcp()
     try:
@@ -1299,8 +1330,8 @@ async def test_callback_rejects_same_id_initialization(operation):
                         await asyncio.wait_for(
                             client.resume_session(
                                 "reentry",
-                                on_permission_request=PermissionHandler.approve_all,
-                                create_session_fs_handler=lambda _session: Provider(),
+                                permissions={"on_request": PermissionHandler.approve_all},
+                                state={"create_session_fs_provider": lambda _session: Provider()},
                             ),
                             1,
                         )
@@ -1308,8 +1339,8 @@ async def test_callback_rejects_same_id_initialization(operation):
                         await asyncio.wait_for(
                             client.create_session(
                                 session_id="reentry",
-                                on_permission_request=PermissionHandler.approve_all,
-                                create_session_fs_handler=lambda _session: Provider(),
+                                permissions={"on_request": PermissionHandler.approve_all},
+                                state={"create_session_fs_provider": lambda _session: Provider()},
                             ),
                             1,
                         )
@@ -1318,8 +1349,8 @@ async def test_callback_rejects_same_id_initialization(operation):
 
         session = await client.create_session(
             session_id="reentry",
-            on_permission_request=PermissionHandler.approve_all,
-            create_session_fs_handler=lambda _session: Provider(),
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={"create_session_fs_provider": lambda _session: Provider()},
         )
         try:
             assert len(observed) == 1
@@ -1357,7 +1388,7 @@ async def test_canonical_callback_rejects_wait_on_its_alias_permit():
                     await asyncio.wait_for(
                         client.resume_session(
                             "abcdef12-9999-4789-abcd-0123456789ab",
-                            create_session_fs_handler=lambda _session: Provider(),
+                            state={"create_session_fs_provider": lambda _session: Provider()},
                         ),
                         1,
                     )
@@ -1366,10 +1397,12 @@ async def test_canonical_callback_rejects_wait_on_its_alias_permit():
 
         session = await client.resume_session(
             canonical_id,
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
-            create_session_fs_handler=lambda _session: Provider(),
-            skip_custom_instructions=True,
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
+            state={"create_session_fs_provider": lambda _session: Provider()},
+            instructions={"skip_custom_instructions": True},
         )
         try:
             assert len(observed) == 1
@@ -1400,7 +1433,8 @@ async def test_rejected_cleanup_hook_rejects_same_id_resume():
             try:
                 await asyncio.wait_for(
                     client.resume_session(
-                        "cleanup-hook", create_session_fs_handler=lambda _session: object()
+                        "cleanup-hook",
+                        state={"create_session_fs_provider": lambda _session: object()},
                     ),
                     1,
                 )
@@ -1411,16 +1445,18 @@ async def test_rejected_cleanup_hook_rejects_same_id_resume():
         with pytest.raises(RuntimeError, match="does not support auto_mode_recovery"):
             await client.create_session(
                 session_id="cleanup-hook",
-                create_session_fs_handler=lambda _session: object(),
-                auto_mode_recovery=True,
-                on_auto_mode_switch_request=lambda _request, _invocation: "no",
-                hooks={"on_session_end": hook},
+                state={"create_session_fs_provider": lambda _session: object()},
+                interaction={
+                    "auto_mode_recovery": True,
+                    "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+                },
+                hooks={"handlers": {"on_session_end": hook}},
             )
         assert len(observed) == 1
         assert isinstance(observed[0], RuntimeError), repr(observed[0])
         assert "active session callback" in str(observed[0])
         replacement = await client.resume_session(
-            "cleanup-hook", create_session_fs_handler=lambda _session: object()
+            "cleanup-hook", state={"create_session_fs_provider": lambda _session: object()}
         )
         await replacement.disconnect()
 
@@ -1435,7 +1471,7 @@ async def test_recovery_resume_waits_for_failed_ordinary_resume():
 
     async def on_request(_callback, message):
         if message["method"] == "session.resume":
-            if message["params"].get("requestAutoModeRecovery"):
+            if message["params"].get("interaction", {}).get("requestAutoModeRecovery"):
                 recovery_entered.set()
                 await release_recovery.wait()
             else:
@@ -1446,15 +1482,17 @@ async def test_recovery_resume_waits_for_failed_ordinary_resume():
             detached.set()
 
     async with session_fs_peer(on_request=on_request) as (client, _callback):
-        options = {"create_session_fs_handler": lambda _session: object()}
+        options = {"state": {"create_session_fs_provider": lambda _session: object()}}
         ordinary = asyncio.create_task(client.resume_session("provisional", **options))
         await asyncio.wait_for(ordinary_entered.wait(), 5)
         recovery = asyncio.create_task(
             client.resume_session(
                 "provisional",
-                auto_mode_recovery=True,
-                on_auto_mode_switch_request=lambda _request, _invocation: "no",
                 **options,
+                interaction={
+                    "auto_mode_recovery": True,
+                    "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+                },
             )
         )
         try:
@@ -1487,20 +1525,22 @@ async def test_cancelling_recovery_wait_does_not_cancel_ordinary_resume():
 
     async def on_request(_callback, message):
         if message["method"] == "session.resume":
-            assert not message["params"].get("requestAutoModeRecovery")
+            assert not message["params"].get("interaction", {}).get("requestAutoModeRecovery")
             ordinary_entered.set()
             await release_ordinary.wait()
 
     async with session_fs_peer(on_request=on_request) as (client, _callback):
-        options = {"create_session_fs_handler": lambda _session: object()}
+        options = {"state": {"create_session_fs_provider": lambda _session: object()}}
         ordinary = asyncio.create_task(client.resume_session("cancel-wait", **options))
         await asyncio.wait_for(ordinary_entered.wait(), 5)
         recovery = asyncio.create_task(
             client.resume_session(
                 "cancel-wait",
-                auto_mode_recovery=True,
-                on_auto_mode_switch_request=lambda _request, _invocation: "no",
                 **options,
+                interaction={
+                    "auto_mode_recovery": True,
+                    "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+                },
             )
         )
         try:
@@ -1552,13 +1592,15 @@ async def test_abbreviated_recovery_resume_uses_canonical_owner(resident, rpc_re
             cleanup_replies.append(reply)
 
     async with session_fs_peer(on_request=on_request, session_fs=False) as (client, callback):
-        options = {"create_session_fs_handler": lambda _session: object()}
+        options = {"state": {"create_session_fs_provider": lambda _session: object()}}
         previous = None
         if resident:
             previous = await client.create_session(
                 session_id=canonical_id,
-                on_auto_mode_switch_request=lambda _request, _invocation: "yes_always",
                 **options,
+                interaction={
+                    "on_auto_mode_switch_request": lambda _request, _invocation: "yes_always"
+                },
             )
 
         def accepted(_request, invocation):
@@ -1571,9 +1613,8 @@ async def test_abbreviated_recovery_resume_uses_canonical_owner(resident, rpc_re
         ):
             await client.resume_session(
                 "abcdef12",
-                auto_mode_recovery=True,
-                on_auto_mode_switch_request=accepted,
                 **options,
+                interaction={"auto_mode_recovery": True, "on_auto_mode_switch_request": accepted},
             )
         detaches = [params for method, params in requests if method == "session.detach"]
         assert detaches == (
@@ -1645,8 +1686,10 @@ async def test_uuid_prefix_callback_ownership(resident, outcome):
         if resident:
             previous = await client.create_session(
                 session_id=canonical_id,
-                create_session_fs_handler=lambda _session: object(),
-                on_auto_mode_switch_request=lambda _request, _invocation: "yes_always",
+                state={"create_session_fs_provider": lambda _session: object()},
+                interaction={
+                    "on_auto_mode_switch_request": lambda _request, _invocation: "yes_always"
+                },
             )
 
         def provider(session):
@@ -1669,9 +1712,8 @@ async def test_uuid_prefix_callback_ownership(resident, outcome):
         async def resume():
             return await client.resume_session(
                 "ABCDEF12-3456",
-                auto_mode_recovery=True,
-                on_auto_mode_switch_request=accepted,
-                create_session_fs_handler=provider,
+                interaction={"auto_mode_recovery": True, "on_auto_mode_switch_request": accepted},
+                state={"create_session_fs_provider": provider},
             )
 
         if outcome == "accepted":
@@ -1762,8 +1804,10 @@ async def test_resume_session_prefix_lookup_guard(session_id, lookup):
         assert not requests
         session = await client.resume_session(
             session_id,
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=lambda _request, _invocation: "no",
+            interaction={
+                "auto_mode_recovery": True,
+                "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+            },
         )
         assert session.session_id == expected_id
         assert [params for method, params in requests if method == "sessions.findByPrefix"] == (
@@ -1790,13 +1834,15 @@ async def test_cancelled_prefix_lookup_releases_canonical_admission():
             resumes.append(message)
 
     async with session_fs_peer(on_request=on_request, session_fs=False) as (client, _callback):
-        options = {"create_session_fs_handler": lambda _session: object()}
+        options = {"state": {"create_session_fs_provider": lambda _session: object()}}
         first = asyncio.create_task(
             client.resume_session(
                 "abcdef12",
-                auto_mode_recovery=True,
-                on_auto_mode_switch_request=lambda _request, _invocation: "no",
                 **options,
+                interaction={
+                    "auto_mode_recovery": True,
+                    "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+                },
             )
         )
         await asyncio.wait_for(lookup_entered.wait(), 5)
@@ -1856,21 +1902,25 @@ async def test_options_patch_failure_cannot_detach_replacement(resume, recovery)
                 return {"error": {"code": -32603, "message": "options patch rejected"}}
 
     async with session_fs_peer(on_request=on_request) as (client, callback):
-        options = {"create_session_fs_handler": lambda _session: object()}
+        options = {"state": {"create_session_fs_provider": lambda _session: object()}}
         first = asyncio.create_task(
-            client.resume_session("patch-owner", skip_custom_instructions=True, **options)
+            client.resume_session(
+                "patch-owner", **options, instructions={"skip_custom_instructions": True}
+            )
             if resume
             else client.create_session(
-                session_id="patch-owner", skip_custom_instructions=True, **options
+                session_id="patch-owner", **options, instructions={"skip_custom_instructions": True}
             )
         )
         await asyncio.wait_for(patch_entered.wait(), 5)
         replacement = asyncio.create_task(
             client.resume_session(
                 "patch-owner",
-                auto_mode_recovery=recovery,
-                on_auto_mode_switch_request=lambda _request, _invocation: "yes",
                 **options,
+                interaction={
+                    "auto_mode_recovery": recovery,
+                    "on_auto_mode_switch_request": lambda _request, _invocation: "yes",
+                },
             )
         )
         try:
@@ -1931,7 +1981,7 @@ async def test_in_flight_alias_resume_cannot_be_detached_by_rejected_recovery(
             assert params == {"prefix": alias_id}
             return {"result": {"sessionId": canonical_id}}
         if method == "session.resume":
-            recovery = params.get("requestAutoModeRecovery", False)
+            recovery = params.get("interaction", {}).get("requestAutoModeRecovery", False)
             assert params["sessionId"] == (canonical_id if recovery else alias_id)
             attached = True
             (recovery_entered if recovery else ordinary_entered).set()
@@ -1942,15 +1992,17 @@ async def test_in_flight_alias_resume_cannot_be_detached_by_rejected_recovery(
             attached = False
 
     async with session_fs_peer(on_request=on_request, session_fs=False) as (client, _callback):
-        options = {"create_session_fs_handler": lambda _session: object()}
+        options = {"state": {"create_session_fs_provider": lambda _session: object()}}
 
         async def recovery_resume():
             with pytest.raises(RuntimeError, match="does not support auto_mode_recovery"):
                 await client.resume_session(
                     canonical_id,
-                    auto_mode_recovery=True,
-                    on_auto_mode_switch_request=lambda _request, _invocation: "no",
                     **options,
+                    interaction={
+                        "auto_mode_recovery": True,
+                        "on_auto_mode_switch_request": lambda _request, _invocation: "no",
+                    },
                 )
 
         def ordinary_resume():
@@ -2007,12 +2059,11 @@ async def test_pending_consent_allows_independent_resume():
             await release.wait()
             return "no"
 
-        options = {"create_session_fs_handler": lambda _session: object()}
+        options = {"state": {"create_session_fs_provider": lambda _session: object()}}
         session = await client.create_session(
             session_id="pending-consent",
-            auto_mode_recovery=True,
-            on_auto_mode_switch_request=consent,
             **options,
+            interaction={"auto_mode_recovery": True, "on_auto_mode_switch_request": consent},
         )
         offer = asyncio.create_task(
             callback(
@@ -2048,7 +2099,7 @@ async def test_cancelled_options_patch_keeps_canonical_cleanup_fenced(resume):
     async def on_request(_callback, message):
         method, params = message["method"], message["params"]
         if method in ("session.create", "session.resume"):
-            if params.get("requestAutoModeRecovery"):
+            if params.get("interaction", {}).get("requestAutoModeRecovery"):
                 replacement_entered.set()
                 if not detach_finished.is_set():
                     premature_replacements.append(params)
@@ -2068,14 +2119,16 @@ async def test_cancelled_options_patch_keeps_canonical_cleanup_fenced(resume):
 
     async with session_fs_peer(on_request=on_request) as (client, callback):
         options = {
-            "create_session_fs_handler": lambda _session: object(),
-            "on_auto_mode_switch_request": lambda _request, _invocation: "yes",
+            "state": {"create_session_fs_provider": lambda _session: object()},
+            "interaction": {"on_auto_mode_switch_request": lambda _request, _invocation: "yes"},
         }
         first = asyncio.create_task(
-            client.resume_session(canonical_id, skip_custom_instructions=True, **options)
+            client.resume_session(
+                canonical_id, **options, instructions={"skip_custom_instructions": True}
+            )
             if resume
             else client.create_session(
-                session_id=canonical_id, skip_custom_instructions=True, **options
+                session_id=canonical_id, **options, instructions={"skip_custom_instructions": True}
             )
         )
         replacement = None
@@ -2095,7 +2148,13 @@ async def test_cancelled_options_patch_keeps_canonical_cleanup_fenced(resume):
             )
             assert reply.get("result") == {"response": "yes"}, reply
             replacement = asyncio.create_task(
-                client.resume_session("cancelled-patch", auto_mode_recovery=True, **options)
+                client.resume_session(
+                    "cancelled-patch",
+                    **{
+                        **options,
+                        "interaction": {**options["interaction"], "auto_mode_recovery": True},
+                    },
+                )
             )
 
             async def waiting_or_admitted():
@@ -2135,8 +2194,8 @@ async def test_initialization_still_serializes_outside_callbacks():
         def create(session_id):
             return client.create_session(
                 session_id=session_id,
-                on_permission_request=PermissionHandler.approve_all,
-                create_session_fs_handler=lambda _session: object(),
+                permissions={"on_request": PermissionHandler.approve_all},
+                state={"create_session_fs_provider": lambda _session: object()},
             )
 
         first = asyncio.create_task(create("serialized"))
@@ -2193,8 +2252,8 @@ async def test_independent_same_id_rejects_until_all_callbacks_finish():
 
         def options():
             return {
-                "on_permission_request": PermissionHandler.approve_all,
-                "create_session_fs_handler": lambda _session: Provider(),
+                "permissions": {"on_request": PermissionHandler.approve_all},
+                "state": {"create_session_fs_provider": lambda _session: Provider()},
             }
 
         session = await client.create_session(session_id="active", **options())

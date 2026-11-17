@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func assistantContent(t *testing.T, event *copilot.SessionEvent) string {
@@ -101,6 +101,20 @@ func randomHex(t *testing.T) string {
 
 func rpcPtr[T any](value T) *T {
 	return &value
+}
+
+func useTCP(options *copilot.ClientOptions, port int, token string) {
+	stdio := options.Runtime.(copilot.SpawnedStdioConnection)
+	options.Runtime = copilot.SpawnedTCPConnection{
+		Path:                      stdio.Path,
+		Args:                      stdio.Args,
+		Env:                       stdio.Env,
+		WorkingDirectory:          stdio.WorkingDirectory,
+		BaseDirectory:             stdio.BaseDirectory,
+		SessionIdleTimeoutSeconds: stdio.SessionIdleTimeoutSeconds,
+		Port:                      port,
+		ConnectionToken:           token,
+	}
 }
 
 func waitForListedSessions(t *testing.T, client interface {

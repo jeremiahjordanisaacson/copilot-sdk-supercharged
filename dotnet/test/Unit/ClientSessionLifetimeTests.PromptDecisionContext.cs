@@ -4,10 +4,10 @@
 
 #if NET8_0_OR_GREATER
 using System.Text.Json;
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -40,15 +40,18 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task UserInputRequest_Reply_Carries_DecisionContext_Only_When_Handler_Supplies_One(bool labeled)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
         {
-            OnUserInputRequest = (_, _) => Task.FromResult(new UserInputResponse
+            Interaction = new SessionInteractionOptions
             {
-                Answer = "Only src/app.ts",
-                WasFreeform = true,
-                DecisionContext = labeled ? PersonAnswered() : null,
-            })
+                OnUserInputRequest = (_, _) => Task.FromResult(new UserInputResponse
+                {
+                    Answer = "Only src/app.ts",
+                    WasFreeform = true,
+                    DecisionContext = labeled ? PersonAnswered() : null,
+                })
+            }
         });
 
         var response = await server.SendRequestAsync("userInput.request", new Dictionary<string, object?>
@@ -77,15 +80,18 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task ExitPlanModeRequest_Reply_Carries_DecisionContext_Only_When_Handler_Supplies_One(bool labeled)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
         {
-            OnExitPlanModeRequest = (_, _) => Task.FromResult(new ExitPlanModeResult
+            Interaction = new SessionInteractionOptions
             {
-                Approved = false,
-                Feedback = "Split the migration first",
-                DecisionContext = labeled ? PersonAnswered() : null,
-            })
+                OnExitPlanModeRequest = (_, _) => Task.FromResult(new ExitPlanModeResult
+                {
+                    Approved = false,
+                    Feedback = "Split the migration first",
+                    DecisionContext = labeled ? PersonAnswered() : null,
+                })
+            }
         });
 
         var response = await server.SendRequestAsync("exitPlanMode.request", new Dictionary<string, object?>
@@ -118,15 +124,18 @@ public sealed partial class ClientSessionLifetimeTests
         server.ResponseFactory = request => request.Method == "session.ui.handlePendingElicitation"
             ? new Dictionary<string, object?> { ["success"] = true }
             : throw new InvalidOperationException($"Unexpected RPC method '{request.Method}'.");
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
         {
-            OnElicitationRequest = _ => Task.FromResult(new ElicitationResult
+            Interaction = new SessionInteractionOptions
             {
-                Action = UIElicitationResponseAction.Accept,
-                Content = new Dictionary<string, object> { ["name"] = "scenario" },
-                DecisionContext = labeled ? PersonAnswered() : null,
-            })
+                OnElicitationRequest = _ => Task.FromResult(new ElicitationResult
+                {
+                    Action = UIElicitationResponseAction.Accept,
+                    Content = new Dictionary<string, object> { ["name"] = "scenario" },
+                    DecisionContext = labeled ? PersonAnswered() : null,
+                })
+            }
         });
 
         await server.SendSessionEventAsync(session.SessionId, "elicitation.requested", new Dictionary<string, object?>

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 // TestInProcessFfiE2E exercises native-host startup and overlapping callbacks
@@ -27,9 +27,8 @@ func TestInProcessFfiE2E(t *testing.T) {
 	}
 	t.Run("should start and connect over in-process FFI", func(t *testing.T) {
 		fixture := testharness.NewTestContext(t)
-		client := copilot.NewClient(&copilot.ClientOptions{
-			Connection:    copilot.InProcessConnection{},
-			BaseDirectory: fixture.HomeDir,
+		client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent,
+			Runtime: copilot.InProcessConnection{BaseDirectory: fixture.HomeDir},
 		})
 		t.Cleanup(func() { client.ForceStop() })
 
@@ -76,8 +75,10 @@ func TestInProcessFfiE2E(t *testing.T) {
 				t.Fatal(err)
 			}
 			client := fixture.NewClient(func(options *copilot.ClientOptions) {
-				options.GitHubToken = token
-				options.BaseDirectory = fixture.HomeDir
+				options.GitHub.Token = token
+				connection := options.Runtime.(copilot.SpawnedStdioConnection)
+				connection.BaseDirectory = fixture.HomeDir
+				options.Runtime = connection
 			})
 			clients[i] = client
 			t.Cleanup(func() { client.ForceStop() })
@@ -86,22 +87,20 @@ func TestInProcessFfiE2E(t *testing.T) {
 			t.Cleanup(releases[i])
 			results[i] = make(chan result, 1)
 			go func() {
-				session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-					OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-					Hooks: &copilot.SessionHooks{
-						OnSessionStart: func(input copilot.SessionStartHookInput, _ copilot.HookInvocation) (*copilot.SessionStartHookOutput, error) {
-							if input.WorkingDirectory != fixture.WorkDir {
-								return nil, fmt.Errorf("host %d cwd = %q, want %q", i, input.WorkingDirectory, fixture.WorkDir)
-							}
-							entered <- i
-							select {
-							case <-release:
-								return nil, nil
-							case <-ctx.Done():
-								return nil, ctx.Err()
-							}
-						},
+				session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+					OnSessionStart: func(input copilot.SessionStartHookInput, _ copilot.HookInvocation) (*copilot.SessionStartHookOutput, error) {
+						if input.WorkingDirectory != fixture.WorkDir {
+							return nil, fmt.Errorf("host %d cwd = %q, want %q", i, input.WorkingDirectory, fixture.WorkDir)
+						}
+						entered <- i
+						select {
+						case <-release:
+							return nil, nil
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
 					},
+				}},
 				})
 				if err != nil {
 					results[i] <- result{err: err}

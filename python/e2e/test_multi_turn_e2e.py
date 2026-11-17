@@ -93,7 +93,7 @@ class TestMultiTurn:
     async def test_should_use_tool_results_from_previous_turns(self, ctx: E2ETestContext):
         Path(ctx.work_dir, "secret.txt").write_text("The magic number is 42.", encoding="utf-8")
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         events: list = []
         unsubscribe = session.on(events.append)
@@ -118,7 +118,7 @@ class TestMultiTurn:
 
     async def test_should_handle_file_creation_then_reading_across_turns(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         events: list = []
         unsubscribe = session.on(events.append)

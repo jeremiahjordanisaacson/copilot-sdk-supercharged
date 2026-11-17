@@ -4,26 +4,26 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::{PermissionHandler, PermissionResult};
-use github_copilot_sdk::rpc::{
+use copilot_sdk::handler::{PermissionHandler, PermissionResult};
+use copilot_sdk::rpc::{
     HandlePendingToolCallRequest, PermissionDecision, PermissionDecisionApproveOnce,
     PermissionDecisionApproveOnceKind, PermissionDecisionRequest,
 };
-use github_copilot_sdk::session_events::{
+use copilot_sdk::session_events::{
     AssistantMessageData, ExternalToolRequestedData, PermissionRequestedData, SessionEventType,
 };
-use github_copilot_sdk::subscription::RecvError;
-use github_copilot_sdk::types::{PermissionRequestData, RequestId, SessionId};
-use github_copilot_sdk::{
-    Client, ClientOptions, EventSubscription, ResumeSessionConfig, SessionConfig,
+use copilot_sdk::subscription::RecvError;
+use copilot_sdk::types::{PermissionRequestData, RequestId, SessionId};
+use copilot_sdk::{
+    Client, ClientOptions, CreateSessionOptions, EventSubscription, ResumeSessionOptions,
 };
 use serde_json::json;
 
 const TOOL_NAME: &str = "manual_resume_status";
 
-fn manual_tool() -> github_copilot_sdk::Tool {
+fn manual_tool() -> copilot_sdk::Tool {
     // No handler is registered for this tool, so the SDK leaves execution pending.
-    github_copilot_sdk::Tool::new(TOOL_NAME)
+    copilot_sdk::Tool::new(TOOL_NAME)
         .with_description("Looks up a status value. The SDK consumer supplies the result manually.")
         .with_parameters(json!({
             "type": "object",
@@ -102,12 +102,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tool = manual_tool();
 
     // 1. Create a session with a declaration-only tool, then stop after the permission prompt.
-    let client1 = Client::start(ClientOptions::default()).await?;
+    let client1 = Client::start(ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)).await?;
     let session1 = client1
         .create_session(
-            SessionConfig::default()
-                .with_tools([tool.clone()])
-                .with_permission_handler(Arc::new(LeavePermissionPending)),
+            CreateSessionOptions::default()
+                .with_tools(|group| group.with_definitions([tool.clone()]))
+                .with_permissions(|group| group.with_on_request(Arc::new(LeavePermissionPending))),
         )
         .await?;
     let session_id = session1.id().clone();
@@ -124,12 +124,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     pause().await;
 
     // 2. Resume pending work and grant permission to invoke the tool.
-    let client2 = Client::start(ClientOptions::default()).await?;
+    let client2 = Client::start(ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)).await?;
     let session2 = client2
         .resume_session(
-            ResumeSessionConfig::new(session_id.clone())
-                .with_tools([tool.clone()])
-                .with_permission_handler(Arc::new(LeavePermissionPending))
+            ResumeSessionOptions::new(session_id.clone())
+                .with_tools(|group| group.with_definitions([tool.clone()]))
+                .with_permissions(|group| group.with_on_request(Arc::new(LeavePermissionPending)))
                 .with_continue_pending_work(true),
         )
         .await?;
@@ -154,12 +154,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     pause().await;
 
     // 3. Resume again and manually provide the pending tool result.
-    let client3 = Client::start(ClientOptions::default()).await?;
+    let client3 = Client::start(ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)).await?;
     let session3 = client3
         .resume_session(
-            ResumeSessionConfig::new(session_id)
-                .with_tools([tool])
-                .with_permission_handler(Arc::new(LeavePermissionPending))
+            ResumeSessionOptions::new(session_id)
+                .with_tools(|group| group.with_definitions([tool]))
+                .with_permissions(|group| group.with_on_request(Arc::new(LeavePermissionPending)))
                 .with_continue_pending_work(true),
         )
         .await?;

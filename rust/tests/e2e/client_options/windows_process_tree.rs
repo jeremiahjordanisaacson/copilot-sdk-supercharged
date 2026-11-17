@@ -1,11 +1,12 @@
 #![cfg(windows)]
 
+use copilot_sdk::{RuntimeConnection, SpawnedTcpRuntimeOptions};
 use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::Path;
 use std::time::Duration;
 
-use github_copilot_sdk::{CliProgram, Client, ClientOptions, Transport};
+use copilot_sdk::{CliProgram, Client, ClientOptions};
 use windows_sys::Win32::System::Threading::{
     OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
@@ -80,13 +81,19 @@ impl Drop for FixtureProcess {
 
 fn options(fake: &ShutdownCli, tcp: bool) -> ClientOptions {
     let mut options = fake.options();
-    options.prefix_args.push("--fixture-descendant".into());
+    let Some(RuntimeConnection::SpawnedStdio(mut process)) = options.runtime.take() else {
+        panic!("stdio fixture")
+    };
+    process.args.push("--fixture-descendant".into());
     if tcp {
-        options.prefix_args.push("--fixture-tcp".into());
-        options.transport = Transport::Tcp {
+        process.args.push("--fixture-tcp".into());
+        options.runtime = Some(RuntimeConnection::SpawnedTcp(SpawnedTcpRuntimeOptions {
+            process,
             port: 0,
             connection_token: None,
-        };
+        }));
+    } else {
+        options.runtime = Some(RuntimeConnection::SpawnedStdio(process));
     }
     options
 }
@@ -212,12 +219,18 @@ async fn last_clone_drop_is_private_to_its_client_job() {
 async fn abrupt_host_exit_terminates_root_and_descendant_without_rust_cleanup() {
     for tcp in [false, true] {
         let fake = ShutdownCli::new("force");
-        let options = options(&fake, tcp);
-        let CliProgram::Path(program) = options.program else {
+        let mut options = options(&fake, tcp);
+        let options = options
+            .runtime
+            .as_mut()
+            .unwrap()
+            .child_process_options_mut()
+            .unwrap();
+        let CliProgram::Path(program) = &options.program else {
             panic!("fixture uses an explicit program");
         };
         let prefix: Vec<_> = options
-            .prefix_args
+            .args
             .iter()
             .map(|arg| arg.to_str().expect("fixture argument is UTF-8"))
             .collect();

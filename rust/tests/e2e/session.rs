@@ -2,24 +2,24 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures_util::FutureExt;
-use github_copilot_sdk::handler::{
+use copilot_sdk::handler::{
     ApproveAllHandler, McpAuthHandler, McpAuthRequest, McpAuthResult, PermissionHandler,
     PermissionResult,
 };
-use github_copilot_sdk::rpc::ModelSetAllowedModelsRequest;
-use github_copilot_sdk::session_events::{
+use copilot_sdk::rpc::ModelSetAllowedModelsRequest;
+use copilot_sdk::session_events::{
     SessionErrorData, SessionEventType, SessionInfoData, SessionModelChangeData, SessionResumeData,
     SessionStartData, SessionWarningData, UserMessageAgentMode, UserMessageData,
 };
-use github_copilot_sdk::tool::ToolHandler;
-use github_copilot_sdk::types::LogLevel as SessionLogLevel;
-use github_copilot_sdk::{
+use copilot_sdk::tool::ToolHandler;
+use copilot_sdk::types::LogLevel as SessionLogLevel;
+use copilot_sdk::{
     Attachment, AttachmentLineRange, AttachmentSelectionPosition, AttachmentSelectionRange,
-    DefaultAgentConfig, Error, GitHubReferenceType, LogOptions, MessageOptions,
-    PermissionRequestData, RequestId, ResumeSessionConfig, SectionOverride, SessionConfig,
+    CreateSessionOptions, DefaultAgentConfig, Error, GitHubReferenceType, LogOptions,
+    MessageOptions, PermissionRequestData, RequestId, ResumeSessionOptions, SectionOverride,
     SessionId, SetModelOptions, SystemMessageConfig, Tool, ToolInvocation, ToolResult,
 };
+use futures_util::FutureExt;
 use serde_json::json;
 
 use super::support::{
@@ -232,7 +232,7 @@ async fn should_create_a_session_with_availabletools() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_available_tools(["view", "edit"]),
+                            .with_tools(|group| group.with_available_tools(["view", "edit"])),
                     )
                     .await
                     .expect("create session");
@@ -269,7 +269,7 @@ async fn should_create_a_session_with_excludedtools() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
-                            .with_excluded_tools(["view"]),
+                            .with_tools(|group| group.with_excluded_tools(["view"])),
                     )
                     .await
                     .expect("create session");
@@ -305,12 +305,18 @@ async fn should_create_a_session_with_defaultagent_excludedtools() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_tools(vec![secret_tool()])
-                            .with_default_agent(DefaultAgentConfig {
-                                excluded_tools: Some(vec!["secret_tool".to_string()]),
+                        CreateSessionOptions::default()
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_tools(|group| group.with_definitions(vec![secret_tool()]))
+                            .with_agents(|group| {
+                                group.with_default(DefaultAgentConfig {
+                                    excluded_tools: Some(vec!["secret_tool".to_string()]),
+                                })
                             }),
                     )
                     .await
@@ -343,11 +349,11 @@ async fn should_throw_error_when_resuming_non_existent_session() {
             Box::pin(async move {
                 ctx.set_default_copilot_user();
                 let client = ctx.start_client().await;
-                let config = ResumeSessionConfig::new(github_copilot_sdk::SessionId::new(
+                let config = ResumeSessionOptions::new(copilot_sdk::SessionId::new(
                     "non-existent-session-id",
                 ))
-                .with_permission_handler(Arc::new(ApproveAllHandler))
-                .with_github_token(super::support::DEFAULT_TEST_TOKEN);
+                .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+                .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN));
 
                 assert!(client.resume_session(config).await.is_err());
 
@@ -440,11 +446,15 @@ async fn should_resume_a_session_using_the_same_client() {
                     .expect("disconnect first session");
                 let resumed = client
                     .resume_session(
-                        ResumeSessionConfig::new(session_id.clone())
-                            .with_permission_handler(Arc::new(
-                                github_copilot_sdk::handler::ApproveAllHandler,
-                            ))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN),
+                        ResumeSessionOptions::new(session_id.clone())
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(
+                                    copilot_sdk::handler::ApproveAllHandler,
+                                ))
+                            })
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            }),
                     )
                     .await
                     .expect("resume session");
@@ -498,12 +508,16 @@ async fn should_resume_a_session_using_a_new_client() {
                 let new_client = ctx.start_client().await;
                 let resumed = new_client
                     .resume_session(
-                        ResumeSessionConfig::new(session_id.clone())
+                        ResumeSessionOptions::new(session_id.clone())
                             .with_continue_pending_work(true)
-                            .with_permission_handler(Arc::new(
-                                github_copilot_sdk::handler::ApproveAllHandler,
-                            ))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN),
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(
+                                    copilot_sdk::handler::ApproveAllHandler,
+                                ))
+                            })
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            }),
                     )
                     .await
                     .expect("resume session");
@@ -582,9 +596,9 @@ async fn should_recover_marker_after_cold_resume_with_explicit_session_id() {
                 let new_client = ctx.start_client().await;
                 let resumed = new_client
                     .resume_session(
-                        ResumeSessionConfig::new(session_id.clone())
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN),
+                        ResumeSessionOptions::new(session_id.clone())
+                            .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+                            .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN)),
                     )
                     .await
                     .expect("resume session");
@@ -620,10 +634,9 @@ async fn resumes_a_persisted_session_from_a_new_client_when_an_mcp_oauth_handler
                 ctx.set_default_copilot_user();
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(
-                        ctx.approve_all_session_config()
-                            .with_mcp_auth_handler(Arc::new(CancelMcpAuthHandler)),
-                    )
+                    .create_session(ctx.approve_all_session_config().with_mcp(|group| {
+                        group.with_on_auth_request(Arc::new(CancelMcpAuthHandler))
+                    }))
                     .await
                     .expect("create session");
                 let session_id = session.id().clone();
@@ -644,10 +657,16 @@ async fn resumes_a_persisted_session_from_a_new_client_when_an_mcp_oauth_handler
                 let new_client = ctx.start_client().await;
                 let resumed = new_client
                     .resume_session(
-                        ResumeSessionConfig::new(session_id.clone())
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_mcp_auth_handler(Arc::new(CancelMcpAuthHandler))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN),
+                        ResumeSessionOptions::new(session_id.clone())
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_mcp(|group| {
+                                group.with_on_auth_request(Arc::new(CancelMcpAuthHandler))
+                            })
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            }),
                     )
                     .await
                     .expect("resume session");
@@ -702,10 +721,9 @@ async fn send_returns_immediately_while_events_stream_in_background() {
                     release: tokio::sync::Mutex::new(Some(release_rx)),
                 });
                 let session = client
-                    .create_session(
-                        ctx.approve_all_session_config()
-                            .with_permission_handler(permission_handler.clone()),
-                    )
+                    .create_session(ctx.approve_all_session_config().with_permissions(|group| {
+                        group.with_on_request(permission_handler.clone())
+                    }))
                     .await
                     .expect("create session");
                 let mut events = session.subscribe();
@@ -840,7 +858,7 @@ async fn should_get_session_metadata_by_id() {
                 assert!(!metadata.modified_time.is_empty());
                 assert!(
                     client
-                        .get_session_metadata(&github_copilot_sdk::SessionId::new(
+                        .get_session_metadata(&copilot_sdk::SessionId::new(
                             "non-existent-session-id"
                         ))
                         .await
@@ -982,7 +1000,7 @@ async fn should_replace_and_clear_the_host_model_allowlist_on_a_live_session() {
                     .await
                     .expect_err("empty allowlist should be rejected");
                 assert!(
-                    matches!(empty_err.kind(), github_copilot_sdk::ErrorKind::Rpc { .. }),
+                    matches!(empty_err.kind(), copilot_sdk::ErrorKind::Rpc { .. }),
                     "expected an RPC error for an empty allowlist, got {empty_err:?}"
                 );
 
@@ -1597,9 +1615,7 @@ async fn should_send_with_mode_property() {
     .await;
 }
 
-async fn latest_user_message(
-    session: &github_copilot_sdk::session::Session,
-) -> github_copilot_sdk::SessionEvent {
+async fn latest_user_message(session: &copilot_sdk::session::Session) -> copilot_sdk::SessionEvent {
     session
         .get_events()
         .await

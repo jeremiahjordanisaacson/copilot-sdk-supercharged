@@ -7,7 +7,7 @@
 //! Requires the `derive` feature for typed parameter schemas:
 //!
 //! ```sh
-//! cargo run -p github-copilot-sdk --example tool_server --features derive
+//! cargo run -p copilot-sdk --example tool_server --features derive
 //! ```
 
 // Gate the entire example behind the `derive` feature so it compiles
@@ -16,7 +16,7 @@
 #[cfg(not(feature = "derive"))]
 fn main() {
     eprintln!("This example requires the `derive` feature:");
-    eprintln!("  cargo run -p github-copilot-sdk --example tool_server --features derive");
+    eprintln!("  cargo run -p copilot-sdk --example tool_server --features derive");
     std::process::exit(1);
 }
 
@@ -28,13 +28,13 @@ use std::time::Duration;
 #[cfg(feature = "derive")]
 use async_trait::async_trait;
 #[cfg(feature = "derive")]
-use github_copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::handler::ApproveAllHandler;
 #[cfg(feature = "derive")]
-use github_copilot_sdk::tool::{JsonSchema, ToolHandler, schema_for};
+use copilot_sdk::tool::{JsonSchema, ToolHandler, schema_for};
 #[cfg(feature = "derive")]
-use github_copilot_sdk::types::{MessageOptions, SessionConfig, Tool, ToolInvocation, ToolResult};
+use copilot_sdk::types::{CreateSessionOptions, MessageOptions, Tool, ToolInvocation, ToolResult};
 #[cfg(feature = "derive")]
-use github_copilot_sdk::{Client, ClientOptions, Error};
+use copilot_sdk::{Client, ClientOptions, Error};
 #[cfg(feature = "derive")]
 use serde::Deserialize;
 
@@ -120,12 +120,12 @@ impl ToolHandler for RollDiceTool {
 
 #[cfg(feature = "derive")]
 #[tokio::main]
-async fn main() -> Result<(), github_copilot_sdk::Error> {
-    let client = Client::start(ClientOptions::default()).await?;
+async fn main() -> Result<(), copilot_sdk::Error> {
+    let client = Client::start(ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)).await?;
 
-    let config = SessionConfig::default()
-        .with_permission_handler(Arc::new(ApproveAllHandler))
-        .with_tools(vec![
+    let config = CreateSessionOptions::default()
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+        .with_tools(|group| group.with_definitions(vec![
             Tool::new("get_weather")
                 .with_description("Get the current weather for a city.")
                 .with_parameters(schema_for::<GetWeatherParams>())
@@ -140,7 +140,7 @@ async fn main() -> Result<(), github_copilot_sdk::Error> {
                     }
                 }))
                 .with_handler(Arc::new(RollDiceTool)),
-        ]);
+        ]));
     let session = client.create_session(config).await?;
 
     println!(

@@ -1,15 +1,15 @@
-#:project ../src/GitHub.Copilot.SDK.csproj
+#:project ../src/Microsoft.Copilot.SDK.csproj
 
 using System.ComponentModel;
-using GitHub.Copilot;
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot;
+using Microsoft.Copilot.Rpc;
 using Microsoft.Extensions.AI;
 
 var tool = ManualToolDeclaration();
 
 // 1. Create a session with a declaration-only tool, then stop after the permission prompt.
 await using CopilotClient client1 = new();
-await using var session1 = await client1.CreateSessionAsync(new() { Tools = [tool] });
+await using var session1 = await client1.CreateSessionAsync(new() { Tools = new SessionToolOptions { Definitions = [tool] } });
 
 // Subscribe before sending so the permission event cannot be missed.
 var permissionRequested = WaitForEventAsync<PermissionRequestedEvent>(session1);
@@ -26,10 +26,7 @@ await PauseAsync();
 // 2. Resume pending work and grant permission to invoke the tool.
 await using CopilotClient client2 = new();
 await using var session2 = await client2.ResumeSessionAsync(session1.SessionId, new()
-{
-    Tools = [tool],
-    ContinuePendingWork = true,
-});
+{ ContinuePendingWork = true, Tools = new SessionToolOptions { Definitions = [tool] } });
 
 // Subscribe before approving so the external tool request cannot be missed.
 var toolRequested = WaitForEventAsync<ExternalToolRequestedEvent>(
@@ -48,12 +45,9 @@ await client2.ForceStopAsync();
 await PauseAsync();
 
 // 3. Resume again and manually provide the pending tool result.
-await using var client3 = new CopilotClient();
-await using var session3 = await client3.ResumeSessionAsync(session1.SessionId, new ResumeSessionConfig
-{
-    Tools = [tool],
-    ContinuePendingWork = true,
-});
+await using var client3 = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+await using var session3 = await client3.ResumeSessionAsync(session1.SessionId, new ResumeSessionOptions
+{ ContinuePendingWork = true, Tools = new SessionToolOptions { Definitions = [tool] } });
 
 var assistantMessage = WaitForEventAsync<AssistantMessageEvent>(session3);
 await session3.Rpc.Tools.HandlePendingToolCallAsync(

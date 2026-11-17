@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
 	"github.com/google/uuid"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 const childContext = "Subagent start hook verified: read the requested file."
@@ -187,7 +187,7 @@ func TestSubagentHooksE2E(t *testing.T) {
 	ctx := testharness.NewTestContext(t)
 	transport := newRecordingForwardingTransport(t, ctx.ProxyURL)
 	client := ctx.NewClient(func(o *copilot.ClientOptions) {
-		o.RequestHandler = &copilot.CopilotRequestHandler{Transport: transport}
+		o.Models.RequestHandler = &copilot.CopilotRequestHandler{Transport: transport}
 	})
 	t.Cleanup(func() { client.ForceStop() })
 
@@ -214,52 +214,48 @@ func TestSubagentHooksE2E(t *testing.T) {
 		var stopInvocations []copilot.HookInvocation
 		stopObserved := make(chan struct{}, 1)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			SessionID:           parentSessionID,
-			Model:               subagentReplayModel,
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Hooks: &copilot.SessionHooks{
-				OnPreToolUse: func(input copilot.PreToolUseHookInput, invocation copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
-					mu.Lock()
-					hookLog = append(hookLog, hookEntry{kind: "pre", toolName: input.ToolName, sessionID: input.SessionID})
-					mu.Unlock()
-					return &copilot.PreToolUseHookOutput{PermissionDecision: "allow"}, nil
-				},
-				OnPostToolUse: func(input copilot.PostToolUseHookInput, invocation copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
-					mu.Lock()
-					hookLog = append(hookLog, hookEntry{kind: "post", toolName: input.ToolName, sessionID: input.SessionID})
-					mu.Unlock()
-					// A fast child can inject its result before the fixture's waiting reply is requested.
-					if input.ToolName == "view" && input.SessionID != parentSessionID {
-						select {
-						case <-parentWaiting:
-						case <-t.Context().Done():
-							return nil, t.Context().Err()
-						}
-					}
-					return nil, nil
-				},
-				OnSubagentStart: func(input copilot.SubagentStartHookInput, invocation copilot.HookInvocation) (*copilot.SubagentStartHookOutput, error) {
-					mu.Lock()
-					startInputs = append(startInputs, input)
-					lifecycle = append(lifecycle, "start")
-					startInvocations = append(startInvocations, invocation)
-					mu.Unlock()
-					return &copilot.SubagentStartHookOutput{AdditionalContext: childContext}, nil
-				},
-				OnSubagentStop: func(input copilot.SubagentStopHookInput, invocation copilot.HookInvocation) (*copilot.SubagentStopHookOutput, error) {
-					mu.Lock()
-					stopInputs = append(stopInputs, input)
-					lifecycle = append(lifecycle, "stop")
-					stopInvocations = append(stopInvocations, invocation)
-					mu.Unlock()
-					select {
-					case stopObserved <- struct{}{}:
-					default:
-					}
-					return &copilot.SubagentStopHookOutput{ModifiedResponse: copilot.String(stopResponsePrefix + input.Response)}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{SessionID: parentSessionID, Model: subagentReplayModel, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnPreToolUse: func(input copilot.PreToolUseHookInput, invocation copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
+				mu.Lock()
+				hookLog = append(hookLog, hookEntry{kind: "pre", toolName: input.ToolName, sessionID: input.SessionID})
+				mu.Unlock()
+				return &copilot.PreToolUseHookOutput{PermissionDecision: "allow"}, nil
 			},
+			OnPostToolUse: func(input copilot.PostToolUseHookInput, invocation copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
+				mu.Lock()
+				hookLog = append(hookLog, hookEntry{kind: "post", toolName: input.ToolName, sessionID: input.SessionID})
+				mu.Unlock()
+				// A fast child can inject its result before the fixture's waiting reply is requested.
+				if input.ToolName == "view" && input.SessionID != parentSessionID {
+					select {
+					case <-parentWaiting:
+					case <-t.Context().Done():
+						return nil, t.Context().Err()
+					}
+				}
+				return nil, nil
+			},
+			OnSubagentStart: func(input copilot.SubagentStartHookInput, invocation copilot.HookInvocation) (*copilot.SubagentStartHookOutput, error) {
+				mu.Lock()
+				startInputs = append(startInputs, input)
+				lifecycle = append(lifecycle, "start")
+				startInvocations = append(startInvocations, invocation)
+				mu.Unlock()
+				return &copilot.SubagentStartHookOutput{AdditionalContext: childContext}, nil
+			},
+			OnSubagentStop: func(input copilot.SubagentStopHookInput, invocation copilot.HookInvocation) (*copilot.SubagentStopHookOutput, error) {
+				mu.Lock()
+				stopInputs = append(stopInputs, input)
+				lifecycle = append(lifecycle, "stop")
+				stopInvocations = append(stopInvocations, invocation)
+				mu.Unlock()
+				select {
+				case stopObserved <- struct{}{}:
+				default:
+				}
+				return &copilot.SubagentStopHookOutput{ModifiedResponse: copilot.String(stopResponsePrefix + input.Response)}, nil
+			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)

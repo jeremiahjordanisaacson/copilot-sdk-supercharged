@@ -8,10 +8,10 @@ This guide explains the plugin folder layout, how to load a plugin from a direct
 
 Use a plugin directory when you want to:
 
-* **Distribute a bundle of capabilities** as one unit — e.g., a "TypeScript reviewer" pack with a skill, a `preToolUse` hook that enforces lint, and a custom agent that runs the reviewer.
-* **Vendor capability packs into a repository** so every clone of the host application loads the same extensions deterministically.
-* **Develop a plugin locally** before publishing it to a marketplace.
-* **Override or extend** a marketplace-installed plugin with a local checkout for testing.
+- **Distribute a bundle of capabilities** as one unit — e.g., a "TypeScript reviewer" pack with a skill, a `preToolUse` hook that enforces lint, and a custom agent that runs the reviewer.
+- **Vendor capability packs into a repository** so every clone of the host application loads the same extensions deterministically.
+- **Develop a plugin locally** before publishing it to a marketplace.
+- **Override or extend** a marketplace-installed plugin with a local checkout for testing.
 
 If you only need to add a single MCP server, a single hook, or a single custom agent, you can register it inline via the SDK config (`mcpServers`, `hooks`, `customAgents`). Plugin directories are most useful once you have three or more related extensions that ship together.
 
@@ -38,9 +38,9 @@ At the plugin root, `plugin.json` declares the canonical schema:
 
 ```json
 {
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "my-plugin",
-  "description": "Lint fixes and code review"
+    "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+    "name": "my-plugin",
+    "description": "Lint fixes and code review"
 }
 ```
 
@@ -76,42 +76,40 @@ Components are optional. For legacy manifest fields and discovery locations, see
 
 ## Loading a plugin directory from the SDK
 
-Plugin directories are loaded by passing `--plugin-dir <path>` to the Copilot CLI when the SDK spawns it. Each language exposes this through the runtime connection's extra-args option. The flag can be repeated to load multiple plugins.
+Use [per-session plugin directories](#per-session-plugin-directories) for session-scoped plugins. For process-wide plugins, select a subprocess connection and pass `--plugin-dir <path>` in its extra arguments. Repeat the flag for multiple plugins.
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 async function main() {
-  const client = new CopilotClient({
-    connection: RuntimeConnection.forStdio({
-      args: [
-        "--plugin-dir", "./plugins/code-reviewer",
-        "--plugin-dir", "./plugins/lint-fix",
-      ],
-    }),
-  });
+    const client = new CopilotClient({
+        mode: "coding-agent",
+        runtime: RuntimeConnection.forSpawnedStdio({
+            args: ["--plugin-dir", "./plugins/code-reviewer", "--plugin-dir", "./plugins/lint-fix"],
+        }),
+    });
 
-  await client.start();
+    await client.start();
 }
 
 main();
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-  connection: RuntimeConnection.forStdio({
-    args: [
-      "--plugin-dir", "./plugins/code-reviewer",
-      "--plugin-dir", "./plugins/lint-fix",
-    ],
-  }),
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forSpawnedStdio({
+        args: ["--plugin-dir", "./plugins/code-reviewer", "--plugin-dir", "./plugins/lint-fix"],
+    }),
 });
 
 await client.start();
@@ -123,16 +121,18 @@ await client.start();
 <summary><strong>Python</strong></summary>
 
 <!-- docs-validate: wrap-async -->
+
 ```python
-from copilot import CopilotClient, StdioRuntimeConnection
+from copilot import CopilotClient, SpawnedStdioRuntimeConnection
 
 client = CopilotClient(
-    connection=StdioRuntimeConnection(
+    mode="coding-agent",
+    runtime=SpawnedStdioRuntimeConnection(
         args=(
             "--plugin-dir", "./plugins/code-reviewer",
             "--plugin-dir", "./plugins/lint-fix",
         ),
-    ),
+    )
 )
 await client.start()
 ```
@@ -143,13 +143,14 @@ await client.start()
 <summary><strong>Go</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```go
 package main
 
 import (
 	"context"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
@@ -158,7 +159,8 @@ func main() {
 
 func run(ctx context.Context) error {
 	client := copilot.NewClient(&copilot.ClientOptions{
-		Connection: copilot.StdioConnection{
+		Mode: copilot.ModeCodingAgent,
+		Runtime: copilot.SpawnedStdioConnection{
 			Args: []string{
 				"--plugin-dir", "./plugins/code-reviewer",
 				"--plugin-dir", "./plugins/lint-fix",
@@ -171,11 +173,13 @@ func run(ctx context.Context) error {
 	return nil
 }
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```go
 client := copilot.NewClient(&copilot.ClientOptions{
-    Connection: copilot.StdioConnection{
+    Mode: copilot.ModeCodingAgent,
+    Runtime: copilot.SpawnedStdioConnection{
         Args: []string{
             "--plugin-dir", "./plugins/code-reviewer",
             "--plugin-dir", "./plugins/lint-fix",
@@ -183,8 +187,9 @@ client := copilot.NewClient(&copilot.ClientOptions{
     },
 })
 if err := client.Start(ctx); err != nil {
-    return err
+	return err
 }
+
 ```
 
 </details>
@@ -193,17 +198,19 @@ if err := client.Start(ctx); err != nil {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 await using var client = new CopilotClient(new CopilotClientOptions
 {
-    Connection = RuntimeConnection.ForStdio(args: new[]
+    Mode = CopilotClientMode.CodingAgent,
+    Runtime = RuntimeConnection.ForSpawnedStdio(args: new[]
     {
-        "--plugin-dir", "./plugins/code-reviewer",
-        "--plugin-dir", "./plugins/lint-fix",
-    }),
+        "--plugin-dir",
+        "./plugins/code-reviewer",
+        "--plugin-dir",
+        "./plugins/lint-fix",
+    })
 });
-
 await client.StartAsync();
 ```
 
@@ -213,34 +220,43 @@ await client.StartAsync();
 <summary><strong>Java</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.RuntimeConnection;
+import java.util.List;
 
 public class PluginDirectoriesExample {
     public static void main(String[] args) throws Exception {
-        var options = new CopilotClientOptions()
-            .setCliArgs(new String[] {
+        var options = new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+            .setRuntime(RuntimeConnection.forSpawnedStdio().setArgs(List.of(
                 "--plugin-dir", "./plugins/code-reviewer",
-                "--plugin-dir", "./plugins/lint-fix",
-            });
+                "--plugin-dir", "./plugins/lint-fix"
+            )));
 
         var client = new CopilotClient(options);
-        client.start().get();
+        client
+                .start()
+                .get();
     }
 }
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```java
-var options = new CopilotClientOptions()
-    .setCliArgs(new String[] {
+var options = new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+    .setRuntime(RuntimeConnection.forSpawnedStdio().setArgs(List.of(
         "--plugin-dir", "./plugins/code-reviewer",
-        "--plugin-dir", "./plugins/lint-fix",
-    });
+        "--plugin-dir", "./plugins/lint-fix"
+    )));
 
 var client = new CopilotClient(options);
-client.start().get();
+client
+        .start()
+        .get();
 ```
 
 </details>
@@ -249,50 +265,58 @@ client.start().get();
 <summary><strong>Rust</strong></summary>
 
 ```rust
-use github_copilot_sdk::{Client, ClientOptions};
+use copilot_sdk::{Client, ClientOptions, SpawnedProcessOptions, RuntimeConnection};
 
 let client = Client::start(
-    ClientOptions::new().with_extra_args([
-        "--plugin-dir", "./plugins/code-reviewer",
-        "--plugin-dir", "./plugins/lint-fix",
-    ]),
+    ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_runtime(RuntimeConnection::SpawnedStdio(
+        SpawnedProcessOptions::default().with_args([
+            "--plugin-dir", "./plugins/code-reviewer",
+            "--plugin-dir", "./plugins/lint-fix",
+        ]),
+    )),
 )
 .await?;
 ```
 
 </details>
 
-> The example above uses an stdio runtime connection — the default when the SDK bundles the CLI. If you connect to an external runtime via a URL (`forUri` / `ForUri`), pass `--plugin-dir` to the long-running CLI server when you start it; the SDK does not forward `--plugin-dir` to runtimes it didn't spawn.
+> If you connect to an external runtime via TCP (`forTcp` / `ForTcp`), pass `--plugin-dir` to the long-running CLI server when you start it; the SDK does not forward `--plugin-dir` to runtimes it didn't spawn.
 
 ## Per-session plugin directories
 
-`--plugin-dir` is a launch argument, so its plugin set is shared by sessions created against that CLI process. When sessions need additional, session-specific plugins, or when the SDK is connected to a runtime it did not spawn, pass the directories on the session config instead. They travel in the `session.create` and `session.resume` payloads over JSON-RPC rather than as process arguments. The connected runtime must support this option.
+Pass plugin directories when creating or resuming a session. Each session can use its own plugin set:
 
 <!-- docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 async function main() {
-  const client = new CopilotClient();
-  await client.start();
+    const client = new CopilotClient({ mode: "coding-agent" });
+    await client.start();
 
-  const session = await client.createSession({
-    pluginDirectories: ["./plugins/code-reviewer"],
-  });
+    const session = await client.createSession({
+        plugins: {
+            directories: ["./plugins/code-reviewer"],
+        },
+    });
 }
 
 main();
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 await client.start();
 
 const session = await client.createSession({
-  pluginDirectories: ["./plugins/code-reviewer"],
+    plugins: {
+        directories: ["./plugins/code-reviewer"],
+    },
 });
 ```
 
@@ -300,66 +324,68 @@ Relative paths resolve against `workingDirectory`, or the runtime working direct
 
 The equivalent option in each SDK is:
 
-| SDK | Session option |
-|---|---|
-| Node.js / TypeScript | `pluginDirectories: string[]` |
-| Python | `plugin_directories=[...]` |
-| Go | `PluginDirectories: []string{...}` |
-| .NET | `PluginDirectories = [...]` |
-| Java | `.setPluginDirectories(List.of(...))` |
-| Rust | `.with_plugin_directories([...])` |
+| SDK                  | Session option                                                         |
+| -------------------- | ---------------------------------------------------------------------- | ----- | ------------------------------- |
+| Node.js / TypeScript | `plugins: { directories: [...] }`                                      |
+| Python               | `plugins={"directories": [...]}`                                       |
+| Go                   | `Plugins: copilot.SessionPluginOptions{Directories: []string{...}}`    |
+| .NET                 | `Plugins = new SessionPluginOptions { Directories = [...] }`           |
+| Java                 | `.setPlugins(new SessionPluginOptions().setDirectories(List.of(...)))` |
+| Rust                 | `.with_plugins(                                                        | group | group.with_directories([...]))` |
 
 ## Trusted host-bundled plugin directories
 
 Applications that ship their own trusted plugins can register them as a client startup option. The SDK sends the complete ordered set after connecting and verifying the protocol, before `start` returns or any session can be created. Paths must be absolute; leaving the option unset or empty makes no RPC call.
 
 <!-- docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 async function main() {
-  const client = new CopilotClient({
-    builtinPluginDirectories: [
-      "/opt/my-app/copilot-plugins/core",
-      "/opt/my-app/copilot-plugins/github",
-    ],
-  });
-  await client.start();
+    const client = new CopilotClient({
+        mode: "coding-agent",
+        plugins: {
+            builtinDirectories: ["/opt/my-app/copilot-plugins/core", "/opt/my-app/copilot-plugins/github"],
+        },
+    });
+    await client.start();
 }
 
 main();
 ```
+
 <!-- /docs-validate: hidden -->
 
 The equivalent option in each SDK is:
 
-| SDK | Startup option |
-|---|---|
-| Node.js / TypeScript | `builtinPluginDirectories: string[]` |
-| Python | `builtin_plugin_directories=[...]` |
-| Go | `BuiltinPluginDirectories: []string{...}` |
-| .NET | `BuiltinPluginDirectories = [...]` |
-| Java | `.setBuiltinPluginDirectories(List.of(Path.of(...)))` |
-| Rust | `.with_builtin_plugin_directories([...])` |
+| SDK                  | Startup option                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------- | ----- | --------------------------------------- |
+| Node.js / TypeScript | `plugins: { builtinDirectories: [...] }`                                              |
+| Python               | `plugins={"builtin_directories": [...]}`                                              |
+| Go                   | `Plugins: copilot.ClientPluginOptions{BuiltinDirectories: []string{...}}`             |
+| .NET                 | `Plugins = new ClientPluginOptions { BuiltinDirectories = [...] }`                    |
+| Java                 | `.setPlugins(new ClientPluginOptions().setBuiltinDirectories(List.of(Path.of(...))))` |
+| Rust                 | `.with_plugins(                                                                       | group | group.with_builtin_directories([...]))` |
 
 This is a trust boundary for plugins bundled and controlled by the host application. It is distinct from `--plugin-dir`, which is a CLI process launch argument for explicitly loading ordinary plugin directories. The startup option also works when connecting to an existing runtime that supports built-in plugin registration, because it is sent over JSON-RPC rather than forwarded as a process argument.
 
-The bundled opt-in plugins `computer-use` and `browser-use` are the exception: they contribute no skills, hooks or MCP servers until enabled through `enabledPlugins`, `client.rpc.plugins.enable({ names: ["browser-use"] })`, or settings. Changes apply to sessions created afterwards. Managed `enabledPlugins["browser-use"]` forces Browser Use on or off regardless of user preferences. Computer Use also accepts the legacy `enabledMcpServers` preference; its managed policy veto is `features.computerUse=false`, not `enabledPlugins["computer-use"]`.
+The bundled opt-in plugins `computer-use` and `browser-use` are the exception: they contribute no skills, hooks or MCP servers until enabled through `enabledPlugins`, `client.rpc.plugins.enable({ names: ["browser-use"] })`, or settings. Changes apply to sessions created afterwards. Managed `enabledPlugins["browser-use"]` forces Browser Use on or off regardless of user preferences, and managed `features.browserUse=false` makes it unavailable even when `enabledPlugins` forces it on. Computer Use also accepts the legacy `enabledMcpServers` preference; its managed policy veto is `features.computerUse=false`, not `enabledPlugins["computer-use"]`.
 
 ## What a plugin can contribute
 
-Launch-time directories are shared across sessions; `pluginDirectories` applies to the session that supplies it. The runtime merges the active plugin's components with anything you register inline:
+Launch-time directories are shared across sessions; `plugins.directories` applies to the session that supplies it. The runtime merges the active plugin's components with anything you register inline:
 
-| Plugin contributes | Agent Plugins location | Visible to session as |
-|---|---|---|
-| Skills | `skills/*/SKILL.md` | Items in `session.skills.list()`; injectable by name |
-| MCP servers | `mcp.json` | Tools and resources reachable through `session.mcp.*` |
-| Custom agents | `com.github.copilot/agents/*.md` | Dispatchable via the `task(agent_type=...)` tool |
-| Commands | `com.github.copilot/commands/` | Plugin slash commands |
-| Rules | `com.github.copilot/rules/` | Instructions applied by the runtime |
-| Hooks | `com.github.copilot/hooks/hooks.json` | Fired alongside hooks registered via the SDK |
-| LSP servers | `com.github.copilot/lsp.json` | Initialized via `session.lsp.initialize(...)` |
-| Extensions | `com.github.copilot/extensions/` | Runtime extension registrations |
+| Plugin contributes | Agent Plugins location                | Visible to session as                                 |
+| ------------------ | ------------------------------------- | ----------------------------------------------------- |
+| Skills             | `skills/*/SKILL.md`                   | Items in `session.skills.list()`; injectable by name  |
+| MCP servers        | `mcp.json`                            | Tools and resources reachable through `session.mcp.*` |
+| Custom agents      | `com.github.copilot/agents/*.md`      | Dispatchable via the `task(agent_type=...)` tool      |
+| Commands           | `com.github.copilot/commands/`        | Plugin slash commands                                 |
+| Rules              | `com.github.copilot/rules/`           | Instructions applied by the runtime                   |
+| Hooks              | `com.github.copilot/hooks/hooks.json` | Fired alongside hooks registered via the SDK          |
+| LSP servers        | `com.github.copilot/lsp.json`         | Initialized via `session.lsp.initialize(...)`         |
+| Extensions         | `com.github.copilot/extensions/`      | Runtime extension registrations                       |
 
 Legacy plugins use their legacy discovery locations and manifest overrides instead.
 
@@ -369,10 +395,10 @@ Plugin agents are first-class sub-agents in [fleet mode](./fleet-mode.md): a par
 
 The runtime has two ways to install plugins, and both end up looking the same to a session:
 
-* **Marketplace / direct-repo plugins** are installed persistently through the CLI's `/plugin` slash command. They are *ambient* and participate in the session's plugin discovery and activation rules.
-* **`--plugin-dir` plugins** are *explicit and ephemeral* — they only apply to the CLI process you launched with that flag. They take precedence over ambient discovery and are de-duplicated against marketplace entries with the same cache path, so the same plugin won't load twice when both surfaces reference it.
+- **Marketplace / direct-repo plugins** are installed persistently through the CLI's `/plugin` slash command. They are _ambient_ and participate in the session's plugin discovery and activation rules.
+- **`--plugin-dir` plugins** are _explicit and ephemeral_ — they only apply to the CLI process you launched with that flag. They take precedence over ambient discovery and are de-duplicated against marketplace entries with the same cache path, so the same plugin won't load twice when both surfaces reference it.
 
-For SDK-driven applications, use `--plugin-dir` for shared process-level plugins or `pluginDirectories` for session-specific additions. Both keep explicit directories under your application's control instead of relying only on per-machine user state.
+For SDK-driven applications, use `--plugin-dir` for shared process-level plugins or `plugins.directories` for session-specific additions. Both keep explicit directories under your application's control instead of relying only on per-machine user state.
 
 ### Team marketplace sources
 
@@ -384,38 +410,38 @@ A listed marketplace that only the Team supplies has `team: true`. Because it is
 
 ## Making plugin sets deterministic
 
-When the host machine may have other plugins installed (marketplace or personal), set `COPILOT_PLUGIN_DIR_ONLY=true` in the runtime's environment to suppress ambient plugin discovery. Explicit directories supplied through either `--plugin-dir` or session `pluginDirectories` still load. This setting does not disable host-registered built-in plugins, whose activation is handled separately.
+When the host machine may have other plugins installed (marketplace or personal), set `COPILOT_PLUGIN_DIR_ONLY=true` in the runtime's environment to suppress ambient plugin discovery. Explicit directories supplied through either `--plugin-dir` or session `plugins.directories` still load. This setting does not disable host-registered built-in plugins, whose activation is handled separately.
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 async function main() {
-  process.env.COPILOT_PLUGIN_DIR_ONLY = "true";
-  const client = new CopilotClient({
-    connection: RuntimeConnection.forStdio({
-      args: ["--plugin-dir", "./plugins/code-reviewer"],
-    }),
-  });
-  await client.start();
+    process.env.COPILOT_PLUGIN_DIR_ONLY = "true";
+    const client = new CopilotClient({ mode: "coding-agent" });
+    await client.start();
+    const session = await client.createSession({
+        plugins: { directories: ["./plugins/code-reviewer"] },
+    });
 }
 
 main();
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```typescript
 process.env.COPILOT_PLUGIN_DIR_ONLY = "true";
 
-const client = new CopilotClient({
-  connection: RuntimeConnection.forStdio({
-    args: ["--plugin-dir", "./plugins/code-reviewer"],
-  }),
-});
+const client = new CopilotClient({ mode: "coding-agent" });
 await client.start();
+const session = await client.createSession({
+    plugins: { directories: ["./plugins/code-reviewer"] },
+});
 ```
 
 </details>
@@ -430,30 +456,34 @@ Once a session is created, list the active plugins to confirm a directory was pi
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 async function main() {
-  const client = new CopilotClient();
-  await client.start();
-  const session = await client.createSession({
-    onPermissionRequest: async () => ({ kind: "approve-once" }),
-  });
+    const client = new CopilotClient({ mode: "coding-agent" });
+    await client.start();
+    const session = await client.createSession({
+        permissions: {
+            onRequest: async () => ({ kind: "approve-once" }),
+        },
+    });
 
-  const plugins = await session.rpc.plugins.list();
-  for (const plugin of plugins.plugins) {
-    console.log(`${plugin.name} (${plugin.enabled ? "enabled" : "disabled"})`);
-  }
+    const plugins = await session.rpc.plugins.list();
+    for (const plugin of plugins.plugins) {
+        console.log(`${plugin.name} (${plugin.enabled ? "enabled" : "disabled"})`);
+    }
 }
 
 main();
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```typescript
 const plugins = await session.rpc.plugins.list();
 for (const plugin of plugins.plugins) {
-  console.log(`${plugin.name} (${plugin.enabled ? "enabled" : "disabled"})`);
+    console.log(`${plugin.name} (${plugin.enabled ? "enabled" : "disabled"})`);
 }
 ```
 
@@ -461,13 +491,13 @@ for (const plugin of plugins.plugins) {
 
 Plugins loaded via `--plugin-dir` appear in this list alongside marketplace installs. Each entry has these fields:
 
-| Field | Description |
-|-------|-------------|
-| `name` | The plugin name. |
-| `marketplace` | The marketplace the plugin came from. Empty for a plugin loaded from a plugin directory. |
-| `version` | The plugin version, when the plugin declares one. |
-| `enabled` | Whether the plugin is enabled. |
-| `rootPath` | The absolute directory holding the plugin's content, when the runtime resolved one. For a plugin loaded from a plugin directory, this is that directory. |
+| Field         | Description                                                                                                                                              |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | The plugin name.                                                                                                                                         |
+| `marketplace` | The marketplace the plugin came from. Empty for a plugin loaded from a plugin directory.                                                                 |
+| `version`     | The plugin version, when the plugin declares one.                                                                                                        |
+| `enabled`     | Whether the plugin is enabled.                                                                                                                           |
+| `rootPath`    | The absolute directory holding the plugin's content, when the runtime resolved one. For a plugin loaded from a plugin directory, this is that directory. |
 
 ## Retrying plugins required by managed settings
 
@@ -479,46 +509,50 @@ Call it with no arguments to retry every plugin the managed settings require, or
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 async function main() {
-  const client = new CopilotClient();
-  await client.start();
-  const session = await client.createSession({
-    onPermissionRequest: async () => ({ kind: "approve-once" }),
-  });
+    const client = new CopilotClient({ mode: "coding-agent" });
+    await client.start();
+    const session = await client.createSession({
+        permissions: {
+            onRequest: async () => ({ kind: "approve-once" }),
+        },
+    });
 
-  // Retry every plugin the managed settings require, for example from a Retry action.
-  const result = await session.rpc.plugins.retryManaged();
-  for (const entry of result.plugins) {
-    console.log(`${entry.spec}: ${entry.status}${entry.error ? ` (${entry.error})` : ""}`);
-  }
+    // Retry every plugin the managed settings require, for example from a Retry action.
+    const result = await session.rpc.plugins.retryManaged();
+    for (const entry of result.plugins) {
+        console.log(`${entry.spec}: ${entry.status}${entry.error ? ` (${entry.error})` : ""}`);
+    }
 
-  // Or retry only the required plugins that are still missing.
-  const { plugins } = await session.rpc.plugins.list();
-  const missing = plugins
-    .filter((plugin) => plugin.managedDesiredEnabled === true && plugin.installed === false)
-    .map((plugin) => `${plugin.name}@${plugin.marketplace}`);
-  await session.rpc.plugins.retryManaged({ plugins: missing });
+    // Or retry only the required plugins that are still missing.
+    const { plugins } = await session.rpc.plugins.list();
+    const missing = plugins
+        .filter((plugin) => plugin.managedDesiredEnabled === true && plugin.installed === false)
+        .map((plugin) => `${plugin.name}@${plugin.marketplace}`);
+    await session.rpc.plugins.retryManaged({ plugins: missing });
 }
 
 main();
 ```
+
 <!-- /docs-validate: hidden -->
 
 ```typescript
 // Retry every plugin the managed settings require, for example from a Retry action.
 const result = await session.rpc.plugins.retryManaged();
 for (const entry of result.plugins) {
-  console.log(`${entry.spec}: ${entry.status}${entry.error ? ` (${entry.error})` : ""}`);
+    console.log(`${entry.spec}: ${entry.status}${entry.error ? ` (${entry.error})` : ""}`);
 }
 
 // Or retry only the required plugins that are still missing.
 const { plugins } = await session.rpc.plugins.list();
 const missing = plugins
-  .filter((plugin) => plugin.managedDesiredEnabled === true && plugin.installed === false)
-  .map((plugin) => `${plugin.name}@${plugin.marketplace}`);
+    .filter((plugin) => plugin.managedDesiredEnabled === true && plugin.installed === false)
+    .map((plugin) => `${plugin.name}@${plugin.marketplace}`);
 await session.rpc.plugins.retryManaged({ plugins: missing });
 ```
 
@@ -528,15 +562,15 @@ Runtimes that do not prepare managed plugins for the session reject the call.
 
 ## Troubleshooting
 
-* **"no plugin.json or SKILL.md found in &lt;dir&gt;"**: the directory exists but doesn't qualify as a plugin. For Agent Plugins, add root `plugin.json` with a recognized schema and a name. For legacy plugins, use one of the manifest locations listed above or a root `SKILL.md`.
-* **Plugin loaded but components not visible**: check which format the manifest selects. Agent Plugins uses `skills/*/SKILL.md`, root `mcp.json` with a matching schema, and `com.github.copilot/` for Copilot-specific components. Legacy root assets and component-path fields do not carry over when you add the spec schema. Use `session.rpc.skills.reload()` for skill changes; it is not an agent reload API.
-* **Duplicate hooks firing**: explicit directories are de-duplicated against other entries for the same directory. Separate copies can still load twice. Remove the extra directory; `COPILOT_PLUGIN_DIR_ONLY=true` suppresses ambient plugins, not duplicate explicit copies.
-* **`--plugin-dir` ignored when connecting to an external runtime**: the SDK only forwards extra args when it spawns the CLI itself. Pass `--plugin-dir` when starting the runtime server, or use session `pluginDirectories` with a runtime that supports it.
+- **"no plugin.json or SKILL.md found in &lt;dir&gt;"**: the directory exists but doesn't qualify as a plugin. For Agent Plugins, add root `plugin.json` with a recognized schema and a name. For legacy plugins, use one of the manifest locations listed above or a root `SKILL.md`.
+- **Plugin loaded but components not visible**: check which format the manifest selects. Agent Plugins uses `skills/*/SKILL.md`, root `mcp.json` with a matching schema, and `com.github.copilot/` for Copilot-specific components. Legacy root assets and component-path fields do not carry over when you add the spec schema. Use `session.rpc.skills.reload()` for skill changes; it is not an agent reload API.
+- **Duplicate hooks firing**: explicit directories are de-duplicated against other entries for the same directory. Separate copies can still load twice. Remove the extra directory; `COPILOT_PLUGIN_DIR_ONLY=true` suppresses ambient plugins, not duplicate explicit copies.
+- **`--plugin-dir` ignored when connecting to an external runtime**: the SDK only forwards extra args when it spawns the CLI itself. Pass `--plugin-dir` when starting the runtime server, or use session `plugins.directories` with a runtime that supports it.
 
 ## Related
 
-* [Custom agents](./custom-agents.md): write agents for `com.github.copilot/agents/` (or legacy `agents/`).
-* [Skills](./skills.md): how `SKILL.md` files are loaded, and the skill-tier ordering rules.
-* [Hooks](./hooks.md): hooks defined by a plugin fire alongside SDK-registered hooks.
-* [MCP servers](./mcp.md): plugin-provided MCP servers integrate the same way as inline registrations.
-* [Fleet mode](./fleet-mode.md): plugin-provided agents are dispatchable as sub-agents.
+- [Custom agents](./custom-agents.md): write agents for `com.github.copilot/agents/` (or legacy `agents/`).
+- [Skills](./skills.md): how `SKILL.md` files are loaded, and the skill-tier ordering rules.
+- [Hooks](./hooks.md): hooks defined by a plugin fire alongside SDK-registered hooks.
+- [MCP servers](./mcp.md): plugin-provided MCP servers integrate the same way as inline registrations.
+- [Fleet mode](./fleet-mode.md): plugin-provided agents are dispatchable as sub-agents.

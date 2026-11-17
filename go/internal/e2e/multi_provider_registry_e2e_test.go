@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 // TestMultiProviderRegistryE2E exercises the experimental multi-provider BYOK
@@ -30,43 +30,39 @@ func TestMultiProviderRegistryE2E(t *testing.T) {
 		// A heterogeneous registry: two providers of different types, with
 		// multiple models each. Provider-qualified selection ids are
 		// alpha/sonnet, alpha/haiku, beta/opus, beta/haiku.
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Providers: []copilot.NamedProviderConfig{
-				{
-					Name:    "alpha",
-					Type:    "openai",
-					WireAPI: "completions",
-					BaseURL: "https://alpha.example.test/v1",
-					APIKey:  "alpha-secret",
-					Headers: map[string]string{"X-Provider": "alpha"},
-				},
-				{
-					Name:        "beta",
-					Type:        "anthropic",
-					BaseURL:     "https://beta.example.test",
-					BearerToken: "beta-bearer",
-					Headers:     map[string]string{"X-Provider": "beta"},
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Inference: copilot.SessionInferenceOptions{Providers: []copilot.NamedProviderConfig{
+			{
+				Name:    "alpha",
+				Type:    "openai",
+				WireAPI: "completions",
+				BaseURL: "https://alpha.example.test/v1",
+				APIKey:  "alpha-secret",
+				Headers: map[string]string{"X-Provider": "alpha"},
 			},
-			Models: []copilot.ProviderModelConfig{
-				{ID: "sonnet", Provider: "alpha", WireModel: "byok-gpt-4o", MaxPromptTokens: 111111},
-				{ID: "haiku", Provider: "alpha", WireModel: "byok-gpt-4o-mini"},
-				{ID: "opus", Provider: "beta", WireModel: "byok-claude-3-opus"},
-				{ID: "haiku", Provider: "beta", WireModel: "byok-claude-3-haiku"},
+			{
+				Name:        "beta",
+				Type:        "anthropic",
+				BaseURL:     "https://beta.example.test",
+				BearerToken: "beta-bearer",
+				Headers:     map[string]string{"X-Provider": "beta"},
 			},
-			CustomAgents: []copilot.CustomAgentConfig{
-				{Name: "orchestrator", DisplayName: "Orchestrator", Description: "Top-level planner.", Prompt: "Plan and delegate.", Model: "alpha/sonnet"},
-				{Name: "researcher", DisplayName: "Researcher", Description: "Deep research subagent.", Prompt: "Research thoroughly.", Model: "beta/opus"},
-				{Name: "fast-helper", DisplayName: "Fast Helper", Description: "Quick subagent.", Prompt: "Answer quickly.", Model: "alpha/haiku"},
-				{Name: "summarizer", DisplayName: "Summarizer", Description: "Summarizing subagent.", Prompt: "Summarize.", Model: "beta/haiku"},
-			},
+		}, Models: []copilot.ProviderModelConfig{
+			{ID: "sonnet", Provider: "alpha", WireModel: "byok-gpt-4o", MaxPromptTokens: 111111},
+			{ID: "haiku", Provider: "alpha", WireModel: "byok-gpt-4o-mini"},
+			{ID: "opus", Provider: "beta", WireModel: "byok-claude-3-opus"},
+			{ID: "haiku", Provider: "beta", WireModel: "byok-claude-3-haiku"},
+		}}, Agents: copilot.SessionAgentOptions{Definitions: []copilot.CustomAgentConfig{
+			{Name: "orchestrator", DisplayName: "Orchestrator", Description: "Top-level planner.", Prompt: "Plan and delegate.", Model: "alpha/sonnet"},
+			{Name: "researcher", DisplayName: "Researcher", Description: "Deep research subagent.", Prompt: "Research thoroughly.", Model: "beta/opus"},
+			{Name: "fast-helper", DisplayName: "Fast Helper", Description: "Quick subagent.", Prompt: "Answer quickly.", Model: "alpha/haiku"},
+			{Name: "summarizer", DisplayName: "Summarizer", Description: "Summarizing subagent.", Prompt: "Summarize.", Model: "beta/haiku"},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
 
-		result, err := session.RPC.Agent.List(t.Context())
+		result, err := session.RPC.Agent.List(t.Context(), nil)
 		if err != nil {
 			t.Fatalf("Agent.List failed: %v", err)
 		}
@@ -120,32 +116,28 @@ func TestMultiProviderRegistryE2E(t *testing.T) {
 		// their /chat/completions traffic is captured. They are distinguished
 		// on the wire by their per-provider X-Provider header. "alpha" carries
 		// two models (multiple models per provider); "delta" carries one.
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               selectionID,
-			Providers: []copilot.NamedProviderConfig{
-				{
-					Name:    "alpha",
-					Type:    "openai",
-					WireAPI: "completions",
-					BaseURL: ctx.ProxyURL,
-					APIKey:  "alpha-secret",
-					Headers: map[string]string{"X-Provider": "alpha"},
-				},
-				{
-					Name:    "delta",
-					Type:    "openai",
-					WireAPI: "completions",
-					BaseURL: ctx.ProxyURL,
-					APIKey:  "delta-secret",
-					Headers: map[string]string{"X-Provider": "delta"},
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: selectionID, Inference: copilot.SessionInferenceOptions{Providers: []copilot.NamedProviderConfig{
+			{
+				Name:    "alpha",
+				Type:    "openai",
+				WireAPI: "completions",
+				BaseURL: ctx.ProxyURL,
+				APIKey:  "alpha-secret",
+				Headers: map[string]string{"X-Provider": "alpha"},
 			},
-			Models: []copilot.ProviderModelConfig{
-				{ID: "sonnet", Provider: "alpha", WireModel: "byok-gpt-4o"},
-				{ID: "haiku", Provider: "alpha", WireModel: "byok-gpt-4o-mini"},
-				{ID: "turbo", Provider: "delta", WireModel: "byok-gpt-4-turbo"},
+			{
+				Name:    "delta",
+				Type:    "openai",
+				WireAPI: "completions",
+				BaseURL: ctx.ProxyURL,
+				APIKey:  "delta-secret",
+				Headers: map[string]string{"X-Provider": "delta"},
 			},
+		}, Models: []copilot.ProviderModelConfig{
+			{ID: "sonnet", Provider: "alpha", WireModel: "byok-gpt-4o"},
+			{ID: "haiku", Provider: "alpha", WireModel: "byok-gpt-4o-mini"},
+			{ID: "turbo", Provider: "delta", WireModel: "byok-gpt-4-turbo"},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)

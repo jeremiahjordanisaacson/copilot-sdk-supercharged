@@ -734,6 +734,9 @@ pub struct ModelSwitchToRequest {
     /// When true, defer this switch (enqueue it) if another model change is already queued, even when no turn is active — so it drains last (FIFO) and wins over the already-queued change. Intended for genuine user-initiated model selections; internal restore/reapply switches omit it and apply immediately when no turn is active. When no other model change is queued this has no effect (a switch still applies immediately unless a turn is active).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_if_model_change_queued: Option<bool>,
+    /// Optional Copilot Fusion tier to stage atomically with selecting `fusion` or `auto`, matching the CLI's `--fusion-tier`. The runtime resolves it to the Auto routing preference it stands for and stages that preference exactly like `autoTier`. Cannot be combined with `autoTier`, and is rejected when `modelId` is not `fusion` or `auto`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fusion_tier: Option<FusionTier>,
     /// Override individual model capabilities resolved by the runtime
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_capabilities: Option<ModelCapabilitiesOverride>,
@@ -745,6 +748,9 @@ pub struct ModelSwitchToRequest {
     /// Optional settings context and explicit-override flags used to persist a picker selection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub picker_persistence: Option<ModelPickerPersistenceRequest>,
+    /// Provider id from the selected list entry's provider reference. Selects this exact provider/model pair; an unavailable pair fails rather than using another provider. Omit for deterministic legacy bare-model selection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
     /// Reasoning effort level to use for the model. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. "none" disables reasoning. Pass null to clear any session effort override and fall back to the model's default. When omitted, the session's current effort is kept.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
@@ -766,151 +772,6 @@ pub struct ModelSwitchToRequest {
     /// Output verbosity level to request for supported models
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verbosity: Option<Verbosity>,
-}
-
-/// Extensible [`ModelSwitchToRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`ModelSwitchToOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelSwitchToOptions {
-    #[serde(flatten)]
-    legacy: ModelSwitchToRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    provider_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    fusion_tier: Option<FusionTier>,
-}
-
-impl ModelSwitchToOptions {
-    /// Creates options with the required inputs.
-    pub fn new(model_id: impl Into<String>) -> Self {
-        Self {
-            legacy: ModelSwitchToRequest {
-                model_id: model_id.into(),
-                auto_tier: None,
-                reasoning_effort: None,
-                reasoning_summary: None,
-                verbosity: None,
-                model_capabilities: None,
-                context_tier: None,
-                source: None,
-                defer_if_model_change_queued: None,
-                compaction_decision: None,
-                run_compaction_preflight: None,
-                repo_scope: None,
-                model_change_scope: None,
-                require_available: None,
-                picker_persistence: None,
-            },
-            provider_id: None,
-            fusion_tier: None,
-        }
-    }
-
-    /// Optional Auto routing preference to stage atomically with selecting `auto`. Pass null to return to provider-default Auto routing. This field is rejected when `modelId` is not `auto`. For Copilot Fusion, prefer `fusionTier`: the `balance`, `hydrafusion` and `hydrafusion-max` identifiers it replaces remain accepted but are deprecated.
-    pub fn auto_tier(mut self, value: AutoTier) -> Self {
-        self.legacy.auto_tier = Some(value);
-        self
-    }
-
-    /// Reasoning effort level to use for the model. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. "none" disables reasoning. Pass null to clear any session effort override and fall back to the model's default. When omitted, the session's current effort is kept.
-    pub fn reasoning_effort(mut self, value: impl Into<String>) -> Self {
-        self.legacy.reasoning_effort = Some(value.into());
-        self
-    }
-
-    /// Reasoning summary mode to request for supported model clients
-    pub fn reasoning_summary(mut self, value: ReasoningSummary) -> Self {
-        self.legacy.reasoning_summary = Some(value);
-        self
-    }
-
-    /// Output verbosity level to request for supported models
-    pub fn verbosity(mut self, value: Verbosity) -> Self {
-        self.legacy.verbosity = Some(value);
-        self
-    }
-
-    /// Override individual model capabilities resolved by the runtime
-    pub fn model_capabilities(mut self, value: ModelCapabilitiesOverride) -> Self {
-        self.legacy.model_capabilities = Some(value);
-        self
-    }
-
-    /// Explicit context tier for the selected model. `"default"` / `"long_context"` apply the requested tier; omit this field to use normal model behavior with no explicit tier.
-    pub fn context_tier(mut self, value: ContextTier) -> Self {
-        self.legacy.context_tier = Some(value);
-        self
-    }
-
-    /// Origin to record on the effective `session.model_change` event for trusted in-process calls. Transport SDK calls are always recorded as `sdk`, regardless of this value.
-    pub fn source(mut self, value: ModelChangeSource) -> Self {
-        self.legacy.source = Some(value);
-        self
-    }
-
-    /// When true, defer this switch (enqueue it) if another model change is already queued, even when no turn is active — so it drains last (FIFO) and wins over the already-queued change. Intended for genuine user-initiated model selections; internal restore/reapply switches omit it and apply immediately when no turn is active. When no other model change is queued this has no effect (a switch still applies immediately unless a turn is active).
-    pub fn defer_if_model_change_queued(mut self, value: bool) -> Self {
-        self.legacy.defer_if_model_change_queued = Some(value);
-        self
-    }
-
-    /// Explicit response to a model-switch compaction preflight. Omit to request a confirmation projection when compaction is necessary.
-    pub fn compaction_decision(mut self, value: impl Into<String>) -> Self {
-        self.legacy.compaction_decision = Some(value.into());
-        self
-    }
-
-    /// When true, evaluate context-window compaction policy before applying the switch, including effort-only and unchanged selections while idle. An effort-only change applies immediately without compaction when a turn is active, including when the turn starts during preflight; an explicit `compactionDecision: "cancel"` still cancels the change. Other switches retain preflight and may be deferred until the active turn ends.
-    pub fn run_compaction_preflight(mut self, value: bool) -> Self {
-        self.legacy.run_compaction_preflight = Some(value);
-        self
-    }
-
-    /// Optional repository settings scope to persist after the switch commits.
-    pub fn repo_scope(mut self, value: impl Into<String>) -> Self {
-        self.legacy.repo_scope = Some(value.into());
-        self
-    }
-
-    /// Settings scope used when persisting the selected model.
-    pub fn model_change_scope(mut self, value: impl Into<String>) -> Self {
-        self.legacy.model_change_scope = Some(value.into());
-        self
-    }
-
-    /// Require the target to be currently available and enabled before applying the switch.
-    pub fn require_available(mut self, value: bool) -> Self {
-        self.legacy.require_available = Some(value);
-        self
-    }
-
-    /// Optional settings context and explicit-override flags used to persist a picker selection.
-    pub fn picker_persistence(mut self, value: ModelPickerPersistenceRequest) -> Self {
-        self.legacy.picker_persistence = Some(value);
-        self
-    }
-
-    /// Provider id from the selected list entry's provider reference. Selects this exact provider/model pair; an unavailable pair fails rather than using another provider. Omit for deterministic legacy bare-model selection.
-    pub fn provider_id(mut self, value: impl Into<String>) -> Self {
-        self.provider_id = Some(value.into());
-        self
-    }
-
-    /// Optional Copilot Fusion tier to stage atomically with selecting `fusion` or `auto`, matching the CLI's `--fusion-tier`. The runtime resolves it to the Auto routing preference it stands for and stages that preference exactly like `autoTier`. Cannot be combined with `autoTier`, and is rejected when `modelId` is not `fusion` or `auto`.
-    pub fn fusion_tier(mut self, value: FusionTier) -> Self {
-        self.fusion_tier = Some(value);
-        self
-    }
 }
 
 /// The model identifier active on the session after the switch.
@@ -1136,7 +997,7 @@ pub struct ProviderSyncResult {
 pub struct ProviderTokenAcquireRequest {
     /// Target session identifier
     pub session_id: SessionId,
-    /// Name of the BYOK provider needing a token. For the legacy whole-session provider this is the implicit provider name; for named providers it is the configured provider name.
+    /// Explicit name of the BYOK connection needing a token, including when it is the default connection.
     pub provider_name: String,
 }
 
@@ -1196,7 +1057,7 @@ pub struct ProviderUpdateProviderRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderWithdrawRequest {
-    /// Provider-qualified selection ids to withdraw. Ids that are not registered are ignored, so withdrawal is idempotent. A provider left with no models referencing it is removed too.
+    /// Provider-qualified selection ids to withdraw. Ids that are not registered are ignored, so withdrawal is idempotent. A provider left with no models referencing it is removed too, unless it is the session's default provider.
     pub models: Vec<String>,
 }
 
@@ -1214,7 +1075,7 @@ pub struct ProviderWithdrawResult {
     /// True when withdrawal removed the selected host-managed model, leaving the session with no explicit selection, so ordinary model resolution picks the session default. Withdrawal never promotes a surviving model in its place: the choice of which model to use stays with the user.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_deselected: Option<bool>,
-    /// Providers removed because one of the withdrawn models was the last entry referencing them. A provider that merely has no models is not removed.
+    /// Providers removed because one of the withdrawn models was the last entry referencing them. The default provider and providers that merely have no models are not removed.
     pub providers_removed: Vec<String>,
     /// Selection ids that were registered and are now withdrawn. Excludes requested ids that were not present.
     pub withdrawn: Vec<String>,

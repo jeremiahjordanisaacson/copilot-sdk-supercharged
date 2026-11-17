@@ -26,9 +26,9 @@ Every session that has handled a message is resumable by its ID. Without your ow
 ### TypeScript
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 
 // Create a session with a meaningful ID
 const session = await client.createSession({
@@ -49,11 +49,15 @@ await session.sendAndWait({ prompt: "Analyze my codebase" });
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
 await client.start()
 
 # Create a session with a meaningful ID
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all, model="gpt-5.2-codex", session_id="user-123-task-456")
+session = await client.create_session(
+    model="gpt-5.2-codex",
+    session_id="user-123-task-456",
+    permissions={"on_request": PermissionHandler.approve_all},
+)
 
 # Do some work...
 await session.send_and_wait("Analyze my codebase")
@@ -69,21 +73,23 @@ package main
 
 import (
 	"context"
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
 	ctx := context.Background()
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
 	// Create a session with a meaningful ID
-	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
+	session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
 		SessionID: "user-123-task-456",
 		Model:     "gpt-5.2-codex",
 	})
 
 	// Do some work...
-	session.SendAndWait(ctx, copilot.MessageOptions{Prompt: "Analyze my codebase"})
+	session.SendAndWait(ctx, copilot.MessageOptions{
+		Prompt: "Analyze my codebase",
+	})
 
 	// Session state is automatically persisted
 	_ = session
@@ -93,38 +99,40 @@ func main() {
 
 ```go
 ctx := context.Background()
-client := copilot.NewClient(nil)
+client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
 // Create a session with a meaningful ID
-session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-    SessionID: "user-123-task-456",
-    Model:     "gpt-5.2-codex",
+session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	SessionID: "user-123-task-456",
+	Model:     "gpt-5.2-codex",
 })
 
 // Do some work...
-session.SendAndWait(ctx, copilot.MessageOptions{Prompt: "Analyze my codebase"})
+session.SendAndWait(ctx, copilot.MessageOptions{
+	Prompt: "Analyze my codebase",
+})
 
 // Session state is automatically persisted
+
 ```
 
 ### C# (.NET)
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
-var client = new CopilotClient();
-
+var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
 // Create a session with a meaningful ID
-var session = await client.CreateSessionAsync(new SessionConfig
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
     SessionId = "user-123-task-456",
-    Model = "gpt-5.2-codex",
+    Model = "gpt-5.2-codex"
 });
-
 // Do some work...
-await session.SendAndWaitAsync(new MessageOptions { Prompt = "Analyze my codebase" });
-
-// Session state is automatically persisted
+await session.SendAndWaitAsync(new MessageOptions
+{
+    Prompt = "Analyze my codebase"
+}); // Session state is automatically persisted
 ```
 
 ## Resuming a session
@@ -155,7 +163,7 @@ Storage routing does not change permission lifetimes, URL denial precedence, or 
 
 Saved sandbox preferences are restored on create and resume. Later explicit SDK `options.update` calls can change the live sandbox configuration without rewriting the saved preference.
 
-Without `sessionFs`, SDK applications in both `empty` and `copilot-cli` modes retain existing host-backed persistence. This includes the existing behavior where permanent URL consent saves host settings and grants access in the live session, but a fresh SDK session does not automatically load the host URL allowlist.
+Without `sessionFs`, SDK applications in both `empty` and `coding-agent` modes retain existing host-backed persistence. This includes the existing behavior where permanent URL consent saves host settings and grants access in the live session, but a fresh SDK session does not automatically load the host URL allowlist.
 
 See [Multi-tenancy and server deployments](../setup/multi-tenancy.md#sessionfs) for provider isolation responsibilities.
 
@@ -253,10 +261,12 @@ await session.sendAndWait({ prompt: "What did we discuss earlier?" });
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
 
 # Resume from a different client instance (or after restart)
-session = await client.resume_session("user-123-task-456", on_permission_request=PermissionHandler.approve_all)
+session = await client.resume_session(
+    "user-123-task-456", permissions={"on_request": PermissionHandler.approve_all}
+)
 
 # Continue where you left off
 await session.send_and_wait("What did we discuss earlier?")
@@ -270,16 +280,18 @@ package main
 
 import (
 	"context"
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
 	ctx := context.Background()
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
 	session, _ := client.ResumeSession(ctx, "user-123-task-456", nil)
 
-	session.SendAndWait(ctx, copilot.MessageOptions{Prompt: "What did we discuss earlier?"})
+	session.SendAndWait(ctx, copilot.MessageOptions{
+		Prompt: "What did we discuss earlier?",
+	})
 	_ = session
 }
 ```
@@ -292,21 +304,25 @@ ctx := context.Background()
 session, _ := client.ResumeSession(ctx, "user-123-task-456", nil)
 
 // Continue where you left off
-session.SendAndWait(ctx, copilot.MessageOptions{Prompt: "What did we discuss earlier?"})
+session.SendAndWait(ctx, copilot.MessageOptions{
+	Prompt: "What did we discuss earlier?",
+})
+
 ```
 
 ### C# (.NET)
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
-var client = new CopilotClient();
-
+var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
 // Resume from a different client instance (or after restart)
-var session = await client.ResumeSessionAsync("user-123-task-456", new ResumeSessionConfig());
-
+var session = await client.ResumeSessionAsync("user-123-task-456", new ResumeSessionOptions());
 // Continue where you left off
-await session.SendAndWaitAsync(new MessageOptions { Prompt = "What did we discuss earlier?" });
+await session.SendAndWaitAsync(new MessageOptions
+{
+    Prompt = "What did we discuss earlier?"
+});
 ```
 
 ## Resume options
@@ -317,26 +333,26 @@ When resuming a session, you can optionally reconfigure many settings. This is u
 |--------|-------------|
 | `model` | Change the model for the resumed session |
 | `systemMessage` | Override or extend the system prompt |
-| `availableTools` | Restrict which tools are available |
-| `excludedTools` | Disable specific tools |
-| `provider` | Re-provide BYOK credentials (required for BYOK sessions) |
-| `capi.autoTier` | Override the persisted Auto routing preference |
-| `capi.fusionTier` | Override the persisted Auto routing preference with a Copilot Fusion tier |
-| `capi.enableWebSocketResponses` | Choose the Responses API transport for the resumed session |
-| `reasoningEffort` | Adjust reasoning effort level |
-| `streaming` | Enable/disable streaming responses |
+| `tools.availableTools` | Restrict which tools are available |
+| `tools.excludedTools` | Disable specific tools |
+| `inference.providers`, `inference.models` | Restore BYOK connections and model registrations |
+| `github.capi.autoTier` | Override the persisted Auto routing preference |
+| `github.capi.fusionTier` | Override the persisted Auto routing preference with a Copilot Fusion tier |
+| `github.capi.enableWebSocketResponses` | Choose the Responses API transport for the resumed session |
+| `inference.reasoningEffort` | Adjust reasoning effort level |
+| `events.streaming` | Enable/disable streaming responses |
 | `workingDirectory` | Change the working directory |
 | `configDirectory` | Override configuration directory |
-| `mcpServers` | Configure MCP servers |
-| `customAgents` | Configure custom agents |
-| `agent` | Pre-select a custom agent by name |
-| `skillDirectories` | Directories to load skills from |
-| `disabledSkills` | Skills to disable |
-| `infiniteSessions` | Configure infinite session behavior |
+| `mcp.servers` | Configure MCP servers |
+| `agents.definitions` | Configure custom agents |
+| `agents.selected` | Pre-select a custom agent by name |
+| `skills.directories` | Directories to load skills from |
+| `skills.disabledSkills` | Skills to disable |
+| `state.infiniteSessions` | Configure infinite session behavior |
 
 ### Auto tier persistence
 
-With `model: "auto"`, the optional `capi.autoTier` setting selects an Auto routing preference: `efficiency`, `balance`, `intelligence`, or `fast`. In Python, use `capi={"auto_tier": "balance"}`. This setting applies to V2 Auto routing; V1 Auto requests are unchanged.
+With `model: "auto"`, the optional `github.capi.autoTier` setting selects an Auto routing preference: `efficiency`, `balance`, `intelligence`, or `fast`. In Python, use `github={"capi": {"auto_tier": "balance"}}`. This setting applies to V2 Auto routing; V1 Auto requests are unchanged.
 
 The session's `model.list` RPC also returns optional `auto` metadata from the provider's `/meta` endpoint. Use the enabled descriptors with `type: "auto"` to discover additional supported tier identifiers, their display names, descriptions, and ordering. The existing selection methods and JSON fields accept these identifiers. A discovery failure does not fall back to `/models`, and a successful response without `auto` metadata provides no selectable Auto tiers.
 
@@ -348,7 +364,7 @@ If a persisted tier is removed or disabled, resume preserves the explicit prefer
 
 The CLI also preserves settings-derived preferences during startup, even when a tier is unavailable or dynamic discovery is disabled. You can then select a replacement in the model picker. Explicit SDK create and resume preferences are still validated before the operation succeeds, and Auto activation always validates availability against the resolved discovery mode.
 
-When a create or resume request includes `expAssignments`, the runtime installs those assignments before validating an explicit Auto preference. Validation, discovery, and activation use the same resolved feature decision.
+When a create or resume request includes `experiments.assignments`, the runtime installs those assignments before validating an explicit Auto preference. Validation, discovery, and activation use the same resolved feature decision.
 
 `fast` is an integrator-only latency preset, not a first-party GitHub Copilot product preference. Fast is not validated against the `/meta` tier catalog when configuring a session. The SDK does not decide Fast eligibility, inspect client identity, choose it as a default, or fall back to another tier when a runtime does not support it—an older runtime returns its native error unchanged.
 
@@ -413,12 +429,12 @@ The SDK accepts the same Copilot Fusion names as the CLI. `model: "fusion"` (cas
 
 <!-- docs-validate: strict -->
 ```typescript
-import { approveAll } from "@github/copilot-sdk";
+import { approveAll } from "@microsoft/copilot-sdk";
 
 const session = await client.createSession({
   model: "fusion",
-  capi: { fusionTier: "high" },
-  onPermissionRequest: approveAll,
+  github: { capi: { fusionTier: "high" } },
+  permissions: { onRequest: approveAll },
 });
 ```
 
@@ -434,8 +450,8 @@ The selected model is reported as `auto`, and `model.getCurrent`, `session.model
 
 | SDK | Create or resume | Stage a tier with the switch | Change the tier |
 |-----|------------------|------------------------------|-----------------|
-| Node.js | `capi: { fusionTier: "high" }` | `setModel("fusion", { fusionTier: "high" })` | `session.setFusionTier("high")` |
-| Python | `capi={"fusion_tier": "high"}` | `set_model("fusion", fusion_tier="high")` | `session.set_fusion_tier("high")` |
+| Node.js | `github: { capi: { fusionTier: "high" } }` | `setModel("fusion", { fusionTier: "high" })` | `session.setFusionTier("high")` |
+| Python | `github={"capi": {"fusion_tier": "high"}}` | `set_model("fusion", fusion_tier="high")` | `session.set_fusion_tier("high")` |
 | Go | `&CapiSessionOptions{FusionTier: copilot.FusionTierHigh}` | `SetModelOptions{FusionTier: &tier}` | `session.SetFusionTier(ctx, copilot.FusionTierHigh)` |
 | .NET | `new CapiSessionOptions { FusionTier = FusionTier.High }` | `new SetModelOptions { FusionTier = FusionTier.High }` | `session.SetFusionTierAsync(FusionTier.High)` |
 | Rust | `CapiSessionOptions::new().with_fusion_tier(FusionTier::High)` | `SetModelOptions::default().with_fusion_tier(FusionTier::High)` | `session.set_fusion_tier(FusionTier::High)` |
@@ -448,13 +464,15 @@ To return to the provider's default routing, use `setAutoTier` with `null`, as d
 
 ### Responses transport on resume
 
-The optional `capi.enableWebSocketResponses` setting chooses the transport for the CAPI Responses API. It defaults to `true`, so the WebSocket transport is used whenever the selected model advertises the `ws:/responses` endpoint. Setting it to `false` falls back to the HTTP transport. In Python, use `capi={"enable_web_socket_responses": False}`.
+The optional `github.capi.enableWebSocketResponses` setting chooses the transport for the CAPI Responses API. It defaults to `true`, so the WebSocket transport is used whenever the selected model advertises the `ws:/responses` endpoint. Setting it to `false` falls back to the HTTP transport. In Python, use `github={"capi": {"enable_web_socket_responses": False}}`.
 
 Supply it on the resume call when you need it. It is worth setting when WebSocket connections fail behind a proxy, and when a resumed session reports `400 input item ID does not belong to this connection`, which is specific to the WebSocket transport.
 
 ```typescript
 const session = await client.resumeSession("user-123-task-456", {
-  capi: { enableWebSocketResponses: false },
+    github: {
+        capi: { enableWebSocketResponses: false },
+    },
 });
 ```
 
@@ -465,8 +483,11 @@ Setting this to `false` is equivalent to the `COPILOT_CLI_DISABLE_WEBSOCKET_RESP
 ```typescript
 // Resume with a different model
 const session = await client.resumeSession("user-123-task-456", {
-  model: "claude-sonnet-4",  // Switch to a different model
-  reasoningEffort: "high",   // Increase reasoning effort
+    model: "claude-sonnet-4",
+    inference: {
+        // Switch to a different model
+        reasoningEffort: "high",
+    },
 });
 ```
 
@@ -477,24 +498,29 @@ When using your own API keys, you must re-provide the provider configuration whe
 ```typescript
 // Original session with BYOK
 const session = await client.createSession({
-  sessionId: "user-123-task-456",
-  model: "gpt-5.2-codex",
-  provider: {
-    type: "azure",
-    baseUrl: "https://my-resource.openai.azure.com",
-    apiKey: process.env.AZURE_OPENAI_KEY,
-    azure: { apiVersion: "2024-10-21" },
-  },
+    sessionId: "user-123-task-456",
+    model: "gpt-5.2-codex",
+    github: { capi: { enabled: false } },
+    inference: {
+        defaultProvider: "byok", providers: [{ name: "byok",
+            type: "azure",
+            baseUrl: "https://my-resource.openai.azure.com",
+            apiKey: process.env.AZURE_OPENAI_KEY,
+            azure: { apiVersion: "2024-10-21" },
+        }],
+    },
 });
 
 // When resuming, you MUST re-provide the provider config
 const resumed = await client.resumeSession("user-123-task-456", {
-  provider: {
-    type: "azure",
-    baseUrl: "https://my-resource.openai.azure.com",
-    apiKey: process.env.AZURE_OPENAI_KEY,  // Required again
-    azure: { apiVersion: "2024-10-21" },
-  },
+    inference: {
+        providers: [{ name: "byok",
+            type: "azure",
+            baseUrl: "https://my-resource.openai.azure.com",
+            apiKey: process.env.AZURE_OPENAI_KEY, // Required again
+            azure: { apiVersion: "2024-10-21" },
+        }],
+    },
 });
 ```
 
@@ -694,9 +720,6 @@ Each SDK also provides idiomatic automatic cleanup patterns:
 | **C#** | `IAsyncDisposable` | `await using var session = await client.CreateSessionAsync(config);` |
 | **Go** | `defer` | `defer session.Disconnect()` |
 
-> [!NOTE]
-> The Rust SDK's `destroy()` is a deprecated alias for `disconnect()`; use `disconnect()` there. The other SDKs only provide `disconnect()`.
-
 ### Permanently deleting a session (`deleteSession`)
 
 To permanently remove a session and all its data from disk (conversation history, planning state, artifacts), use `deleteSession`. This is irreversible—the session **cannot** be resumed after deletion:
@@ -713,17 +736,18 @@ await client.deleteSession("user-123-task-456");
 By default, sessions have **no idle timeout** and live indefinitely until explicitly disconnected or deleted. You can optionally configure a server-wide idle timeout via `CopilotClientOptions.sessionIdleTimeoutSeconds`:
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { RuntimeConnection, CopilotClient } from "@microsoft/copilot-sdk";
 
 const client = new CopilotClient({
-  sessionIdleTimeoutSeconds: 30 * 60, // 30 minutes
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forDefault({ sessionIdleTimeoutSeconds: 30 * 60 }),
 });
 ```
 
 When a timeout is configured, sessions without activity for that duration are automatically cleaned up. Set to `0` or omit to disable.
 
 > [!NOTE]
-> This option only applies when the SDK spawns the runtime process. When connecting to an existing server via a URI connection (`RuntimeConnection.forUri`), the server's own timeout configuration applies.
+> This option only applies when the SDK spawns the runtime process. When connecting to an existing server via a TCP connection (`RuntimeConnection.forTcp`), the server's own timeout configuration applies.
 
 ```mermaid
 flowchart LR
@@ -780,7 +804,7 @@ flowchart LR
 * ⚠️ Session ID validation before operations
 
 ```typescript
-import { CopilotClient, CopilotSession } from "@github/copilot-sdk";
+import { CopilotClient, CopilotSession } from "@microsoft/copilot-sdk";
 
 // Application-level access control for shared CLI
 async function resumeSessionWithAuth(
@@ -845,12 +869,14 @@ For workflows that might exceed context limits, enable infinite sessions with au
 
 ```typescript
 const session = await client.createSession({
-  sessionId: "long-workflow-123",
-  infiniteSessions: {
-    enabled: true,
-    backgroundCompactionThreshold: 0.80,  // Start compaction at 80% context
-    bufferExhaustionThreshold: 0.95,      // Block at 95% if needed
-  },
+    sessionId: "long-workflow-123",
+    state: {
+        infiniteSessions: {
+            enabled: true,
+            backgroundCompactionThreshold: 0.8, // Start compaction at 80% context
+            bufferExhaustionThreshold: 0.95, // Block at 95% if needed
+        },
+    },
 });
 ```
 

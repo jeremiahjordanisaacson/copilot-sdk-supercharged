@@ -9,8 +9,8 @@ import (
 	"reflect"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
 )
 
 func assertJSONSubset(t *testing.T, label string, expected, actual any) {
@@ -71,7 +71,7 @@ func newGeneratedRPCFixture(t *testing.T, ctx context.Context) *generatedRPCFixt
 		server := jsonrpc2.NewClient(conn, conn)
 		t.Cleanup(server.Stop)
 		for method, result := range map[string]string{
-			"connect":                `{"ok":true,"protocolVersion":3,"version":"test"}`,
+			"connect":                `{"ok":true,"protocolVersion":4,"version":"test"}`,
 			"plugins.builtin.set":    `{}`,
 			"session.create":         `{"sessionId":"generated-rpc-surface"}`,
 			"session.options.update": `{"success":true}`,
@@ -85,14 +85,9 @@ func newGeneratedRPCFixture(t *testing.T, ctx context.Context) *generatedRPCFixt
 		ready <- serverConnection{server: server, conn: conn}
 	}()
 
-	client := copilot.NewClient(&copilot.ClientOptions{
-		Connection: copilot.URIConnection{URL: listener.Addr().String()},
-	})
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.TCPConnection{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port}})
 	t.Cleanup(client.ForceStop)
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		SessionID:           "generated-rpc-surface",
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	})
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{SessionID: "generated-rpc-surface", Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 	if err != nil {
 		t.Fatal(err)
 	}

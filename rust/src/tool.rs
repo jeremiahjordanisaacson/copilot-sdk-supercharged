@@ -5,7 +5,7 @@
 //! [tool definition](crate::types::Tool) via
 //! [`Tool::with_handler`](crate::types::Tool::with_handler), then install
 //! the resulting tools on a session via
-//! [`SessionConfig::with_tools`](crate::types::SessionConfig::with_tools).
+//! [`SessionToolOptions::with_definitions`](crate::types::SessionToolOptions::with_definitions).
 //! The SDK builds an internal name-keyed registry from the handlers and
 //! dispatches to the matching handler when the CLI broadcasts
 //! `external_tool.requested`.
@@ -32,7 +32,7 @@ use crate::types::{ToolBinaryResult, ToolInvocation, ToolResult, ToolResultExpan
 /// # Example
 ///
 /// ```rust
-/// use github_copilot_sdk::tool::{schema_for, JsonSchema};
+/// use copilot_sdk::tool::{schema_for, JsonSchema};
 ///
 /// #[derive(JsonSchema)]
 /// struct Params {
@@ -73,8 +73,8 @@ pub fn schema_for<T: schemars::JsonSchema>() -> serde_json::Value {
 /// # Example
 ///
 /// ```rust
-/// use github_copilot_sdk::tool::tool_parameters;
-/// use github_copilot_sdk::Tool;
+/// use copilot_sdk::tool::tool_parameters;
+/// use copilot_sdk::Tool;
 ///
 /// let mut tool = Tool::default();
 /// tool.name = "ping".to_string();
@@ -221,9 +221,9 @@ pub fn convert_mcp_call_tool_result(value: &serde_json::Value) -> Option<ToolRes
 /// # Example
 ///
 /// ```rust,ignore
-/// use github_copilot_sdk::tool::{schema_for, JsonSchema, ToolHandler};
-/// use github_copilot_sdk::types::{Tool, ToolInvocation};
-/// use github_copilot_sdk::{Error, ToolResult};
+/// use copilot_sdk::tool::{schema_for, JsonSchema, ToolHandler};
+/// use copilot_sdk::types::{Tool, ToolInvocation};
+/// use copilot_sdk::{Error, ToolResult};
 /// use serde::Deserialize;
 /// use async_trait::async_trait;
 /// use std::sync::Arc;
@@ -268,7 +268,7 @@ pub trait ToolHandler: Send + Sync + 'static {
 /// `JsonSchema`-derived parameter struct.
 ///
 /// The returned [`Tool`] carries an attached handler ready to install on a
-/// session via [`SessionConfig::with_tools`](crate::types::SessionConfig::with_tools).
+/// session via [`SessionToolOptions::with_definitions`](crate::types::SessionToolOptions::with_definitions).
 /// JSON Schema for the parameter type is generated via [`schema_for`] at
 /// construction time.
 ///
@@ -286,9 +286,9 @@ pub trait ToolHandler: Send + Sync + 'static {
 /// # Example
 ///
 /// ```rust,no_run
-/// use github_copilot_sdk::tool::{define_tool, JsonSchema};
-/// use github_copilot_sdk::types::ToolInvocation;
-/// use github_copilot_sdk::{Error, ToolResult};
+/// use copilot_sdk::tool::{define_tool, JsonSchema};
+/// use copilot_sdk::types::ToolInvocation;
+/// use copilot_sdk::{Error, ToolResult};
 /// use serde::Deserialize;
 ///
 /// #[derive(Deserialize, JsonSchema)]
@@ -372,7 +372,7 @@ where
 /// # Example
 ///
 /// ```rust,no_run
-/// use github_copilot_sdk::tool::{define_tool_declaration, JsonSchema};
+/// use copilot_sdk::tool::{define_tool_declaration, JsonSchema};
 /// use serde::Deserialize;
 ///
 /// #[derive(Deserialize, JsonSchema)]

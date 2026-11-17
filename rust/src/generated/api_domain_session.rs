@@ -1862,6 +1862,18 @@ pub struct PermissionsConfigureParams {
     /// If specified, sets whether tool permission requests are auto-approved without prompting. Omit to leave the current value unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approve_all_tool_permission_requests: Option<bool>,
+    /// SDK-host advisory JSON for future Assisted Permissions judge requests. The value replaces only its named source; null clears that source. Omit to leave all sources unchanged. The runtime applies strict structural and size limits, renders the source in a runtime-controlled advisory frame, and never treats the value as instructions or authorization. Session-scoped only; hosts must reapply after resume.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assisted_approval_context: Option<PermissionsConfigureAssistedApprovalContext>,
+    /// User-authored instructions appended verbatim to the assisted-approval judge's system prompt. Applies to subsequent judge requests in this local session without changing permission mode, pre-judge gates, or the coding agent's prompt. Omit to leave unchanged; an empty or whitespace-only string clears the instructions. Hosts must reapply their configuration after resuming a session. Remote sessions are not supported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assisted_approval_instructions: Option<String>,
+    /// Optional owner-authenticated per-source update to lifecycle-fenced session authority. Active grants from all sources are rendered together, in source order, to the Assisted Permissions judge, which alone interprets their statements and scope. Only the owning non-extension session connection, bound to the current session generation, may replace or revoke authority. Omit to leave unchanged. Hard runtime controls, mandatory policy, and later human restrictions still take precedence. Session-scoped only; hosts must reapply after resume.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authenticated_authority: Option<AuthenticatedAuthorityUpdate>,
+    /// Declares whether this connection's registered permission handler applies non-human host policy to the tools and canvases this connection registered. When true, unattended Assisted Autopilot sends permission requests for those tools, and `open_canvas` and `invoke_canvas_action` requests whose target canvas this connection registered, to the handler before runtime Assisted Approval or unattended fallback can settle them. All other requests, including shell commands, file access, URLs, and tools or canvases registered by other connections or extensions, keep runtime settlement. Managed policy and other runtime enforcement still take precedence. Only the session's owning non-extension connection may set this field. The declaration ends when that connection detaches or the session is resumed, so hosts must reapply it after resume. Omit to leave unchanged; false clears it. Without a declaration, registered handlers are not consulted during unattended Assisted Autopilot. Remote sessions are not supported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_policy_permission_handler: Option<bool>,
     /// If specified, replaces the session's path-permission policy. The runtime constructs the appropriate PathManager based on these inputs (rooted at the session's working directory). Omit to leave the current path policy unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub paths: Option<PermissionPathsConfig>,
@@ -1871,124 +1883,6 @@ pub struct PermissionsConfigureParams {
     /// If specified, replaces the session's URL-permission policy. The runtime constructs a fresh DefaultUrlManager based on these inputs. Omit to leave the current URL policy unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub urls: Option<PermissionUrlsConfig>,
-}
-
-/// Extensible [`PermissionsConfigureParams`], including inputs added after it was published.
-///
-/// Required inputs are [`PermissionsConfigureOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionsConfigureOptions {
-    #[serde(flatten)]
-    legacy: PermissionsConfigureParams,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    assisted_approval_instructions: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    assisted_approval_context: Option<PermissionsConfigureAssistedApprovalContext>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    authenticated_authority: Option<AuthenticatedAuthorityUpdate>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    host_policy_permission_handler: Option<bool>,
-}
-
-impl PermissionsConfigureOptions {
-    /// Creates options with the required inputs.
-    pub fn new() -> Self {
-        Self {
-            legacy: PermissionsConfigureParams {
-                approve_all_tool_permission_requests: None,
-                approve_all_read_permission_requests: None,
-                rules: None,
-                paths: None,
-                urls: None,
-                additional_content_exclusion_policies: None,
-            },
-            assisted_approval_instructions: None,
-            assisted_approval_context: None,
-            authenticated_authority: None,
-            host_policy_permission_handler: None,
-        }
-    }
-
-    /// If specified, sets whether tool permission requests are auto-approved without prompting. Omit to leave the current value unchanged.
-    pub fn approve_all_tool_permission_requests(mut self, value: bool) -> Self {
-        self.legacy.approve_all_tool_permission_requests = Some(value);
-        self
-    }
-
-    /// If specified, sets whether path/URL read permission requests are auto-approved. Omit to leave the current value unchanged.
-    pub fn approve_all_read_permission_requests(mut self, value: bool) -> Self {
-        self.legacy.approve_all_read_permission_requests = Some(value);
-        self
-    }
-
-    /// If specified, replaces the session's approved/denied permission rules. Omit to leave the current rules unchanged.
-    pub fn rules(mut self, value: PermissionRulesSet) -> Self {
-        self.legacy.rules = Some(value);
-        self
-    }
-
-    /// If specified, replaces the session's path-permission policy. The runtime constructs the appropriate PathManager based on these inputs (rooted at the session's working directory). Omit to leave the current path policy unchanged.
-    pub fn paths(mut self, value: PermissionPathsConfig) -> Self {
-        self.legacy.paths = Some(value);
-        self
-    }
-
-    /// If specified, replaces the session's URL-permission policy. The runtime constructs a fresh DefaultUrlManager based on these inputs. Omit to leave the current URL policy unchanged.
-    pub fn urls(mut self, value: PermissionUrlsConfig) -> Self {
-        self.legacy.urls = Some(value);
-        self
-    }
-
-    /// If specified, replaces the host-supplied GitHub Content Exclusion policies on the session (combined with natively-discovered policies when evaluating tool/file access). Omit to leave the current policies unchanged.
-    pub fn additional_content_exclusion_policies(
-        mut self,
-        value: Vec<PermissionsConfigureAdditionalContentExclusionPolicy>,
-    ) -> Self {
-        self.legacy.additional_content_exclusion_policies = Some(value);
-        self
-    }
-
-    /// User-authored instructions appended verbatim to the assisted-approval judge's system prompt. Applies to subsequent judge requests in this local session without changing permission mode, pre-judge gates, or the coding agent's prompt. Omit to leave unchanged; an empty or whitespace-only string clears the instructions. Hosts must reapply their configuration after resuming a session. Remote sessions are not supported.
-    pub fn assisted_approval_instructions(mut self, value: impl Into<String>) -> Self {
-        self.assisted_approval_instructions = Some(value.into());
-        self
-    }
-
-    /// SDK-host advisory JSON for future Assisted Permissions judge requests. The value replaces only its named source; null clears that source. Omit to leave all sources unchanged. The runtime applies strict structural and size limits, renders the source in a runtime-controlled advisory frame, and never treats the value as instructions or authorization. Session-scoped only; hosts must reapply after resume.
-    pub fn assisted_approval_context(
-        mut self,
-        value: PermissionsConfigureAssistedApprovalContext,
-    ) -> Self {
-        self.assisted_approval_context = Some(value);
-        self
-    }
-
-    /// Optional owner-authenticated per-source update to lifecycle-fenced session authority. Active grants from all sources are rendered together, in source order, to the Assisted Permissions judge, which alone interprets their statements and scope. Only the owning non-extension session connection, bound to the current session generation, may replace or revoke authority. Omit to leave unchanged. Hard runtime controls, mandatory policy, and later human restrictions still take precedence. Session-scoped only; hosts must reapply after resume.
-    pub fn authenticated_authority(mut self, value: AuthenticatedAuthorityUpdate) -> Self {
-        self.authenticated_authority = Some(value);
-        self
-    }
-
-    /// Declares whether this connection's registered permission handler applies non-human host policy to the tools and canvases this connection registered. When true, unattended Assisted Autopilot sends permission requests for those tools, and `open_canvas` and `invoke_canvas_action` requests whose target canvas this connection registered, to the handler before runtime Assisted Approval or unattended fallback can settle them. All other requests, including shell commands, file access, URLs, and tools or canvases registered by other connections or extensions, keep runtime settlement. Managed policy and other runtime enforcement still take precedence. Only the session's owning non-extension connection may set this field. The declaration ends when that connection detaches or the session is resumed, so hosts must reapply it after resume. Omit to leave unchanged; false clears it. Without a declaration, registered handlers are not consulted during unattended Assisted Autopilot. Remote sessions are not supported.
-    pub fn host_policy_permission_handler(mut self, value: bool) -> Self {
-        self.host_policy_permission_handler = Some(value);
-        self
-    }
-}
-
-impl Default for PermissionsConfigureOptions {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Indicates whether the operation succeeded.
@@ -2357,44 +2251,11 @@ pub struct PermissionsSetModeResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionsSetRequiredRequest {
+    /// Optional permission-provider identity, scoped to the calling connection and this session. With this field, true registers the provider and false releases it without overriding a later direct host requirement. The runtime releases these registrations when their connection detaches. Omit for a direct host requirement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
     /// Whether the client wants `permission.requested` events bridged from the session-owned permission service. CLI clients that render prompt UI set this to `true` for as long as their listener is mounted; headless callers leave it unset (the default is `false`).
     pub required: bool,
-}
-
-/// Extensible [`PermissionsSetRequiredRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`PermissionsSetRequiredOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionsSetRequiredOptions {
-    #[serde(flatten)]
-    legacy: PermissionsSetRequiredRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    provider_id: Option<String>,
-}
-
-impl PermissionsSetRequiredOptions {
-    /// Creates options with the required inputs.
-    pub fn new(required: bool) -> Self {
-        Self {
-            legacy: PermissionsSetRequiredRequest { required },
-            provider_id: None,
-        }
-    }
-
-    /// Optional permission-provider identity, scoped to the calling connection and this session. With this field, true registers the provider and false releases it without overriding a later direct host requirement. The runtime releases these registrations when their connection detaches. Omit for a direct host requirement.
-    pub fn provider_id(mut self, value: impl Into<String>) -> Self {
-        self.provider_id = Some(value.into());
-        self
-    }
 }
 
 /// Indicates whether the operation succeeded.
@@ -2508,72 +2369,6 @@ pub struct ProtocolExternalToolDefinition {
     /// Optional human-readable display title.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-}
-
-/// Custom model-provider configuration (BYOK).
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderConfig {
-    /// API key. Optional for local providers like Ollama.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
-    /// Command run by the runtime before each provider request to obtain a fresh API key. Credential-command failures fail the turn without sending a model request. Bearer authentication takes precedence.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub api_key_command: Option<String>,
-    /// Azure-specific provider options.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub azure: Option<ProviderConfigAzure>,
-    /// API endpoint URL.
-    pub base_url: String,
-    /// Bearer token for authentication. Sets the Authorization header directly. Takes precedence over apiKey when both are set.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bearer_token: Option<String>,
-    /// When true, the SDK client supplies bearer tokens on demand: the runtime calls the client-session `providerToken.getToken` callback before each request and applies the returned token as an `Authorization: Bearer <token>` header. This is the bearer/OAuth scheme used by Azure AD / managed-identity tokens and provider OAuth access tokens (including Anthropic's), not a provider-specific API-key header such as Anthropic's `x-api-key`. The token-acquiring function itself stays on the SDK side and is never serialized; only this flag crosses the wire. When set alongside `apiKey`/`bearerToken`, the callback takes precedence: the runtime applies the token returned by `providerToken.getToken` as the `Authorization: Bearer` header for each request and does not send the static credential.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub has_bearer_token_provider: Option<bool>,
-    /// Custom HTTP headers to include in all outbound requests to the provider.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub headers: Option<HashMap<String, String>>,
-    /// Maximum context window tokens for the model.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_context_window_tokens: Option<f64>,
-    /// Maximum output tokens for the model.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_output_tokens: Option<f64>,
-    /// Maximum prompt/input tokens for the model.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_prompt_tokens: Option<f64>,
-    /// Overrides for model capabilities when they cannot be inferred from modelId.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_capabilities: Option<ModelCapabilitiesOverride>,
-    /// Well-known model ID used for capability lookup. When set, agent behavior config and token limits are inferred from this model.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_id: Option<String>,
-    /// The product serving the model, reported in telemetry as `model_provider`. Set it when `type` alone cannot identify the product, such as Ollama or LM Studio behind an OpenAI-compatible endpoint. Only affects telemetry.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_provider: Option<ProviderConfigModelProvider>,
-    /// Provider name used for model and telemetry attribution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider_name: Option<String>,
-    /// Provider transport. Defaults to "http".
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transport: Option<ProviderConfigTransport>,
-    /// Provider type. Defaults to "openai" for generic OpenAI-compatible APIs.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<ProviderConfigType>,
-    /// Wire API format (openai/azure only). Defaults to "completions".
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wire_api: Option<ProviderConfigWireApi>,
-    /// The model identifier sent to the provider API for inference (the "wire" model), as opposed to modelId which is the well-known base.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wire_model: Option<String>,
 }
 
 /// Reattach to an existing MC session without creating a new one.
@@ -4404,6 +4199,390 @@ pub struct SessionModelList {
     pub quota_snapshots: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// Agent definitions, selection, and source filters.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenAgentOptions {
+    /// Runtime context discriminator for agent filtering.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    /// Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directories: Option<Vec<String>>,
+    /// Built-in subagent names to exclude from this session. Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a custom agent with the same name is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excluded_builtin_agents: Option<Vec<String>>,
+    /// Built-in subagent names to include in this session. When specified, only these built-ins are available, subject to runtime availability and exclusions. Custom agents with the same name remain available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub included_builtin_agents: Option<Vec<String>>,
+    /// Whether custom agents default to local-only execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_discovery_only: Option<bool>,
+}
+
+/// Event delivery and streaming.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenEventOptions {
+    /// Whether model responses stream as delta events.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub streaming: Option<bool>,
+}
+
+/// Execution accounting and autonomous continuation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenExecutionOptions {
+    /// Autopilot policy. Defaults to runtime-owned continuation with at most five automatic continuations. Does not change the session mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autopilot: Option<AutopilotOptions>,
+    /// Whether auto-mode continuation is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continue_on_auto_mode: Option<bool>,
+    /// Initial session limits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<SessionLimitsConfig>,
+}
+
+/// Feature experimentation and trusted assignments.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenExperimentOptions {
+    /// ExP assignment ('flight') data injected by an SDK integrator, in the same JSON shape the Copilot CLI fetches from the experimentation service (CopilotExpAssignmentResponse). When supplied this is fed into the FeatureFlagService exactly like CLI-fetched assignments and ExP-backed flags wait for it. When absent the session does not block on ExP.
+    #[doc(hidden)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) assignments: Option<serde_json::Value>,
+    /// Trusted host defaults consumed by the runtime during session construction.
+    #[doc(hidden)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) configuration: Option<SessionFeatureFlagConfiguration>,
+    /// Whether experimental behavior is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_experimental_mode: Option<bool>,
+    /// Feature-flag values resolved by the host.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flags: Option<HashMap<String, bool>>,
+}
+
+/// Project directory access and change tracking.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenFilesystemOptions {
+    /// Additional directories the agent may access beyond the working directory. Each entry is granted to the session's file-access allow-list and surfaced to the model (system prompt context and `@`-mention completion). Conventional `.github/skills/` and `.github/agents/` definitions under each directory also join the session's project catalogs when their existing subsystem gates are enabled: added-root skills require both `enableConfigDiscovery` and effective `enableSkills`; added-root agents require `enableConfigDiscovery`. Supplying a directory therefore activates configuration from it and should be treated as a trust decision. Absolute paths are recommended; a relative path is resolved against the session's working directory. Nonexistent or unresolvable entries are skipped with a warning. This is applied during session creation and cold resume and is not persisted, so a cold resume must re-supply the directories.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_directories: Option<Vec<String>>,
+    /// Opt in to capturing file changes for session rewind and session diff. Capture cannot reconstruct changes made before it was enabled. On create it starts capture from the first turn. It is also honored on resume: for a session that already has tracked prior turns, tracking continues automatically even if this is omitted; passing it on resume additionally enables tracking for an eligible session that has no prior root turn yet. Resuming a session whose prior root turns were never tracked has no restorable baseline, so tracking stays disabled for it and rewind reports file change tracking as unavailable; the resume itself still succeeds, so sessions that predate tracking remain loadable. The opt-in is only rejected when the session can never track (a subagent session, or one without local session storage). It is intentionally absent from the mutable options update because enabling it after edits have occurred would create an incomplete, misleading baseline. Subagents share the parent session's capture store and are not tracked as separate rewind points: a file a subagent writes is attributed to whichever root user turn was open when the capture was staged, just before the tool body ran. A turn cannot open while a staged capture is still in flight, so a subagent tool that staged under the spawning turn stays attributed to it however late the write lands, while a capture it stages after the user's next message belongs to that later turn. Attribution decides which turn's rewind point counts and file preview include that write; it does not narrow which rewinds revert it, because a rewind restores every capture from the selected turn onward, so the earlier spawning turn reverts it as well.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_file_changes: Option<bool>,
+    /// Pre-resolved working-directory context for session startup.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_directory_context: Option<SessionContext>,
+}
+
+/// GitHub integration and session credentials.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenGitHubOptions {
+    /// Initial authentication info for the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_info: Option<AuthInfo>,
+    /// Whether a CLI host explicitly requested the initial Auto preference. False preserves a settings-derived preference without validating availability during creation; execution still validates it. Defaults to true and is ignored for non-CLI callers.
+    #[doc(hidden)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) auto_tier_is_explicit: Option<bool>,
+    /// Options scoped to the built-in CAPI (Copilot API) provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capi: Option<CapiSessionOptions>,
+    /// Override URL for the Copilot API endpoint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copilot_url: Option<String>,
+    /// Opt-in: self-fetch and enforce enterprise managed settings, including managed hook policies, at session bootstrap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fetch_managed_settings: Option<bool>,
+    /// Declares that a human drives this session's conversation, enabling user-message analysis (sentiment, task completion criteria, and task analytics) for user-authored messages. Automated messages remain excluded. Defaults to false for SDK sessions. Applied when the session is created or loaded from storage; ignored when resuming a session that is already active, and for cloud sessions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interactive_user: Option<bool>,
+}
+
+/// Host Git context and commit attribution.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenGitOptions {
+    /// Whether commit-message coauthor trailers are enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coauthor_enabled: Option<bool>,
+}
+
+/// Callback and filesystem hook sources.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenHookOptions {
+    /// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directories: Option<Vec<String>>,
+    /// Live gate for repository-origin file hooks, including the primary repository, trusted repository-configured roots, and accepted startup additional directories (including CLI --add-dir). False suppresses these hooks; explicit hookDirectories and SDK callbacks are independent. Additional-root eligibility and the DISABLE_ADDITIONAL_DIRECTORY_HOOKS escape hatch are captured at create/cold resume, not expanded by later grants or feature-flag changes. Discovery uses containing Git roots, so supply only trusted repositories: commands and prompts need no further approval. Policy, hook-disable settings, and sandbox rules still apply. Provider-backed sessions skip repository hooks with a warning on omission, skip silently on false, and reject explicit true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_repository_hooks: Option<bool>,
+}
+
+/// Model tuning and provider catalog.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenInferenceOptions {
+    /// Whether the model may request multiple tool calls per response. Defaults to true. False sends a provider hint, not an execution guarantee: all returned calls are still handled and handlers may run concurrently. Re-supply on cold resume.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_multiple_tool_calls: Option<bool>,
+    /// Initial model capability overrides.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<ModelCapabilitiesOverride>,
+    /// Connection used for unqualified BYOK selections. Requires effective
+    /// `github.capi.enabled: false`. Omission on resume preserves the policy;
+    /// explicit null clears it. Does not select an initial model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "SessionOpenInferenceOptions::deserialize_default_provider"
+    )]
+    pub default_provider: Option<Option<String>>,
+    /// Experimental: enable native model citations for supported Anthropic and OpenAI models, normalized onto the `assistant.message` event. Off by default; may change or be removed while the citations surface is experimental.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This type is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases.
+    ///
+    /// </div>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_citations: Option<bool>,
+    /// BYOK model definitions added to the selectable model list, each referencing a provider name.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This type is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases.
+    ///
+    /// </div>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub models: Option<Vec<ProviderModelConfig>>,
+    /// Named BYOK connections. Built-in Copilot availability is independently controlled by github.capi.enabled.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This type is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases.
+    ///
+    /// </div>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub providers: Option<Vec<NamedProviderConfig>>,
+    /// Initial reasoning effort level. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. When omitted, no effort override is applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    /// Initial reasoning summary mode for supported model clients.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_summary: Option<SessionOpenOptionsReasoningSummary>,
+    /// Initial output verbosity level for supported models.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verbosity: Option<Verbosity>,
+}
+
+impl SessionOpenInferenceOptions {
+    fn deserialize_default_provider<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<Option<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Option::<String>::deserialize(deserializer).map(Some)
+    }
+}
+
+/// Instruction sources and discovery.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenInstructionOptions {
+    /// Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directories: Option<Vec<String>>,
+    /// Instruction source IDs disabled for this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_sources: Option<Vec<String>>,
+    /// Whether on-demand custom instruction discovery is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_demand_discovery: Option<bool>,
+    /// Whether to invalidate cached custom-instruction discovery before constructing the session. Use when instruction files may have changed earlier in the same runtime process.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_custom_instructions: Option<bool>,
+    /// Whether to skip custom instruction sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_custom_instructions: Option<bool>,
+}
+
+/// Human input and mode-switch callback capabilities.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenInteractionOptions {
+    /// Whether ask_user is explicitly disabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ask_user_disabled: Option<bool>,
+    /// Whether the host is an interactive UI.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub running_in_interactive_mode: Option<bool>,
+}
+
+/// MCP servers, OAuth, and renderer capability.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenMcpOptions {
+    /// Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_all_server_instructions: Option<bool>,
+    /// OAuth Client ID Metadata Document URL used by this host for MCP authorization.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_client_id_metadata_url: Option<String>,
+    /// MCP server names disabled for this session. Disabled servers are not started or authenticated on create or cold resume.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_servers: Option<Vec<String>>,
+    /// How MCP server environment values are interpreted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env_value_mode: Option<SessionOpenOptionsEnvValueMode>,
+    /// Non-secret host-managed HTTP MCP servers keyed by stable managed identity. Managed provenance is runtime-established from this separate field and credentials are supplied through dynamic-header refresh.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This type is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases.
+    ///
+    /// </div>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed_servers: Option<HashMap<String, ManagedMcpServerConfig>>,
+}
+
+/// Permission decisions and sandboxing.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenPermissionOptions {
+    /// Resolved sandbox configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxConfig>,
+    /// Origin of the sandbox choice. Settings-derived origins (never_configured, user_enabled, user_disabled, repository_policy) let managed policy floor a host preference; explicit below-floor changes remain policy conflicts unless a session opt-out is authorized. Also used for telemetry provenance.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This type is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases.
+    ///
+    /// </div>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_source: Option<SandboxConfigSource>,
+}
+
+/// Explicit plugin sources.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenPluginOptions {
+    /// Installed plugins visible to the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installed: Option<Vec<InstalledPlugin>>,
+}
+
 /// Source descriptor for a `sessions.open` content-exclusion rule, with source name and type.
 ///
 /// <div class="warning">
@@ -4464,7 +4643,7 @@ pub struct SessionOpenOptionsAdditionalContentExclusionPolicy {
     pub scope: SessionOpenOptionsAdditionalContentExclusionPolicyScope,
 }
 
-/// Session construction options.
+/// Host-injected session policy.
 ///
 /// <div class="warning">
 ///
@@ -4474,7 +4653,7 @@ pub struct SessionOpenOptionsAdditionalContentExclusionPolicy {
 /// </div>
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionOpenOptions {
+pub struct SessionOpenPolicyOptions {
     /// Additional content-exclusion policies to merge into the session policy set.
     ///
     /// <div class="warning">
@@ -4486,144 +4665,37 @@ pub struct SessionOpenOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub additional_content_exclusion_policies:
         Option<Vec<SessionOpenOptionsAdditionalContentExclusionPolicy>>,
-    /// Additional directories the agent may access beyond the working directory. Each entry is granted to the session's file-access allow-list and surfaced to the model (system prompt context and `@`-mention completion). Conventional `.github/skills/` and `.github/agents/` definitions under each directory also join the session's project catalogs when their existing subsystem gates are enabled: added-root skills require both `enableConfigDiscovery` and effective `enableSkills`; added-root agents require `enableConfigDiscovery`. Supplying a directory therefore activates configuration from it and should be treated as a trust decision. Absolute paths are recommended; a relative path is resolved against the session's working directory. Nonexistent or unresolvable entries are skipped with a warning. This is applied during session creation and cold resume and is not persisted, so a cold resume must re-supply the directories.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub additional_directories: Option<Vec<String>>,
-    /// Runtime context discriminator for agent filtering.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_context: Option<String>,
-    /// Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_directories: Option<Vec<String>>,
-    /// Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_all_mcp_server_instructions: Option<bool>,
-    /// Whether the model may request multiple tool calls per response. Defaults to true. False sends a provider hint, not an execution guarantee: all returned calls are still handled and handlers may run concurrently. Re-supply on cold resume.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_multiple_tool_calls: Option<bool>,
-    /// Whether ask_user is explicitly disabled.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ask_user_disabled: Option<bool>,
-    /// OAuth Client ID Metadata Document URL used by this host for MCP authorization.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auth_client_id_metadata_url: Option<String>,
-    /// Initial authentication info for the session.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auth_info: Option<AuthInfo>,
-    /// Autopilot policy. Defaults to runtime-owned continuation with at most five automatic continuations. Does not change the session mode.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub autopilot: Option<AutopilotOptions>,
-    /// Whether a CLI host explicitly requested the initial Auto preference. False preserves a settings-derived preference without validating availability during creation; execution still validates it. Defaults to true and is ignored for non-CLI callers.
-    #[doc(hidden)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) auto_tier_is_explicit: Option<bool>,
-    /// Allowlist of available tool names.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub available_tools: Option<Vec<String>>,
-    /// Options scoped to the built-in CAPI (Copilot API) provider.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub capi: Option<CapiSessionOptions>,
-    /// Structured client kind used for runtime behavior gates.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_kind: Option<String>,
-    /// Identifier of the client driving the session.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_name: Option<String>,
-    /// Whether commit-message coauthor trailers are enabled.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub coauthor_enabled: Option<bool>,
-    /// Override Copilot configuration directory.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config_dir: Option<String>,
-    /// Whether auto-mode continuation is enabled.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub continue_on_auto_mode: Option<bool>,
-    /// Override URL for the Copilot API endpoint.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub copilot_url: Option<String>,
-    /// Whether custom agents default to local-only execution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom_agents_local_only: Option<bool>,
-    /// Parent engagement ID for detached child telemetry rollup.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detached_from_spawning_parent_engagement_id: Option<String>,
-    /// Parent session ID for detached child telemetry rollup.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detached_from_spawning_parent_session_id: Option<String>,
-    /// Instruction source IDs disabled for this session.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disabled_instruction_sources: Option<Vec<String>>,
-    /// MCP server names disabled for this session. Disabled servers are not started or authenticated on create or cold resume.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disabled_mcp_servers: Option<Vec<String>>,
-    /// Skill IDs disabled for this session.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disabled_skills: Option<Vec<String>>,
-    /// Experimental: enable native model citations for supported Anthropic and OpenAI models, normalized onto the `assistant.message` event. Off by default; may change or be removed while the citations surface is experimental.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This type is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases.
-    ///
-    /// </div>
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_citations: Option<bool>,
-    /// Opt in to capturing file changes for session rewind and session diff. Capture cannot reconstruct changes made before it was enabled. On create it starts capture from the first turn. It is also honored on resume: for a session that already has tracked prior turns, tracking continues automatically even if this is omitted; passing it on resume additionally enables tracking for an eligible session that has no prior root turn yet. Resuming a session whose prior root turns were never tracked has no restorable baseline, so tracking stays disabled for it and rewind reports file change tracking as unavailable; the resume itself still succeeds, so sessions that predate tracking remain loadable. The opt-in is only rejected when the session can never track (a subagent session, or one without local session storage). It is intentionally absent from the mutable options update because enabling it after edits have occurred would create an incomplete, misleading baseline. Subagents share the parent session's capture store and are not tracked as separate rewind points: a file a subagent writes is attributed to whichever root user turn was open when the capture was staged, just before the tool body ran. A turn cannot open while a staged capture is still in flight, so a subagent tool that staged under the spawning turn stays attributed to it however late the write lands, while a capture it stages after the user's next message belongs to that later turn. Attribution decides which turn's rewind point counts and file preview include that write; it does not narrow which rewinds revert it, because a rewind restores every capture from the selected turn onward, so the earlier spawning turn reverts it as well.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_file_change_tracking: Option<bool>,
-    /// Live gate for repository-origin file hooks, including the primary repository, trusted repository-configured roots, and accepted startup additional directories (including CLI --add-dir). False suppresses these hooks; explicit hookDirectories and SDK callbacks are independent. Additional-root eligibility and the DISABLE_ADDITIONAL_DIRECTORY_HOOKS escape hatch are captured at create/cold resume, not expanded by later grants or feature-flag changes. Discovery uses containing Git roots, so supply only trusted repositories: commands and prompts need no further approval. Policy, hook-disable settings, and sandbox rules still apply. Provider-backed sessions skip repository hooks with a warning on omission, skip silently on false, and reject explicit true.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_file_hooks: Option<bool>,
-    /// Opt-in: self-fetch and enforce enterprise managed settings, including managed hook policies, at session bootstrap.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_managed_settings: Option<bool>,
-    /// Whether on-demand custom instruction discovery is enabled.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_on_demand_instruction_discovery: Option<bool>,
-    /// Deprecated and ignored. Shell command analysis is always enabled; retained for wire compatibility.
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_script_safety: Option<bool>,
-    /// Whether skill loading is enabled. When omitted, explicit SDK skill roots or an SDK skill provider enable skills independently of enableConfigDiscovery.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_skills: Option<bool>,
-    /// Whether model responses stream as delta events.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_streaming: Option<bool>,
     /// Opt in to enforcing non-overridable managed model controls on session model, Auto-tier, reasoning-effort, and context-tier changes. Managed defaults still apply when omitted; this option only turns conflicting changes into errors.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enforce_managed_model_defaults: Option<bool>,
-    /// How MCP server environment values are interpreted.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub env_value_mode: Option<SessionOpenOptionsEnvValueMode>,
-    /// Override directory for session event logs.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub events_log_directory: Option<String>,
-    /// Whether subagent callback events should be forwarded into the session event log sink.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub events_log_includes_subagents: Option<bool>,
-    /// Built-in subagent names to exclude from this session. Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a custom agent with the same name is available.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub excluded_builtin_agents: Option<Vec<String>>,
     /// Managed-setting paths this trusted SDK host enforces externally or does not support, excluded from fetched, device, and policy-helper policy for this session. Exact dotted paths exclude a setting and its descendants (for example sandbox or permissions.disableBypassPermissionsMode); wildcards and array indices are not supported. Host-injected managedSettings and policy availability checks are not excluded. Not persisted; re-supply on resume, where omission restores full enforcement. Requires enableManagedSettings to self-fetch policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub excluded_managed_settings: Option<Vec<String>>,
-    /// Denylist of tool names.
+    /// Permissions-only enterprise policy injected by the SDK host at session create or resume. Composes restrictively with self-fetched and device policy and is not persisted.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub excluded_tools: Option<Vec<String>>,
-    /// ExP assignment ('flight') data injected by an SDK integrator, in the same JSON shape the Copilot CLI fetches from the experimentation service (CopilotExpAssignmentResponse). When supplied this is fed into the FeatureFlagService exactly like CLI-fetched assignments and ExP-backed flags wait for it. When absent the session does not block on ExP.
-    #[doc(hidden)]
+    pub managed_settings: Option<SessionManagedSettings>,
+}
+
+/// Skill loading, sources, and provider capability.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenSkillOptions {
+    /// Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) exp_assignments: Option<serde_json::Value>,
-    /// Trusted host defaults consumed by the runtime during session construction.
-    #[doc(hidden)]
+    pub directories: Option<Vec<String>>,
+    /// Skill IDs disabled for this session.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) feature_flag_configuration: Option<SessionFeatureFlagConfiguration>,
-    /// Feature-flag values resolved by the host.
+    pub disabled_skills: Option<Vec<String>>,
+    /// Whether skill loading is enabled. When omitted, explicit SDK skill roots or an SDK skill provider enable skills independently of enableConfigDiscovery.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub feature_flags: Option<HashMap<String, bool>>,
+    pub enabled: Option<bool>,
     /// Whether the requesting SDK session has a skill provider. The provider remains ephemeral and is never persisted in session options or history. When enableSkills is false, it remains bound but dormant and receives no callbacks. Cloud, relay, handoff, and raw sessions.open flows reject it because they cannot safely pre-register the callback handler.
     ///
     /// <div class="warning">
@@ -4634,34 +4706,137 @@ pub struct SessionOpenOptions {
     /// </div>
     #[doc(hidden)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) has_skill_provider: Option<bool>,
-    /// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hook_directories: Option<Vec<String>>,
+    pub(crate) has_provider: Option<bool>,
     /// Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ignored_skills_locations: Option<Vec<String>>,
-    /// Built-in subagent names to include in this session. When specified, only these built-ins are available, subject to runtime availability and exclusions. Custom agents with the same name remain available.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub included_builtin_agents: Option<Vec<String>>,
+    pub ignored_locations: Option<Vec<String>>,
     /// Built-in skill names to include in this session. When specified, only these runtime-bundled skills are available. Skills from other sources with the same name remain available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub included_builtin_skills: Option<Vec<String>>,
-    /// Installed plugins visible to the session.
+}
+
+/// Context retention and session-state storage.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenStateOptions {
+    /// Override directory for session event logs.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub installed_plugins: Option<Vec<InstalledPlugin>>,
-    /// Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    pub events_log_directory: Option<String>,
+    /// Whether subagent callback events should be forwarded into the session event log sink.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub instruction_directories: Option<Vec<String>>,
+    pub events_log_includes_subagents: Option<bool>,
+    /// Memory configuration for this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryConfiguration>,
+    /// Optional trajectory output file path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trajectory_file: Option<String>,
+}
+
+/// Tool declarations, exposure, and behavior.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenToolOptions {
+    /// Allowlist of available tool names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_tools: Option<Vec<String>>,
+    /// Denylist of tool names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excluded_tools: Option<Vec<String>>,
+    /// Whether interactive shell sessions are logged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_interactive_shells: Option<bool>,
+    /// Maximum decoded byte size of a single inline model-facing binary tool result persisted in session events (default 10 MB).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_inline_binary_bytes: Option<i64>,
+    /// Per-session settings for built-in shell tools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell: Option<ShellOptions>,
+    /// PowerShell process flags applied to built-in and user-requested shell commands.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell_process_flags: Option<Vec<String>>,
+}
+
+/// Session construction options.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOpenOptions {
+    /// Agent definitions, selection, and source filters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agents: Option<SessionOpenAgentOptions>,
+    /// Structured client kind used for runtime behavior gates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_kind: Option<String>,
+    /// Identifier of the client driving the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_name: Option<String>,
+    /// Override Copilot configuration directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_directory: Option<String>,
+    /// Parent engagement ID for detached child telemetry rollup.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detached_from_spawning_parent_engagement_id: Option<String>,
+    /// Parent session ID for detached child telemetry rollup.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detached_from_spawning_parent_session_id: Option<String>,
+    /// Enables runtime discovery of supported configuration. Explicitly supplied
+    /// configuration takes precedence; explicit feature roots remain independent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_config_discovery: Option<bool>,
+    /// Event delivery and streaming.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub events: Option<SessionOpenEventOptions>,
+    /// Execution accounting and autonomous continuation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution: Option<SessionOpenExecutionOptions>,
+    /// Feature experimentation and trusted assignments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub experiments: Option<SessionOpenExperimentOptions>,
+    /// Project directory access and change tracking.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filesystem: Option<SessionOpenFilesystemOptions>,
+    /// Host Git context and commit attribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git: Option<SessionOpenGitOptions>,
+    /// GitHub integration and session credentials.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub github: Option<SessionOpenGitHubOptions>,
+    /// Callback and filesystem hook sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<SessionOpenHookOptions>,
+    /// Model tuning and provider catalog.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inference: Option<SessionOpenInferenceOptions>,
+    /// Instruction sources and discovery.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<SessionOpenInstructionOptions>,
     /// Stable integration identifier for analytics.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub integration_id: Option<String>,
-    /// Declares that a human drives this session's conversation, enabling user-message analysis (sentiment, task completion criteria, and task analytics) for user-authored messages. Automated messages remain excluded. Defaults to false for SDK sessions. Applied when the session is created or loaded from storage; ignored when resuming a session that is already active, and for cloud sessions.
+    /// Human input and mode-switch callback capabilities.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub interactive_user: Option<bool>,
-    /// Whether experimental behavior is enabled.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_experimental_mode: Option<bool>,
+    pub interaction: Option<SessionOpenInteractionOptions>,
     /// Startup-only experimental runtime lifecycle diagnostics configuration.
     ///
     /// <div class="warning">
@@ -4673,72 +4848,27 @@ pub struct SessionOpenOptions {
     #[doc(hidden)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) lifecycle_diagnostics: Option<LifecycleDiagnosticsConfiguration>,
-    /// Whether interactive shell sessions are logged.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub log_interactive_shells: Option<bool>,
     /// Identifier sent to LSP-style integrations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lsp_client_name: Option<String>,
-    /// Non-secret host-managed HTTP MCP servers keyed by stable managed identity. Managed provenance is runtime-established from this separate field and credentials are supplied through dynamic-header refresh.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This type is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases.
-    ///
-    /// </div>
+    /// MCP servers, OAuth, and renderer capability.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub managed_mcp_servers: Option<HashMap<String, ManagedMcpServerConfig>>,
-    /// Permissions-only enterprise policy injected by the SDK host at session create or resume. Composes restrictively with self-fetched and device policy and is not persisted.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub managed_settings: Option<SessionManagedSettings>,
-    /// Maximum decoded byte size of a single inline model-facing binary tool result persisted in session events (default 10 MB).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_inline_binary_bytes: Option<i64>,
-    /// Memory configuration for this session.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub memory: Option<MemoryConfiguration>,
+    pub mcp: Option<SessionOpenMcpOptions>,
     /// Initial model identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Initial model capability overrides.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_capabilities_overrides: Option<ModelCapabilitiesOverride>,
-    /// BYOK model definitions added to the selectable model list, each referencing a provider name.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This type is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases.
-    ///
-    /// </div>
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub models: Option<Vec<ProviderModelConfig>>,
     /// Optional human-friendly session name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Custom model-provider configuration (BYOK).
+    /// Permission decisions and sandboxing.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<ProviderConfig>,
-    /// Named BYOK provider connections, additive to CAPI auth. Combining with `provider` is rejected.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This type is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases.
-    ///
-    /// </div>
+    pub permissions: Option<SessionOpenPermissionOptions>,
+    /// Explicit plugin sources.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub providers: Option<Vec<NamedProviderConfig>>,
-    /// Initial reasoning effort level. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. When omitted, no effort override is applied.
+    pub plugins: Option<SessionOpenPluginOptions>,
+    /// Host-injected session policy.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<String>,
-    /// Initial reasoning summary mode for supported model clients.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_summary: Option<SessionOpenOptionsReasoningSummary>,
-    /// Whether to invalidate cached custom-instruction discovery before constructing the session. Use when instruction files may have changed earlier in the same runtime process.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub refresh_custom_instructions: Option<bool>,
+    pub policy: Option<SessionOpenPolicyOptions>,
     /// Telemetry-only remote-defaulted flag.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_defaulted_on: Option<bool>,
@@ -4748,60 +4878,24 @@ pub struct SessionOpenOptions {
     /// Whether this session supports remote steering.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_steerable: Option<bool>,
-    /// Whether the host is an interactive UI.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub running_in_interactive_mode: Option<bool>,
-    /// Resolved sandbox configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sandbox_config: Option<SandboxConfig>,
-    /// Origin of the sandbox choice. Settings-derived origins (never_configured, user_enabled, user_disabled, repository_policy) let managed policy floor a host preference; explicit below-floor changes remain policy conflicts unless a session opt-out is authorized. Also used for telemetry provenance.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This type is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases.
-    ///
-    /// </div>
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sandbox_config_source: Option<SandboxConfigSource>,
     /// Capabilities enabled for this session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_capabilities: Option<Vec<SessionCapability>>,
     /// Optional stable session identifier to use for a new session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
-    /// Initial session limits.
+    /// Skill loading, sources, and provider capability.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_limits: Option<SessionLimitsConfig>,
-    /// Per-session settings for built-in shell tools.
+    pub skills: Option<SessionOpenSkillOptions>,
+    /// Context retention and session-state storage.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shell: Option<ShellOptions>,
-    /// Use shell.initProfile instead. Shell init profile.
-    #[doc(hidden)]
-    #[deprecated]
+    pub state: Option<SessionOpenStateOptions>,
+    /// Tool declarations, exposure, and behavior.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shell_init_profile: Option<String>,
-    /// PowerShell process flags applied to built-in and user-requested shell commands.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shell_process_flags: Option<Vec<String>>,
-    /// Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_directories: Option<Vec<String>>,
-    /// Whether to skip custom instruction sources.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skip_custom_instructions: Option<bool>,
-    /// Optional trajectory output file path.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trajectory_file: Option<String>,
-    /// Initial output verbosity level for supported models.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verbosity: Option<Verbosity>,
+    pub tools: Option<SessionOpenToolOptions>,
     /// Working directory to anchor the session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
-    /// Pre-resolved working-directory context for session startup.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub working_directory_context: Option<SessionContext>,
 }
 
 /// Parameters for creating a new local session.
@@ -5346,44 +5440,11 @@ pub struct SessionsCheckInUseResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionsCloseRequest {
+    /// Run deferred session-end hooks with their full configured timeout when the host stays alive.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detach_session_end_hooks: Option<bool>,
     /// Session ID to close
     pub session_id: SessionId,
-}
-
-/// Extensible [`SessionsCloseRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`SessionsCloseOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionsCloseOptions {
-    #[serde(flatten)]
-    legacy: SessionsCloseRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    detach_session_end_hooks: Option<bool>,
-}
-
-impl SessionsCloseOptions {
-    /// Creates options with the required inputs.
-    pub fn new(session_id: SessionId) -> Self {
-        Self {
-            legacy: SessionsCloseRequest { session_id },
-            detach_session_end_hooks: None,
-        }
-    }
-
-    /// Run deferred session-end hooks with their full configured timeout when the host stays alive.
-    pub fn detach_session_end_hooks(mut self, value: bool) -> Self {
-        self.detach_session_end_hooks = Some(value);
-        self
-    }
 }
 
 /// Closes a session: emits shutdown, flushes pending events to disk, releases the in-use lock, disposes the active session. Idempotent: succeeds even if the session is not currently active.
@@ -5840,46 +5901,11 @@ pub struct SessionSettingsSnapshot {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionsFindByPrefixRequest {
+    /// Configuration directory containing the session state. Omitted to use the server's configured home.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
     /// UUID prefix (>=7 hex chars, <36 chars). Returns the unique session ID, or undefined when there is no match or the prefix matches multiple sessions.
     pub prefix: String,
-}
-
-/// Extensible [`SessionsFindByPrefixRequest`], including inputs added after it was published.
-///
-/// Required inputs are [`SessionsFindByPrefixOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionsFindByPrefixOptions {
-    #[serde(flatten)]
-    legacy: SessionsFindByPrefixRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    config_dir: Option<String>,
-}
-
-impl SessionsFindByPrefixOptions {
-    /// Creates options with the required inputs.
-    pub fn new(prefix: impl Into<String>) -> Self {
-        Self {
-            legacy: SessionsFindByPrefixRequest {
-                prefix: prefix.into(),
-            },
-            config_dir: None,
-        }
-    }
-
-    /// Configuration directory containing the session state. Omitted to use the server's configured home.
-    pub fn config_dir(mut self, value: impl Into<String>) -> Self {
-        self.config_dir = Some(value.into());
-        self
-    }
 }
 
 /// Session ID matching the prefix, omitted when no unique match exists.
@@ -6571,7 +6597,7 @@ pub struct SessionTelemetryEngagement {
     pub engagement_id: Option<String>,
 }
 
-/// Patch of mutable session options to apply to the running session.
+/// Agent definitions, selection, and source filters.
 ///
 /// <div class="warning">
 ///
@@ -6581,7 +6607,310 @@ pub struct SessionTelemetryEngagement {
 /// </div>
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionUpdateOptionsParams {
+pub struct SessionUpdateAgentOptions {
+    /// Runtime context discriminator (e.g., `cli`, `actions`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    /// Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directories: Option<Vec<String>>,
+    /// Built-in subagent names to exclude from this session. Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a custom agent with the same name is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excluded_builtin_agents: Option<Vec<String>>,
+    /// Built-in subagent names to include in this session. When specified, only these built-ins are available, subject to runtime availability and exclusions. Custom agents with the same name remain available. Set to null to remove the allowlist restriction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub included_builtin_agents: Option<Vec<String>>,
+    /// Whether to default custom agents to local-only execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_discovery_only: Option<bool>,
+    /// When true, the selected custom agent's prompt is not injected into the user message (skill context is still injected). Used by automation triggers where the agent prompt is already in the problem statement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suppress_custom_agent_prompt: Option<bool>,
+}
+
+/// Event delivery and streaming.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateEventOptions {
+    /// Whether to stream model responses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub streaming: Option<bool>,
+}
+
+/// Execution accounting and autonomous continuation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateExecutionOptions {
+    /// Patch the Autopilot policy. Omitted fields retain their current values; an empty object makes no changes. Does not change the session mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autopilot: Option<AutopilotOptions>,
+    /// Whether to allow auto-mode continuation across turns.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continue_on_auto_mode: Option<bool>,
+    /// Optional session limits. Pass null to clear the session limits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<SessionLimitsConfig>,
+}
+
+/// Feature experimentation and trusted assignments.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateExperimentOptions {
+    /// Whether experimental capabilities are enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_experimental_mode: Option<bool>,
+    /// Map of feature-flag IDs to their boolean enabled state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flags: Option<HashMap<String, bool>>,
+}
+
+/// GitHub integration and session credentials.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateGitHubOptions {
+    /// Options scoped to the built-in CAPI (Copilot API) provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capi: Option<CapiSessionOptions>,
+    /// Override URL for the Copilot API endpoint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copilot_url: Option<String>,
+}
+
+/// Host Git context and commit attribution.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateGitOptions {
+    /// Whether to include the `Co-authored-by` trailer in commit messages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coauthor_enabled: Option<bool>,
+    /// Whether to enable host git operations (context resolution, child repo scanning, git info in system prompt).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_host_git_operations: Option<bool>,
+}
+
+/// Callback and filesystem hook sources.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateHookOptions {
+    /// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directories: Option<Vec<String>>,
+    /// Whether to enable repository-origin file hooks from `.github/hooks/` and trusted repository-configured roots. Does not control explicit hookDirectories or SDK callback hooks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_repository_hooks: Option<bool>,
+}
+
+/// Model tuning and provider catalog.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateInferenceOptions {
+    /// Per-property model capability overrides for the selected model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<ModelCapabilitiesOverride>,
+    /// Context tier for models with tiered pricing. The session uses this to derive effective `modelCapabilitiesOverrides` so compaction, truncation, token display, and request limits honor the selected tier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_tier: Option<OptionsUpdateContextTier>,
+    /// Connection used for unqualified selections. Omission preserves routing;
+    /// null clears it. Requires effective CAPI disablement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "SessionUpdateInferenceOptions::deserialize_default_provider"
+    )]
+    pub default_provider: Option<Option<String>>,
+    /// Whether to surface reasoning-summary events from the model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_reasoning_summaries: Option<bool>,
+    /// Reasoning effort for the selected model. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. When omitted, no effort override is applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    /// Reasoning summary mode for supported model clients.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_summary: Option<OptionsUpdateReasoningSummary>,
+    /// Output verbosity level for supported models.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verbosity: Option<Verbosity>,
+}
+
+impl SessionUpdateInferenceOptions {
+    fn deserialize_default_provider<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<Option<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Option::<String>::deserialize(deserializer).map(Some)
+    }
+}
+
+/// Instruction sources and discovery.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateInstructionOptions {
+    /// Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directories: Option<Vec<String>>,
+    /// Instruction source IDs to exclude from the system prompt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_sources: Option<Vec<String>>,
+    /// Whether to discover custom instructions on demand after successful file views (AGENTS.md / CLAUDE.md / .github/copilot-instructions.md surfacing). Combined with `skipCustomInstructions`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_demand_discovery: Option<bool>,
+    /// Organization-level custom instructions to inject into the system prompt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organization_text: Option<String>,
+    /// Whether to skip loading custom instruction sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_custom_instructions: Option<bool>,
+}
+
+/// Human input and mode-switch callback capabilities.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateInteractionOptions {
+    /// Whether to disable the `ask_user` tool (encourages autonomous behavior).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ask_user_disabled: Option<bool>,
+    /// Whether the session is running in an interactive UI.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub running_in_interactive_mode: Option<bool>,
+}
+
+/// MCP servers, OAuth, and renderer capability.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateMcpOptions {
+    /// Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_all_server_instructions: Option<bool>,
+    /// How env values are passed to MCP servers (`direct` inlines literal values; `indirect` resolves at launch).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env_value_mode: Option<OptionsUpdateEnvValueMode>,
+}
+
+/// Permission decisions and sandboxing.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdatePermissionOptions {
+    /// Resolved sandbox configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxConfig>,
+    /// Origin of the sandbox choice. Settings-derived origins (never_configured, user_enabled, user_disabled, repository_policy) let managed policy floor a host preference; explicit below-floor changes remain policy conflicts unless a session opt-out is authorized. Also used for telemetry provenance.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This type is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases.
+    ///
+    /// </div>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_source: Option<SandboxConfigSource>,
+}
+
+/// Explicit plugin sources.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdatePluginOptions {
+    /// Full set of installed plugins for the session. Replaces the existing list; the runtime invalidates the skills cache only when the list materially changes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installed: Option<Vec<SessionInstalledPlugin>>,
+}
+
+/// Host-injected session policy.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdatePolicyOptions {
     /// Additional content-exclusion policies to merge into the session's policy set.
     ///
     /// <div class="warning">
@@ -6593,216 +6922,9 @@ pub struct SessionUpdateOptionsParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub additional_content_exclusion_policies:
         Option<Vec<OptionsUpdateAdditionalContentExclusionPolicy>>,
-    /// Runtime context discriminator (e.g., `cli`, `actions`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_context: Option<String>,
-    /// Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_directories: Option<Vec<String>>,
-    /// Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_all_mcp_server_instructions: Option<bool>,
-    /// Whether to disable the `ask_user` tool (encourages autonomous behavior).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ask_user_disabled: Option<bool>,
-    /// Patch the Autopilot policy. Omitted fields retain their current values; an empty object makes no changes. Does not change the session mode.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub autopilot: Option<AutopilotOptions>,
-    /// Allowlist of tool names available to this session.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub available_tools: Option<Vec<String>>,
-    /// Options scoped to the built-in CAPI (Copilot API) provider.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub capi: Option<CapiSessionOptions>,
-    /// Identifier of the client driving the session.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_name: Option<String>,
-    /// Whether to include the `Co-authored-by` trailer in commit messages.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub coauthor_enabled: Option<bool>,
-    /// Context tier for models with tiered pricing. The session uses this to derive effective `modelCapabilitiesOverrides` so compaction, truncation, token display, and request limits honor the selected tier.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_tier: Option<OptionsUpdateContextTier>,
-    /// Whether to allow auto-mode continuation across turns.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub continue_on_auto_mode: Option<bool>,
-    /// Override URL for the Copilot API endpoint.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub copilot_url: Option<String>,
-    /// Whether to default custom agents to local-only execution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom_agents_local_only: Option<bool>,
-    /// Instruction source IDs to exclude from the system prompt.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disabled_instruction_sources: Option<Vec<String>>,
-    /// Skill IDs that should be excluded from this session.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disabled_skills: Option<Vec<String>>,
-    /// Whether to enable repository-origin file hooks from `.github/hooks/` and trusted repository-configured roots. Does not control explicit hookDirectories or SDK callback hooks.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_file_hooks: Option<bool>,
-    /// Whether to enable host git operations (context resolution, child repo scanning, git info in system prompt).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_host_git_operations: Option<bool>,
-    /// Whether to discover custom instructions on demand after successful file views (AGENTS.md / CLAUDE.md / .github/copilot-instructions.md surfacing). Combined with `skipCustomInstructions`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_on_demand_instruction_discovery: Option<bool>,
-    /// Whether to surface reasoning-summary events from the model.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_reasoning_summaries: Option<bool>,
-    /// Deprecated and ignored. Shell command analysis is always enabled; retained for wire compatibility.
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_script_safety: Option<bool>,
-    /// Whether to enable cross-session store writes and reads.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_session_store: Option<bool>,
-    /// Whether skill loading is enabled. Explicit false disables every source, including explicit SDK roots and a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless explicit SDK skill roots or an SDK skill provider are supplied.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_skills: Option<bool>,
-    /// Whether to stream model responses.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_streaming: Option<bool>,
-    /// How env values are passed to MCP servers (`direct` inlines literal values; `indirect` resolves at launch).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub env_value_mode: Option<OptionsUpdateEnvValueMode>,
-    /// Override directory for the session-events log. When unset, the runtime's default events log directory is used.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub events_log_directory: Option<String>,
-    /// Whether subagent callback events should be forwarded into the session event log sink.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub events_log_includes_subagents: Option<bool>,
-    /// Built-in subagent names to exclude from this session. Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a custom agent with the same name is available.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub excluded_builtin_agents: Option<Vec<String>>,
-    /// Denylist of tool names for this session.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub excluded_tools: Option<Vec<String>>,
-    /// Map of feature-flag IDs to their boolean enabled state.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub feature_flags: Option<HashMap<String, bool>>,
-    /// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hook_directories: Option<Vec<String>>,
-    /// Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ignored_skills_locations: Option<Vec<String>>,
-    /// Enable or disable the native image tool for this session without changing the conversation model.
-    /// Omitted values preserve the current setting. Re-supply consent on cold resume.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub image_generation: Option<ProtocolImageGenerationOptions>,
-    /// Built-in subagent names to include in this session. When specified, only these built-ins are available, subject to runtime availability and exclusions. Custom agents with the same name remain available. Set to null to remove the allowlist restriction.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub included_builtin_agents: Option<Vec<String>>,
-    /// Built-in skill names to include in this session. When specified, only these runtime-bundled skills are available. Skills from other sources with the same name remain available. Set to null to remove the allowlist restriction.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub included_builtin_skills: Option<Vec<String>>,
-    /// Full set of installed plugins for the session. Replaces the existing list; the runtime invalidates the skills cache only when the list materially changes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub installed_plugins: Option<Vec<SessionInstalledPlugin>>,
-    /// Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub instruction_directories: Option<Vec<String>>,
-    /// Stable integration identifier used for analytics and rate-limit attribution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub integration_id: Option<String>,
-    /// Whether experimental capabilities are enabled.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_experimental_mode: Option<bool>,
-    /// Whether interactive shell sessions are logged.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub log_interactive_shells: Option<bool>,
-    /// Identifier sent to LSP-style integrations.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lsp_client_name: Option<String>,
-    /// Whether to expose the `manage_schedule` tool to the agent. The runtime always owns the per-session schedule registry; this flag only controls tool exposure (typically gated to staff users).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub manage_schedule_enabled: Option<bool>,
-    /// Maximum decoded byte size of a single model-facing binary tool result (e.g. an image) persisted inline in session events and re-presented to the model on later turns / resume. Larger results are persisted as a metadata-only marker and shown to the model as a short text note. Defaults to 10 MB.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_inline_binary_bytes: Option<i64>,
-    /// The model ID to use for assistant turns.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// Per-property model capability overrides for the selected model.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_capabilities_overrides: Option<ModelCapabilitiesOverride>,
-    /// Organization-level custom instructions to inject into the system prompt.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub organization_custom_instructions: Option<String>,
-    /// Custom model-provider configuration (BYOK).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<ProviderConfig>,
-    /// Reasoning effort for the selected model. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. When omitted, no effort override is applied.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<String>,
-    /// Reasoning summary mode for supported model clients.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_summary: Option<OptionsUpdateReasoningSummary>,
-    /// Whether the session is running in an interactive UI.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub running_in_interactive_mode: Option<bool>,
-    /// Resolved sandbox configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sandbox_config: Option<SandboxConfig>,
-    /// Origin of the sandbox choice. Settings-derived origins (never_configured, user_enabled, user_disabled, repository_policy) let managed policy floor a host preference; explicit below-floor changes remain policy conflicts unless a session opt-out is authorized. Also used for telemetry provenance.
-    ///
-    /// <div class="warning">
-    ///
-    /// **Experimental.** This type is part of an experimental wire-protocol surface
-    /// and may change or be removed in future SDK or CLI releases.
-    ///
-    /// </div>
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sandbox_config_source: Option<SandboxConfigSource>,
-    /// Replaces the session's capability set with the given list. Use to enable or disable capabilities mid-session (e.g., remove `memory` for reproducible scripted runs). Omit the field to leave the existing capability set unchanged.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_capabilities: Option<Vec<SessionCapability>>,
-    /// Optional session limits. Pass null to clear the session limits.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_limits: Option<SessionLimitsConfig>,
-    /// Per-session settings for built-in shell tools.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shell: Option<ShellOptions>,
-    /// Use shell.initProfile instead. Shell init profile (`None` or `NonInteractive`).
-    #[doc(hidden)]
-    #[deprecated]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shell_init_profile: Option<String>,
-    /// PowerShell process flags applied to built-in and user-requested shell commands.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shell_process_flags: Option<Vec<String>>,
-    /// Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_directories: Option<Vec<String>>,
-    /// Whether to skip loading custom instruction sources.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skip_custom_instructions: Option<bool>,
-    /// Whether to skip embedding retrieval pipeline initialization and execution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skip_embedding_retrieval: Option<bool>,
-    /// When true, the selected custom agent's prompt is not injected into the user message (skill context is still injected). Used by automation triggers where the agent prompt is already in the problem statement.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub suppress_custom_agent_prompt: Option<bool>,
-    /// Controls how availableTools (allowlist) and excludedTools (denylist) combine when both are set. Omitted updates preserve the current setting; new sessions default to excluded.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_filter_precedence: Option<OptionsUpdateToolFilterPrecedence>,
-    /// Optional path for trajectory output.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trajectory_file: Option<String>,
-    /// Output verbosity level for supported models.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verbosity: Option<Verbosity>,
-    /// Absolute working-directory path for shell tools.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub working_directory: Option<String>,
 }
 
-/// Extensible [`SessionUpdateOptionsParams`], including inputs added after it was published.
-///
-/// Required inputs are [`SessionUpdateOptionsWithSettings::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
+/// Skill loading, sources, and provider capability.
 ///
 /// <div class="warning">
 ///
@@ -6810,495 +6932,178 @@ pub struct SessionUpdateOptionsParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionUpdateOptionsWithSettings {
-    #[serde(flatten)]
-    legacy: SessionUpdateOptionsParams,
+pub struct SessionUpdateSkillOptions {
+    /// Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
     #[serde(skip_serializing_if = "Option::is_none")]
-    settings: Option<SessionSettingsPatch>,
+    pub directories: Option<Vec<String>>,
+    /// Skill IDs that should be excluded from this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_skills: Option<Vec<String>>,
+    /// Whether skill loading is enabled. Explicit false disables every source, including explicit SDK roots and a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless explicit SDK skill roots or an SDK skill provider are supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignored_locations: Option<Vec<String>>,
+    /// Built-in skill names to include in this session. When specified, only these runtime-bundled skills are available. Skills from other sources with the same name remain available. Set to null to remove the allowlist restriction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub included_builtin_skills: Option<Vec<String>>,
 }
 
-impl SessionUpdateOptionsWithSettings {
-    /// Creates options with the required inputs.
-    pub fn new() -> Self {
-        Self {
-            legacy: SessionUpdateOptionsParams {
-                image_generation: None,
-                model: None,
-                model_capabilities_overrides: None,
-                reasoning_effort: None,
-                reasoning_summary: None,
-                verbosity: None,
-                client_name: None,
-                lsp_client_name: None,
-                integration_id: None,
-                feature_flags: None,
-                is_experimental_mode: None,
-                provider: None,
-                capi: None,
-                working_directory: None,
-                available_tools: None,
-                excluded_tools: None,
-                included_builtin_agents: None,
-                excluded_builtin_agents: None,
-                tool_filter_precedence: None,
-                enable_script_safety: None,
-                shell: None,
-                shell_init_profile: None,
-                shell_process_flags: None,
-                sandbox_config: None,
-                sandbox_config_source: None,
-                log_interactive_shells: None,
-                env_value_mode: None,
-                allow_all_mcp_server_instructions: None,
-                skill_directories: None,
-                agent_directories: None,
-                instruction_directories: None,
-                hook_directories: None,
-                ignored_skills_locations: None,
-                included_builtin_skills: None,
-                disabled_skills: None,
-                enable_on_demand_instruction_discovery: None,
-                max_inline_binary_bytes: None,
-                installed_plugins: None,
-                custom_agents_local_only: None,
-                suppress_custom_agent_prompt: None,
-                skip_custom_instructions: None,
-                disabled_instruction_sources: None,
-                coauthor_enabled: None,
-                trajectory_file: None,
-                enable_streaming: None,
-                copilot_url: None,
-                ask_user_disabled: None,
-                continue_on_auto_mode: None,
-                running_in_interactive_mode: None,
-                enable_reasoning_summaries: None,
-                agent_context: None,
-                events_log_directory: None,
-                events_log_includes_subagents: None,
-                additional_content_exclusion_policies: None,
-                manage_schedule_enabled: None,
-                session_capabilities: None,
-                skip_embedding_retrieval: None,
-                organization_custom_instructions: None,
-                enable_file_hooks: None,
-                enable_host_git_operations: None,
-                enable_session_store: None,
-                enable_skills: None,
-                context_tier: None,
-                session_limits: None,
-                autopilot: None,
-            },
-            settings: None,
-        }
-    }
+/// Context retention and session-state storage.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateStateOptions {
+    /// Whether to enable cross-session store writes and reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_cross_session_store: Option<bool>,
+    /// Override directory for the session-events log. When unset, the runtime's default events log directory is used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub events_log_directory: Option<String>,
+    /// Whether subagent callback events should be forwarded into the session event log sink.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub events_log_includes_subagents: Option<bool>,
+    /// Whether to skip embedding retrieval pipeline initialization and execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_embedding_retrieval: Option<bool>,
+    /// Optional path for trajectory output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trajectory_file: Option<String>,
+}
 
+/// Tool declarations, exposure, and behavior.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateToolOptions {
+    /// Allowlist of tool names available to this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_tools: Option<Vec<String>>,
+    /// Denylist of tool names for this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excluded_tools: Option<Vec<String>>,
+    /// Controls how availableTools (allowlist) and excludedTools (denylist) combine when both are set. Omitted updates preserve the current setting; new sessions default to excluded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_precedence: Option<OptionsUpdateToolFilterPrecedence>,
     /// Enable or disable the native image tool for this session without changing the conversation model.
     /// Omitted values preserve the current setting. Re-supply consent on cold resume.
-    pub fn image_generation(mut self, value: ProtocolImageGenerationOptions) -> Self {
-        self.legacy.image_generation = Some(value);
-        self
-    }
-
-    /// The model ID to use for assistant turns.
-    pub fn model(mut self, value: impl Into<String>) -> Self {
-        self.legacy.model = Some(value.into());
-        self
-    }
-
-    /// Per-property model capability overrides for the selected model.
-    pub fn model_capabilities_overrides(mut self, value: ModelCapabilitiesOverride) -> Self {
-        self.legacy.model_capabilities_overrides = Some(value);
-        self
-    }
-
-    /// Reasoning effort for the selected model. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. When omitted, no effort override is applied.
-    pub fn reasoning_effort(mut self, value: impl Into<String>) -> Self {
-        self.legacy.reasoning_effort = Some(value.into());
-        self
-    }
-
-    /// Reasoning summary mode for supported model clients.
-    pub fn reasoning_summary(mut self, value: OptionsUpdateReasoningSummary) -> Self {
-        self.legacy.reasoning_summary = Some(value);
-        self
-    }
-
-    /// Output verbosity level for supported models.
-    pub fn verbosity(mut self, value: Verbosity) -> Self {
-        self.legacy.verbosity = Some(value);
-        self
-    }
-
-    /// Identifier of the client driving the session.
-    pub fn client_name(mut self, value: impl Into<String>) -> Self {
-        self.legacy.client_name = Some(value.into());
-        self
-    }
-
-    /// Identifier sent to LSP-style integrations.
-    pub fn lsp_client_name(mut self, value: impl Into<String>) -> Self {
-        self.legacy.lsp_client_name = Some(value.into());
-        self
-    }
-
-    /// Stable integration identifier used for analytics and rate-limit attribution.
-    pub fn integration_id(mut self, value: impl Into<String>) -> Self {
-        self.legacy.integration_id = Some(value.into());
-        self
-    }
-
-    /// Map of feature-flag IDs to their boolean enabled state.
-    pub fn feature_flags(mut self, value: HashMap<String, bool>) -> Self {
-        self.legacy.feature_flags = Some(value);
-        self
-    }
-
-    /// Whether experimental capabilities are enabled.
-    pub fn is_experimental_mode(mut self, value: bool) -> Self {
-        self.legacy.is_experimental_mode = Some(value);
-        self
-    }
-
-    /// Custom model-provider configuration (BYOK).
-    pub fn provider(mut self, value: ProviderConfig) -> Self {
-        self.legacy.provider = Some(value);
-        self
-    }
-
-    /// Options scoped to the built-in CAPI (Copilot API) provider.
-    pub fn capi(mut self, value: CapiSessionOptions) -> Self {
-        self.legacy.capi = Some(value);
-        self
-    }
-
-    /// Absolute working-directory path for shell tools.
-    pub fn working_directory(mut self, value: impl Into<String>) -> Self {
-        self.legacy.working_directory = Some(value.into());
-        self
-    }
-
-    /// Allowlist of tool names available to this session.
-    pub fn available_tools(mut self, value: Vec<String>) -> Self {
-        self.legacy.available_tools = Some(value);
-        self
-    }
-
-    /// Denylist of tool names for this session.
-    pub fn excluded_tools(mut self, value: Vec<String>) -> Self {
-        self.legacy.excluded_tools = Some(value);
-        self
-    }
-
-    /// Built-in subagent names to include in this session. When specified, only these built-ins are available, subject to runtime availability and exclusions. Custom agents with the same name remain available. Set to null to remove the allowlist restriction.
-    pub fn included_builtin_agents(mut self, value: Vec<String>) -> Self {
-        self.legacy.included_builtin_agents = Some(value);
-        self
-    }
-
-    /// Built-in subagent names to exclude from this session. Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a custom agent with the same name is available.
-    pub fn excluded_builtin_agents(mut self, value: Vec<String>) -> Self {
-        self.legacy.excluded_builtin_agents = Some(value);
-        self
-    }
-
-    /// Controls how availableTools (allowlist) and excludedTools (denylist) combine when both are set. Omitted updates preserve the current setting; new sessions default to excluded.
-    pub fn tool_filter_precedence(mut self, value: OptionsUpdateToolFilterPrecedence) -> Self {
-        self.legacy.tool_filter_precedence = Some(value);
-        self
-    }
-
-    /// Deprecated and ignored. Shell command analysis is always enabled; retained for wire compatibility.
-    pub fn enable_script_safety(mut self, value: bool) -> Self {
-        self.legacy.enable_script_safety = Some(value);
-        self
-    }
-
-    /// Per-session settings for built-in shell tools.
-    pub fn shell(mut self, value: ShellOptions) -> Self {
-        self.legacy.shell = Some(value);
-        self
-    }
-
-    /// Use shell.initProfile instead. Shell init profile (`None` or `NonInteractive`).
-    pub fn shell_init_profile(mut self, value: impl Into<String>) -> Self {
-        self.legacy.shell_init_profile = Some(value.into());
-        self
-    }
-
-    /// PowerShell process flags applied to built-in and user-requested shell commands.
-    pub fn shell_process_flags(mut self, value: Vec<String>) -> Self {
-        self.legacy.shell_process_flags = Some(value);
-        self
-    }
-
-    /// Resolved sandbox configuration.
-    pub fn sandbox_config(mut self, value: SandboxConfig) -> Self {
-        self.legacy.sandbox_config = Some(value);
-        self
-    }
-
-    /// Origin of the sandbox choice. Settings-derived origins (never_configured, user_enabled, user_disabled, repository_policy) let managed policy floor a host preference; explicit below-floor changes remain policy conflicts unless a session opt-out is authorized. Also used for telemetry provenance.
-    pub fn sandbox_config_source(mut self, value: SandboxConfigSource) -> Self {
-        self.legacy.sandbox_config_source = Some(value);
-        self
-    }
-
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_generation: Option<ProtocolImageGenerationOptions>,
     /// Whether interactive shell sessions are logged.
-    pub fn log_interactive_shells(mut self, value: bool) -> Self {
-        self.legacy.log_interactive_shells = Some(value);
-        self
-    }
-
-    /// How env values are passed to MCP servers (`direct` inlines literal values; `indirect` resolves at launch).
-    pub fn env_value_mode(mut self, value: OptionsUpdateEnvValueMode) -> Self {
-        self.legacy.env_value_mode = Some(value);
-        self
-    }
-
-    /// Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
-    pub fn allow_all_mcp_server_instructions(mut self, value: bool) -> Self {
-        self.legacy.allow_all_mcp_server_instructions = Some(value);
-        self
-    }
-
-    /// Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-    pub fn skill_directories(mut self, value: Vec<String>) -> Self {
-        self.legacy.skill_directories = Some(value);
-        self
-    }
-
-    /// Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-    pub fn agent_directories(mut self, value: Vec<String>) -> Self {
-        self.legacy.agent_directories = Some(value);
-        self
-    }
-
-    /// Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-    pub fn instruction_directories(mut self, value: Vec<String>) -> Self {
-        self.legacy.instruction_directories = Some(value);
-        self
-    }
-
-    /// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
-    pub fn hook_directories(mut self, value: Vec<String>) -> Self {
-        self.legacy.hook_directories = Some(value);
-        self
-    }
-
-    /// Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.
-    pub fn ignored_skills_locations(mut self, value: Vec<String>) -> Self {
-        self.legacy.ignored_skills_locations = Some(value);
-        self
-    }
-
-    /// Built-in skill names to include in this session. When specified, only these runtime-bundled skills are available. Skills from other sources with the same name remain available. Set to null to remove the allowlist restriction.
-    pub fn included_builtin_skills(mut self, value: Vec<String>) -> Self {
-        self.legacy.included_builtin_skills = Some(value);
-        self
-    }
-
-    /// Skill IDs that should be excluded from this session.
-    pub fn disabled_skills(mut self, value: Vec<String>) -> Self {
-        self.legacy.disabled_skills = Some(value);
-        self
-    }
-
-    /// Whether to discover custom instructions on demand after successful file views (AGENTS.md / CLAUDE.md / .github/copilot-instructions.md surfacing). Combined with `skipCustomInstructions`.
-    pub fn enable_on_demand_instruction_discovery(mut self, value: bool) -> Self {
-        self.legacy.enable_on_demand_instruction_discovery = Some(value);
-        self
-    }
-
-    /// Maximum decoded byte size of a single model-facing binary tool result (e.g. an image) persisted inline in session events and re-presented to the model on later turns / resume. Larger results are persisted as a metadata-only marker and shown to the model as a short text note. Defaults to 10 MB.
-    pub fn max_inline_binary_bytes(mut self, value: i64) -> Self {
-        self.legacy.max_inline_binary_bytes = Some(value);
-        self
-    }
-
-    /// Full set of installed plugins for the session. Replaces the existing list; the runtime invalidates the skills cache only when the list materially changes.
-    pub fn installed_plugins(mut self, value: Vec<SessionInstalledPlugin>) -> Self {
-        self.legacy.installed_plugins = Some(value);
-        self
-    }
-
-    /// Whether to default custom agents to local-only execution.
-    pub fn custom_agents_local_only(mut self, value: bool) -> Self {
-        self.legacy.custom_agents_local_only = Some(value);
-        self
-    }
-
-    /// When true, the selected custom agent's prompt is not injected into the user message (skill context is still injected). Used by automation triggers where the agent prompt is already in the problem statement.
-    pub fn suppress_custom_agent_prompt(mut self, value: bool) -> Self {
-        self.legacy.suppress_custom_agent_prompt = Some(value);
-        self
-    }
-
-    /// Whether to skip loading custom instruction sources.
-    pub fn skip_custom_instructions(mut self, value: bool) -> Self {
-        self.legacy.skip_custom_instructions = Some(value);
-        self
-    }
-
-    /// Instruction source IDs to exclude from the system prompt.
-    pub fn disabled_instruction_sources(mut self, value: Vec<String>) -> Self {
-        self.legacy.disabled_instruction_sources = Some(value);
-        self
-    }
-
-    /// Whether to include the `Co-authored-by` trailer in commit messages.
-    pub fn coauthor_enabled(mut self, value: bool) -> Self {
-        self.legacy.coauthor_enabled = Some(value);
-        self
-    }
-
-    /// Optional path for trajectory output.
-    pub fn trajectory_file(mut self, value: impl Into<String>) -> Self {
-        self.legacy.trajectory_file = Some(value.into());
-        self
-    }
-
-    /// Whether to stream model responses.
-    pub fn enable_streaming(mut self, value: bool) -> Self {
-        self.legacy.enable_streaming = Some(value);
-        self
-    }
-
-    /// Override URL for the Copilot API endpoint.
-    pub fn copilot_url(mut self, value: impl Into<String>) -> Self {
-        self.legacy.copilot_url = Some(value.into());
-        self
-    }
-
-    /// Whether to disable the `ask_user` tool (encourages autonomous behavior).
-    pub fn ask_user_disabled(mut self, value: bool) -> Self {
-        self.legacy.ask_user_disabled = Some(value);
-        self
-    }
-
-    /// Whether to allow auto-mode continuation across turns.
-    pub fn continue_on_auto_mode(mut self, value: bool) -> Self {
-        self.legacy.continue_on_auto_mode = Some(value);
-        self
-    }
-
-    /// Whether the session is running in an interactive UI.
-    pub fn running_in_interactive_mode(mut self, value: bool) -> Self {
-        self.legacy.running_in_interactive_mode = Some(value);
-        self
-    }
-
-    /// Whether to surface reasoning-summary events from the model.
-    pub fn enable_reasoning_summaries(mut self, value: bool) -> Self {
-        self.legacy.enable_reasoning_summaries = Some(value);
-        self
-    }
-
-    /// Runtime context discriminator (e.g., `cli`, `actions`).
-    pub fn agent_context(mut self, value: impl Into<String>) -> Self {
-        self.legacy.agent_context = Some(value.into());
-        self
-    }
-
-    /// Override directory for the session-events log. When unset, the runtime's default events log directory is used.
-    pub fn events_log_directory(mut self, value: impl Into<String>) -> Self {
-        self.legacy.events_log_directory = Some(value.into());
-        self
-    }
-
-    /// Whether subagent callback events should be forwarded into the session event log sink.
-    pub fn events_log_includes_subagents(mut self, value: bool) -> Self {
-        self.legacy.events_log_includes_subagents = Some(value);
-        self
-    }
-
-    /// Additional content-exclusion policies to merge into the session's policy set.
-    pub fn additional_content_exclusion_policies(
-        mut self,
-        value: Vec<OptionsUpdateAdditionalContentExclusionPolicy>,
-    ) -> Self {
-        self.legacy.additional_content_exclusion_policies = Some(value);
-        self
-    }
-
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_interactive_shells: Option<bool>,
     /// Whether to expose the `manage_schedule` tool to the agent. The runtime always owns the per-session schedule registry; this flag only controls tool exposure (typically gated to staff users).
-    pub fn manage_schedule_enabled(mut self, value: bool) -> Self {
-        self.legacy.manage_schedule_enabled = Some(value);
-        self
-    }
-
-    /// Replaces the session's capability set with the given list. Use to enable or disable capabilities mid-session (e.g., remove `memory` for reproducible scripted runs). Omit the field to leave the existing capability set unchanged.
-    pub fn session_capabilities(mut self, value: Vec<SessionCapability>) -> Self {
-        self.legacy.session_capabilities = Some(value);
-        self
-    }
-
-    /// Whether to skip embedding retrieval pipeline initialization and execution.
-    pub fn skip_embedding_retrieval(mut self, value: bool) -> Self {
-        self.legacy.skip_embedding_retrieval = Some(value);
-        self
-    }
-
-    /// Organization-level custom instructions to inject into the system prompt.
-    pub fn organization_custom_instructions(mut self, value: impl Into<String>) -> Self {
-        self.legacy.organization_custom_instructions = Some(value.into());
-        self
-    }
-
-    /// Whether to enable repository-origin file hooks from `.github/hooks/` and trusted repository-configured roots. Does not control explicit hookDirectories or SDK callback hooks.
-    pub fn enable_file_hooks(mut self, value: bool) -> Self {
-        self.legacy.enable_file_hooks = Some(value);
-        self
-    }
-
-    /// Whether to enable host git operations (context resolution, child repo scanning, git info in system prompt).
-    pub fn enable_host_git_operations(mut self, value: bool) -> Self {
-        self.legacy.enable_host_git_operations = Some(value);
-        self
-    }
-
-    /// Whether to enable cross-session store writes and reads.
-    pub fn enable_session_store(mut self, value: bool) -> Self {
-        self.legacy.enable_session_store = Some(value);
-        self
-    }
-
-    /// Whether skill loading is enabled. Explicit false disables every source, including explicit SDK roots and a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless explicit SDK skill roots or an SDK skill provider are supplied.
-    pub fn enable_skills(mut self, value: bool) -> Self {
-        self.legacy.enable_skills = Some(value);
-        self
-    }
-
-    /// Context tier for models with tiered pricing. The session uses this to derive effective `modelCapabilitiesOverrides` so compaction, truncation, token display, and request limits honor the selected tier.
-    pub fn context_tier(mut self, value: OptionsUpdateContextTier) -> Self {
-        self.legacy.context_tier = Some(value);
-        self
-    }
-
-    /// Optional session limits. Pass null to clear the session limits.
-    pub fn session_limits(mut self, value: SessionLimitsConfig) -> Self {
-        self.legacy.session_limits = Some(value);
-        self
-    }
-
-    /// Patch the Autopilot policy. Omitted fields retain their current values; an empty object makes no changes. Does not change the session mode.
-    pub fn autopilot(mut self, value: AutopilotOptions) -> Self {
-        self.legacy.autopilot = Some(value);
-        self
-    }
-
-    /// Session-only user preferences. Omitted preferences keep their current values.
-    pub fn settings(mut self, value: SessionSettingsPatch) -> Self {
-        self.settings = Some(value);
-        self
-    }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manage_schedule_enabled: Option<bool>,
+    /// Maximum decoded byte size of a single model-facing binary tool result (e.g. an image) persisted inline in session events and re-presented to the model on later turns / resume. Larger results are persisted as a metadata-only marker and shown to the model as a short text note. Defaults to 10 MB.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_inline_binary_bytes: Option<i64>,
+    /// Per-session settings for built-in shell tools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell: Option<ShellOptions>,
+    /// PowerShell process flags applied to built-in and user-requested shell commands.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell_process_flags: Option<Vec<String>>,
 }
 
-impl Default for SessionUpdateOptionsWithSettings {
-    fn default() -> Self {
-        Self::new()
-    }
+/// Patch of mutable session options to apply to the running session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdateOptionsParams {
+    /// Agent definitions, selection, and source filters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agents: Option<SessionUpdateAgentOptions>,
+    /// Identifier of the client driving the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_name: Option<String>,
+    /// Event delivery and streaming.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub events: Option<SessionUpdateEventOptions>,
+    /// Execution accounting and autonomous continuation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution: Option<SessionUpdateExecutionOptions>,
+    /// Feature experimentation and trusted assignments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub experiments: Option<SessionUpdateExperimentOptions>,
+    /// Host Git context and commit attribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git: Option<SessionUpdateGitOptions>,
+    /// GitHub integration and session credentials.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub github: Option<SessionUpdateGitHubOptions>,
+    /// Callback and filesystem hook sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<SessionUpdateHookOptions>,
+    /// Model tuning and provider catalog.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inference: Option<SessionUpdateInferenceOptions>,
+    /// Instruction sources and discovery.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<SessionUpdateInstructionOptions>,
+    /// Stable integration identifier used for analytics and rate-limit attribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integration_id: Option<String>,
+    /// Human input and mode-switch callback capabilities.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interaction: Option<SessionUpdateInteractionOptions>,
+    /// Identifier sent to LSP-style integrations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lsp_client_name: Option<String>,
+    /// MCP servers, OAuth, and renderer capability.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<SessionUpdateMcpOptions>,
+    /// The model ID to use for assistant turns.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Permission decisions and sandboxing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<SessionUpdatePermissionOptions>,
+    /// Explicit plugin sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugins: Option<SessionUpdatePluginOptions>,
+    /// Host-injected session policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy: Option<SessionUpdatePolicyOptions>,
+    /// Replaces the session's capability set with the given list. Use to enable or disable capabilities mid-session (e.g., remove `memory` for reproducible scripted runs). Omit the field to leave the existing capability set unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_capabilities: Option<Vec<SessionCapability>>,
+    /// Session-only user preferences. Omitted preferences keep their current values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<SessionSettingsPatch>,
+    /// Skill loading, sources, and provider capability.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills: Option<SessionUpdateSkillOptions>,
+    /// Context retention and session-state storage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<SessionUpdateStateOptions>,
+    /// Tool declarations, exposure, and behavior.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<SessionUpdateToolOptions>,
+    /// Absolute working-directory path for shell tools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<String>,
 }
 
 /// Indicates whether the session options patch was applied successfully.
@@ -10677,86 +10482,12 @@ pub struct SessionFeatureFlagsReadParams {
     /// Wait for a different revision or service disposal using the existing change notification.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after_revision: Option<i64>,
-}
-
-/// Extensible [`SessionFeatureFlagsReadParams`], including inputs added after it was published.
-///
-/// Required inputs are [`SessionFeatureFlagsReadOptions::new`] arguments; optional inputs have fluent setters.
-/// Input-only: it serialises to the flat wire request and is not deserialisable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionFeatureFlagsReadOptions {
-    #[serde(flatten)]
-    legacy: SessionFeatureFlagsReadParams,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    display_only: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    service_id: Option<String>,
-}
-
-impl SessionFeatureFlagsReadOptions {
-    /// Creates options with the required inputs.
-    pub fn new() -> Self {
-        Self {
-            legacy: SessionFeatureFlagsReadParams {
-                wait_for_exp_response: None,
-                flags: None,
-                overrides: None,
-                after_revision: None,
-            },
-            display_only: None,
-            service_id: None,
-        }
-    }
-
-    /// Wait for the current assignment. Omission does not wait.
-    pub fn wait_for_exp_response(mut self, value: bool) -> Self {
-        self.legacy.wait_for_exp_response = Some(value);
-        self
-    }
-
-    /// Feature names evaluated with their canonical experiment mappings.
-    pub fn flags(mut self, value: Vec<String>) -> Self {
-        self.legacy.flags = Some(value);
-        self
-    }
-
-    /// Explicit experiment/static queries, in result order.
-    pub fn overrides(mut self, value: Vec<FeatureFlagExpOverrideQuery>) -> Self {
-        self.legacy.overrides = Some(value);
-        self
-    }
-
-    /// Wait for a different revision or service disposal using the existing change notification.
-    pub fn after_revision(mut self, value: i64) -> Self {
-        self.legacy.after_revision = Some(value);
-        self
-    }
-
     /// Return only the redacted UI projection, without assignment data or requested evaluations.
-    pub fn display_only(mut self, value: bool) -> Self {
-        self.display_only = Some(value);
-        self
-    }
-
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_only: Option<bool>,
     /// Original display generation; a replaced service returns an unavailable projection.
-    pub fn service_id(mut self, value: impl Into<String>) -> Self {
-        self.service_id = Some(value.into());
-        self
-    }
-}
-
-impl Default for SessionFeatureFlagsReadOptions {
-    fn default() -> Self {
-        Self::new()
-    }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_id: Option<String>,
 }
 
 /// One authoritative snapshot and the requested evaluations.
@@ -10770,6 +10501,9 @@ impl Default for SessionFeatureFlagsReadOptions {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFeatureFlagsReadResult {
+    /// Redacted runtime decisions for UI presentation, present only for an available display read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_state: Option<serde_json::Value>,
     /// Requested feature values. Unknown or unset values are absent.
     pub flags: HashMap<String, bool>,
     /// Explicit override results; null means neither source supplies a boolean.
@@ -14136,7 +13870,7 @@ pub struct SessionProviderWithdrawResult {
     /// True when withdrawal removed the selected host-managed model, leaving the session with no explicit selection, so ordinary model resolution picks the session default. Withdrawal never promotes a surviving model in its place: the choice of which model to use stays with the user.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_deselected: Option<bool>,
-    /// Providers removed because one of the withdrawn models was the last entry referencing them. A provider that merely has no models is not removed.
+    /// Providers removed because one of the withdrawn models was the last entry referencing them. The default provider and providers that merely have no models are not removed.
     pub providers_removed: Vec<String>,
     /// Selection ids that were registered and are now withdrawn. Excludes requested ids that were not present.
     pub withdrawn: Vec<String>,
@@ -14915,13 +14649,6 @@ pub struct SessionUiHandleHumanExitPlanModeResult {
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionUiRegisterDirectAutoModeSwitchHandlerParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-
 /// Registers an in-process Auto-switch responder and suppresses server-bridge dispatch to avoid competing responders for the same requestId. When requested, also enrolls the responder for active-request Auto recovery and acknowledges support. Attach the actual listener separately through standard event subscriptions before starting a turn, and release the handle when the responder is removed.
 ///
 /// <div class="warning">
@@ -14933,14 +14660,6 @@ pub struct SessionUiRegisterDirectAutoModeSwitchHandlerParams {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionUiRegisterDirectAutoModeSwitchHandlerResult {
-    /// Opaque handle representing the registration. Pass this same handle to `unregisterDirectAutoModeSwitchHandler` when the in-process handler is no longer active. Multiple registrations are reference-counted; the server bridge will only dispatch auto-mode-switch requests when no handles are active.
-    pub handle: String,
-}
-
-/// Registers an in-process Auto-switch responder and suppresses server-bridge dispatch to avoid competing responders for the same requestId. When requested, also enrolls the responder for active-request Auto recovery and acknowledges support. Attach the actual listener separately through standard event subscriptions before starting a turn, and release the handle when the responder is removed.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionUiRegisterDirectAutoModeSwitchHandlerResultWithAutoModeRecovery {
     /// Positive acknowledgment of recovery-aware enrollment. Absence on an older runtime means recovery is unsupported.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_mode_recovery: Option<bool>,
@@ -18847,7 +18566,7 @@ pub enum SessionManagementScope {
     Unknown,
 }
 
-/// Allowed values for the `SessionOpenOptionsAdditionalContentExclusionPolicyScope` enumeration.
+/// Initial reasoning summary mode for supported model clients.
 ///
 /// <div class="warning">
 ///
@@ -18856,13 +18575,16 @@ pub enum SessionManagementScope {
 ///
 /// </div>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SessionOpenOptionsAdditionalContentExclusionPolicyScope {
-    /// The content exclusion policy applies to the current repository.
-    #[serde(rename = "repo")]
-    Repo,
-    /// The content exclusion policy applies across all repositories.
-    #[serde(rename = "all")]
-    All,
+pub enum SessionOpenOptionsReasoningSummary {
+    /// Do not request reasoning summaries from the model.
+    #[serde(rename = "none")]
+    None,
+    /// Request a concise summary of model reasoning.
+    #[serde(rename = "concise")]
+    Concise,
+    /// Request a detailed summary of model reasoning.
+    #[serde(rename = "detailed")]
+    Detailed,
     /// Unknown variant for forward compatibility.
     #[default]
     #[serde(other)]
@@ -18891,7 +18613,7 @@ pub enum SessionOpenOptionsEnvValueMode {
     Unknown,
 }
 
-/// Initial reasoning summary mode for supported model clients.
+/// Allowed values for the `SessionOpenOptionsAdditionalContentExclusionPolicyScope` enumeration.
 ///
 /// <div class="warning">
 ///
@@ -18900,16 +18622,13 @@ pub enum SessionOpenOptionsEnvValueMode {
 ///
 /// </div>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SessionOpenOptionsReasoningSummary {
-    /// Do not request reasoning summaries from the model.
-    #[serde(rename = "none")]
-    None,
-    /// Request a concise summary of model reasoning.
-    #[serde(rename = "concise")]
-    Concise,
-    /// Request a detailed summary of model reasoning.
-    #[serde(rename = "detailed")]
-    Detailed,
+pub enum SessionOpenOptionsAdditionalContentExclusionPolicyScope {
+    /// The content exclusion policy applies to the current repository.
+    #[serde(rename = "repo")]
+    Repo,
+    /// The content exclusion policy applies across all repositories.
+    #[serde(rename = "all")]
+    All,
     /// Unknown variant for forward compatibility.
     #[default]
     #[serde(other)]

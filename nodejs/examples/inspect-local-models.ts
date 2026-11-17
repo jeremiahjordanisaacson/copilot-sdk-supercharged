@@ -25,8 +25,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const root = process.argv[2];
     if (!root) throw new Error("Usage: inspect-local-models.ts <config-directory> [--watch]");
     const client = new CopilotClient({
-        connection: RuntimeConnection.forStdio(),
-        baseDirectory: root,
+        mode: "coding-agent",
+        runtime: {
+            ...RuntimeConnection.forSpawnedStdio(),
+            baseDirectory: root,
+        },
     });
     try {
         await client.start();

@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 // hasImageURLContent returns true if any user message in the given exchanges
@@ -180,14 +180,11 @@ func TestSessionConfigE2E(t *testing.T) {
 	t.Run("vision disabled then enabled via setModel", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-5",
-			ModelCapabilities: &copilot.ModelCapabilitiesOverride{
-				Supports: &copilot.ModelCapabilitiesOverrideSupports{
-					Vision: copilot.Bool(false),
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: "claude-sonnet-5", Inference: copilot.SessionInferenceOptions{Capabilities: &copilot.ModelCapabilitiesOverride{
+			Supports: &copilot.ModelCapabilitiesOverrideSupports{
+				Vision: copilot.Bool(false),
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -235,14 +232,11 @@ func TestSessionConfigE2E(t *testing.T) {
 	t.Run("vision enabled then disabled via setModel", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-5",
-			ModelCapabilities: &copilot.ModelCapabilitiesOverride{
-				Supports: &copilot.ModelCapabilitiesOverrideSupports{
-					Vision: copilot.Bool(true),
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: "claude-sonnet-5", Inference: copilot.SessionInferenceOptions{Capabilities: &copilot.ModelCapabilitiesOverride{
+			Supports: &copilot.ModelCapabilitiesOverrideSupports{
+				Vision: copilot.Bool(true),
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -301,10 +295,7 @@ func TestSessionConfigNewOptionsE2E(t *testing.T) {
 	t.Run("should apply session limits on create", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SessionLimits:       &rpc.SessionLimitsConfig{MaxAiCredits: float64Ref(30)},
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Execution: copilot.SessionExecutionOptions{Limits: &rpc.SessionLimitsConfig{MaxAiCredits: float64Ref(30)}}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -317,20 +308,15 @@ func TestSessionConfigNewOptionsE2E(t *testing.T) {
 	t.Run("should apply session limits on resume", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
 		defer session1.Disconnect()
 
-		session2, err := client.ResumeSessionWithOptions(t.Context(), session1.SessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SessionLimits:       &rpc.SessionLimitsConfig{MaxAiCredits: float64Ref(30)},
-		})
+		session2, err := client.ResumeSession(t.Context(), session1.SessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Execution: copilot.SessionExecutionOptions{Limits: &rpc.SessionLimitsConfig{MaxAiCredits: float64Ref(30)}}})
 		if err != nil {
-			t.Fatalf("ResumeSessionWithOptions failed: %v", err)
+			t.Fatalf("ResumeSession failed: %v", err)
 		}
 		defer session2.Disconnect()
 
@@ -343,9 +329,7 @@ func TestSessionConfigNewOptionsE2E(t *testing.T) {
 
 		const excludedAgent = "explore"
 		const prompt = "What is 1+1?"
-		baseline, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		baseline, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession baseline failed: %v", err)
 		}
@@ -355,10 +339,7 @@ func TestSessionConfigNewOptionsE2E(t *testing.T) {
 		}
 		_ = baseline.Disconnect()
 
-		excluded, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest:   copilot.PermissionHandler.ApproveAll,
-			ExcludedBuiltInAgents: []string{excludedAgent},
-		})
+		excluded, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Agents: copilot.SessionAgentOptions{ExcludedBuiltinAgents: []string{excludedAgent}}})
 		if err != nil {
 			t.Fatalf("CreateSession excluded failed: %v", err)
 		}
@@ -378,20 +359,15 @@ func TestSessionConfigNewOptionsE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		const excludedAgent = "explore"
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
 		defer session1.Disconnect()
 
-		session2, err := client.ResumeSessionWithOptions(t.Context(), session1.SessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest:   copilot.PermissionHandler.ApproveAll,
-			ExcludedBuiltInAgents: []string{excludedAgent},
-		})
+		session2, err := client.ResumeSession(t.Context(), session1.SessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Agents: copilot.SessionAgentOptions{ExcludedBuiltinAgents: []string{excludedAgent}}})
 		if err != nil {
-			t.Fatalf("ResumeSessionWithOptions failed: %v", err)
+			t.Fatalf("ResumeSession failed: %v", err)
 		}
 		defer session2.Disconnect()
 
@@ -420,12 +396,7 @@ func TestSessionConfigNewOptionsCopilotRequestE2E(t *testing.T) {
 			t.Fatalf("Failed to start client: %v", err)
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-5",
-			EnableCitations:     copilot.Bool(true),
-			Provider:            createAnthropicProvider(),
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: "claude-sonnet-5", Inference: byokInference(createAnthropicProvider(), copilot.SessionInferenceOptions{EnableCitations: copilot.Bool(true)})})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -452,8 +423,8 @@ func TestSessionConfigNewOptionsCopilotRequestE2E(t *testing.T) {
 		handler := &copilot.CopilotRequestHandler{Transport: transport}
 		const connectionToken = "go-citation-resume-token"
 		server := ctx.NewClient(func(o *copilot.ClientOptions) {
-			o.Connection = copilot.TCPConnection{Path: ctx.CLIPath, ConnectionToken: connectionToken}
-			o.RequestHandler = handler
+			useTCP(o, 0, connectionToken)
+			o.Models.RequestHandler = handler
 		})
 		t.Cleanup(func() { server.ForceStop() })
 
@@ -461,9 +432,7 @@ func TestSessionConfigNewOptionsCopilotRequestE2E(t *testing.T) {
 			t.Fatalf("Failed to start server client: %v", err)
 		}
 
-		session1, err := server.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := server.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -474,21 +443,16 @@ func TestSessionConfigNewOptionsCopilotRequestE2E(t *testing.T) {
 			t.Fatal("Expected non-zero runtime port")
 		}
 		resumeClient := ctx.NewClient(func(o *copilot.ClientOptions) {
-			o.Connection = copilot.URIConnection{
-				URL:             fmt.Sprintf("localhost:%d", runtimePort),
+			o.Runtime = copilot.TCPConnection{
+				Host: "localhost", Port: runtimePort,
 				ConnectionToken: connectionToken,
 			}
 		})
 		t.Cleanup(func() { resumeClient.ForceStop() })
 
-		session2, err := resumeClient.ResumeSessionWithOptions(t.Context(), session1.SessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-5",
-			EnableCitations:     copilot.Bool(true),
-			Provider:            createAnthropicProvider(),
-		})
+		session2, err := resumeClient.ResumeSession(t.Context(), session1.SessionID, &copilot.ResumeSessionOptions{GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: "claude-sonnet-5", Inference: byokInference(createAnthropicProvider(), copilot.SessionInferenceOptions{EnableCitations: copilot.Bool(true)})})
 		if err != nil {
-			t.Fatalf("ResumeSessionWithOptions failed: %v", err)
+			t.Fatalf("ResumeSession failed: %v", err)
 		}
 		defer session2.Disconnect()
 
@@ -535,10 +499,7 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		requestedSessionID := newUUID(t)
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SessionID:           requestedSessionID,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SessionID: requestedSessionID})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -562,10 +523,7 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 	t.Run("should forward clientName in userAgent", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			ClientName:          clientName,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, ClientName: clientName})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -590,11 +548,7 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 	t.Run("should forward custom provider headers on create", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-5",
-			Provider:            createProxyProvider(ctx, providerHeaderName, "create-provider-header"),
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: "claude-sonnet-5", Inference: byokInference(createProxyProvider(ctx, providerHeaderName, "create-provider-header"), copilot.SessionInferenceOptions{})})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -625,20 +579,14 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 	t.Run("should forward custom provider headers on resume", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
 		sessionID := session1.SessionID
 		t.Cleanup(func() { _ = session1.Disconnect() })
 
-		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-5",
-			Provider:            createProxyProvider(ctx, providerHeaderName, "resume-provider-header"),
-		})
+		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: "claude-sonnet-5", Inference: byokInference(createProxyProvider(ctx, providerHeaderName, "resume-provider-header"), copilot.SessionInferenceOptions{})})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
 		}
@@ -669,7 +617,7 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 
 	t.Run("should forward provider wire model", func(t *testing.T) {
 		// Verifies that ProviderConfig.WireModel overrides the model name sent to
-		// the provider API, while SessionConfig.Model still drives runtime
+		// the provider API, while CreateSessionOptions.Model still drives runtime
 		// configuration lookup (capabilities, prompts, reasoning behavior).
 		// MaxOutputTokens is also set here to confirm the SDK accepts it without
 		// serialization errors; the CLI does not echo it as `max_tokens` on the
@@ -678,16 +626,13 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		maxOutputTokens := 1024
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-5",
-			Provider: &copilot.ProviderConfig{
-				Type:            "openai",
-				BaseURL:         ctx.ProxyURL,
-				APIKey:          "test-provider-key",
-				WireModel:       "test-wire-model",
-				MaxOutputTokens: maxOutputTokens,
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: "claude-sonnet-5", Inference: byokInference(&copilot.ProviderConfig{
+			Type:            "openai",
+			BaseURL:         ctx.ProxyURL,
+			APIKey:          "test-provider-key",
+			WireModel:       "test-wire-model",
+			MaxOutputTokens: maxOutputTokens,
+		}, copilot.SessionInferenceOptions{}),
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -711,19 +656,15 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 	})
 
 	t.Run("should use provider model id as wire model", func(t *testing.T) {
-		// ProviderConfig.ModelID drives both the runtime resolved model AND the wire
-		// model when WireModel is not specified. SessionConfig.Model is intentionally
-		// omitted so that ModelID is the only model source.
+		// A registered model's ModelID is the wire model when WireModel is omitted.
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Provider: &copilot.ProviderConfig{
-				Type:    "openai",
-				BaseURL: ctx.ProxyURL,
-				APIKey:  "test-provider-key",
-				ModelID: "claude-sonnet-5",
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Model: "claude-sonnet-5", GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Inference: byokInference(&copilot.ProviderConfig{
+			Type:    "openai",
+			BaseURL: ctx.ProxyURL,
+			APIKey:  "test-provider-key",
+			ModelID: "claude-sonnet-5",
+		}, copilot.SessionInferenceOptions{}),
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -757,10 +698,7 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 			t.Fatalf("WriteFile failed: %v", err)
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			WorkingDirectory:    subDir,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, WorkingDirectory: subDir})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -787,19 +725,14 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 			t.Fatalf("WriteFile failed: %v", err)
 		}
 
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
 		sessionID := session1.SessionID
 		t.Cleanup(func() { _ = session1.Disconnect() })
 
-		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			WorkingDirectory:    subDir,
-		})
+		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, WorkingDirectory: subDir})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
 		}
@@ -819,9 +752,7 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 	t.Run("should apply systemMessage on session resume", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -829,12 +760,10 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 		t.Cleanup(func() { _ = session1.Disconnect() })
 
 		const resumeInstruction = "End the response with RESUME_SYSTEM_MESSAGE_SENTINEL."
-		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SystemMessage: &copilot.SystemMessageConfig{
-				Mode:    "append",
-				Content: resumeInstruction,
-			},
+		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SystemMessage: &copilot.SystemMessageConfig{
+			Mode:    "append",
+			Content: resumeInstruction,
+		},
 		})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
@@ -878,11 +807,7 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 			t.Fatalf("WriteFile failed: %v", err)
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest:    copilot.PermissionHandler.ApproveAll,
-			WorkingDirectory:       projectDir,
-			InstructionDirectories: []string{instructionDir},
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, WorkingDirectory: projectDir, Instructions: copilot.CreateSessionInstructionOptions{Directories: []string{instructionDir}}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -922,20 +847,13 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 			t.Fatalf("WriteFile failed: %v", err)
 		}
 
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			WorkingDirectory:    projectDir,
-		})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, WorkingDirectory: projectDir})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
 		t.Cleanup(func() { _ = session1.Disconnect() })
 
-		session2, err := client.ResumeSession(t.Context(), session1.SessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest:    copilot.PermissionHandler.ApproveAll,
-			WorkingDirectory:       projectDir,
-			InstructionDirectories: []string{instructionDir},
-		})
+		session2, err := client.ResumeSession(t.Context(), session1.SessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, WorkingDirectory: projectDir, Instructions: copilot.SessionInstructionOptions{Directories: []string{instructionDir}}})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
 		}
@@ -961,19 +879,14 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 	t.Run("should apply availableTools on session resume", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
 		sessionID := session1.SessionID
 		t.Cleanup(func() { _ = session1.Disconnect() })
 
-		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			AvailableTools:      []string{"view"},
-		})
+		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{AvailableTools: []string{"view"}}})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
 		}
@@ -1000,17 +913,13 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 		enableInsidersMode := true
 		disableFormDeferral := true
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest:   copilot.PermissionHandler.ApproveAll,
-			EnableConfigDiscovery: copilot.Bool(true),
-			EnableMCPApps:         true,
-			GitHubMCPToolConfig: &copilot.GitHubMCPToolConfig{
-				EnableAllTools:      &enableAllTools,
-				AdditionalToolsets:  []string{"actions"},
-				AdditionalTools:     []string{"get_me"},
-				EnableInsidersMode:  &enableInsidersMode,
-				DisableFormDeferral: &disableFormDeferral,
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, EnableConfigDiscovery: copilot.Bool(true), MCP: copilot.SessionMCPOptions{EnableApps: true}, GitHub: copilot.SessionGitHubOptions{MCP: &copilot.GitHubMCPToolConfig{
+			EnableAllTools:      &enableAllTools,
+			AdditionalToolsets:  []string{"actions"},
+			AdditionalTools:     []string{"get_me"},
+			EnableInsidersMode:  &enableInsidersMode,
+			DisableFormDeferral: &disableFormDeferral,
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)

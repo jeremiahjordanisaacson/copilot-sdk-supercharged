@@ -132,7 +132,7 @@ def _sdk_profile(profile, features):
         srcs = native.glob(["src/**/*.rs"]),
         compile_data = ["README.md"],
         crate_features = features,
-        crate_name = "github_copilot_sdk",
+        crate_name = "copilot_sdk",
         crate_root = "src/lib.rs",
         edition = "2024",
         proc_macro_deps = all_crate_deps(proc_macro = True),
@@ -337,7 +337,7 @@ def sdk_targets(name = "platform_dirs_srcs"):
     for profile, requested in _PROFILES.items():
         _sdk_profile(profile, _features(requested))
     native.alias(
-        name = "github-copilot-sdk",
+        name = "copilot-sdk",
         actual = ":sdk_default",
         visibility = ["//visibility:public"],
     )
@@ -348,7 +348,7 @@ def sdk_targets(name = "platform_dirs_srcs"):
     )
 
     copilot_rust_library_explicit(
-        name = "github-copilot-sdk-local-runtime",
+        name = "copilot-sdk-local-runtime",
         srcs = native.glob(["src/**/*.rs"]),
         compile_data = ["README.md"],
         crate_features = [
@@ -360,7 +360,7 @@ def sdk_targets(name = "platform_dirs_srcs"):
             "//bazel:dependency_test_features_enabled": ["test-support"],
             "//conditions:default": [],
         }),
-        crate_name = "github_copilot_sdk",
+        crate_name = "copilot_sdk",
         crate_root = "src/lib.rs",
         proc_macro_deps = ["@vendor__async-trait-0.1.92//:async_trait"],
         rustc_cpu = 2,
@@ -377,14 +377,14 @@ def sdk_targets(name = "platform_dirs_srcs"):
         deps = _LOCAL_RUNTIME_DEPS,
     )
 
-    for test in ["api_types", "session_events", "legacy_options"]:
+    for test in ["api_types", "session_events"]:
         copilot_rust_test(
             name = "sdk_" + test + "_test",
             srcs = ["tests/" + test + "_test.rs"],
             crate_root = "tests/" + test + "_test.rs",
             edition = "2024",
             deps = [
-                ":github-copilot-sdk-local-runtime",
+                ":copilot-sdk-local-runtime",
                 "@vendor__serde_json-1.0.154//:serde_json",
             ],
         )
@@ -398,7 +398,7 @@ def sdk_targets(name = "platform_dirs_srcs"):
         crate_root = "tests/network_test.rs",
         edition = "2024",
         deps = [
-            ":github-copilot-sdk-local-runtime",
+            ":copilot-sdk-local-runtime",
             "@vendor//tokio",
             "@vendor__serde_json-1.0.154//:serde_json",
         ],

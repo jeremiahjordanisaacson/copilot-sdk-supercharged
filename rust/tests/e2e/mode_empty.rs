@@ -10,9 +10,9 @@
 
 use std::sync::Arc;
 
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::types::SystemMessageConfig;
-use github_copilot_sdk::{BUILTIN_TOOLS_ISOLATED, ClientMode, SessionConfig, ToolSet};
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::types::SystemMessageConfig;
+use copilot_sdk::{BUILTIN_TOOLS_ISOLATED, ClientMode, CreateSessionOptions, ToolSet};
 use serde_json::Value;
 
 use super::support::assistant_message_content;
@@ -20,13 +20,18 @@ use super::support::assistant_message_content;
 static E2E: super::support::SharedE2eGroup =
     super::support::SharedE2eGroup::new("mode_empty", empty_shared_client_options, 6);
 
-fn empty_shared_client_options(
-    context: &super::support::E2eContext,
-) -> github_copilot_sdk::ClientOptions {
-    context
-        .client_options()
-        .with_mode(ClientMode::Empty)
-        .with_base_directory(context.work_dir().to_path_buf())
+fn empty_shared_client_options(context: &super::support::E2eContext) -> copilot_sdk::ClientOptions {
+    {
+        let mut options = context.client_options().with_mode(ClientMode::Empty);
+        let group = options
+            .runtime
+            .as_mut()
+            .expect("runtime selected")
+            .owned_options_mut()
+            .expect("applicable runtime settings");
+        *group = std::mem::take(group).with_base_directory(context.work_dir().to_path_buf());
+        options
+    }
 }
 
 const SHELL_TOOL_NAME: &str = if cfg!(windows) { "powershell" } else { "bash" };
@@ -107,10 +112,14 @@ async fn empty_mode_isolated_set_shell_tool_is_not_exposed() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_available_tools(isolated_tool_set()),
+                        CreateSessionOptions::default()
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_tools(|group| group.with_available_tools(isolated_tool_set())),
                     )
                     .await
                     .expect("create session");
@@ -154,10 +163,16 @@ async fn empty_mode_builtin_star_exposes_all_built_in_tools() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_available_tools(star_builtin_tool_set()),
+                        CreateSessionOptions::default()
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_tools(|group| {
+                                group.with_available_tools(star_builtin_tool_set())
+                            }),
                     )
                     .await
                     .expect("create session");
@@ -191,11 +206,18 @@ async fn empty_mode_excluded_tools_subtracts_from_available_tools() {
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_available_tools(star_builtin_tool_set())
-                            .with_excluded_tools(vec![format!("builtin:{SHELL_TOOL_NAME}")]),
+                        CreateSessionOptions::default()
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            })
+                            .with_github(|group| {
+                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
+                            })
+                            .with_tools(|group| group.with_available_tools(star_builtin_tool_set()))
+                            .with_tools(|group| {
+                                group
+                                    .with_excluded_tools(vec![format!("builtin:{SHELL_TOOL_NAME}")])
+                            }),
                     )
                     .await
                     .expect("create session");
@@ -230,10 +252,10 @@ async fn empty_mode_strips_environment_context_from_the_system_message_by_defaul
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_available_tools(isolated_tool_set())
+                        CreateSessionOptions::default()
+                            .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+                            .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+                            .with_tools(|group| group.with_available_tools(isolated_tool_set()))
                             .with_system_message(
                                 SystemMessageConfig::new()
                                     .with_mode("customize")
@@ -284,10 +306,10 @@ async fn empty_mode_system_message_replace_llm_follows_caller_content_verbatim()
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_available_tools(isolated_tool_set())
+                        CreateSessionOptions::default()
+                            .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+                            .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+                            .with_tools(|group| group.with_available_tools(isolated_tool_set()))
                             .with_system_message(
                                 SystemMessageConfig::new()
                                     .with_mode("replace")
@@ -327,10 +349,10 @@ async fn empty_mode_append_caller_instruction_takes_effect_and_env_context_strip
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
-                        SessionConfig::default()
-                            .with_permission_handler(Arc::new(ApproveAllHandler))
-                            .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_available_tools(isolated_tool_set())
+                        CreateSessionOptions::default()
+                            .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+                            .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+                            .with_tools(|group| group.with_available_tools(isolated_tool_set()))
                             .with_system_message(
                                 SystemMessageConfig::new()
                                     .with_mode("append")

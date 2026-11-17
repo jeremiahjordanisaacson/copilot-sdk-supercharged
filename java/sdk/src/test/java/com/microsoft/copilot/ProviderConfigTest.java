@@ -1,0 +1,500 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+package com.microsoft.copilot;
+import com.microsoft.copilot.rpc.CapiSessionOptions;
+import com.microsoft.copilot.rpc.SessionGitHubOptions;
+
+import com.microsoft.copilot.rpc.SessionEventOptions;
+import com.microsoft.copilot.rpc.SessionInferenceOptions;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import com.microsoft.copilot.rpc.AzureOptions;
+import com.microsoft.copilot.rpc.ProviderConfig;
+import com.microsoft.copilot.rpc.ResumeSessionOptions;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
+
+/**
+ * Tests for {@link ProviderConfig} and {@link AzureOptions} BYOK (Bring Your
+ * Own Key) configuration.
+ *
+ * <p>
+ * Covers fluent setters, JSON serialization, null-field omission, and
+ * integration with {@link CreateSessionOptions} and
+ * {@link ResumeSessionOptions}.
+ * </p>
+ */
+public class ProviderConfigTest {
+
+    private static final ObjectMapper MAPPER = JsonRpcClient.getObjectMapper();
+
+    // =========================================================================
+    // Fluent setters and getters
+    // =========================================================================
+
+    @Test
+    void testDefaultsAreNull() {
+        var provider = new ProviderConfig();
+
+        assertNull(provider.getType());
+        assertNull(provider.getWireApi());
+        assertNull(provider.getModelProvider());
+        assertNull(provider.getBaseUrl());
+        assertNull(provider.getApiKey());
+        assertNull(provider.getApiKeyCommand());
+        assertNull(provider.getBearerToken());
+        assertNull(provider.getAzure());
+    }
+
+    @Test
+    void testFluentSettersReturnSameInstance() {
+        var provider = new ProviderConfig();
+
+        ProviderConfig result = provider.setType("openai").setWireApi("completions").setModelProvider("lm_studio")
+                .setBaseUrl("https://api.openai.com/v1").setApiKey("sk-test-key").setBearerToken("bearer-token")
+                .setAzure(new AzureOptions());
+
+        // All chained calls should return the same instance
+        assertEquals(provider, result);
+    }
+
+    @Test
+    void testGettersReturnSetValues() {
+        var azure = new AzureOptions().setApiVersion("2024-02-01");
+        var provider = new ProviderConfig().setType("azure-openai").setWireApi("chat").setModelProvider("azure_openai")
+                .setBaseUrl("https://my-resource.openai.azure.com").setApiKey("my-key").setBearerToken("my-token")
+                .setAzure(azure);
+
+        assertEquals("azure-openai", provider.getType());
+        assertEquals("chat", provider.getWireApi());
+        assertEquals("azure_openai", provider.getModelProvider());
+        assertEquals("https://my-resource.openai.azure.com", provider.getBaseUrl());
+        assertEquals("my-key", provider.getApiKey());
+        assertEquals("my-token", provider.getBearerToken());
+        assertNotNull(provider.getAzure());
+        assertEquals("2024-02-01", provider.getAzure().getApiVersion());
+    }
+
+    // =========================================================================
+    // AzureOptions
+    // =========================================================================
+
+    @Test
+    void testAzureOptionsDefaultsAreNull() {
+        var azure = new AzureOptions();
+        assertNull(azure.getApiVersion());
+    }
+
+    @Test
+    void testAzureOptionsFluentSetter() {
+        var azure = new AzureOptions();
+        AzureOptions result = azure.setApiVersion("2023-12-01-preview");
+
+        assertEquals(azure, result);
+        assertEquals("2023-12-01-preview", azure.getApiVersion());
+    }
+
+    // =========================================================================
+    // JSON serialization — OpenAI BYOK
+    // =========================================================================
+
+    @Test
+    void testSerializeOpenAiProvider() throws Exception {
+        var provider = new ProviderConfig().setType("openai").setBaseUrl("https://api.openai.com/v1")
+                .setApiKey("sk-test-key");
+
+        JsonNode json = MAPPER.valueToTree(provider);
+
+        assertEquals("openai", json.get("type").asText());
+        assertEquals("https://api.openai.com/v1", json.get("baseUrl").asText());
+        assertEquals("sk-test-key", json.get("apiKey").asText());
+        // Null fields must be omitted (NON_NULL)
+        assertTrue(json.path("wireApi").isMissingNode());
+        assertTrue(json.path("bearerToken").isMissingNode());
+        assertTrue(json.path("azure").isMissingNode());
+    }
+
+    @Test
+    void testDeserializeOpenAiProvider() throws Exception {
+        String json = """
+                {
+                    "type": "openai",
+                    "baseUrl": "https://api.openai.com/v1",
+                    "apiKey": "sk-test-key"
+                }
+                """;
+
+        ProviderConfig provider = MAPPER.readValue(json, ProviderConfig.class);
+
+        assertEquals("openai", provider.getType());
+        assertEquals("https://api.openai.com/v1", provider.getBaseUrl());
+        assertEquals("sk-test-key", provider.getApiKey());
+        assertNull(provider.getWireApi());
+        assertNull(provider.getBearerToken());
+        assertNull(provider.getAzure());
+    }
+
+    @Test
+    void testApiKeyCommandRoundTripsAndOmitsWhenAbsent() throws Exception {
+        var provider = new ProviderConfig().setBaseUrl("https://models.example.test");
+        assertEquals(provider, provider.setApiKeyCommand("credential-helper --profile sdk"));
+        JsonNode json = MAPPER.valueToTree(provider);
+        assertEquals("credential-helper --profile sdk", json.get("apiKeyCommand").asText());
+        var roundTrip = MAPPER.readValue(MAPPER.writeValueAsString(provider), ProviderConfig.class);
+        assertEquals(provider.getApiKeyCommand(), roundTrip.getApiKeyCommand());
+        provider.setApiKeyCommand(null);
+        assertTrue(MAPPER.valueToTree(provider).path("apiKeyCommand").isMissingNode());
+    }
+
+    // =========================================================================
+    // JSON serialization — Azure OpenAI BYOK
+    // =========================================================================
+
+    @Test
+    void testSerializeAzureOpenAiProvider() throws Exception {
+        var provider = new ProviderConfig().setType("azure-openai").setBaseUrl("https://my-resource.openai.azure.com")
+                .setApiKey("azure-api-key").setAzure(new AzureOptions().setApiVersion("2024-02-01"));
+
+        JsonNode json = MAPPER.valueToTree(provider);
+
+        assertEquals("azure-openai", json.get("type").asText());
+        assertEquals("https://my-resource.openai.azure.com", json.get("baseUrl").asText());
+        assertEquals("azure-api-key", json.get("apiKey").asText());
+        assertNotNull(json.get("azure"));
+        assertEquals("2024-02-01", json.get("azure").get("apiVersion").asText());
+    }
+
+    @Test
+    void testDeserializeAzureOpenAiProvider() throws Exception {
+        String json = """
+                {
+                    "type": "azure-openai",
+                    "baseUrl": "https://my-resource.openai.azure.com",
+                    "apiKey": "azure-key",
+                    "azure": {
+                        "apiVersion": "2024-02-01"
+                    }
+                }
+                """;
+
+        ProviderConfig provider = MAPPER.readValue(json, ProviderConfig.class);
+
+        assertEquals("azure-openai", provider.getType());
+        assertEquals("https://my-resource.openai.azure.com", provider.getBaseUrl());
+        assertEquals("azure-key", provider.getApiKey());
+        assertNotNull(provider.getAzure());
+        assertEquals("2024-02-01", provider.getAzure().getApiVersion());
+    }
+
+    // =========================================================================
+    // JSON serialization — Bearer token authentication
+    // =========================================================================
+
+    @Test
+    void testSerializeBearerTokenProvider() throws Exception {
+        var provider = new ProviderConfig().setType("openai").setBaseUrl("https://custom-provider.example.com/v1")
+                .setBearerToken("eyJhbGciOiJSUzI1NiIs...");
+
+        JsonNode json = MAPPER.valueToTree(provider);
+
+        assertEquals("openai", json.get("type").asText());
+        assertEquals("https://custom-provider.example.com/v1", json.get("baseUrl").asText());
+        assertEquals("eyJhbGciOiJSUzI1NiIs...", json.get("bearerToken").asText());
+        assertTrue(json.path("apiKey").isMissingNode());
+    }
+
+    @Test
+    void testDeserializeBearerTokenProvider() throws Exception {
+        String json = """
+                {
+                    "type": "openai",
+                    "baseUrl": "https://custom-provider.example.com/v1",
+                    "bearerToken": "my-bearer-token"
+                }
+                """;
+
+        ProviderConfig provider = MAPPER.readValue(json, ProviderConfig.class);
+
+        assertEquals("openai", provider.getType());
+        assertEquals("https://custom-provider.example.com/v1", provider.getBaseUrl());
+        assertEquals("my-bearer-token", provider.getBearerToken());
+        assertNull(provider.getApiKey());
+    }
+
+    // =========================================================================
+    // JSON serialization — custom wire API
+    // =========================================================================
+
+    @Test
+    void testSerializeCustomWireApi() throws Exception {
+        var provider = new ProviderConfig().setType("openai").setBaseUrl("https://custom.example.com").setApiKey("key")
+                .setWireApi("responses");
+
+        JsonNode json = MAPPER.valueToTree(provider);
+
+        assertEquals("responses", json.get("wireApi").asText());
+    }
+
+    @Test
+    void testSerializeTransport() throws Exception {
+        var provider = new ProviderConfig().setType("openai").setBaseUrl("https://custom.example.com").setApiKey("key")
+                .setWireApi("responses").setTransport("websockets");
+
+        JsonNode json = MAPPER.valueToTree(provider);
+
+        assertEquals("websockets", json.get("transport").asText());
+
+        ProviderConfig roundTrip = MAPPER.readValue(MAPPER.writeValueAsString(provider), ProviderConfig.class);
+        assertEquals("websockets", roundTrip.getTransport());
+    }
+
+    @Test
+    void testTransportOmittedWhenNull() throws Exception {
+        var provider = new ProviderConfig().setType("openai").setBaseUrl("https://custom.example.com");
+
+        JsonNode json = MAPPER.valueToTree(provider);
+
+        assertTrue(json.path("transport").isMissingNode());
+    }
+
+    // =========================================================================
+    // JSON serialization — all fields populated
+    // =========================================================================
+
+    @Test
+    void testSerializeAllFields() throws Exception {
+        var provider = new ProviderConfig().setType("azure-openai").setWireApi("completions")
+                .setModelProvider("azure_openai").setBaseUrl("https://my-resource.openai.azure.com")
+                .setApiKey("my-api-key").setBearerToken("my-bearer-token")
+                .setAzure(new AzureOptions().setApiVersion("2024-02-01"));
+
+        JsonNode json = MAPPER.valueToTree(provider);
+
+        assertEquals("azure-openai", json.get("type").asText());
+        assertEquals("completions", json.get("wireApi").asText());
+        assertEquals("azure_openai", json.get("modelProvider").asText());
+        assertEquals("https://my-resource.openai.azure.com", json.get("baseUrl").asText());
+        assertEquals("my-api-key", json.get("apiKey").asText());
+        assertEquals("my-bearer-token", json.get("bearerToken").asText());
+        assertEquals("2024-02-01", json.get("azure").get("apiVersion").asText());
+        assertEquals(7, json.size(), "Expected exactly 7 JSON fields");
+    }
+
+    @Test
+    void testSerializeEmptyProviderOmitsAllFields() throws Exception {
+        var provider = new ProviderConfig();
+
+        JsonNode json = MAPPER.valueToTree(provider);
+
+        assertEquals(0, json.size(), "Empty ProviderConfig should serialize to {}");
+    }
+
+    @Test
+    void testSerializeEmptyAzureOptionsOmitsAllFields() throws Exception {
+        var azure = new AzureOptions();
+
+        JsonNode json = MAPPER.valueToTree(azure);
+
+        assertEquals(0, json.size(), "Empty AzureOptions should serialize to {}");
+    }
+
+    // =========================================================================
+    // JSON round-trip
+    // =========================================================================
+
+    @Test
+    void testRoundTripProviderConfig() throws Exception {
+        var original = new ProviderConfig().setType("azure-openai").setWireApi("completions")
+                .setBaseUrl("https://my-resource.openai.azure.com").setApiKey("my-key").setBearerToken("my-token")
+                .setAzure(new AzureOptions().setApiVersion("2024-02-01"));
+
+        String json = MAPPER.writeValueAsString(original);
+        ProviderConfig deserialized = MAPPER.readValue(json, ProviderConfig.class);
+
+        assertEquals(original.getType(), deserialized.getType());
+        assertEquals(original.getWireApi(), deserialized.getWireApi());
+        assertEquals(original.getBaseUrl(), deserialized.getBaseUrl());
+        assertEquals(original.getApiKey(), deserialized.getApiKey());
+        assertEquals(original.getBearerToken(), deserialized.getBearerToken());
+        assertNotNull(deserialized.getAzure());
+        assertEquals(original.getAzure().getApiVersion(), deserialized.getAzure().getApiVersion());
+    }
+
+    @Test
+    void testForwardCompatibilityIgnoresUnknownFields() throws Exception {
+        String json = """
+                {
+                    "type": "openai",
+                    "baseUrl": "https://api.openai.com/v1",
+                    "apiKey": "sk-key",
+                    "unknownFutureField": "some-value",
+                    "anotherNewField": 42
+                }
+                """;
+
+        // Should not throw - ObjectMapper is configured with
+        // FAIL_ON_UNKNOWN_PROPERTIES = false
+        ProviderConfig provider = MAPPER.readValue(json, ProviderConfig.class);
+
+        assertEquals("openai", provider.getType());
+        assertEquals("https://api.openai.com/v1", provider.getBaseUrl());
+        assertEquals("sk-key", provider.getApiKey());
+    }
+
+    // =========================================================================
+    // Integration with CreateSessionOptions
+    // =========================================================================
+
+    @Test
+    void testSessionConfigWithOpenAiProvider() throws Exception {
+        var config = new CreateSessionOptions().setModel("gpt-4")
+                .setInference(ByokTestOptions.inference(new SessionInferenceOptions(),
+                        new ProviderConfig().setType("openai").setBaseUrl("https://api.openai.com/v1")
+                                .setApiKey("sk-test-key")))
+                .setGitHub(new SessionGitHubOptions().setCapi(new CapiSessionOptions().setEnabled(false)));
+
+        JsonNode json = MAPPER.valueToTree(config);
+
+        assertNotNull(json.path("inference").path("providers").get(0));
+        assertEquals("openai", json.path("inference").path("providers").get(0).get("type").asText());
+        assertEquals("https://api.openai.com/v1",
+                json.path("inference").path("providers").get(0).get("baseUrl").asText());
+        assertEquals("sk-test-key", json.path("inference").path("providers").get(0).get("apiKey").asText());
+        assertEquals("gpt-4", json.get("model").asText());
+    }
+
+    @Test
+    void testSessionConfigWithAzureProvider() throws Exception {
+        var config = new CreateSessionOptions().setModel("gpt-4")
+                .setInference(ByokTestOptions.inference(new SessionInferenceOptions(),
+                        new ProviderConfig().setType("azure-openai").setBaseUrl("https://my-resource.openai.azure.com")
+                                .setApiKey("azure-key").setAzure(new AzureOptions().setApiVersion("2024-02-01"))))
+                .setGitHub(new SessionGitHubOptions().setCapi(new CapiSessionOptions().setEnabled(false)));
+
+        JsonNode json = MAPPER.valueToTree(config);
+
+        JsonNode providerNode = json.path("inference").path("providers").get(0);
+        assertNotNull(providerNode);
+        assertEquals("azure-openai", providerNode.get("type").asText());
+        assertEquals("2024-02-01", providerNode.get("azure").get("apiVersion").asText());
+    }
+
+    @Test
+    void testSessionConfigWithoutProviderOmitsField() throws Exception {
+        var config = new CreateSessionOptions().setModel("gpt-4");
+
+        JsonNode json = MAPPER.valueToTree(config);
+
+        assertTrue(json.path("inference").path("providers").isMissingNode(),
+                "provider field should be omitted when null");
+    }
+
+    // =========================================================================
+    // Integration with ResumeSessionOptions
+    // =========================================================================
+
+    @Test
+    void testResumeSessionConfigWithProvider() throws Exception {
+        var config = new ResumeSessionOptions().setEvents(new SessionEventOptions().setStreaming(true))
+                .setInference(ByokTestOptions.inference(new SessionInferenceOptions(),
+                        new ProviderConfig().setType("openai").setBaseUrl("https://api.openai.com/v1")
+                                .setBearerToken("my-bearer-token")))
+                .setGitHub(new SessionGitHubOptions().setCapi(new CapiSessionOptions().setEnabled(false)));
+
+        assertNotNull(config.getInference().getProviders().get(0));
+        assertEquals("openai", config.getInference().getProviders().get(0).getType());
+        assertEquals("https://api.openai.com/v1", config.getInference().getProviders().get(0).getBaseUrl());
+        assertEquals("my-bearer-token", config.getInference().getProviders().get(0).getBearerToken());
+    }
+
+    @Test
+    void testResumeSessionConfigProviderSerialization() throws Exception {
+        var config = new ResumeSessionOptions()
+                .setInference(ByokTestOptions.inference(new SessionInferenceOptions(),
+                        new ProviderConfig().setType("azure-openai").setBaseUrl("https://my-resource.openai.azure.com")
+                                .setApiKey("key").setAzure(new AzureOptions().setApiVersion("2024-02-01"))))
+                .setGitHub(new SessionGitHubOptions().setCapi(new CapiSessionOptions().setEnabled(false)));
+
+        JsonNode json = MAPPER.valueToTree(config);
+
+        JsonNode providerNode = json.path("inference").path("providers").get(0);
+        assertNotNull(providerNode);
+        assertEquals("azure-openai", providerNode.get("type").asText());
+        assertEquals("https://my-resource.openai.azure.com", providerNode.get("baseUrl").asText());
+        assertEquals("key", providerNode.get("apiKey").asText());
+        assertEquals("2024-02-01", providerNode.get("azure").get("apiVersion").asText());
+    }
+
+    @Test
+    void testResumeSessionConfigWithoutProviderOmitsField() throws Exception {
+        var config = new ResumeSessionOptions().setEvents(new SessionEventOptions().setStreaming(true));
+
+        JsonNode json = MAPPER.valueToTree(config);
+
+        assertTrue(json.path("inference").path("providers").isMissingNode(),
+                "provider field should be omitted when null");
+    }
+
+    // =========================================================================
+    // Provider model and token limit overrides
+    // =========================================================================
+
+    @Test
+    void testProviderModelIdAndWireModelSerialization() throws Exception {
+        var provider = new ProviderConfig().setBaseUrl("https://example.com/provider")
+                .setHeaders(java.util.Map.of("Authorization", "Bearer provider-token")).setModelId("gpt-4o")
+                .setWireModel("my-finetune-v3").setModelProvider("lm_studio").setMaxPromptTokens(100_000)
+                .setMaxOutputTokens(4096);
+
+        JsonNode json = MAPPER.valueToTree(provider);
+
+        assertEquals("https://example.com/provider", json.get("baseUrl").asText());
+        assertEquals("Bearer provider-token", json.get("headers").get("Authorization").asText());
+        assertEquals("gpt-4o", json.get("modelId").asText());
+        assertEquals("my-finetune-v3", json.get("wireModel").asText());
+        assertEquals("lm_studio", json.get("modelProvider").asText());
+        assertEquals(100_000, json.get("maxPromptTokens").asInt());
+        assertEquals(4096, json.get("maxOutputTokens").asInt());
+
+        // Round-trip
+        ProviderConfig deserialized = MAPPER.readValue(MAPPER.writeValueAsString(provider), ProviderConfig.class);
+        assertEquals("gpt-4o", deserialized.getModelId());
+        assertEquals("my-finetune-v3", deserialized.getWireModel());
+        assertEquals("lm_studio", deserialized.getModelProvider());
+        assertEquals(100_000, deserialized.getMaxPromptTokens().getAsInt());
+        assertEquals(4096, deserialized.getMaxOutputTokens().getAsInt());
+    }
+
+    @Test
+    void testProviderModelFieldsDefaultToNull() {
+        var provider = new ProviderConfig();
+        assertNull(provider.getModelId());
+        assertNull(provider.getWireModel());
+        assertNull(provider.getModelProvider());
+        assertTrue(provider.getMaxPromptTokens().isEmpty());
+        assertTrue(provider.getMaxOutputTokens().isEmpty());
+    }
+
+    @Test
+    void testProviderModelFieldsOmittedWhenNull() throws Exception {
+        var provider = new ProviderConfig().setType("openai");
+
+        JsonNode json = MAPPER.valueToTree(provider);
+
+        assertTrue(json.path("modelId").isMissingNode());
+        assertTrue(json.path("wireModel").isMissingNode());
+        assertTrue(json.path("modelProvider").isMissingNode());
+        assertTrue(json.path("maxPromptTokens").isMissingNode());
+        assertTrue(json.path("maxOutputTokens").isMissingNode());
+    }
+}

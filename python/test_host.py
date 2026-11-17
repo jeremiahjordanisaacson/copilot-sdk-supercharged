@@ -13,12 +13,13 @@ from copilot import (
     RuntimeConnection,
 )
 from copilot._jsonrpc import JsonRpcClient
-from copilot.generated.rpc import ServerRpc
-from copilot.rpc import HostGitHubEnvironmentOptions, HostLocalServerOptions
+from copilot.rpc import HostGitHubEnvironmentOptions, HostLocalServerOptions, ServerRpc
 
 
 def client_fixture():
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
 
     async def request(method, params, **_):
         if method == "host.start":
@@ -61,7 +62,9 @@ def release(client, host):
 
 @pytest.mark.parametrize("options", [None, AhpHostOptions()])
 async def test_requires_explicit_transport(options):
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     client.start = AsyncMock()
     with pytest.raises(ValueError, match="At least one"):
         await client.start_ahp_host(options)
@@ -220,14 +223,14 @@ async def test_factories_preserve_configuration_and_release_exact_original_once(
 
     async def create(request):
         cancellations.append(request.cancellation_event)
-        assert request.config["permission_mode"] is PermissionMode.ALLOW_ALL
+        assert request.config["permissions"]["mode"] is PermissionMode.ALLOW_ALL
         original = await client.create_session(**request.config)
         originals.append(original)
         return original
 
     async def restore(request):
         cancellations.append(request.cancellation_event)
-        assert request.config["permission_mode"] is PermissionMode.ALLOW_ALL
+        assert request.config["permissions"]["mode"] is PermissionMode.ALLOW_ALL
         original = await client.resume_session(request.session_id, **request.config)
         originals.append(original)
         return original
@@ -253,12 +256,12 @@ async def test_factories_preserve_configuration_and_release_exact_original_once(
             model="test-model",
             configDir="/config",
             mcpOAuthTokenStorage="in-memory",
+            enableMcpApps=True,
             gitHubToken="test-auth",
             additionalDirectories=[],
-            enableMcpApps=True,
             enableExperimentalMode=False,
-            infiniteSessions={"enabled": False, "backgroundCompactionThreshold": 0.7},
             featureFlags={"Arbitrary.MixedCase": True},
+            infiniteSessions={"enabled": False, "backgroundCompactionThreshold": 0.7},
             permissionMode="allow-all",
             **config,
         )
@@ -278,9 +281,9 @@ async def test_factories_preserve_configuration_and_release_exact_original_once(
 
 
 OPTIONS_PATCH_SETTINGS = {
-    "skipCustomInstructions": "skip_custom_instructions",
-    "coauthorEnabled": "coauthor_enabled",
-    "manageScheduleEnabled": "manage_schedule_enabled",
+    "skipCustomInstructions": ("instructions", "skip_custom_instructions"),
+    "coauthorEnabled": ("git", "coauthor_enabled"),
+    "manageScheduleEnabled": ("tools", "manage_schedule_enabled"),
 }
 
 
@@ -311,7 +314,8 @@ async def test_factories_preserve_settings_applied_after_creation(resume, settin
         for call in rpc.request.call_args_list
         if call.args[0] == "session.options.update"
     ]
-    assert [update[setting] for update in updates] == [value]
+    group, _ = OPTIONS_PATCH_SETTINGS[setting]
+    assert [update[group][setting] for update in updates] == [value]
 
 
 @pytest.mark.parametrize("setting", list(OPTIONS_PATCH_SETTINGS))
@@ -320,7 +324,8 @@ async def test_changed_settings_applied_after_creation_are_rejected(setting, exp
     client, _ = client_fixture()
 
     async def create(request):
-        config = {**request.config, OPTIONS_PATCH_SETTINGS[setting]: not expected}
+        group, field = OPTIONS_PATCH_SETTINGS[setting]
+        config = {**request.config, group: {**request.config[group], field: not expected}}
         return await client.create_session(**config)
 
     host = await client.start_ahp_host(

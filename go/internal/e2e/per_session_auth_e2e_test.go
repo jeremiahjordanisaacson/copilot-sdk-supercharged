@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 func TestPerSessionAuthE2E(t *testing.T) {
@@ -36,10 +36,7 @@ func TestPerSessionAuthE2E(t *testing.T) {
 	t.Run("should authenticate with per-session token", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			GitHubToken:         "token-alice",
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Token: "token-alice"}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -60,18 +57,12 @@ func TestPerSessionAuthE2E(t *testing.T) {
 	t.Run("should isolate auth between sessions", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		sessionA, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			GitHubToken:         "token-alice",
-		})
+		sessionA, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Token: "token-alice"}})
 		if err != nil {
 			t.Fatalf("Failed to create session A: %v", err)
 		}
 
-		sessionB, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			GitHubToken:         "token-bob",
-		})
+		sessionB, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Token: "token-bob"}})
 		if err != nil {
 			t.Fatalf("Failed to create session B: %v", err)
 		}
@@ -97,17 +88,10 @@ func TestPerSessionAuthE2E(t *testing.T) {
 	t.Run("should be unauthenticated without token", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		noTokenClient := copilot.NewClient(&copilot.ClientOptions{
-			Connection:       copilot.StdioConnection{Path: ctx.CLIPath},
-			WorkingDirectory: ctx.WorkDir,
-			Env:              withoutAuthEnv(append(ctx.Env(), "COPILOT_DEBUG_GITHUB_API_URL="+ctx.ProxyURL)),
-			UseLoggedInUser:  copilot.Bool(false),
-		})
+		noTokenClient := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, GitHub: copilot.ClientGitHubOptions{UseLoggedInUser: copilot.Bool(false)}, Runtime: copilot.SpawnedStdioConnection{Path: ctx.CLIPath, WorkingDirectory: ctx.WorkDir, Env: withoutAuthEnv(append(ctx.Env(), "COPILOT_DEBUG_GITHUB_API_URL="+ctx.ProxyURL))}})
 		t.Cleanup(func() { noTokenClient.ForceStop() })
 
-		session, err := noTokenClient.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := noTokenClient.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -128,10 +112,7 @@ func TestPerSessionAuthE2E(t *testing.T) {
 	t.Run("should fail with invalid token", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		_, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			GitHubToken:         "invalid-token",
-		})
+		_, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Token: "invalid-token"}})
 		if err == nil {
 			t.Fatal("Expected session creation to fail with invalid token")
 		}

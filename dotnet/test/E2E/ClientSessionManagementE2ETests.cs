@@ -5,7 +5,7 @@
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class ClientSessionManagementE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "client_api", output)
@@ -37,9 +37,9 @@ public class ClientSessionManagementE2ETests(E2ETestFixture fixture, ITestOutput
         await Client.StartAsync();
         const string UnknownSessionId = "00000000-0000-0000-0000-000000000000";
 
-        await AssertFailureAsync(
-            () => Client.DeleteSessionAsync(UnknownSessionId),
-            $"Failed to delete session {UnknownSessionId}");
+        var error = await Assert.ThrowsAsync<RemoteRpcException>(
+            () => Client.DeleteSessionAsync(UnknownSessionId));
+        Assert.Contains("not found", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

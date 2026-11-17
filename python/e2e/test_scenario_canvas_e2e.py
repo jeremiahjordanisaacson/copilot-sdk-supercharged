@@ -102,9 +102,8 @@ class TestScenarioCanvas:
         try:
             session = await client.create_session(
                 session_id="scenario-session",
-                canvases=[_counter_canvas()],
-                canvas_handler=handler,
-                on_permission_request=PermissionHandler.approve_all,
+                canvases={"definitions": [_counter_canvas()], "handler": handler},
+                permissions={"on_request": PermissionHandler.approve_all},
             )
             try:
                 calls = _operation_calls(handler, operation)
@@ -146,9 +145,8 @@ class TestScenarioCanvas:
         try:
             session = await client.create_session(
                 session_id="scenario-session",
-                canvases=[_counter_canvas()],
-                canvas_handler=handler,
-                on_permission_request=PermissionHandler.approve_all,
+                canvases={"definitions": [_counter_canvas()], "handler": handler},
+                permissions={"on_request": PermissionHandler.approve_all},
             )
             try:
                 capture = read_scenario_capture(capture_path)
@@ -172,27 +170,28 @@ class TestScenarioCanvas:
         client, capture_path = create_scenario_client(ctx, "canvas-resume")
         first = await client.create_session(
             session_id="scenario-session",
-            canvases=[_counter_canvas()],
-            canvas_handler=_ScenarioCanvasHandler(),
-            on_permission_request=PermissionHandler.approve_all,
+            canvases={"definitions": [_counter_canvas()], "handler": _ScenarioCanvasHandler()},
+            permissions={"on_request": PermissionHandler.approve_all},
         )
         await first.disconnect()
 
         handler = _ScenarioCanvasHandler()
         resumed = await client.resume_session(
             "scenario-session",
-            canvases=[_counter_canvas()],
-            canvas_handler=handler,
-            open_canvases=[
-                OpenCanvasInstance(
-                    canvas_id="counter",
-                    extension_id="python-scenario-tests",
-                    instance_id="reattached-counter",
-                    input={"startValue": 3},
-                    status="ready",
-                )
-            ],
-            on_permission_request=PermissionHandler.approve_all,
+            canvases={
+                "definitions": [_counter_canvas()],
+                "handler": handler,
+                "open": [
+                    OpenCanvasInstance(
+                        canvas_id="counter",
+                        extension_id="python-scenario-tests",
+                        instance_id="reattached-counter",
+                        input={"startValue": 3},
+                        status="ready",
+                    )
+                ],
+            },
+            permissions={"on_request": PermissionHandler.approve_all},
         )
         try:
             assert len(handler.open_calls) == 1

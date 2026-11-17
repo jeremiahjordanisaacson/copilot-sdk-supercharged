@@ -414,8 +414,13 @@ async fn stream_initiation_enqueues_without_polling_completion() {
 async fn unpolled_public_completion_cleans_up_without_retracting_stream_frame() {
     let (writer, reader) = tokio::io::duplex(8192);
     let (_peer_writer, client_reader) = tokio::io::duplex(8192);
-    let client =
-        crate::Client::from_streams(client_reader, writer, std::path::PathBuf::from(".")).unwrap();
+    let client = crate::Client::from_streams(
+        crate::ClientMode::CodingAgent,
+        client_reader,
+        writer,
+        std::path::PathBuf::from("."),
+    )
+    .unwrap();
     let pending = client.begin_call("accepted", None).unwrap();
     assert_eq!(client.inner.rpc.pending_requests.read().len(), 1);
     drop(pending);

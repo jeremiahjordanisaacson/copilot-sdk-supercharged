@@ -11,13 +11,13 @@
 use std::path::PathBuf;
 
 #[cfg(feature = "runtime")]
-use github_copilot_sdk::ErrorKind;
-#[cfg(all(feature = "bundled-cli", has_bundled_cli))]
-use github_copilot_sdk::SessionConfig;
-use github_copilot_sdk::{
-    CliProgram, Client, ClientOptions, HAS_BUNDLED_CLI, Transport, install_bundled_cli,
+use copilot_sdk::{CliProgram, ErrorKind, SpawnedProcessOptions};
+use copilot_sdk::{
+    Client, ClientOptions, HAS_BUNDLED_CLI, RuntimeConnection, install_bundled_cli,
     install_bundled_runtime,
 };
+#[cfg(all(feature = "bundled-cli", has_bundled_cli))]
+use copilot_sdk::{CreateSessionOptions, OwnedRuntimeOptions};
 use serial_test::serial;
 
 #[cfg(feature = "runtime")]
@@ -68,9 +68,11 @@ async fn env_override_resolves_to_pointed_file() {
         "COPILOT_CLI_PATH",
         path.to_str().expect("utf-8 tempfile path"),
     );
-    let opts = ClientOptions::default()
-        .with_program(CliProgram::Resolve)
-        .with_transport(Transport::Stdio);
+    let opts = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_runtime(
+        RuntimeConnection::for_spawned_stdio(
+            SpawnedProcessOptions::new().with_program(CliProgram::Resolve),
+        ),
+    );
 
     // `Client::start` reads the env var via resolve.rs. We don't want to
     // actually launch a subprocess against our empty temp file, so go
@@ -106,11 +108,17 @@ async fn cli_selection_respects_transport_and_environment() {
         let cli_path = std::env::var("COPILOT_CLI_PATH").expect("explicit path");
         let fallback =
             std::env::var("COPILOT_CLI_EXTRACT_DIR").expect("owned extraction directory");
-        let mut options = ClientOptions::default()
+        let mut options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent);
+        if transport != "external" {
+            options = options.with_github(|group| group.with_use_logged_in_user(false));
+        }
+        let mut process = SpawnedProcessOptions::new()
             .with_program(CliProgram::Resolve)
-            .with_bundled_cli_extract_dir(&fallback)
-            .with_base_directory(PathBuf::from(&fallback).join("home"))
-            .with_use_logged_in_user(false);
+            .with_owned(|owned| {
+                owned
+                    .with_bundled_cli_extract_directory(&fallback)
+                    .with_base_directory(PathBuf::from(&fallback).join("home"))
+            });
         if transport == "external" {
             let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
                 .await
@@ -124,18 +132,20 @@ async fn cli_selection_respects_transport_and_environment() {
                     &mut stream,
                     serde_json::json!({
                         "jsonrpc": "2.0", "id": connect["id"],
-                        "result": { "ok": true, "protocolVersion": 3, "version": "test" }
+                        "result": { "ok": true, "protocolVersion": 4, "version": "test" }
                     }),
                 )
                 .await;
                 stream
             };
             let start = async {
-                Client::start(options.with_transport(Transport::External {
-                    host: "127.0.0.1".into(),
-                    port,
-                    connection_token: None,
-                }))
+                Client::start(options.with_runtime(RuntimeConnection::Tcp(
+                    copilot_sdk::TcpRuntimeOptions {
+                        host: "127.0.0.1".to_string(),
+                        port,
+                        connection_token: None,
+                    },
+                )))
                 .await
                 .expect("external transport ignores local CLI selection")
             };
@@ -162,29 +172,32 @@ async fn cli_selection_respects_transport_and_environment() {
                     .expect("selected but unlaunchable CLI");
             }
             if relative_child {
-                options = options
-                    .with_cwd(transport.as_str())
+                process = process
+                    .with_working_directory(transport.as_str())
                     .with_env([("COPILOT_CLI_PATH", "./child-copilot")]);
             } else {
-                options = options.with_env([("COPILOT_CLI_PATH", &selected_path)]);
+                process = process.with_env([("COPILOT_CLI_PATH", &selected_path)]);
             }
         } else if transport == "child-remove" {
-            options = options.with_env_remove(["COPILOT_CLI_PATH"]);
+            process = process.with_env_remove(["COPILOT_CLI_PATH"]);
         }
-        let transport = match transport.as_str() {
+        let removed = !process.env_remove.is_empty();
+        let runtime = match transport.as_str() {
             "stdio" | "child-override" | "child-valid" | "child-relative" | "child-remove" => {
-                Transport::Stdio
+                RuntimeConnection::SpawnedStdio(process)
             }
-            "tcp" => Transport::Tcp {
+            "tcp" => RuntimeConnection::SpawnedTcp(copilot_sdk::SpawnedTcpRuntimeOptions {
+                process,
                 port: 0,
                 connection_token: None,
-            },
+            }),
             #[cfg(feature = "in-process")]
-            "inprocess" => Transport::InProcess,
+            "inprocess" => RuntimeConnection::for_in_process(
+                copilot_sdk::InProcessRuntimeOptions::new().with_owned(|_| process.owned),
+            ),
             other => panic!("unexpected transport: {other}"),
         };
-        let removed = !options.env_remove.is_empty();
-        let result = Client::start(options.with_transport(transport)).await;
+        let result = Client::start(options.with_runtime(runtime)).await;
         if removed {
             result
                 .expect("removed host override permits bundled discovery")
@@ -294,9 +307,11 @@ async fn unbundled_resolver_finds_extracted_binary() {
     unset_env("COPILOT_CLI_PATH");
     unset_env("COPILOT_CLI_EXTRACT_DIR");
 
-    let opts = ClientOptions::default()
-        .with_program(CliProgram::Resolve)
-        .with_transport(Transport::Stdio);
+    let opts = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_runtime(
+        RuntimeConnection::for_spawned_stdio(
+            SpawnedProcessOptions::new().with_program(CliProgram::Resolve),
+        ),
+    );
     let result = Client::start(opts).await;
     if let Err(e) = result {
         assert!(
@@ -329,9 +344,11 @@ async fn extract_dir_runtime_override_is_honored() {
         tmp.path().to_str().expect("utf-8 tempdir path"),
     );
 
-    let opts = ClientOptions::default()
-        .with_program(CliProgram::Resolve)
-        .with_transport(Transport::Stdio);
+    let opts = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_runtime(
+        RuntimeConnection::for_spawned_stdio(
+            SpawnedProcessOptions::new().with_program(CliProgram::Resolve),
+        ),
+    );
     let result = Client::start(opts).await;
 
     unset_env("COPILOT_CLI_EXTRACT_DIR");
@@ -388,7 +405,7 @@ fn pin_file_when_present_is_well_formed() {
                         )
                         || value.trim()
                             == format!(
-                                "https://github.com/github/copilot-sdk/releases/download/runtime-{version}"
+                                "https://github.com/microsoft/copilot-sdk/releases/download/runtime-{version}"
                             ),
                     "unexpected release URL in {filename}"
                 );
@@ -541,17 +558,21 @@ async fn bundled_runtime_clean_extract_starts_without_cli_host() {
     std::fs::create_dir(&working_dir).expect("create working directory");
     assert!(!extract_dir.exists());
 
-    let options = ClientOptions::new()
-        .with_bundled_cli_extract_dir(&extract_dir)
-        .with_cwd(&working_dir)
-        .with_env([("PATH", empty_path.as_os_str())])
-        .with_env_remove([
-            "COPILOT_RUNTIME_HOST_COMMAND",
-            "COPILOT_CLI_PATH",
-            "COPILOT_RUNTIME_PROVIDER_LIB",
-        ])
-        .with_transport(Transport::Stdio)
-        .with_use_logged_in_user(false);
+    let options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+        .with_runtime(RuntimeConnection::for_spawned_stdio(
+            SpawnedProcessOptions::new()
+                .with_working_directory(&working_dir)
+                .with_env(std::env::vars_os().chain([("PATH".into(), empty_path.into_os_string())]))
+                .with_env_remove([
+                    "COPILOT_RUNTIME_HOST_COMMAND",
+                    "COPILOT_CLI_PATH",
+                    "COPILOT_RUNTIME_PROVIDER_LIB",
+                ])
+                .with_owned(|_| {
+                    OwnedRuntimeOptions::new().with_bundled_cli_extract_directory(&extract_dir)
+                }),
+        ))
+        .with_github(|group| group.with_use_logged_in_user(false));
     let client = Client::start(options)
         .await
         .expect("start bundled runtime from clean extraction");
@@ -562,7 +583,7 @@ async fn bundled_runtime_clean_extract_starts_without_cli_host() {
     assert_eq!(response.message, "pong: hostless runtime");
 
     let session = client
-        .create_session(SessionConfig::default())
+        .create_session(CreateSessionOptions::default())
         .await
         .expect("create session");
     session.disconnect().await.expect("disconnect session");

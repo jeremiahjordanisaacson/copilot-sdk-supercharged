@@ -3,12 +3,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 using System.Diagnostics;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.Logging;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class CompactionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "compaction", output)
 {
@@ -17,15 +17,8 @@ public class CompactionE2ETests(E2ETestFixture fixture, ITestOutputHelper output
     [Fact]
     public async Task Should_Trigger_Compaction_With_Low_Threshold_And_Emit_Events()
     {
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            InfiniteSessions = new InfiniteSessionConfig
-            {
-                Enabled = true,
-                BackgroundCompactionThreshold = 0.005,
-                BufferExhaustionThreshold = 0.01
-            }
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { State = new SessionStateOptions { InfiniteSessions = new InfiniteSessionConfig { Enabled = true, BackgroundCompactionThreshold = 0.005, BufferExhaustionThreshold = 0.01 } } });
 
         // The first prompt leaves the session below the compaction processor's minimum
         // message count. The second prompt is therefore the first deterministic point
@@ -118,13 +111,8 @@ public class CompactionE2ETests(E2ETestFixture fixture, ITestOutputHelper output
     [Fact]
     public async Task Should_Not_Emit_Compaction_Events_When_Infinite_Sessions_Disabled()
     {
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            InfiniteSessions = new InfiniteSessionConfig
-            {
-                Enabled = false
-            }
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { State = new SessionStateOptions { InfiniteSessions = new InfiniteSessionConfig { Enabled = false } } });
 
         var compactionEvents = new List<SessionEvent>();
 

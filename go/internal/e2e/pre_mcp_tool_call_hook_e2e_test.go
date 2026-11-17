@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 func TestPreMCPToolCallHookE2E(t *testing.T) {
@@ -37,22 +37,19 @@ func TestPreMCPToolCallHookE2E(t *testing.T) {
 			inputs []copilot.PreMCPToolCallHookInput
 		)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			MCPServers:          metaEchoConfig(),
-			Hooks: &copilot.SessionHooks{
-				OnPreMCPToolCall: func(input copilot.PreMCPToolCallHookInput, invocation copilot.HookInvocation) (*copilot.PreMCPToolCallHookOutput, error) {
-					mu.Lock()
-					inputs = append(inputs, input)
-					mu.Unlock()
-					return &copilot.PreMCPToolCallHookOutput{
-						MetaToUse: map[string]any{
-							"injected": "by-hook",
-							"source":   "test",
-						},
-					}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, MCP: copilot.SessionMCPOptions{Servers: metaEchoConfig()}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnPreMCPToolCall: func(input copilot.PreMCPToolCallHookInput, invocation copilot.HookInvocation) (*copilot.PreMCPToolCallHookOutput, error) {
+				mu.Lock()
+				inputs = append(inputs, input)
+				mu.Unlock()
+				return &copilot.PreMCPToolCallHookOutput{
+					MetaToUse: map[string]any{
+						"injected": "by-hook",
+						"source":   "test",
+					},
+				}, nil
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -103,21 +100,18 @@ func TestPreMCPToolCallHookE2E(t *testing.T) {
 			inputs []copilot.PreMCPToolCallHookInput
 		)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			MCPServers:          metaEchoConfig(),
-			Hooks: &copilot.SessionHooks{
-				OnPreMCPToolCall: func(input copilot.PreMCPToolCallHookInput, invocation copilot.HookInvocation) (*copilot.PreMCPToolCallHookOutput, error) {
-					mu.Lock()
-					inputs = append(inputs, input)
-					mu.Unlock()
-					return &copilot.PreMCPToolCallHookOutput{
-						MetaToUse: map[string]any{
-							"completely": "replaced",
-						},
-					}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, MCP: copilot.SessionMCPOptions{Servers: metaEchoConfig()}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnPreMCPToolCall: func(input copilot.PreMCPToolCallHookInput, invocation copilot.HookInvocation) (*copilot.PreMCPToolCallHookOutput, error) {
+				mu.Lock()
+				inputs = append(inputs, input)
+				mu.Unlock()
+				return &copilot.PreMCPToolCallHookOutput{
+					MetaToUse: map[string]any{
+						"completely": "replaced",
+					},
+				}, nil
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -162,19 +156,16 @@ func TestPreMCPToolCallHookE2E(t *testing.T) {
 			inputs []copilot.PreMCPToolCallHookInput
 		)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			MCPServers:          metaEchoConfig(),
-			Hooks: &copilot.SessionHooks{
-				OnPreMCPToolCall: func(input copilot.PreMCPToolCallHookInput, invocation copilot.HookInvocation) (*copilot.PreMCPToolCallHookOutput, error) {
-					mu.Lock()
-					inputs = append(inputs, input)
-					mu.Unlock()
-					return &copilot.PreMCPToolCallHookOutput{
-						MetaToUse: nil,
-					}, nil
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, MCP: copilot.SessionMCPOptions{Servers: metaEchoConfig()}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+			OnPreMCPToolCall: func(input copilot.PreMCPToolCallHookInput, invocation copilot.HookInvocation) (*copilot.PreMCPToolCallHookOutput, error) {
+				mu.Lock()
+				inputs = append(inputs, input)
+				mu.Unlock()
+				return &copilot.PreMCPToolCallHookOutput{
+					MetaToUse: nil,
+				}, nil
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)

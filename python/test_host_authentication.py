@@ -78,7 +78,7 @@ async def test_authentication_cancelled_before_handler_task_starts():
     assert not client._ahp_hosts._authentications
 
 
-@pytest.mark.parametrize("mode", ["copilot-cli", "empty"])
+@pytest.mark.parametrize("mode", ["coding-agent", "empty"])
 @pytest.mark.parametrize(
     "authentication,mission_control",
     [
@@ -90,7 +90,7 @@ async def test_authentication_cancelled_before_handler_task_starts():
     ],
 )
 async def test_invalid_policy_fails_before_connection(mode, authentication, mission_control):
-    client = CopilotClient(mode=mode, connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(mode=mode, runtime=RuntimeConnection.for_tcp("localhost", 1234))
     client.start = AsyncMock()
     with pytest.raises(ValueError, match="authentication"):
         await client.start_ahp_host(
@@ -264,7 +264,7 @@ async def test_trusted_authentication_is_sibling_and_never_inference_configurati
             mode, None if mode == "none" else "owner"
         )
         assert "authentication" not in request.config
-        assert "github_token" not in request.config
+        assert "token" not in request.config.get("github", {})
         if resume:
             return await client.resume_session(request.session_id, **request.config)
         return await client.create_session(**request.config)

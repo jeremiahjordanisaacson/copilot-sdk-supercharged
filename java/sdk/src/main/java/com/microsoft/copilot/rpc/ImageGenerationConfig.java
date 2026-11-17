@@ -1,0 +1,104 @@
+/*
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ */
+
+package com.microsoft.copilot.rpc;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.microsoft.copilot.CopilotExperimental;
+
+/**
+ * <strong>Experimental.</strong> This API may change or be removed in a future
+ * release. Opt in to image generation through an authorized Copilot image
+ * model. Omission disables on create/cold resume and preserves resident resume
+ * state. Not persisted: re-supply after runtime restart. Policy, permissions,
+ * offline mode, and tool filters still apply. BYOK image generation is not
+ * supported.
+ */
+@JsonInclude(JsonInclude.Include.NON_NULL)
+@CopilotExperimental
+public class ImageGenerationConfig {
+    @JsonProperty("enabled")
+    private Boolean enabled;
+
+    @JsonProperty("watermark")
+    private Boolean watermark;
+
+    @JsonProperty("saveToDisk")
+    private Boolean saveToDisk;
+
+    /**
+     * Gets the image generation opt-in.
+     *
+     * @return true to opt in, false to disable, or null when unset
+     */
+    public Boolean getEnabled() {
+        return enabled;
+    }
+
+    /**
+     * Enables or disables image generation.
+     *
+     * @param enabled
+     *            the opt-in, or null when unset
+     * @return this config for method chaining
+     */
+    public ImageGenerationConfig setEnabled(Boolean enabled) {
+        this.enabled = enabled;
+        return this;
+    }
+
+    /**
+     * Gets the visible image label preference.
+     *
+     * @return true to request the label, false to opt out, or null to use the
+     *         user's imageGenerationWatermark preference (default false)
+     */
+    public Boolean getWatermark() {
+        return watermark;
+    }
+
+    /**
+     * Requests a visible "Made with AI" label on generated and edited images.
+     * Re-supply after cold resume. Does not enable image generation or enforce
+     * enterprise policy.
+     *
+     * @param watermark
+     *            the preference, or null to use the user's setting
+     * @return this config for method chaining
+     */
+    public ImageGenerationConfig setWatermark(Boolean watermark) {
+        this.watermark = watermark;
+        return this;
+    }
+
+    /**
+     * Gets the experimental save-to-disk preference.
+     *
+     * @return true to save images, false to opt out, or null when unset (default
+     *         true)
+     */
+    public Boolean getSaveToDisk() {
+        return saveToDisk;
+    }
+
+    /**
+     * Experimental. Saves generated and edited images under the session-state
+     * directory's {@code images} folder and gives the model each path as a
+     * {@code saved_to:} line in the tool result. Defaults to true; set false to opt
+     * out. Subagents follow their parent's value unless they set their own. A
+     * failed save still returns the image. Sessions without a local session-state
+     * directory never save. Re-supply after cold resume. Does not enable image
+     * generation.
+     *
+     * @param saveToDisk
+     *            the preference, or null when unset
+     * @return this config for method chaining
+     */
+    public ImageGenerationConfig setSaveToDisk(Boolean saveToDisk) {
+        this.saveToDisk = saveToDisk;
+        return this;
+    }
+}

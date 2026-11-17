@@ -19,13 +19,13 @@ export function validateLocalPublication({
   version,
 }) {
   if (
-    artifactId !== "copilot-sdk-java" &&
-    artifactId !== "copilot-sdk-java-runtime"
+    artifactId !== "copilot-sdk" &&
+    artifactId !== "copilot-sdk-runtime"
   ) {
     throw new Error(`Unsupported Java SDK artifact: ${artifactId}`);
   }
   const classifiers =
-    artifactId === "copilot-sdk-java-runtime"
+    artifactId === "copilot-sdk-runtime"
       ? [
           "linux-x64",
           "linux-arm64",
@@ -40,7 +40,7 @@ export function validateLocalPublication({
   const artifactDirectory = path.join(
     repositoryPath,
     "com",
-    "github",
+    "microsoft",
     artifactId,
     version,
   );
@@ -124,12 +124,12 @@ function validatePublishedPom({ artifactId, pomPath, version }) {
     (value) => value.trim(),
   );
   if (
-    groupId !== "com.github" ||
+    groupId !== "com.microsoft" ||
     publishedArtifactId !== artifactId ||
     publishedVersion !== version
   ) {
     throw new Error(
-      `Unexpected Maven coordinates in ${pomPath}: ${groupId}:${publishedArtifactId}:${publishedVersion} (expected com.github:${artifactId}:${version})`,
+      `Unexpected Maven coordinates in ${pomPath}: ${groupId}:${publishedArtifactId}:${publishedVersion} (expected com.microsoft:${artifactId}:${version})`,
     );
   }
 }

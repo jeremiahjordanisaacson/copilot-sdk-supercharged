@@ -81,10 +81,16 @@ class Application:
     def config(self, requested: dict) -> dict:
         return {
             **requested,
-            "on_permission_request": PermissionHandler.approve_all,
+            "permissions": {
+                **requested.get("permissions", {}),
+                "on_request": PermissionHandler.approve_all,
+            },
             "system_message": {"mode": "append", "content": MARKER},
-            "tools": [self.tool],
-            "hooks": {"on_pre_tool_use": self.pre_tool},
+            "tools": {**requested.get("tools", {}), "definitions": [self.tool]},
+            "hooks": {
+                **requested.get("hooks", {}),
+                "handlers": {"on_pre_tool_use": self.pre_tool},
+            },
         }
 
     async def create(self, request: AhpSessionCreateRequest) -> CopilotSession:

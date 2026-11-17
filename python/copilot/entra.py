@@ -8,13 +8,13 @@ from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from ._jsonrpc import JsonRpcClient
-from .generated.rpc import (
+from ._generated.rpc import (
     EntraAuthConfig,
     EntraTokenAcquireRequest,
     EntraTokenAcquireResult,
     EntraTokenGetTokenRequest,
 )
+from ._jsonrpc import JsonRpcClient
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ class EntraAuthOptions(EntraAuthConfig):
     """**Experimental.** Entra application and optional host-owned acquisition."""
 
     mats_app_name: str | None = field(default=None, kw_only=True)
+    one_auth_application_id: str | None = field(default=None, kw_only=True)
     token_provider: EntraTokenProvider | None = field(default=None, repr=False, compare=False)
     """**Experimental.** Host callback; omission retains built-in runtime authentication."""
 

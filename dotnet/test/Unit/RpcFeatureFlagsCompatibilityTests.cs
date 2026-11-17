@@ -3,10 +3,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 #if NET8_0_OR_GREATER
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -24,18 +24,15 @@ public sealed partial class ClientSessionLifetimeTests
             : throw new InvalidOperationException($"Unexpected feature flag request '{request.Method}'.");
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.ClearRequests();
 
         await session.Rpc.FeatureFlags.ReadAsync(null);
         await session.Rpc.FeatureFlags.ReadAsync(null, cancellationToken: CancellationToken.None);
-        await session.Rpc.FeatureFlags.ReadWithOptionsAsync(new SessionFeatureFlagsReadRequest
-        {
-            DisplayOnly = true,
-            ServiceId = "original-generation",
-        });
+        await session.Rpc.FeatureFlags.ReadAsync(displayOnly: true, serviceId: "original-generation");
 
         var requests = server.Requests.ToArray();
         Assert.Equal(3, requests.Length);

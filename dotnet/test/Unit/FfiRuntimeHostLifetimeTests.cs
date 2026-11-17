@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Reflection;
@@ -10,7 +10,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed class FfiRuntimeHostLifetimeTests
 {
@@ -62,10 +62,10 @@ public sealed class FfiRuntimeHostLifetimeTests
         var logger = new FailingStartupLogger(checkpoint);
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForInProcess(),
-            UseLoggedInUser = false,
-            BaseDirectory = homeDirectory,
-            Logger = logger,
+            Mode = CopilotClientMode.CodingAgent,
+            GitHub = new ClientGitHubOptions { UseLoggedInUser = false },
+            Runtime = RuntimeConnection.ForInProcess(baseDirectory: homeDirectory),
+            Observability = new ClientObservabilityOptions { Logger = logger }
         });
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.StartAsync());
         Assert.Same(logger.Failure, error);
@@ -148,7 +148,7 @@ public sealed class FfiRuntimeHostLifetimeTests
         };
         Action releaseCallback = () => Interlocked.Increment(ref callbackReleaseCalls);
 
-        var hostType = typeof(CopilotClient).Assembly.GetType("GitHub.Copilot.FfiRuntimeHost", throwOnError: true)!;
+        var hostType = typeof(CopilotClient).Assembly.GetType("Microsoft.Copilot.FfiRuntimeHost", throwOnError: true)!;
         var constructor = hostType.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
             .Single(candidate => candidate.GetParameters().Length == 8);
         using var host = (IDisposable)constructor.Invoke(
@@ -195,7 +195,7 @@ public sealed class FfiRuntimeHostLifetimeTests
         var shutdownCalls = 0;
         var callbackReleaseCalls = 0;
 
-        var hostType = typeof(CopilotClient).Assembly.GetType("GitHub.Copilot.FfiRuntimeHost", throwOnError: true)!;
+        var hostType = typeof(CopilotClient).Assembly.GetType("Microsoft.Copilot.FfiRuntimeHost", throwOnError: true)!;
         var constructor = hostType.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
             .Single(candidate => candidate.GetParameters().Length == 8);
         using var host = (IDisposable)constructor.Invoke(
@@ -252,7 +252,7 @@ public sealed class FfiRuntimeHostLifetimeTests
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static WeakReference StartUnreferencedHost(string homeDirectory)
     {
-        var hostType = typeof(CopilotClient).Assembly.GetType("GitHub.Copilot.FfiRuntimeHost", throwOnError: true)!;
+        var hostType = typeof(CopilotClient).Assembly.GetType("Microsoft.Copilot.FfiRuntimeHost", throwOnError: true)!;
         var explicitCliPath = Environment.GetEnvironmentVariable("COPILOT_CLI_PATH");
         if (string.IsNullOrEmpty(explicitCliPath))
         {

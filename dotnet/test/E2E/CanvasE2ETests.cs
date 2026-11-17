@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class CanvasE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "canvas", output)
@@ -119,30 +119,8 @@ public class CanvasE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
 
     private Task<CopilotSession> CreateCanvasSessionAsync(TestCanvasHandler handler)
     {
-        return CreateSessionAsync(new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            RequestCanvasRenderer = true,
-            ExtensionInfo = new ExtensionInfo { Source = "dotnet-sdk-tests", Name = "canvas-provider" },
-            Canvases =
-            [
-                new CanvasDeclaration
-                {
-                    Id = "counter",
-                    DisplayName = "Counter",
-                    Description = "Tracks a counter value.",
-                    Actions =
-                    [
-                        new CanvasAction
-                        {
-                            Name = "increment",
-                            Description = "Increments the counter.",
-                        }
-                    ],
-                }
-            ],
-            CanvasHandler = handler,
-        });
+        return CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Canvases = new SessionCanvasOptions { RequestRenderer = true, Definitions = [new CanvasDeclaration { Id = "counter", DisplayName = "Counter", Description = "Tracks a counter value.", Actions = [new CanvasAction { Name = "increment", Description = "Increments the counter.", }], }], Handler = handler }, Extensions = new SessionExtensionOptions { Identity = new ExtensionInfo { Source = "dotnet-sdk-tests", Name = "canvas-provider" } } });
     }
 
     private static int GetRequiredInt32(JsonElement? element, string propertyName)

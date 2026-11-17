@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use super::{
-    Attachment, AttachmentSelectionPosition, AttachmentSelectionRange, GitHubReferenceType,
-    McpServerConfig, McpStdioServerConfig, PermissionRequestData, ProviderConfig,
-    ResumeSessionConfig, SessionConfig, SessionId, Tool, ensure_attachment_display_names,
+    Attachment, AttachmentSelectionPosition, AttachmentSelectionRange, CreateSessionOptions,
+    GitHubReferenceType, McpServerConfig, McpStdioServerConfig, PermissionRequestData,
+    ProviderConfig, ResumeSessionOptions, SessionId, Tool, ensure_attachment_display_names,
 };
 use crate::generated::session_events::{
     AssistedApprovalAssessment, AssistedApprovalCompletedRecommendation,
@@ -236,19 +236,88 @@ fn builtin_agent_allowlist_preserves_omission_empty_and_subset_on_create_and_res
         Some(Vec::<String>::new()),
         Some(vec!["explore".into()]),
     ] {
-        let mut create = SessionConfig::default();
-        let mut resume = ResumeSessionConfig::new(SessionId::new("allowlist-session"));
+        let mut create = CreateSessionOptions::default();
+        let mut resume = ResumeSessionOptions::new(SessionId::new("allowlist-session"));
         if let Some(ref agents) = agents {
-            create = create.with_included_builtin_agents(agents.clone());
-            resume = resume.with_included_builtin_agents(agents.clone());
+            create = create.with_agents(|group| group.with_included_builtin_agents(agents.clone()));
+            resume = resume.with_agents(|group| group.with_included_builtin_agents(agents.clone()));
         }
         let create = serde_json::to_value(create.into_wire(None).unwrap().0).unwrap();
         let resume = serde_json::to_value(resume.into_wire().unwrap().0).unwrap();
         for payload in [create, resume] {
             match &agents {
-                None => assert!(payload.get("includedBuiltinAgents").is_none(), "{payload}"),
-                Some(agents) => assert_eq!(payload["includedBuiltinAgents"], json!(agents)),
+                None => assert!(
+                    payload["agents"].get("includedBuiltinAgents").is_none(),
+                    "{payload}"
+                ),
+                Some(agents) => {
+                    assert_eq!(payload["agents"]["includedBuiltinAgents"], json!(agents))
+                }
             }
+        }
+    }
+}
+
+#[test]
+fn grouped_credentials_preserve_empty_token_byok_semantics() {
+    for token in ["", "session-token"] {
+        let provider: super::NamedProviderConfig = serde_json::from_value(json!({
+            "name": "gateway", "type": "openai", "baseUrl": "https://provider.example",
+        }))
+        .unwrap();
+        let create = CreateSessionOptions::default()
+            .with_inference(|group| group.with_providers(vec![provider.clone()]))
+            .with_github(|group| group.with_token(token))
+            .into_wire(None)
+            .map(|(wire, _)| serde_json::to_value(wire).unwrap());
+        let resume = ResumeSessionOptions::new(SessionId::from("credentials"))
+            .with_inference(|group| group.with_providers(vec![provider]))
+            .with_github(|group| group.with_token(token))
+            .into_wire()
+            .map(|(wire, _)| serde_json::to_value(wire).unwrap());
+        for result in [create, resume] {
+            let payload = result.unwrap();
+            assert_eq!(payload["github"]["token"], token);
+            assert_eq!(payload["inference"]["providers"][0]["type"], "openai");
+            assert!(payload["inference"].get("provider").is_none());
+        }
+    }
+}
+
+#[test]
+fn default_provider_preserves_omitted_and_null_on_create_and_resume() {
+    for default in [None, Some(None), Some(Some("gateway".to_string()))] {
+        let mut inference = super::SessionInferenceOptions::new().with_providers(vec![
+            super::NamedProviderConfig::new("gateway", "https://provider.example")
+                .with_wire_api("responses")
+                .with_transport("websockets")
+                .with_api_key_command("credential-helper"),
+        ]);
+        inference.default_provider = default.clone();
+        let capi = super::CapiSessionOptions::new().with_enabled(false);
+        let create = CreateSessionOptions::default()
+            .with_inference(|_| inference.clone())
+            .with_github(|group| group.with_capi(capi.clone()));
+        let resume = ResumeSessionOptions::new(SessionId::from("routing"))
+            .with_inference(|_| inference)
+            .with_github(|group| group.with_capi(capi));
+        for payload in [
+            serde_json::to_value(create.into_wire(None).unwrap().0).unwrap(),
+            serde_json::to_value(resume.into_wire().unwrap().0).unwrap(),
+        ] {
+            match &default {
+                None => assert!(payload["inference"].get("defaultProvider").is_none()),
+                Some(value) => assert_eq!(payload["inference"]["defaultProvider"], json!(value)),
+            }
+            assert_eq!(payload["github"]["capi"]["enabled"], false);
+            assert_eq!(
+                payload["inference"]["providers"][0]["transport"],
+                "websockets"
+            );
+            assert_eq!(
+                payload["inference"]["providers"][0]["apiKeyCommand"],
+                "credential-helper"
+            );
         }
     }
 }
@@ -316,8 +385,8 @@ fn mcp_servers_serialize_in_insertion_order() {
         );
     }
 
-    let (wire, _runtime) = SessionConfig::default()
-        .with_mcp_servers(servers)
+    let (wire, _runtime) = CreateSessionOptions::default()
+        .with_mcp(|group| group.with_servers(servers))
         .into_wire(None)
         .expect("into_wire should succeed");
     let json = serde_json::to_string(&wire).expect("serialize wire");
@@ -570,14 +639,11 @@ fn session_configs_redact_sandbox_config_in_debug() {
         }
     }))
     .unwrap();
-    let create = SessionConfig::default().with_sandbox_config(sandbox.clone());
-    let resume =
-        ResumeSessionConfig::new(SessionId::from("resume-sandbox")).with_sandbox_config(sandbox);
+    let create = CreateSessionOptions::default()
+        .with_permissions(|group| group.with_sandbox(sandbox.clone()));
+    let resume = ResumeSessionOptions::new(SessionId::from("resume-sandbox"))
+        .with_permissions(|group| group.with_sandbox(sandbox));
     for debug in [format!("{create:?}"), format!("{resume:?}")] {
-        assert!(
-            debug.contains("sandbox_config: Some(\"<redacted>\")"),
-            "{debug}"
-        );
         assert!(!debug.contains("proxy-secret"), "{debug}");
     }
 }

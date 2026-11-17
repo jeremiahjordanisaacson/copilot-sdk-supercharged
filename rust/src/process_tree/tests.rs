@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+use crate::{RuntimeConnection, SpawnedProcessOptions, SpawnedTcpRuntimeOptions};
 use std::marker::PhantomData;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::os::windows::process::CommandExt;
@@ -610,26 +611,30 @@ async fn recovered_client(dir: &Path, tcp: bool) -> crate::Client {
         .join("../test/harness/stdio-shutdown-runtime.cjs")
         .canonicalize()
         .unwrap();
-    let mut options = crate::ClientOptions::new()
+    let mut process = SpawnedProcessOptions::new()
         .with_program(crate::CliProgram::Path("node".into()))
-        .with_prefix_args([
+        .with_args([
             script.into_os_string(),
             dir.join("cleanup.jsonl").into_os_string(),
             "force".into(),
             dir.join("child.pid").into_os_string(),
         ])
-        .with_cwd(dir)
-        .with_mode(crate::ClientMode::Empty)
-        .with_base_directory(dir.join("state"))
-        .with_use_logged_in_user(false)
-        .with_transport(crate::Transport::Stdio);
-    if tcp {
-        options.prefix_args.push("--fixture-tcp".into());
-        options.transport = crate::Transport::Tcp {
+        .with_working_directory(dir)
+        .with_owned(|owned| owned.with_base_directory(dir.join("state")));
+    let runtime = if tcp {
+        process.args.push("--fixture-tcp".into());
+        RuntimeConnection::SpawnedTcp(SpawnedTcpRuntimeOptions {
+            process,
             port: 0,
             connection_token: None,
-        };
-    }
+        })
+    } else {
+        RuntimeConnection::SpawnedStdio(process)
+    };
+    let options = crate::ClientOptions::new(crate::ClientMode::CodingAgent)
+        .with_mode(crate::ClientMode::Empty)
+        .with_github(|group| group.with_use_logged_in_user(false))
+        .with_runtime(runtime);
     let mut starting = std::pin::pin!(crate::Client::start(options));
     let client = tokio::time::timeout(
         Duration::from_secs(10),

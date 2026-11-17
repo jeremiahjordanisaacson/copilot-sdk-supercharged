@@ -23,7 +23,7 @@ class TestUiElicitation:
     async def test_elicitation_methods_throw_in_headless_mode(self, ctx: E2ETestContext):
         """Elicitation methods throw when running in headless mode."""
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         # The SDK spawns the CLI headless — no TUI means no elicitation support.
@@ -62,8 +62,8 @@ class TestUiElicitation:
             return {"action": "accept", "content": {}}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            on_elicitation_request=handler,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_elicitation_request": handler},
         )
 
         assert session.capabilities.get("ui", {}).get("elicitation") is True
@@ -75,7 +75,7 @@ class TestUiElicitation:
     ):
         """Session created without onElicitationContext reports no elicitation capability."""
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         assert session.capabilities.get("ui", {}).get("elicitation") in (False, None)
@@ -89,8 +89,8 @@ class TestUiElicitation:
             return {"action": "accept", "content": {}}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            on_elicitation_request=handler,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_elicitation_request": handler},
         )
 
         assert session.session_id is not None
@@ -101,7 +101,7 @@ class TestUiElicitation:
     ):
         """Session without an elicitation handler still creates successfully."""
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         assert session.session_id is not None
@@ -115,8 +115,8 @@ class TestUiElicitation:
             return {"action": "accept", "content": {"confirmed": True}}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            on_elicitation_request=handler,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_elicitation_request": handler},
         )
 
         assert session.capabilities.get("ui", {}).get("elicitation") is True
@@ -129,8 +129,8 @@ class TestUiElicitation:
             return {"action": "decline"}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            on_elicitation_request=handler,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_elicitation_request": handler},
         )
 
         assert (await session.ui.confirm("Confirm?")) is False
@@ -145,8 +145,8 @@ class TestUiElicitation:
             return {"action": "accept", "content": {"selection": "beta"}}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            on_elicitation_request=handler,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_elicitation_request": handler},
         )
 
         assert (await session.ui.select("Choose", ["alpha", "beta"])) == "beta"
@@ -161,8 +161,8 @@ class TestUiElicitation:
             return {"action": "accept", "content": {"value": "typed value"}}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            on_elicitation_request=handler,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_elicitation_request": handler},
         )
 
         result = await session.ui.input(
@@ -191,8 +191,8 @@ class TestUiElicitation:
             return responses.pop(0)
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            on_elicitation_request=handler,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_elicitation_request": handler},
         )
 
         params: ElicitationParams = {

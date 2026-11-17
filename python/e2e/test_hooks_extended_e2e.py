@@ -37,8 +37,8 @@ class TestHooksExtended:
             return {"modifiedPrompt": "Reply with exactly: HOOKED_PROMPT"}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            hooks={"on_user_prompt_submitted": on_user_prompt_submitted},
+            permissions={"on_request": PermissionHandler.approve_all},
+            hooks={"handlers": {"on_user_prompt_submitted": on_user_prompt_submitted}},
         )
         try:
             response = await session.send_and_wait("Say something else")
@@ -60,8 +60,8 @@ class TestHooksExtended:
             return {"modifiedTransformedPrompt": "Reply with exactly: HOOKED_TRANSFORMED_PROMPT"}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            hooks={"on_user_prompt_transformed": on_user_prompt_transformed},
+            permissions={"on_request": PermissionHandler.approve_all},
+            hooks={"handlers": {"on_user_prompt_transformed": on_user_prompt_transformed}},
         )
         try:
             response = await session.send_and_wait("Answer the request above.")
@@ -85,8 +85,8 @@ class TestHooksExtended:
             return {"additionalContext": "Session start hook context."}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            hooks={"on_session_start": on_session_start},
+            permissions={"on_request": PermissionHandler.approve_all},
+            hooks={"handlers": {"on_session_start": on_session_start}},
         )
         try:
             await session.send_and_wait("Say hi")
@@ -110,8 +110,8 @@ class TestHooksExtended:
             return {"sessionSummary": "session ended"}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            hooks={"on_session_end": on_session_end},
+            permissions={"on_request": PermissionHandler.approve_all},
+            hooks={"handlers": {"on_session_end": on_session_end}},
         )
         await session.send_and_wait("Say bye")
         await session.disconnect()
@@ -129,8 +129,8 @@ class TestHooksExtended:
             return {"errorHandling": "skip"}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            hooks={"on_error_occurred": on_error_occurred},
+            permissions={"on_request": PermissionHandler.approve_all},
+            hooks={"handlers": {"on_error_occurred": on_error_occurred}},
         )
         try:
             await session.send_and_wait("Say hi")
@@ -155,8 +155,8 @@ class TestHooksExtended:
             return None
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            hooks={"on_agent_stop": on_agent_stop},
+            permissions={"on_request": PermissionHandler.approve_all},
+            hooks={"handlers": {"on_agent_stop": on_agent_stop}},
         )
         try:
             response = await session.send_and_wait("Reply with exactly: AGENT_STOP_INITIAL")
@@ -189,25 +189,27 @@ class TestHooksExtended:
             }
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[
-                Tool(
-                    name="echo_value",
-                    description="Echoes the supplied value",
-                    parameters={
-                        "type": "object",
-                        "properties": {
-                            "value": {
-                                "type": "string",
-                                "description": "Value to echo",
-                            }
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={
+                "definitions": [
+                    Tool(
+                        name="echo_value",
+                        description="Echoes the supplied value",
+                        parameters={
+                            "type": "object",
+                            "properties": {
+                                "value": {
+                                    "type": "string",
+                                    "description": "Value to echo",
+                                }
+                            },
+                            "required": ["value"],
                         },
-                        "required": ["value"],
-                    },
-                    handler=echo_value,
-                )
-            ],
-            hooks={"on_pre_tool_use": on_pre_tool_use},
+                        handler=echo_value,
+                    )
+                ]
+            },
+            hooks={"handlers": {"on_pre_tool_use": on_pre_tool_use}},
         )
         try:
             response = await session.send_and_wait(
@@ -236,8 +238,8 @@ class TestHooksExtended:
             }
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            hooks={"on_post_tool_use": on_post_tool_use},
+            permissions={"on_request": PermissionHandler.approve_all},
+            hooks={"handlers": {"on_post_tool_use": on_post_tool_use}},
         )
         try:
             response = await session.send_and_wait(
@@ -270,11 +272,13 @@ class TestHooksExtended:
             return {"additionalContext": "HOOK_FAILURE_GUIDANCE_APPLIED"}
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            available_tools=["report_intent"],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"available_tools": ["report_intent"]},
             hooks={
-                "on_post_tool_use": on_post_tool_use,
-                "on_post_tool_use_failure": on_post_tool_use_failure,
+                "handlers": {
+                    "on_post_tool_use": on_post_tool_use,
+                    "on_post_tool_use_failure": on_post_tool_use_failure,
+                }
             },
         )
         try:

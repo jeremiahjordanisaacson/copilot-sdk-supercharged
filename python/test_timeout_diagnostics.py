@@ -168,7 +168,9 @@ async def test_timeout_samples_owned_cli_from_pending_test_frame(tmp_path, monke
         config=SimpleNamespace(rootpath=tmp_path),
         funcargs={"ctx": SimpleNamespace(_client=context_client)},
     )
-    owner = CopilotClient(connection=RuntimeConnection.for_stdio(path=sys.executable))
+    owner = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=sys.executable)
+    )
     process = subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.stdin.read()"],
         stdin=subprocess.PIPE,

@@ -44,15 +44,13 @@ fn empty_mode_post_patch_sets_empty_included_builtin_skills() {
     let patch =
         build_mode_post_create_patch(crate::ClientMode::Empty, None, None, None, None, None)
             .expect("empty mode always sends a patch");
-    assert_eq!(
-        patch.included_builtin_skills,
-        Some(Vec::new()),
-        "empty mode must fail closed with an empty includedBuiltinSkills list"
-    );
-    assert_eq!(patch.installed_plugins.as_ref().map(|p| p.len()), Some(0));
     // Serializes as an explicit empty array (not omitted).
     let value = serde_json::to_value(&patch).expect("serialize patch");
-    assert_eq!(value["includedBuiltinSkills"], serde_json::json!([]));
+    assert_eq!(
+        value["skills"]["includedBuiltinSkills"],
+        serde_json::json!([])
+    );
+    assert_eq!(value["plugins"]["installed"], serde_json::json!([]));
 }
 
 #[test]
@@ -67,7 +65,7 @@ fn empty_mode_post_patch_preserves_explicit_builtin_skill_allowlist() {
     )
     .expect("empty mode always sends a patch");
     assert_eq!(
-        patch.included_builtin_skills,
+        patch.skills.unwrap().included_builtin_skills,
         Some(vec!["code-review".to_string()])
     );
 }
@@ -76,12 +74,12 @@ fn empty_mode_post_patch_preserves_explicit_builtin_skill_allowlist() {
 fn copilot_cli_mode_does_not_inject_included_builtin_skills() {
     // No fields set -> no patch at all.
     assert!(
-        build_mode_post_create_patch(crate::ClientMode::CopilotCli, None, None, None, None, None)
+        build_mode_post_create_patch(crate::ClientMode::CodingAgent, None, None, None, None, None)
             .is_none()
     );
     // A field set -> patch sent, but skills field stays absent.
     let patch = build_mode_post_create_patch(
-        crate::ClientMode::CopilotCli,
+        crate::ClientMode::CodingAgent,
         Some(true),
         None,
         None,
@@ -89,13 +87,13 @@ fn copilot_cli_mode_does_not_inject_included_builtin_skills() {
         None,
     )
     .expect("a set field triggers a patch");
-    assert_eq!(patch.included_builtin_skills, None);
-    assert!(patch.installed_plugins.is_none());
+    assert!(patch.skills.is_none());
+    assert!(patch.plugins.is_none());
     let value = serde_json::to_value(&patch).expect("serialize patch");
-    assert!(value.get("includedBuiltinSkills").is_none());
+    assert!(value.get("skills").is_none());
 
     let patch = build_mode_post_create_patch(
-        crate::ClientMode::CopilotCli,
+        crate::ClientMode::CodingAgent,
         None,
         None,
         None,
@@ -104,7 +102,7 @@ fn copilot_cli_mode_does_not_inject_included_builtin_skills() {
     )
     .expect("an explicit allowlist triggers a patch");
     assert_eq!(
-        patch.included_builtin_skills,
+        patch.skills.unwrap().included_builtin_skills,
         Some(vec!["code-review".to_string()])
     );
 }

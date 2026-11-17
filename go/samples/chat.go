@@ -10,10 +10,10 @@ import (
 	"os"
 	"strings"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
-	"github.com/github/copilot-sdk/go/samples/internal/sampleutil"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/samples/internal/sampleutil"
 )
 
 const blue = "\033[34m"
@@ -53,15 +53,13 @@ func main() {
 		panic(err)
 	}
 
-	client := copilot.NewClient(&copilot.ClientOptions{Connection: copilot.StdioConnection{Path: cliPath}})
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedStdioConnection{Path: cliPath}})
 	if err := client.Start(ctx); err != nil {
 		panic(err)
 	}
 	defer client.Stop()
 
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	})
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 	if err != nil {
 		panic(err)
 	}
@@ -192,7 +190,7 @@ func showCombinedPermissionHandlers(recovery, events bool) {
 		}
 		server := jsonrpc2.NewClient(conn, conn)
 		for method, result := range map[string]string{
-			"connect":                           `{"ok":true,"protocolVersion":3,"version":"example"}`,
+			"connect":                           `{"ok":true,"protocolVersion":4,"version":"example"}`,
 			"plugins.builtin.set":               `{}`,
 			"session.create":                    `{"sessionId":"combined-example","capabilities":{"ui":{"autoModeRecovery":true}}}`,
 			"session.eventLog.registerInterest": `{}`,
@@ -209,7 +207,7 @@ func showCombinedPermissionHandlers(recovery, events bool) {
 		server.Start()
 		ready <- peer{server, conn}
 	}()
-	client := copilot.NewClient(&copilot.ClientOptions{Connection: copilot.URIConnection{URL: listener.Addr().String()}})
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.TCPConnection{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port}})
 	if err := client.Start(ctx); err != nil {
 		panic(err)
 	}
@@ -233,18 +231,18 @@ func showCombinedPermissionHandlers(recovery, events bool) {
 		}
 		return copilot.MCPAuthResultCancelled(), nil
 	}
-	config := &copilot.SessionConfig{SessionID: "combined-example"}
-	var session *copilot.Session
-	if recovery {
-		session, err = client.CreateSessionWithPermissionEnvelopeAndAutoModeRecovery(ctx, config, permissionHandler, &copilot.AutoModeRecoveryOptions{
-			OnAutoModeSwitchRequest: func(copilot.AutoModeSwitchRequestWithAutoModeRecovery, copilot.AutoModeSwitchInvocation) (copilot.AutoModeSwitchResponse, error) {
-				return copilot.AutoModeSwitchResponseNo, nil
-			},
-			MCPAuthRuntimeRefreshHandler: refreshHandler,
-		})
-	} else {
-		session, err = client.CreateSessionWithPermissionEnvelopeAndMCPAuthRuntimeRefresh(ctx, config, permissionHandler, refreshHandler)
+	config := &copilot.CreateSessionOptions{
+		SessionID:   "combined-example",
+		Permissions: copilot.SessionPermissionOptions{OnRequestWithEnvelope: permissionHandler},
+		MCP:         copilot.SessionMCPOptions{OnAuthRuntimeRefresh: refreshHandler},
+		Interaction: copilot.SessionInteractionOptions{AutoModeRecovery: recovery},
 	}
+	if recovery {
+		config.Interaction.OnAutoModeSwitchRequest = func(copilot.AutoModeSwitchRequest, copilot.AutoModeSwitchInvocation) (copilot.AutoModeSwitchResponse, error) {
+			return copilot.AutoModeSwitchResponseNo, nil
+		}
+	}
+	session, err := client.CreateSession(ctx, config)
 	if err != nil {
 		panic(err)
 	}

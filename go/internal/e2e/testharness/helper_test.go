@@ -10,9 +10,9 @@ import (
 	"sync"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestFinalAssistantMessageWaiterBeforeCompletionRPC(t *testing.T) {
@@ -350,7 +350,7 @@ func newCompletionFixture(t *testing.T, ctx context.Context, history []copilot.S
 		server := jsonrpc2.NewClient(conn, conn)
 		t.Cleanup(server.Stop)
 		for method, result := range map[string]string{
-			"connect":                `{"ok":true,"protocolVersion":3,"version":"test"}`,
+			"connect":                `{"ok":true,"protocolVersion":4,"version":"test"}`,
 			"plugins.builtin.set":    `{}`,
 			"session.create":         `{"sessionId":"completion-session"}`,
 			"session.options.update": `{"success":true}`,
@@ -366,13 +366,9 @@ func newCompletionFixture(t *testing.T, ctx context.Context, history []copilot.S
 		server.Start()
 		ready <- &completionFixture{server: server, conn: conn}
 	}()
-	client := copilot.NewClient(&copilot.ClientOptions{
-		Connection: copilot.URIConnection{URL: listener.Addr().String()},
-	})
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.TCPConnection{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port}})
 	t.Cleanup(func() { client.ForceStop() })
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		SessionID: "completion-session", OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	})
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{SessionID: "completion-session", Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 	if err != nil {
 		t.Fatal(err)
 	}

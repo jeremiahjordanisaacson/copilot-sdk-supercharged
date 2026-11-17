@@ -7,12 +7,12 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public sealed class RuntimeHostE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "runtime_host", output, replayOnly: true)
@@ -53,12 +53,12 @@ public sealed class RuntimeHostE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         public readonly TaskCompletionSource Exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int ExitCount;
 
-        public void Configure(SessionConfigBase config)
+        public void Configure(SessionOptionsBase config)
         {
-            config.OnPermissionRequest = PermissionHandler.ApproveAll;
+            config.Permissions.OnRequest = PermissionHandler.ApproveAll;
             config.SystemMessage = new SystemMessageConfig { Mode = SystemMessageMode.Append, Content = Marker };
-            config.Tools = [AIFunctionFactory.Create(MagicNumber, "magic_number")];
-            config.Hooks = new SessionHooks
+            config.Tools.Definitions = [AIFunctionFactory.Create(MagicNumber, "magic_number")];
+            config.Hooks.Handlers = new SessionHooks
             {
                 OnPreToolUse = (_, invocation) =>
                 {
@@ -157,7 +157,7 @@ public sealed class RuntimeHostE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         await using var ahp = await AhpTestClient.StartAsync();
         if (publish)
         {
-            var config = new SessionConfig { WorkingDirectory = Ctx.WorkDir };
+            var config = new CreateSessionOptions { WorkingDirectory = Ctx.WorkDir };
             app.Configure(config);
             app.Session = await Ctx.CreateSessionAsync(owner, config);
         }

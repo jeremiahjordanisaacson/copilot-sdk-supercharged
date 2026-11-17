@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::handler::{ApproveAllHandler, PermissionHandler, PermissionResult};
 use crate::permission;
 use crate::types::{
-    PermissionDecision, PermissionRequestData, RequestId, SessionConfig, SessionId,
+    CreateSessionOptions, PermissionDecision, PermissionRequestData, RequestId, SessionId,
 };
 
 fn data() -> PermissionRequestData {
@@ -21,8 +21,11 @@ fn data() -> PermissionRequestData {
 
 /// Apply the same policy-resolution logic that `Client::create_session`
 /// uses, so tests exercise the effective handler.
-fn resolve_create(mut cfg: SessionConfig) -> Option<Arc<dyn PermissionHandler>> {
-    permission::resolve_handler(cfg.permission_handler.take(), cfg.permission_policy.take())
+fn resolve_create(mut cfg: CreateSessionOptions) -> Option<Arc<dyn PermissionHandler>> {
+    permission::resolve_handler(
+        cfg.permissions.on_request.take(),
+        cfg.permissions.policy.take(),
+    )
 }
 
 async fn dispatch(handler: &Arc<dyn PermissionHandler>) -> PermissionResult {
@@ -33,7 +36,8 @@ async fn dispatch(handler: &Arc<dyn PermissionHandler>) -> PermissionResult {
 
 #[tokio::test]
 async fn approve_all_standalone_produces_handler() {
-    let cfg = SessionConfig::default().approve_all_permissions();
+    let cfg =
+        CreateSessionOptions::default().with_permissions(|group| group.approve_all_permissions());
     let h = resolve_create(cfg).expect("policy alone yields handler");
     assert!(matches!(
         dispatch(&h).await,
@@ -46,12 +50,12 @@ async fn approve_all_standalone_produces_handler() {
 
 #[tokio::test]
 async fn deny_all_is_order_independent() {
-    let a = SessionConfig::default()
-        .with_permission_handler(Arc::new(ApproveAllHandler))
-        .deny_all_permissions();
-    let b = SessionConfig::default()
-        .deny_all_permissions()
-        .with_permission_handler(Arc::new(ApproveAllHandler));
+    let a = CreateSessionOptions::default()
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+        .with_permissions(|group| group.deny_all_permissions());
+    let b = CreateSessionOptions::default()
+        .with_permissions(|group| group.deny_all_permissions())
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)));
     let ha = resolve_create(a).unwrap();
     let hb = resolve_create(b).unwrap();
     assert!(matches!(
@@ -74,12 +78,12 @@ async fn deny_all_is_order_independent() {
 async fn approve_permissions_if_is_order_independent() {
     let predicate =
         |d: &PermissionRequestData| d.extra.get("tool").and_then(|v| v.as_str()) != Some("shell");
-    let a = SessionConfig::default()
-        .with_permission_handler(Arc::new(ApproveAllHandler))
-        .approve_permissions_if(predicate);
-    let b = SessionConfig::default()
-        .approve_permissions_if(predicate)
-        .with_permission_handler(Arc::new(ApproveAllHandler));
+    let a = CreateSessionOptions::default()
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+        .with_permissions(|group| group.approve_permissions_if(predicate));
+    let b = CreateSessionOptions::default()
+        .with_permissions(|group| group.approve_permissions_if(predicate))
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)));
     let ha = resolve_create(a).unwrap();
     let hb = resolve_create(b).unwrap();
     assert!(matches!(

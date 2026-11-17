@@ -53,23 +53,38 @@ class Second(BaseModel):
     second: int
 
 
-def config(ctx):
+def config(ctx, *, tools=None):
     return {
-        "model": "gpt-4.1",
-        "available_tools": ["custom:*"],
-        "on_permission_request": PermissionHandler.approve_all,
-        "provider": {
-            "type": "openai",
-            "wire_api": "completions",
-            "base_url": ctx.proxy_url,
-            "model_id": "gpt-4.1",
-            "wire_model": "gpt-4.1",
-            "api_key": "fake-token-for-e2e-tests",
-            "headers": {
-                "Copilot-Integration-Id": "copilot-developer-cli",
-                "Copilot-Harness-Id": "copilot-sdk",
-                "X-GitHub-Api-Version": "2026-08-01",
-            },
+        "model": "byok/gpt-4.1",
+        "github": {"capi": {"enabled": False}},
+        "tools": {
+            "available_tools": ["custom:*"],
+            **({"definitions": tools} if tools is not None else {}),
+        },
+        "permissions": {"on_request": PermissionHandler.approve_all},
+        "inference": {
+            "models": [
+                {
+                    "id": "gpt-4.1",
+                    "provider": "byok",
+                    "model_id": "gpt-4.1",
+                    "wire_model": "gpt-4.1",
+                }
+            ],
+            "providers": [
+                {
+                    "name": "byok",
+                    "type": "openai",
+                    "wire_api": "completions",
+                    "base_url": ctx.proxy_url,
+                    "api_key": "fake-token-for-e2e-tests",
+                    "headers": {
+                        "Copilot-Integration-Id": "copilot-developer-cli",
+                        "Copilot-Harness-Id": "copilot-sdk",
+                        "X-GitHub-Api-Version": "2026-08-01",
+                    },
+                }
+            ],
         },
     }
 
@@ -89,7 +104,7 @@ async def test_infers_typed_result_after_custom_tool(ctx):
         return "The inventory contains 42 red widgets."
 
     async with await ctx.client.create_session(
-        **config(ctx), tools=[get_inventory], streaming=True
+        **config(ctx, tools=[get_inventory]), events={"streaming": True}
     ) as session:
         deltas = []
         unsubscribe = session.on(
@@ -141,7 +156,7 @@ async def test_typed_wait_returns_stop_hook_correction(ctx):
         return None
 
     async with await ctx.client.create_session(
-        **config(ctx), hooks={"on_agent_stop": stop_hook}
+        **config(ctx), hooks={"handlers": {"on_agent_stop": stop_hook}}
     ) as session:
         replies = []
         unsubscribe = session.on(
@@ -181,7 +196,8 @@ async def test_send_selects_correlated_response_after_idle(ctx):
         return None
 
     async with await ctx.client.create_session(
-        **config(ctx), tools=[read_inventory], hooks={"on_agent_stop": stop_hook}
+        **config(ctx, tools=[read_inventory]),
+        hooks={"handlers": {"on_agent_stop": stop_hook}},
     ) as session:
         idle = asyncio.get_running_loop().create_future()
         replies = []
@@ -326,7 +342,8 @@ async def test_typed_wait_returns_stop_hook_correction_after_terminal_tool(ctx):
         return None
 
     async with await ctx.client.create_session(
-        **config(ctx), tools=[lookup_number], hooks={"on_agent_stop": stop_hook}
+        **config(ctx, tools=[lookup_number]),
+        hooks={"handlers": {"on_agent_stop": stop_hook}},
     ) as session:
         replies = []
         unsubscribe = session.on(
@@ -371,7 +388,7 @@ async def test_typed_result_after_terminal_tool_and_steering(ctx):
         )
         return 58
 
-    async with await ctx.client.create_session(**config(ctx), tools=[lookup_number]) as session:
+    async with await ctx.client.create_session(**config(ctx, tools=[lookup_number])) as session:
         result = await session.send_and_wait_typed(
             "Call lookup_number exactly once, then add 5 to the returned number. "
             "Do not guess its result.",
@@ -405,7 +422,7 @@ async def test_typed_wait_returns_late_steering_response(ctx):
         return None
 
     async with await ctx.client.create_session(
-        **config(ctx), hooks={"on_agent_stop": stop_hook}
+        **config(ctx), hooks={"handlers": {"on_agent_stop": stop_hook}}
     ) as session:
         result = await session.send_and_wait_typed(
             "What is 19 + 23? Do not use tools.", Answer, timeout=30
@@ -425,7 +442,7 @@ async def test_concurrent_typed_sends_return_their_own_results(ctx):
         await release.wait()
         return 42
 
-    async with await ctx.client.create_session(**config(ctx), tools=[first_number]) as session:
+    async with await ctx.client.create_session(**config(ctx, tools=[first_number])) as session:
         first = asyncio.create_task(
             session.send_and_wait_typed(
                 "Call first_number exactly once and report its returned number.", First, timeout=30

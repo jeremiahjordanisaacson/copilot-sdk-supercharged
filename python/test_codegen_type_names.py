@@ -1,8 +1,13 @@
 import re
 import types
 
-from copilot import rpc as public_rpc
-from copilot.generated import rpc, session_events
+from copilot import rpc, session_events
+from copilot._generated.rpc import (
+    _load_AuthEnumerateValue,
+    _load_PermissionDecisionApproveForLocationApproval,
+    _load_PermissionDecisionApproveForSessionApproval,
+)
+from copilot._generated.session_events import _load_AssistedApprovalAssessment
 
 
 def test_permission_approval_exports_are_union_aliases():
@@ -21,10 +26,10 @@ def test_permission_approval_exports_are_union_aliases():
 
 
 def test_permission_approval_union_loaders_deserialize_expected_variants():
-    session = rpc._load_PermissionDecisionApproveForSessionApproval(
+    session = _load_PermissionDecisionApproveForSessionApproval(
         {"kind": "commands", "commandIdentifiers": ["git status"]}
     )
-    location = rpc._load_PermissionDecisionApproveForLocationApproval({"kind": "read"})
+    location = _load_PermissionDecisionApproveForLocationApproval({"kind": "read"})
 
     assert isinstance(session, rpc.PermissionDecisionApproveForSessionApprovalCommands)
     assert isinstance(location, rpc.PermissionDecisionApproveForLocationApprovalRead)
@@ -33,7 +38,7 @@ def test_permission_approval_union_loaders_deserialize_expected_variants():
 def test_assisted_approval_assessment_is_a_discriminated_union():
     assert isinstance(session_events.AssistedApprovalAssessment, types.UnionType)
 
-    assessment = session_events._load_AssistedApprovalAssessment(
+    assessment = _load_AssistedApprovalAssessment(
         {
             "status": "completed",
             "recommendation": "requireApproval",
@@ -56,9 +61,7 @@ def test_assisted_approval_assessment_is_a_discriminated_union():
         "rationale": "The command modifies protected files.",
     }
 
-    not_run = session_events._load_AssistedApprovalAssessment(
-        {"status": "not-run", "reason": "inactive"}
-    )
+    not_run = _load_AssistedApprovalAssessment({"status": "not-run", "reason": "inactive"})
     assert isinstance(not_run, session_events.AssistedApprovalAssessmentNotRun)
     assert not_run.reason == "inactive"
     assert not_run.to_dict() == {"status": "not-run", "reason": "inactive"}
@@ -84,7 +87,7 @@ def test_assisted_approval_assessment_is_a_discriminated_union():
 
 
 def test_login_account_enumeration_deserializes_concrete_identities():
-    value = rpc._load_AuthEnumerateValue(
+    value = _load_AuthEnumerateValue(
         {
             "kind": "loginAccounts",
             "items": [
@@ -118,17 +121,16 @@ def test_catalog_candidate_provenance_serialises_every_catalog_media_type():
 
 def test_image_availability_preserves_public_session_limit_discriminator():
     assert "SessionLimitPredictionResultKind" in rpc.__all__
-    assert public_rpc.SessionLimitPredictionResultKind is rpc.SessionLimitPredictionResultKind
-    assert public_rpc.SessionLimitPredictionResultKind is not public_rpc.ImageToolModelAvailability
+    assert rpc.SessionLimitPredictionResultKind is not rpc.ImageToolModelAvailability
 
     payload = {"kind": "unavailable", "reason": "no_model"}
-    result = public_rpc.SessionLimitPredictionResult.from_dict(payload)
-    assert result.kind is public_rpc.SessionLimitPredictionResultKind.UNAVAILABLE
+    result = rpc.SessionLimitPredictionResult.from_dict(payload)
+    assert result.kind is rpc.SessionLimitPredictionResultKind.UNAVAILABLE
     assert result.to_dict() == payload
 
     for value in ("available", "unavailable"):
-        kind = public_rpc.SessionLimitPredictionResultKind(value)
-        availability = public_rpc.ImageToolModelAvailability(value)
+        kind = rpc.SessionLimitPredictionResultKind(value)
+        availability = rpc.ImageToolModelAvailability(value)
         assert kind is not availability
         assert kind.value == availability.value == value
         image_payload = {
@@ -138,6 +140,6 @@ def test_image_availability_preserves_public_session_limit_discriminator():
             "name": "Test image",
             "supportedOperations": [],
         }
-        image = public_rpc.ImageToolModel.from_dict(image_payload)
+        image = rpc.ImageToolModel.from_dict(image_payload)
         assert image.availability is availability
         assert image.to_dict() == image_payload

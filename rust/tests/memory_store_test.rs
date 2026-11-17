@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use github_copilot_sdk::session::Session;
-use github_copilot_sdk::types::MemoryConfiguration;
-use github_copilot_sdk::{
-    Client, Error, ErrorKind, MemoryStore, ResumeSessionConfig, SessionConfig, SessionId,
+use copilot_sdk::session::Session;
+use copilot_sdk::types::MemoryConfiguration;
+use copilot_sdk::{
+    Client, CreateSessionOptions, Error, ErrorKind, MemoryStore, ResumeSessionOptions, SessionId,
     StoredMemory,
 };
 use serde_json::{Value, json};
@@ -105,10 +105,16 @@ impl Fixture {
     ) -> Self {
         let (client_write, mut reader) = duplex(8192);
         let (mut writer, client_read) = duplex(8192);
-        let client = Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
-        let config = SessionConfig::default()
-            .with_memory(MemoryConfiguration::enabled())
-            .with_memory_store(memory_store);
+        let client = Client::from_streams(
+            copilot_sdk::ClientMode::CodingAgent,
+            client_read,
+            client_write,
+            std::env::temp_dir(),
+        )
+        .unwrap();
+        let config = CreateSessionOptions::default()
+            .with_state(|group| group.with_memory(MemoryConfiguration::enabled()))
+            .with_state(|group| group.with_memory_store(memory_store));
         let create = tokio::spawn({
             let client = client.clone();
             async move { client.create_session(config).await.unwrap() }
@@ -116,8 +122,11 @@ impl Fixture {
 
         let request = read_frame(&mut reader).await;
         assert_eq!(request["method"], "session.create");
-        assert_eq!(request["params"]["memory"], json!({ "enabled": true }));
-        assert_eq!(request["params"]["hasMemoryStore"], true);
+        assert_eq!(
+            request["params"]["state"]["memory"],
+            json!({ "enabled": true })
+        );
+        assert_eq!(request["params"]["state"]["hasMemoryStore"], true);
         let session_id = request["params"]["sessionId"].clone();
         write_frame(
             &mut writer,
@@ -145,11 +154,17 @@ impl Fixture {
 async fn memory_store_serves_requests_while_session_create_is_pending() {
     let (client_write, mut reader) = duplex(8192);
     let (mut writer, client_read) = duplex(8192);
-    let client = Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
+    let client = Client::from_streams(
+        copilot_sdk::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        std::env::temp_dir(),
+    )
+    .unwrap();
     let calls = Arc::new(Mutex::new(Vec::new()));
-    let config = SessionConfig::default()
-        .with_memory(MemoryConfiguration::enabled())
-        .with_memory_store(store(false, &calls));
+    let config = CreateSessionOptions::default()
+        .with_state(|group| group.with_memory(MemoryConfiguration::enabled()))
+        .with_state(|group| group.with_memory_store(store(false, &calls)));
     let create = tokio::spawn({
         let client = client.clone();
         async move { client.create_session(config).await.unwrap() }
@@ -157,8 +172,12 @@ async fn memory_store_serves_requests_while_session_create_is_pending() {
 
     let request = read_frame(&mut reader).await;
     assert_eq!(request["method"], "session.create");
-    assert_eq!(request["params"]["hasMemoryStore"], true);
-    assert!(request["params"]["memory"].get("storeMemory").is_none());
+    assert_eq!(request["params"]["state"]["hasMemoryStore"], true);
+    assert!(
+        request["params"]["state"]["memory"]
+            .get("storeMemory")
+            .is_none()
+    );
     let session_id = request["params"]["sessionId"].as_str().unwrap().to_string();
     write_frame(&mut writer, store_request(100, &session_id)).await;
     assert_eq!(
@@ -188,16 +207,19 @@ async fn memory_store_is_rebound_by_session_resume() {
     let resume_calls = Arc::new(Mutex::new(Vec::new()));
     let resume = tokio::spawn({
         let client = fixture.client.clone();
-        let config = ResumeSessionConfig::new(session_id.clone())
-            .with_memory(MemoryConfiguration::enabled())
-            .with_memory_store(store(false, &resume_calls));
+        let config = ResumeSessionOptions::new(session_id.clone())
+            .with_state(|group| group.with_memory(MemoryConfiguration::enabled()))
+            .with_state(|group| group.with_memory_store(store(false, &resume_calls)));
         async move { client.resume_session(config).await.unwrap() }
     });
 
     let request = read_frame(&mut fixture.reader).await;
     assert_eq!(request["method"], "session.resume");
-    assert_eq!(request["params"]["memory"], json!({ "enabled": true }));
-    assert_eq!(request["params"]["hasMemoryStore"], true);
+    assert_eq!(
+        request["params"]["state"]["memory"],
+        json!({ "enabled": true })
+    );
+    assert_eq!(request["params"]["state"]["hasMemoryStore"], true);
     let response = fixture.store(session_id.as_str()).await;
     assert_eq!(
         response,
@@ -225,11 +247,20 @@ async fn memory_store_is_rebound_by_session_resume() {
 async fn memory_store_requires_memory_enabled_before_any_request() {
     let (client_write, mut reader) = duplex(8192);
     let (_writer, client_read) = duplex(8192);
-    let client = Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
+    let client = Client::from_streams(
+        copilot_sdk::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        std::env::temp_dir(),
+    )
+    .unwrap();
     let calls = Arc::new(Mutex::new(Vec::new()));
 
     let Err(error) = client
-        .create_session(SessionConfig::default().with_memory_store(store(false, &calls)))
+        .create_session(
+            CreateSessionOptions::default()
+                .with_state(|group| group.with_memory_store(store(false, &calls))),
+        )
         .await
     else {
         panic!("create must fail");
@@ -240,9 +271,9 @@ async fn memory_store_requires_memory_enabled_before_any_request() {
     );
     let Err(error) = client
         .resume_session(
-            ResumeSessionConfig::new(SessionId::new("resume-id"))
-                .with_memory(MemoryConfiguration::disabled())
-                .with_memory_store(store(false, &calls)),
+            ResumeSessionOptions::new(SessionId::new("resume-id"))
+                .with_state(|group| group.with_memory(MemoryConfiguration::disabled()))
+                .with_state(|group| group.with_memory_store(store(false, &calls))),
         )
         .await
     else {
@@ -255,11 +286,11 @@ async fn memory_store_requires_memory_enabled_before_any_request() {
 
     let probe = tokio::spawn({
         let client = client.clone();
-        async move { client.create_session(SessionConfig::default()).await }
+        async move { client.create_session(CreateSessionOptions::default()).await }
     });
     let request = read_frame(&mut reader).await;
     assert_eq!(request["method"], "session.create");
-    assert!(request["params"].get("hasMemoryStore").is_none());
+    assert!(request["params"]["state"].get("hasMemoryStore").is_none());
     probe.abort();
 }
 

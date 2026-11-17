@@ -1,0 +1,44 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: api.schema.json
+
+package com.microsoft.copilot.generated.rpc;
+
+import com.microsoft.copilot.CopilotExperimental;
+import java.util.concurrent.CompletableFuture;
+import javax.annotation.processing.Generated;
+
+/**
+ * API methods for the {@code tools} namespace.
+ *
+ * @since 1.0.0
+ */
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+public final class ServerToolsApi {
+
+    private final RpcCaller caller;
+
+    /** API methods for the {@code tools.largeOutput} sub-namespace. */
+    final ServerToolsLargeOutputApi largeOutput;
+
+    /** @param caller the RPC transport function */
+    ServerToolsApi(RpcCaller caller) {
+        this.caller = caller;
+        this.largeOutput = new ServerToolsLargeOutputApi(caller);
+    }
+
+    /**
+     * Lists built-in tools available for a model.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<ToolsListResult> list(ToolsListParams params) {
+        return caller.invoke("tools.list", params, ToolsListResult.class);
+    }
+
+}

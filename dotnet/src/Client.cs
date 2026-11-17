@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,7 +19,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>
 /// Provides a client for interacting with the Copilot CLI server.
@@ -27,28 +27,27 @@ namespace GitHub.Copilot;
 /// <remarks>
 /// <para>
 /// The <see cref="CopilotClient"/> manages the connection to the Copilot CLI server and provides
-/// methods to create and manage conversation sessions. It can either spawn a CLI server process
+/// methods to create and manage conversation sessions. It hosts the native runtime in-process
+/// by default, or can spawn a CLI server process
 /// or connect to an existing server.
 /// </para>
 /// <para>
-/// The client supports both stdio (default) and TCP transport modes for communication with the CLI server.
+/// The client supports in-process (default), stdio, TCP, and external-server connections.
 /// </para>
 /// </remarks>
 /// <example>
 /// <code>
-/// // Create a client with default options (spawns CLI server)
-/// await using var client = new CopilotClient();
+/// // Create a client with default transport (hosts the runtime in-process)
+/// await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
 ///
 /// // Create a session
-/// await using var session = await client.CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll, Model = "gpt-5.4" });
-///
+/// await using var session = await client.CreateSessionAsync(new CreateSessionOptions() { Model = "gpt-5.4", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 /// // Handle events
-/// using var subscription = session.On&lt;SessionEvent&gt;(evt =>
+/// using var subscription = session.On&lt;SessionEvent&gt;(evt =&gt;
 /// {
 ///     if (evt is AssistantMessageEvent assistantMessage)
 ///         Console.WriteLine(assistantMessage.Data?.Content);
 /// });
-///
 /// // Send a message
 /// await session.SendAsync(new MessageOptions { Prompt = "Hello!" });
 /// </code>
@@ -59,7 +58,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// <summary>
     /// Minimum protocol version this SDK can communicate with.
     /// </summary>
-    private const int MinProtocolVersion = 3;
+    private const int MinProtocolVersion = 4;
     private static readonly TimeSpan s_stderrPumpShutdownTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan s_runtimeShutdownTimeout = TimeSpan.FromSeconds(10);
 
@@ -85,7 +84,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     private readonly int? _optionsPort;
     private readonly string? _optionsHost;
     private readonly string[] _builtinPluginDirectories;
-    private readonly Func<CancellationToken, Task<IList<ModelInfo>>>? _onListModels;
+    private readonly Func<CancellationToken, Task<IList<Model>>>? _onListModels;
     private readonly List<LifecycleSubscription> _lifecycleHandlers = [];
 
     private Task<Connection>? _connectionTask;
@@ -106,7 +105,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     private sealed class ModelsCache
     {
         public SemaphoreSlim Lock { get; } = new(1, 1);
-        public List<ModelInfo>? Models { get; set; }
+        public List<Model>? Models { get; set; }
     }
     /// <summary>
     /// Client-global RPC handlers (e.g. the LLM inference provider adapter),
@@ -156,45 +155,47 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// <summary>
     /// Creates a new instance of <see cref="CopilotClient"/>.
     /// </summary>
-    /// <param name="options">Options for creating the client. If null, default options are used.</param>
+    /// <param name="options">Options for creating the client. Cannot be null.</param>
     /// <example>
     /// <code>
-    /// // Default options - spawns the bundled runtime using stdio
-    /// var client = new CopilotClient();
+    /// // Default transport - loads the native runtime in this process
+    /// var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
     ///
     /// // Connect to an existing runtime
-    /// var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri("localhost:3000") });
+    /// var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp("localhost", 3000) });
     ///
     /// // Custom runtime path with specific log level
     /// var client = new CopilotClient(new CopilotClientOptions
     /// {
-    ///     Connection = RuntimeConnection.ForStdio(path: "/usr/local/bin/copilot"),
-    ///     LogLevel = CopilotLogLevel.Debug
+    ///     Mode = CopilotClientMode.CodingAgent,
+    ///     Runtime = RuntimeConnection.ForSpawnedStdio(path: "/usr/local/bin/copilot"),
+    ///     Observability = new ClientObservabilityOptions { LogLevel = CopilotLogLevel.Debug }
     /// });
     /// </code>
     /// </example>
-    public CopilotClient(CopilotClientOptions? options = null)
+    public CopilotClient(CopilotClientOptions options)
     {
-        _options = options ?? new();
-        _connection = _options.Connection ?? ResolveDefaultConnection(_options);
-        _builtinPluginDirectories = _options.BuiltinPluginDirectories?.ToArray() ?? [];
+        ArgumentNullException.ThrowIfNull(options);
+        _options = options;
+        _connection = _options.Runtime ?? RuntimeConnection.ForDefault();
+        _builtinPluginDirectories = _options.Plugins.BuiltinDirectories?.ToArray() ?? [];
         foreach (var path in _builtinPluginDirectories.Where(path => !IsFullyQualifiedPath(path)))
         {
             throw new ArgumentException(
-                $"{nameof(CopilotClientOptions)}.{nameof(CopilotClientOptions.BuiltinPluginDirectories)} " +
+                $"{nameof(CopilotClientOptions)}.{nameof(CopilotClientOptions.Plugins.BuiltinDirectories)} " +
                 $"must contain only absolute paths: {path}",
                 nameof(options));
         }
 
         switch (_connection)
         {
-            case StdioRuntimeConnection:
+            case SpawnedStdioRuntimeConnection:
                 break;
 
             case InProcessRuntimeConnection:
                 break;
 
-            case TcpRuntimeConnection tcp:
+            case SpawnedTcpRuntimeConnection tcp:
                 if (tcp.ConnectionToken is { Length: 0 })
                 {
                     throw new ArgumentException("ConnectionToken must be a non-empty string or null.", nameof(options));
@@ -204,28 +205,45 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 tcp.ConnectionToken ??= Guid.NewGuid().ToString();
                 break;
 
-            case UriRuntimeConnection uri:
-                if (string.IsNullOrEmpty(uri.Url))
+            case TcpRuntimeConnection existing:
+                if (options.InternalTestOptions is not null)
                 {
-                    throw new ArgumentException("UriRuntimeConnection.Url must be a non-empty string.", nameof(options));
+                    throw new ArgumentException("InternalTestOptions requires a runtime owned by this client", nameof(options));
                 }
-                if (!string.IsNullOrEmpty(_options.GitHubToken) || _options.UseLoggedInUser != null)
+                if (Uri.CheckHostName(existing.Host) == UriHostNameType.Unknown ||
+                    existing.Host[0] == '[') // CheckHostName also accepts bracketed IPv6; this API requires an unbracketed host.
                 {
-                    throw new ArgumentException("GitHubToken and UseLoggedInUser cannot be combined with RuntimeConnection.ForUri (the existing runtime manages its own auth).", nameof(options));
+                    throw new ArgumentException("Host must be a hostname or IP address without a scheme, port, or path.", nameof(options));
                 }
-                var parsed = ParseRuntimeUrl(uri.Url);
-                _optionsHost = parsed.Host.Trim('[', ']');
-                _optionsPort = parsed.Port;
+                if (existing.Port < 1 || existing.Port > 65535)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(options), "Port must be from 1 through 65535.");
+                }
+                var runtimeOnlyOptions = new List<string>();
+                if (_options.GitHub.Token is not null)
+                    runtimeOnlyOptions.Add("GitHub.Token");
+                if (_options.GitHub.UseLoggedInUser is not null)
+                    runtimeOnlyOptions.Add("GitHub.UseLoggedInUser");
+                if (_options.Observability.LogLevel is not null)
+                    runtimeOnlyOptions.Add("Observability.LogLevel");
+                if (_options.Observability.Telemetry is not null)
+                    runtimeOnlyOptions.Add("Observability.Telemetry");
+                if (runtimeOnlyOptions.Count != 0)
+                {
+                    throw new ArgumentException(
+                        $"{string.Join(", ", runtimeOnlyOptions)} cannot be used with RuntimeConnection.ForTcp because the existing runtime manages its own startup configuration.",
+                        nameof(options));
+                }
+                _optionsHost = existing.Host;
+                _optionsPort = existing.Port;
                 break;
 
             default:
                 throw new ArgumentException($"Unsupported RuntimeConnection type: {_connection.GetType().Name}", nameof(options));
         }
 
-        ValidateEnvironmentOptions(_options, _connection);
-
-        _logger = _options.Logger ?? NullLogger.Instance;
-        _onListModels = _options.OnListModels;
+        _logger = _options.Observability.Logger ?? NullLogger.Instance;
+        _onListModels = _options.Models.OnListModels;
 
         _clientGlobalApis = BuildClientGlobalApis();
 
@@ -236,11 +254,11 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         if (_options.Mode == CopilotClientMode.Empty)
         {
             var hasPersistence =
-                !string.IsNullOrEmpty(_options.BaseDirectory) ||
+                !string.IsNullOrEmpty((_options.Runtime as OwnedRuntimeConnection)?.BaseDirectory) ||
                 _options.SessionFs is not null ||
                 // External runtimes manage their own persistence layer; the SDK
                 // can't enforce it from here.
-                _connection is UriRuntimeConnection;
+                _connection is TcpRuntimeConnection;
             if (!hasPersistence)
             {
                 throw new ArgumentException(
@@ -250,109 +268,6 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                     nameof(options));
             }
         }
-    }
-
-    /// <summary>
-    /// Rejects process-wide settings not supported by in-process hosts and
-    /// conflicting environment dictionaries for child-process transports.
-    /// </summary>
-    private static void ValidateEnvironmentOptions(CopilotClientOptions options, RuntimeConnection connection)
-    {
-        if (connection is UriRuntimeConnection && options.InternalTestOptions is not null)
-        {
-            throw new ArgumentException("InternalTestOptions requires a runtime owned by this client", nameof(options));
-        }
-        if (connection is InProcessRuntimeConnection)
-        {
-            if (options.Environment is not null)
-            {
-                throw new ArgumentException(
-                    "CopilotClientOptions.Environment is not supported with RuntimeConnection.ForInProcess(): " +
-                    "environment variables belong to the shared host process. Use typed client/session options " +
-                    "or a child-process transport.", nameof(options));
-            }
-            if (options.WorkingDirectory is not null)
-            {
-                throw new ArgumentException(
-                    $"{nameof(CopilotClientOptions)}.{nameof(CopilotClientOptions.WorkingDirectory)} is not supported with " +
-                    $"{nameof(RuntimeConnection)}.{nameof(RuntimeConnection.ForInProcess)}(): the in-process transport hosts " +
-                    "the native runtime in the shared host process and spawns the worker without a working-directory " +
-                    "parameter, so a per-client working directory cannot be honored in-process. Set " +
-                    "SessionConfig.WorkingDirectory instead, or use a child-process transport.",
-                    nameof(options));
-            }
-
-            return;
-        }
-
-        if (connection is ChildProcessRuntimeConnection { Environment: not null } && options.Environment is not null)
-        {
-            throw new ArgumentException(
-                $"Set environment variables via either {nameof(CopilotClientOptions)}.{nameof(CopilotClientOptions.Environment)} " +
-                $"or {nameof(ChildProcessRuntimeConnection)}.{nameof(ChildProcessRuntimeConnection.Environment)}, not both. " +
-                $"Prefer {nameof(ChildProcessRuntimeConnection)}.{nameof(ChildProcessRuntimeConnection.Environment)} for " +
-                "child-process transports.",
-                nameof(options));
-        }
-    }
-
-    /// <summary>
-    /// Environment variable that overrides the transport used when the caller does not
-    /// specify <see cref="CopilotClientOptions.Connection"/>. Accepts <c>"inprocess"</c>
-    /// or <c>"stdio"</c> (case-insensitive); unset preserves the default stdio transport.
-    /// Any other value is an error. Ignored when a <see cref="RuntimeConnection"/> is set
-    /// explicitly.
-    /// </summary>
-    internal const string DefaultConnectionEnvVar = "COPILOT_SDK_DEFAULT_CONNECTION";
-
-    /// <summary>
-    /// Resolves the default <see cref="RuntimeConnection"/> for the no-Connection case,
-    /// honoring <see cref="DefaultConnectionEnvVar"/>.
-    /// </summary>
-    private static RuntimeConnection ResolveDefaultConnection(CopilotClientOptions options)
-    {
-        var value = options.Environment is not null
-            && options.Environment.TryGetValue(DefaultConnectionEnvVar, out var fromOptions)
-                ? fromOptions
-                : System.Environment.GetEnvironmentVariable(DefaultConnectionEnvVar);
-
-        if (string.IsNullOrEmpty(value) || string.Equals(value, "stdio", StringComparison.OrdinalIgnoreCase))
-        {
-            return RuntimeConnection.ForStdio();
-        }
-        if (string.Equals(value, "inprocess", StringComparison.OrdinalIgnoreCase))
-        {
-            return RuntimeConnection.ForInProcess();
-        }
-        throw new ArgumentException(
-            $"Invalid {DefaultConnectionEnvVar} value '{value}'. Expected 'inprocess', 'stdio', or unset.");
-    }
-
-    /// <summary>
-    /// Parses a runtime URL into a URI with host and port.
-    /// </summary>
-    /// <param name="url">The URL to parse. Supports formats: "port", "host:port", "[ipv6]:port", "http://host:port".</param>
-    private static Uri ParseRuntimeUrl(string url)
-    {
-        if (url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException(
-                "HTTPS runtime connections are not supported: this transport uses plaintext TCP, not TLS");
-        }
-
-        // If it's just a port number, treat as localhost
-        if (int.TryParse(url, out var port))
-        {
-            return new Uri($"http://localhost:{port}");
-        }
-
-        // Preserve legacy port defaults when normalizing scheme-less TCP addresses.
-        if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
-        {
-            url = "https://" + url;
-        }
-
-        return new Uri(url);
     }
 
     private static bool IsFullyQualifiedPath(string path)
@@ -381,15 +296,15 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// <param name="cancellationToken">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
     /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
     /// <remarks>
-    /// If the server is not already running and the client is configured to spawn one (default), it will be started.
-    /// If connecting to an external runtime (via RuntimeConnection.ForUri), only establishes the connection.
+    /// If the client owns the runtime, it starts it in-process by default or using the explicitly configured subprocess transport.
+    /// If connecting to an external runtime (via RuntimeConnection.ForTcp), only establishes the connection.
     /// If a previous start failed or was canceled, calling this method again starts the client anew.
     /// If the connection closed after a successful start, for example because the runtime process exited,
     /// calling this method again retires that connection and its sessions, then starts the client anew.
     /// </remarks>
     /// <example>
     /// <code>
-    /// var client = new CopilotClient();
+    /// var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
     /// await client.StartAsync();
     /// // Now ready to create sessions
     /// </code>
@@ -487,7 +402,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                     await ffiHost.StartAsync(ct);
                     connection = await ConnectToServerAsync(null, null, null, null, ct, ffiHost);
                 }
-                else if (_connection is UriRuntimeConnection)
+                else if (_connection is TcpRuntimeConnection)
                 {
                     // External runtime
                     Volatile.Write(ref _actualPort, _optionsPort is int port ? new RuntimePortRegistration(port) : null);
@@ -520,7 +435,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                     await network.RegisterAsync(connection.Server.Network, ct);
                 }
 
-                if (_options.ExtensionLaunchProvider is not null)
+                if (_options.Extensions.LaunchProvider is not null)
                 {
                     await connection.Server.RegisterExtensionLaunchProviderAsync(ct);
                 }
@@ -800,6 +715,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 or InvalidOperationException
                 or ObjectDisposedException
                 or IOException
+                or RemoteRpcException
                 or SocketException)
             {
                 LoggingHelpers.LogTiming(_logger, LogLevel.Debug, ex,
@@ -1010,7 +926,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     private CopilotSession InitializeSession(
         string sessionId,
         JsonRpc rpc,
-        SessionConfigBase config,
+        SessionOptionsBase config,
         Dictionary<string, Func<string, Task<string>>>? transformCallbacks,
         bool hasHooks,
         string callerName,
@@ -1022,39 +938,39 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             rpc,
             _logger,
             this);
-        session.RegisterTools(config.Tools ?? []);
+        session.RegisterTools(config.Tools.Definitions ?? []);
         session.RegisterPermissionHandler(
-            config.OnPermissionRequest,
-            config.EnableManagedSettings is true || config.ManagedSettings is not null);
-        session.RegisterMcpAuthHandler(config.OnMcpAuthRequest);
-        session.RegisterCommands(config.Commands);
-        session.RegisterElicitationHandler(config.OnElicitationRequest);
-        session.RegisterExitPlanModeHandler(config.OnExitPlanModeRequest);
-        session.RegisterAutoModeSwitchHandler(config.OnAutoModeSwitchRequest);
-        session.RegisterSkillProvider(config.SkillProvider);
-        session.RegisterMemoryStore(config.Memory?.StoreMemory);
-        if (config.OnUserInputRequest != null)
+            config.Permissions.OnRequest,
+            config.GitHub.FetchManagedSettings is true || config.Policy.ManagedSettings is not null);
+        session.RegisterMcpAuthHandler(config.Mcp.OnAuthRequest);
+        session.RegisterCommands(config.Interaction.Commands);
+        session.RegisterElicitationHandler(config.Interaction.OnElicitationRequest);
+        session.RegisterExitPlanModeHandler(config.Interaction.OnExitPlanModeRequest);
+        session.RegisterAutoModeSwitchHandler(config.Interaction.OnAutoModeSwitchRequest);
+        session.RegisterSkillProvider(config.Skills.Provider);
+        session.RegisterMemoryStore(config.State.Memory?.StoreMemory);
+        if (config.Interaction.OnUserInputRequest != null)
         {
-            session.RegisterUserInputHandler(config.OnUserInputRequest);
+            session.RegisterUserInputHandler(config.Interaction.OnUserInputRequest);
         }
-        if (config.OnShellAuthenticationRequest != null)
+        if (config.Interaction.OnShellAuthenticationRequest != null)
         {
-            session.RegisterShellAuthenticationHandler(config.OnShellAuthenticationRequest);
+            session.RegisterShellAuthenticationHandler(config.Interaction.OnShellAuthenticationRequest);
         }
-        if (config.Hooks != null)
+        if (config.Hooks.Handlers != null)
         {
-            session.RegisterHooks(config.Hooks);
+            session.RegisterHooks(config.Hooks.Handlers);
         }
         if (transformCallbacks != null)
         {
             session.RegisterTransformCallbacks(transformCallbacks);
         }
-        if (config.OnEvent != null)
+        if (config.Events.OnEvent != null)
         {
-            session.On<SessionEvent>(config.OnEvent);
+            session.On<SessionEvent>(config.Events.OnEvent);
         }
-        ConfigureSessionFsHandlers(session, config.CreateSessionFsProvider);
-        session.SetCanvasHandler(config.CanvasHandler);
+        ConfigureSessionFsHandlers(session, config.State.CreateSessionFsProvider);
+        session.SetCanvasHandler(config.Canvases.Handler);
         session.RegisterBearerTokenProviders(BuildBearerTokenCallbacks(config));
         RegisterSession(session, rpc, replacedSession);
         session.StartProcessingEvents();
@@ -1062,33 +978,22 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             callerName + " local setup complete. Elapsed={Elapsed}, SessionId={SessionId}, Tools={ToolsCount}, Commands={CommandsCount}, Hooks={HasHooks}",
             setupTimestamp,
             sessionId,
-            config.Tools?.Count ?? 0,
-            config.Commands?.Count ?? 0,
+            config.Tools.Definitions?.Count ?? 0,
+            config.Interaction.Commands?.Count ?? 0,
             hasHooks);
         return session;
     }
 
     /// <summary>
-    /// Implicit provider name for the singular, whole-session <see cref="ProviderConfig"/>.
-    /// </summary>
-    private const string DefaultBearerTokenProviderName = "default";
-
-    /// <summary>
     /// Collects the per-provider <c>BearerTokenProvider</c> callbacks keyed by
-    /// provider name for session-side registration. The singular, whole-session
-    /// <see cref="ProviderConfig"/> uses the implicit
-    /// <see cref="DefaultBearerTokenProviderName"/>.
+    /// configured provider name for session-side registration.
     /// </summary>
-    private static Dictionary<string, Func<ProviderTokenArgs, Task<string>>> BuildBearerTokenCallbacks(SessionConfigBase config)
+    private static Dictionary<string, Func<ProviderTokenArgs, Task<string>>> BuildBearerTokenCallbacks(SessionOptionsBase config)
     {
         var callbacks = new Dictionary<string, Func<ProviderTokenArgs, Task<string>>>(StringComparer.Ordinal);
-        if (config.Provider?.BearerTokenProvider is { } singular)
+        if (config.Inference.Providers != null)
         {
-            callbacks[DefaultBearerTokenProviderName] = singular;
-        }
-        if (config.Providers != null)
-        {
-            foreach (var provider in config.Providers.Where(provider => provider.BearerTokenProvider is not null))
+            foreach (var provider in config.Inference.Providers.Where(provider => provider.BearerTokenProvider is not null))
             {
                 callbacks[provider.Name] = provider.BearerTokenProvider!;
             }
@@ -1097,8 +1002,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Catches misuse of <see cref="SessionConfigBase.AvailableTools"/> /
-    /// <see cref="SessionConfigBase.ExcludedTools"/> at the SDK boundary so
+    /// Catches misuse of <see cref="SessionToolOptions.AvailableTools"/> /
+    /// <see cref="SessionToolOptions.ExcludedTools"/> at the SDK boundary so
     /// callers get an actionable error rather than a silently-empty filter.
     /// The runtime treats a bare <c>"*"</c> as a literal name match for a tool
     /// whose name is the single character <c>*</c>, which the runtime's
@@ -1122,16 +1027,16 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Resolves <see cref="SessionConfigBase.AvailableTools"/> /
-    /// <see cref="SessionConfigBase.ExcludedTools"/> for the wire payload,
+    /// Resolves <see cref="SessionToolOptions.AvailableTools"/> /
+    /// <see cref="SessionToolOptions.ExcludedTools"/> for the wire payload,
     /// validating empty-mode requirements.
     /// </summary>
-    private (IList<string>? AvailableTools, IList<string>? ExcludedTools) ResolveToolFilterOptions(SessionConfigBase config)
+    private (IList<string>? AvailableTools, IList<string>? ExcludedTools) ResolveToolFilterOptions(SessionOptionsBase config)
     {
-        ValidateToolFilterList(nameof(SessionConfigBase.AvailableTools), config.AvailableTools);
-        ValidateToolFilterList(nameof(SessionConfigBase.ExcludedTools), config.ExcludedTools);
+        ValidateToolFilterList(nameof(SessionOptionsBase.Tools.AvailableTools), config.Tools.AvailableTools);
+        ValidateToolFilterList(nameof(SessionOptionsBase.Tools.ExcludedTools), config.Tools.ExcludedTools);
 
-        if (_options.Mode == CopilotClientMode.Empty && config.AvailableTools is null)
+        if (_options.Mode == CopilotClientMode.Empty && config.Tools.AvailableTools is null)
         {
             throw new ArgumentException(
                 "CopilotClient is in Mode = CopilotClientMode.Empty but the session config did " +
@@ -1141,29 +1046,29 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 nameof(config));
         }
 
-        return (config.AvailableTools, config.ExcludedTools);
+        return (config.Tools.AvailableTools, config.Tools.ExcludedTools);
     }
 
     /// <summary>
     /// Applies mode-specific defaults to a session config in place. Caller
     /// values win — only fields left unset by the caller are filled in.
     /// </summary>
-    private void ApplyConfigDefaultsForMode(SessionConfigBase config)
+    private void ApplyConfigDefaultsForMode(SessionOptionsBase config)
     {
         if (_options.Mode == CopilotClientMode.Empty)
         {
-            config.EnableExperimentalMode ??= false;
-            config.EnableSessionTelemetry ??= false;
-            config.SkipEmbeddingRetrieval ??= true;
-            config.EmbeddingCacheStorage ??= EmbeddingCacheStorageMode.InMemory;
-            config.EnableOnDemandInstructionDiscovery ??= false;
-            config.EnableFileHooks ??= false;
-            config.EnableHostGitOperations ??= false;
-            config.EnableSessionStore ??= false;
-            config.EnableSkills ??= false;
-            config.Memory ??= new MemoryConfiguration { Enabled = false };
-            config.McpOAuthTokenStorage ??= McpOAuthTokenStorageMode.InMemory;
-            config.CustomAgentsLocalOnly ??= true;
+            config.Experiments.EnableExperimentalMode ??= false;
+            config.GitHub.TelemetryEnabled ??= false;
+            config.State.SkipEmbeddingRetrieval ??= true;
+            config.State.EmbeddingCacheStorage ??= EmbeddingCacheStorageMode.InMemory;
+            config.Instructions.OnDemandDiscovery ??= false;
+            config.Hooks.EnableRepositoryHooks ??= false;
+            config.Git.EnableHostGitOperations ??= false;
+            config.State.EnableCrossSessionStore ??= false;
+            config.Skills.Enabled ??= false;
+            config.State.Memory ??= new MemoryConfiguration { Enabled = false };
+            config.Mcp.OauthTokenStorage ??= McpOAuthTokenStorageMode.InMemory;
+            config.Agents.LocalDiscoveryOnly ??= true;
         }
     }
 
@@ -1237,15 +1142,15 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// Applies the post-create / post-resume <c>session.options.update</c>
     /// patch for the current mode. In empty mode this defaults the four
     /// overridable feature flags to safe values (caller values from
-    /// <paramref name="config"/> win); <c>installedPlugins=[]</c> is
-    /// unconditional under empty mode. <c>includedBuiltinSkills</c> defaults to
+    /// <paramref name="config"/> win); <c>plugins.installed=[]</c> is
+    /// unconditional under empty mode. <c>skills.includedBuiltinSkills</c> defaults to
     /// an empty list, but callers can explicitly allow selected runtime-bundled
-    /// skills. In copilot-cli mode only explicitly-set fields are forwarded.
+    /// skills. In coding-agent mode only explicitly-set fields are forwarded.
     /// </summary>
     /// <returns>
     /// The settings that only this patch carries, or <see langword="null"/> when no patch was sent.
     /// </returns>
-    private async Task<AppliedSessionOptions?> UpdateSessionOptionsForModeAsync(CopilotSession session, SessionConfigBase config, CancellationToken cancellationToken)
+    private async Task<AppliedSessionOptions?> UpdateSessionOptionsForModeAsync(CopilotSession session, SessionOptionsBase config, CancellationToken cancellationToken)
     {
         var hasAnyPatch = false;
         bool? skipCustomInstructions = null;
@@ -1257,37 +1162,37 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
 
         if (_options.Mode == CopilotClientMode.Empty)
         {
-            skipCustomInstructions = config.SkipCustomInstructions ?? true;
-            customAgentsLocalOnly = config.CustomAgentsLocalOnly ?? true;
-            coauthorEnabled = config.CoauthorEnabled ?? false;
-            manageScheduleEnabled = config.ManageScheduleEnabled ?? false;
+            skipCustomInstructions = config.Instructions.SkipCustomInstructions ?? true;
+            customAgentsLocalOnly = config.Agents.LocalDiscoveryOnly ?? true;
+            coauthorEnabled = config.Git.CoauthorEnabled ?? false;
+            manageScheduleEnabled = config.Tools.ManageScheduleEnabled ?? false;
             installedPlugins = [];
-            includedBuiltinSkills = config.IncludedBuiltinSkills ?? [];
+            includedBuiltinSkills = config.Skills.IncludedBuiltinSkills ?? [];
             hasAnyPatch = true;
         }
         else
         {
-            if (config.SkipCustomInstructions is not null) { skipCustomInstructions = config.SkipCustomInstructions; hasAnyPatch = true; }
-            if (config.CustomAgentsLocalOnly is not null) { customAgentsLocalOnly = config.CustomAgentsLocalOnly; hasAnyPatch = true; }
-            if (config.CoauthorEnabled is not null) { coauthorEnabled = config.CoauthorEnabled; hasAnyPatch = true; }
-            if (config.ManageScheduleEnabled is not null) { manageScheduleEnabled = config.ManageScheduleEnabled; hasAnyPatch = true; }
-            if (config.IncludedBuiltinSkills is not null) { includedBuiltinSkills = config.IncludedBuiltinSkills; hasAnyPatch = true; }
+            if (config.Instructions.SkipCustomInstructions is not null) { skipCustomInstructions = config.Instructions.SkipCustomInstructions; hasAnyPatch = true; }
+            if (config.Agents.LocalDiscoveryOnly is not null) { customAgentsLocalOnly = config.Agents.LocalDiscoveryOnly; hasAnyPatch = true; }
+            if (config.Git.CoauthorEnabled is not null) { coauthorEnabled = config.Git.CoauthorEnabled; hasAnyPatch = true; }
+            if (config.Tools.ManageScheduleEnabled is not null) { manageScheduleEnabled = config.Tools.ManageScheduleEnabled; hasAnyPatch = true; }
+            if (config.Skills.IncludedBuiltinSkills is not null) { includedBuiltinSkills = config.Skills.IncludedBuiltinSkills; hasAnyPatch = true; }
         }
 
         if (!hasAnyPatch) return null;
 
         try
         {
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
             await session.Rpc.Options.UpdateAsync(
-                skipCustomInstructions: skipCustomInstructions,
-                customAgentsLocalOnly: customAgentsLocalOnly,
-                coauthorEnabled: coauthorEnabled,
-                manageScheduleEnabled: manageScheduleEnabled,
-                installedPlugins: installedPlugins,
-                includedBuiltinSkills: includedBuiltinSkills,
+                instructions: skipCustomInstructions is null ? null : new SessionUpdateInstructionOptions { SkipCustomInstructions = skipCustomInstructions },
+                agents: customAgentsLocalOnly is null ? null : new SessionUpdateAgentOptions { LocalDiscoveryOnly = customAgentsLocalOnly },
+                git: coauthorEnabled is null ? null : new SessionUpdateGitOptions { CoauthorEnabled = coauthorEnabled },
+                tools: manageScheduleEnabled is null ? null : new SessionUpdateToolOptions { ManageScheduleEnabled = manageScheduleEnabled },
+                plugins: installedPlugins is null ? null : new SessionUpdatePluginOptions { Installed = installedPlugins },
+                skills: includedBuiltinSkills is null ? null : new SessionUpdateSkillOptions { IncludedBuiltinSkills = includedBuiltinSkills },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
         }
         catch
         {
@@ -1324,31 +1229,25 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// <example>
     /// <code>
     /// // Basic session
-    /// var session = await client.CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll });
-    ///
+    /// var session = await client.CreateSessionAsync(new CreateSessionOptions() { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
     /// // Session with model and tools
-    /// var session = await client.CreateSessionAsync(new()
-    /// {
-    ///     OnPermissionRequest = PermissionHandler.ApproveAll,
-    ///     Model = "gpt-5.4",
-    ///     Tools = [AIFunctionFactory.Create(MyToolMethod)]
-    /// });
+    /// var session = await client.CreateSessionAsync(new CreateSessionOptions() { Model = "gpt-5.4", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(MyToolMethod)] } });
     /// </code>
     /// </example>
-    public async Task<CopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken = default)
+    public async Task<CopilotSession> CreateSessionAsync(CreateSessionOptions config, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
-        if (config.AutoModeRecovery && config.OnAutoModeSwitchRequest is null)
+        if (config.Interaction.AutoModeRecovery && config.Interaction.OnAutoModeSwitchRequest is null)
         {
             throw new ArgumentException("AutoModeRecovery requires OnAutoModeSwitchRequest", nameof(config));
         }
         ValidateGitHubTokenConfig(config);
         ValidateMemoryConfig(config);
-        if (config.Cloud is not null && config.SkillProvider is not null)
+        if (config.Cloud is not null && config.Skills.Provider is not null)
         {
             throw new ArgumentException("Skill providers are not supported for cloud sessions.");
         }
-        if (config.Cloud is not null && config.Memory?.StoreMemory is not null)
+        if (config.Cloud is not null && config.State.Memory?.StoreMemory is not null)
         {
             throw new ArgumentException("Memory stores are not supported for cloud sessions.");
         }
@@ -1360,19 +1259,19 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         config.SystemMessage = GetSystemMessageConfigForMode(config.SystemMessage);
         var toolFilter = ResolveToolFilterOptions(config);
 
-        var hasHooks = config.Hooks != null && (
-            config.Hooks.OnPreToolUse != null ||
-            config.Hooks.OnPreMcpToolCall != null ||
-            config.Hooks.OnPostToolUse != null ||
-            config.Hooks.OnPostToolUseFailure != null ||
-            config.Hooks.OnUserPromptSubmitted != null ||
-            config.Hooks.OnUserPromptTransformed != null ||
-            config.Hooks.OnSessionStart != null ||
-            config.Hooks.OnSessionEnd != null ||
-            config.Hooks.OnErrorOccurred != null ||
-            config.Hooks.OnAgentStop != null ||
-            config.Hooks.OnSubagentStart != null ||
-            config.Hooks.OnSubagentStop != null);
+        var hasHooks = config.Hooks.Handlers != null && (
+            config.Hooks.Handlers.OnPreToolUse != null ||
+            config.Hooks.Handlers.OnPreMcpToolCall != null ||
+            config.Hooks.Handlers.OnPostToolUse != null ||
+            config.Hooks.Handlers.OnPostToolUseFailure != null ||
+            config.Hooks.Handlers.OnUserPromptSubmitted != null ||
+            config.Hooks.Handlers.OnUserPromptTransformed != null ||
+            config.Hooks.Handlers.OnSessionStart != null ||
+            config.Hooks.Handlers.OnSessionEnd != null ||
+            config.Hooks.Handlers.OnErrorOccurred != null ||
+            config.Hooks.Handlers.OnAgentStop != null ||
+            config.Hooks.Handlers.OnSubagentStart != null ||
+            config.Hooks.Handlers.OnSubagentStop != null);
 
         var (wireSystemMessage, transformCallbacks) = ExtractTransformCallbacks(config.SystemMessage);
 
@@ -1388,7 +1287,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             ? null
             : (string.IsNullOrEmpty(config.SessionId) ? Guid.NewGuid().ToString() : config.SessionId);
 
-        var registrationId = RegisterGitHubTokenProvider(config.GitHubTokenProvider);
+        var registrationId = RegisterGitHubTokenProvider(config.GitHub.TokenProvider);
         var registrationTransferred = false;
         CopilotSession? session = null;
         SessionOperation? operation = null;
@@ -1397,7 +1296,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         {
             if (localSessionId != null)
             {
-                operation = BeginSessionOperation(localSessionId, connection.Rpc, config.AutoModeRecovery, initializeSession: true);
+                operation = BeginSessionOperation(localSessionId, connection.Rpc, config.Interaction.AutoModeRecovery, initializeSession: true);
                 session = InitializeSession(
                     localSessionId,
                     connection.Rpc,
@@ -1409,111 +1308,173 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
 
             var (traceparent, tracestate) = TelemetryHelpers.GetTraceContext();
 
-            var request = new CreateSessionRequest(
-                config.Model,
-                localSessionId,
-                config.Name,
-                config.ClientName,
-                config.ReasoningEffort,
-                config.AllowMultipleToolCalls,
-                config.ReasoningSummary,
-                config.ContextTier,
-                config.Tools?.Select(ToolDefinition.FromAIFunction).ToList(),
-                config.EnableCitations,
-                config.EnableFileChangeTracking,
-                wireSystemMessage,
-                config.AskUserVariant,
-                toolFilter.AvailableTools,
-                toolFilter.ExcludedTools,
-                config.ExcludedBuiltInAgents,
-                config.IncludedBuiltInAgents,
-                config.Provider,
-                config.Capi,
-                config.EnableSessionTelemetry,
-                config.EnableExperimentalMode,
-                config.OnPermissionRequest != null ? true : null,
-                config.OnUserInputRequest != null ? true : null,
-                config.OnExitPlanModeRequest != null ? true : null,
-                config.OnAutoModeSwitchRequest != null ? true : null,
-                hasHooks ? true : null,
-                config.WorkingDirectory,
-                config.Streaming is true ? true : null,
-                config.IncludeSubAgentStreamingEvents,
-                config.McpServers,
-                config.Diagnostics,
-                config.LifecycleDiagnostics,
-                config.McpOAuthTokenStorage,
-                config.AuthClientIdMetadataUrl,
-                "direct",
-                config.CustomAgents,
-                config.DefaultAgent,
-                config.Agent,
-                config.ConfigDirectory,
-                config.EnableConfigDiscovery,
-                config.CustomAgentsLocalOnly,
-                config.SkipEmbeddingRetrieval,
-                config.EmbeddingCacheStorage,
-                config.OrganizationCustomInstructions,
-                config.EnableOnDemandInstructionDiscovery,
-                config.EnableFileHooks,
-                config.EnableHostGitOperations,
-                config.EnableSessionStore,
-                config.EnableSkills,
-                config.SkillDirectories,
-                config.DisabledSkills,
-                config.InfiniteSessions,
-                config.SessionLimits,
-                config.Autopilot,
-                Commands: config.Commands?.Select(c => new CommandWireDefinition(c.Name, c.Description ?? string.Empty)).ToList(),
-                RequestElicitation: config.OnElicitationRequest != null,
-                RequestAutoModeRecovery: config.AutoModeRecovery ? true : null,
-                RequestMcpApps: config.EnableMcpApps ? true : null,
-                RequestShellAuthentication: config.OnShellAuthenticationRequest != null ? true : null,
-                Traceparent: traceparent,
-                Tracestate: tracestate,
-                ModelCapabilities: config.ModelCapabilities,
-                GitHubToken: config.GitHubToken,
-                GitHubTokenProviderRegistrationId: registrationId,
-                Cloud: config.Cloud,
-                TrustWorkingDirectory: config.TrustWorkingDirectory switch
+            var request = new CreateSessionRequest
+            {
+                Model = config.Model,
+                SessionId = localSessionId,
+                Name = config.Name,
+                ClientName = config.ClientName,
+                SystemMessage = wireSystemMessage,
+                WorkingDirectory = config.WorkingDirectory,
+                Diagnostics = config.Diagnostics,
+                LifecycleDiagnostics = config.LifecycleDiagnostics,
+                Traceparent = traceparent,
+                Tracestate = tracestate,
+                Cloud = config.Cloud,
+                Inference = new SessionInferenceRequest
                 {
-                    WorkingDirectoryTrust.Session => "session",
-                    WorkingDirectoryTrust.User => "user",
-                    null => null,
-                    _ => throw new ArgumentOutOfRangeException(nameof(config), config.TrustWorkingDirectory, "Unsupported working-directory trust scope.")
+                    ReasoningEffort = config.Inference.ReasoningEffort,
+                    AllowMultipleToolCalls = config.Inference.AllowMultipleToolCalls,
+                    ReasoningSummary = config.Inference.ReasoningSummary,
+                    ContextTier = config.Inference.ContextTier,
+                    EnableCitations = config.Inference.EnableCitations,
+                    DefaultProvider = config.Inference.DefaultProviderForWire,
+                    Capabilities = config.Inference.Capabilities,
+                    Providers = config.Inference.Providers,
+                    Models = config.Inference.Models
                 },
-                RefreshCustomInstructions: config.RefreshCustomInstructions,
-                InstructionDirectories: config.InstructionDirectories,
-                AgentDirectories: config.AgentDirectories,
-                HookDirectories: config.HookDirectories,
-                PluginDirectories: config.PluginDirectories,
-                DisabledMcpServers: config.DisabledMcpServers,
-                SandboxConfig: config.SandboxConfig,
-                LargeOutput: config.LargeOutput,
-                ToolSearch: config.ToolSearch,
-                ImageGeneration: config.ImageGeneration,
-                Memory: config.Memory,
-                Canvases: config.Canvases,
-                RequestCanvasRenderer: config.RequestCanvasRenderer,
-                RequestExtensions: config.RequestExtensions,
-                ExtensionSdkPath: config.ExtensionSdkPath,
-                ExtensionInfo: config.ExtensionInfo,
-                CanvasProvider: config.CanvasProvider,
-                Providers: config.Providers,
-                Models: config.Models,
-                FeatureFlags: config.FeatureFlags,
-                ExpAssignments: config.ExpAssignments,
-                EnableManagedSettings: config.EnableManagedSettings,
-                ExcludedManagedSettings: config.ExcludedManagedSettings,
-                EnforceManagedModelDefaults: config.EnforceManagedModelDefaults,
-                InteractiveUser: config.InteractiveUser,
-                PermissionMode: config.PermissionMode,
-                GitHubMcpToolConfig: config.GitHubMcpToolConfig,
-                ManagedSettings: config.ManagedSettings,
-                EnableGitHubTelemetryForwarding: _options.OnGitHubTelemetry != null ? true : null,
-                AdditionalDirectories: config.AdditionalDirectories,
-                HasSkillProvider: config.SkillProvider is not null ? true : null,
-                HasMemoryStore: config.Memory?.StoreMemory is not null ? true : null);
+                Filesystem = new SessionFilesystemRequest
+                {
+                    TrackFileChanges = config.Filesystem.TrackFileChanges,
+                    TrustWorkingDirectory = config.Filesystem.TrustWorkingDirectory switch
+                    {
+                        WorkingDirectoryTrust.Session => "session",
+                        WorkingDirectoryTrust.User => "user",
+                        null => null,
+                        _ => throw new ArgumentOutOfRangeException(nameof(config), config.Filesystem.TrustWorkingDirectory, "Unsupported working-directory trust scope.")
+                    },
+                    AdditionalDirectories = config.Filesystem.AdditionalDirectories
+                },
+                Interaction = new SessionInteractionRequest
+                {
+                    AskUserVariant = config.Interaction.AskUserVariant,
+                    RequestUserInput = config.Interaction.OnUserInputRequest != null ? true : null,
+                    RequestExitPlanMode = config.Interaction.OnExitPlanModeRequest != null ? true : null,
+                    RequestAutoModeSwitch = config.Interaction.OnAutoModeSwitchRequest != null ? true : null,
+                    Commands = config.Interaction.Commands?.Select(c => new CommandWireDefinition(c.Name, c.Description ?? string.Empty)).ToList(),
+                    RequestElicitation = config.Interaction.OnElicitationRequest != null,
+                    RequestAutoModeRecovery = config.Interaction.AutoModeRecovery ? true : null,
+                    RequestShellAuthentication = config.Interaction.OnShellAuthenticationRequest != null ? true : null
+                },
+                Agents = new SessionAgentRequest
+                {
+                    ExcludedBuiltInAgents = config.Agents.ExcludedBuiltInAgents,
+                    IncludedBuiltInAgents = config.Agents.IncludedBuiltInAgents,
+                    Definitions = config.Agents.Definitions,
+                    Default = config.Agents.Default,
+                    Selected = config.Agents.Selected,
+                    LocalDiscoveryOnly = config.Agents.LocalDiscoveryOnly,
+                    Directories = config.Agents.Directories
+                },
+                GitHub = new SessionGitHubRequest
+                {
+                    Capi = config.GitHub.Capi,
+                    TelemetryEnabled = config.GitHub.TelemetryEnabled,
+                    Token = config.GitHub.Token,
+                    TokenProviderRegistrationId = registrationId,
+                    FetchManagedSettings = config.GitHub.FetchManagedSettings,
+                    InteractiveUser = config.GitHub.InteractiveUser,
+                    Mcp = config.GitHub.Mcp,
+                    TelemetryForwarding = _options.GitHub.OnTelemetry != null ? true : null
+                },
+                Experiments = new SessionExperimentRequest
+                {
+                    EnableExperimentalMode = config.Experiments.EnableExperimentalMode,
+                    Flags = config.Experiments.Flags,
+                    Assignments = config.Experiments.Assignments
+                },
+                Permissions = new SessionPermissionRequest
+                {
+                    Request = config.Permissions.OnRequest != null ? true : null,
+                    Sandbox = config.Permissions.Sandbox,
+                    Mode = config.Permissions.Mode
+                },
+                Events = new SessionEventRequest
+                {
+                    Streaming = config.Events.Streaming is true ? true : null,
+                    IncludeSubAgentStreamingEvents = config.Events.IncludeSubAgentStreamingEvents
+                },
+                Mcp = new SessionMcpRequest
+                {
+                    Servers = config.Mcp.Servers,
+                    OauthTokenStorage = config.Mcp.OauthTokenStorage,
+                    AuthClientIdMetadataUrl = config.Mcp.AuthClientIdMetadataUrl,
+                    EnvValueMode = "direct",
+                    EnableApps = config.Mcp.EnableApps ? true : null,
+                    DisabledServers = config.Mcp.DisabledServers
+                },
+                ConfigDirectory = config.ConfigDirectory,
+                EnableConfigDiscovery = config.EnableConfigDiscovery,
+                State = new SessionStateRequest
+                {
+                    SkipEmbeddingRetrieval = config.State.SkipEmbeddingRetrieval,
+                    EmbeddingCacheStorage = config.State.EmbeddingCacheStorage,
+                    EnableCrossSessionStore = config.State.EnableCrossSessionStore,
+                    InfiniteSessions = config.State.InfiniteSessions,
+                    Memory = config.State.Memory,
+                    HasMemoryStore = config.State.Memory?.StoreMemory is not null ? true : null
+                },
+                Instructions = new SessionInstructionRequest
+                {
+                    OrganizationText = config.Instructions.OrganizationText,
+                    OnDemandDiscovery = config.Instructions.OnDemandDiscovery,
+                    RefreshCustomInstructions = config.Instructions.RefreshCustomInstructions,
+                    Directories = config.Instructions.Directories
+                },
+                Git = new SessionGitRequest
+                {
+                    EnableHostGitOperations = config.Git.EnableHostGitOperations
+                },
+                Skills = new SessionSkillRequest
+                {
+                    Enabled = config.Skills.Enabled,
+                    Directories = config.Skills.Directories,
+                    DisabledSkills = config.Skills.DisabledSkills,
+                    HasProvider = config.Skills.Provider is not null ? true : null
+                },
+                Execution = new SessionExecutionRequest
+                {
+                    Limits = config.Execution.Limits,
+                    Autopilot = config.Execution.Autopilot
+                },
+                Plugins = new SessionPluginRequest
+                {
+                    Directories = config.Plugins.Directories
+                },
+                Extensions = new SessionExtensionRequest
+                {
+                    Enabled = config.Extensions.Enabled,
+                    SdkPath = config.Extensions.SdkPath,
+                    Identity = config.Extensions.Identity
+                },
+                Policy = new SessionPolicyRequest
+                {
+                    ExcludedManagedSettings = config.Policy.ExcludedManagedSettings,
+                    EnforceManagedModelDefaults = config.Policy.EnforceManagedModelDefaults,
+                    ManagedSettings = config.Policy.ManagedSettings
+                },
+                Tools = new SessionToolRequest
+                {
+                    Definitions = config.Tools.Definitions?.Select(ToolDefinition.FromAIFunction).ToList(),
+                    AvailableTools = toolFilter.AvailableTools,
+                    ExcludedTools = toolFilter.ExcludedTools,
+                    LargeOutput = config.Tools.LargeOutput,
+                    Search = config.Tools.Search,
+                    ImageGeneration = config.Tools.ImageGeneration
+                },
+                Hooks = new SessionHookRequest
+                {
+                    HasHandlers = hasHooks ? true : null,
+                    EnableRepositoryHooks = config.Hooks.EnableRepositoryHooks,
+                    Directories = config.Hooks.Directories
+                },
+                Canvases = new SessionCanvasRequest
+                {
+                    Definitions = config.Canvases.Definitions,
+                    RequestRenderer = config.Canvases.RequestRenderer,
+                    Provider = config.Canvases.Provider
+                }
+            };
 
             var rpcTimestamp = Stopwatch.GetTimestamp();
 
@@ -1533,7 +1494,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                     && !string.IsNullOrEmpty(sessionId))
                 {
                     serverAssignedSessionId = sessionId;
-                    operation = BeginSessionOperation(sessionId, connection.Rpc, config.AutoModeRecovery, initializeSession: true);
+                    operation = BeginSessionOperation(sessionId, connection.Rpc, config.Interaction.AutoModeRecovery, initializeSession: true);
                     session = InitializeSession(
                         sessionId,
                         connection.Rpc,
@@ -1563,7 +1524,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             }
 
             session.SetCapabilities(response.Capabilities);
-            if (config.AutoModeRecovery)
+            if (config.Interaction.AutoModeRecovery)
             {
                 if (registrationId is not null)
                 {
@@ -1572,7 +1533,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 }
                 await RequireAutoModeRecoveryAsync(session, cancellationToken, deleteOnFailure: localSessionId is null).ConfigureAwait(false);
             }
-            if (config.OnMcpAuthRequest is not null)
+            if (config.Mcp.OnAuthRequest is not null)
             {
                 await session.Rpc.EventLog.RegisterInterestAsync("mcp.oauth_required", cancellationToken);
             }
@@ -1659,21 +1620,16 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// <example>
     /// <code>
     /// // Resume a previous session
-    /// var session = await client.ResumeSessionAsync("session-123", new() { OnPermissionRequest = PermissionHandler.ApproveAll });
-    ///
+    /// var session = await client.ResumeSessionAsync("session-123", new ResumeSessionOptions() { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
     /// // Resume with new tools
-    /// var session = await client.ResumeSessionAsync("session-123", new()
-    /// {
-    ///     OnPermissionRequest = PermissionHandler.ApproveAll,
-    ///     Tools = [AIFunctionFactory.Create(MyNewToolMethod)]
-    /// });
+    /// var session = await client.ResumeSessionAsync("session-123", new ResumeSessionOptions() { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(MyNewToolMethod)] } });
     /// </code>
     /// </example>
-    public async Task<CopilotSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken = default)
+    public async Task<CopilotSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions config, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sessionId);
         ArgumentNullException.ThrowIfNull(config);
-        if (config.AutoModeRecovery && config.OnAutoModeSwitchRequest is null)
+        if (config.Interaction.AutoModeRecovery && config.Interaction.OnAutoModeSwitchRequest is null)
         {
             throw new ArgumentException("AutoModeRecovery requires OnAutoModeSwitchRequest", nameof(config));
         }
@@ -1687,24 +1643,24 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         config.SystemMessage = GetSystemMessageConfigForMode(config.SystemMessage);
         var toolFilter = ResolveToolFilterOptions(config);
 
-        var hasHooks = config.Hooks != null && (
-            config.Hooks.OnPreToolUse != null ||
-            config.Hooks.OnPreMcpToolCall != null ||
-            config.Hooks.OnPostToolUse != null ||
-            config.Hooks.OnPostToolUseFailure != null ||
-            config.Hooks.OnUserPromptSubmitted != null ||
-            config.Hooks.OnUserPromptTransformed != null ||
-            config.Hooks.OnSessionStart != null ||
-            config.Hooks.OnSessionEnd != null ||
-            config.Hooks.OnErrorOccurred != null ||
-            config.Hooks.OnAgentStop != null ||
-            config.Hooks.OnSubagentStart != null ||
-            config.Hooks.OnSubagentStop != null);
+        var hasHooks = config.Hooks.Handlers != null && (
+            config.Hooks.Handlers.OnPreToolUse != null ||
+            config.Hooks.Handlers.OnPreMcpToolCall != null ||
+            config.Hooks.Handlers.OnPostToolUse != null ||
+            config.Hooks.Handlers.OnPostToolUseFailure != null ||
+            config.Hooks.Handlers.OnUserPromptSubmitted != null ||
+            config.Hooks.Handlers.OnUserPromptTransformed != null ||
+            config.Hooks.Handlers.OnSessionStart != null ||
+            config.Hooks.Handlers.OnSessionEnd != null ||
+            config.Hooks.Handlers.OnErrorOccurred != null ||
+            config.Hooks.Handlers.OnAgentStop != null ||
+            config.Hooks.Handlers.OnSubagentStart != null ||
+            config.Hooks.Handlers.OnSubagentStop != null);
 
         var (wireSystemMessage, transformCallbacks) = ExtractTransformCallbacks(config.SystemMessage);
 
-        using var operation = BeginSessionOperation(sessionId, connection.Rpc, config.AutoModeRecovery, initializeSession: true);
-        var registrationId = RegisterGitHubTokenProvider(config.GitHubTokenProvider);
+        using var operation = BeginSessionOperation(sessionId, connection.Rpc, config.Interaction.AutoModeRecovery, initializeSession: true);
+        var registrationId = RegisterGitHubTokenProvider(config.GitHub.TokenProvider);
         var registrationTransferred = false;
         CopilotSession? session = null;
         CopilotSession? previousSession = null;
@@ -1721,12 +1677,11 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 }
             }
             var resolvedSessionId = sessionId;
-            var uuidPrefix = config.AutoModeRecovery && _options.SessionFs is null && IsAbbreviatedUuidPrefix(sessionId);
+            var uuidPrefix = config.Interaction.AutoModeRecovery && _options.SessionFs is null && IsAbbreviatedUuidPrefix(sessionId);
             if (uuidPrefix)
             {
-                var match = await connection.Server.Sessions.FindByPrefixWithOptionsAsync(
-                    new SessionsFindByPrefixRequest { Prefix = sessionId, ConfigDir = config.ConfigDirectory },
-                    cancellationToken);
+                var match = await connection.Server.Sessions.FindByPrefixAsync(
+                    prefix: sessionId, configDir: config.ConfigDirectory, cancellationToken: cancellationToken);
                 var canonicalId = match?.SessionId;
                 if (canonicalId is not { Length: > 0 }
                     || !canonicalId.StartsWith(sessionId, StringComparison.OrdinalIgnoreCase))
@@ -1737,105 +1692,167 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             }
             var (traceparent, tracestate) = TelemetryHelpers.GetTraceContext();
 
-            var request = new ResumeSessionRequest(
-                resolvedSessionId,
-                config.ClientName,
-                config.Model,
-                config.ReasoningEffort,
-                config.AllowMultipleToolCalls,
-                config.ReasoningSummary,
-                config.ContextTier,
-                config.Tools?.Select(ToolDefinition.FromAIFunction).ToList(),
-                config.EnableCitations,
-                config.EnableFileChangeTracking,
-                wireSystemMessage,
-                config.AskUserVariant,
-                toolFilter.AvailableTools,
-                toolFilter.ExcludedTools,
-                config.ExcludedBuiltInAgents,
-                config.IncludedBuiltInAgents,
-                config.Provider,
-                config.Capi,
-                config.EnableSessionTelemetry,
-                config.EnableExperimentalMode,
-                config.OnPermissionRequest != null ? true : null,
-                config.OnUserInputRequest != null ? true : null,
-                config.OnExitPlanModeRequest != null ? true : null,
-                config.OnAutoModeSwitchRequest != null ? true : null,
-                hasHooks ? true : null,
-                config.WorkingDirectory,
-                config.ConfigDirectory,
-                config.EnableConfigDiscovery,
-                config.CustomAgentsLocalOnly,
-                config.SkipEmbeddingRetrieval,
-                config.EmbeddingCacheStorage,
-                config.OrganizationCustomInstructions,
-                config.EnableOnDemandInstructionDiscovery,
-                config.EnableFileHooks,
-                config.EnableHostGitOperations,
-                config.EnableSessionStore,
-                config.EnableSkills,
-                config.SuppressResumeEvent is true ? true : null,
-                config.Streaming is true ? true : null,
-                config.IncludeSubAgentStreamingEvents,
-                config.McpServers,
-                config.Diagnostics,
-                config.LifecycleDiagnostics,
-                config.McpOAuthTokenStorage,
-                config.AuthClientIdMetadataUrl,
-                "direct",
-                config.CustomAgents,
-                config.DefaultAgent,
-                config.Agent,
-                config.SkillDirectories,
-                config.DisabledSkills,
-                config.InfiniteSessions,
-                config.SessionLimits,
-                config.Autopilot,
-                Commands: config.Commands?.Select(c => new CommandWireDefinition(c.Name, c.Description ?? string.Empty)).ToList(),
-                RequestElicitation: config.OnElicitationRequest != null,
-                RequestAutoModeRecovery: config.AutoModeRecovery ? true : null,
-                RequestMcpApps: config.EnableMcpApps ? true : null,
-                RequestShellAuthentication: config.OnShellAuthenticationRequest != null ? true : null,
-                Traceparent: traceparent,
-                Tracestate: tracestate,
-                ModelCapabilities: config.ModelCapabilities,
-                GitHubToken: config.GitHubToken,
-                GitHubTokenProviderRegistrationId: registrationId,
-                ContinuePendingWork: config.ContinuePendingWork,
-                InstructionDirectories: config.InstructionDirectories,
-                AgentDirectories: config.AgentDirectories,
-                HookDirectories: config.HookDirectories,
-                PluginDirectories: config.PluginDirectories,
-                DisabledMcpServers: config.DisabledMcpServers,
-                SandboxConfig: config.SandboxConfig,
-                LargeOutput: config.LargeOutput,
-                ToolSearch: config.ToolSearch,
-                ImageGeneration: config.ImageGeneration,
-                Memory: config.Memory,
-                Canvases: config.Canvases,
-                RequestCanvasRenderer: config.RequestCanvasRenderer,
-                RequestExtensions: config.RequestExtensions,
-                ExtensionSdkPath: config.ExtensionSdkPath,
-                ExtensionInfo: config.ExtensionInfo,
-                CanvasProvider: config.CanvasProvider,
-                OpenCanvases: config.OpenCanvases,
-                Providers: config.Providers,
-                Models: config.Models,
-                FeatureFlags: config.FeatureFlags,
-                ExpAssignments: config.ExpAssignments,
-                EnableManagedSettings: config.EnableManagedSettings,
-                ExcludedManagedSettings: config.ExcludedManagedSettings,
-                EnforceManagedModelDefaults: config.EnforceManagedModelDefaults,
-                InteractiveUser: config.InteractiveUser,
-                PermissionMode: config.PermissionMode,
-                GitHubMcpToolConfig: config.GitHubMcpToolConfig,
-                ManagedSettings: config.ManagedSettings,
-                EnableGitHubTelemetryForwarding: _options.OnGitHubTelemetry != null ? true : null,
-                AdditionalDirectories: config.AdditionalDirectories,
-                AllowTranscriptRecovery: config.AllowTranscriptRecovery,
-                HasSkillProvider: config.SkillProvider is not null ? true : null,
-                HasMemoryStore: config.Memory?.StoreMemory is not null ? true : null);
+            var request = new ResumeSessionRequest
+            {
+                SessionId = resolvedSessionId,
+                ClientName = config.ClientName,
+                Model = config.Model,
+                SystemMessage = wireSystemMessage,
+                WorkingDirectory = config.WorkingDirectory,
+                SuppressResumeEvent = config.SuppressResumeEvent is true ? true : null,
+                Diagnostics = config.Diagnostics,
+                LifecycleDiagnostics = config.LifecycleDiagnostics,
+                Traceparent = traceparent,
+                Tracestate = tracestate,
+                ContinuePendingWork = config.ContinuePendingWork,
+                AllowTranscriptRecovery = config.AllowTranscriptRecovery,
+                Inference = new SessionInferenceRequest
+                {
+                    ReasoningEffort = config.Inference.ReasoningEffort,
+                    AllowMultipleToolCalls = config.Inference.AllowMultipleToolCalls,
+                    ReasoningSummary = config.Inference.ReasoningSummary,
+                    ContextTier = config.Inference.ContextTier,
+                    EnableCitations = config.Inference.EnableCitations,
+                    DefaultProvider = config.Inference.DefaultProviderForWire,
+                    Capabilities = config.Inference.Capabilities,
+                    Providers = config.Inference.Providers,
+                    Models = config.Inference.Models
+                },
+                Filesystem = new SessionFilesystemRequest
+                {
+                    TrackFileChanges = config.Filesystem.TrackFileChanges,
+                    AdditionalDirectories = config.Filesystem.AdditionalDirectories
+                },
+                Interaction = new SessionInteractionRequest
+                {
+                    AskUserVariant = config.Interaction.AskUserVariant,
+                    RequestUserInput = config.Interaction.OnUserInputRequest != null ? true : null,
+                    RequestExitPlanMode = config.Interaction.OnExitPlanModeRequest != null ? true : null,
+                    RequestAutoModeSwitch = config.Interaction.OnAutoModeSwitchRequest != null ? true : null,
+                    Commands = config.Interaction.Commands?.Select(c => new CommandWireDefinition(c.Name, c.Description ?? string.Empty)).ToList(),
+                    RequestElicitation = config.Interaction.OnElicitationRequest != null,
+                    RequestAutoModeRecovery = config.Interaction.AutoModeRecovery ? true : null,
+                    RequestShellAuthentication = config.Interaction.OnShellAuthenticationRequest != null ? true : null
+                },
+                Agents = new SessionAgentRequest
+                {
+                    ExcludedBuiltInAgents = config.Agents.ExcludedBuiltInAgents,
+                    IncludedBuiltInAgents = config.Agents.IncludedBuiltInAgents,
+                    LocalDiscoveryOnly = config.Agents.LocalDiscoveryOnly,
+                    Definitions = config.Agents.Definitions,
+                    Default = config.Agents.Default,
+                    Selected = config.Agents.Selected,
+                    Directories = config.Agents.Directories
+                },
+                GitHub = new SessionGitHubRequest
+                {
+                    Capi = config.GitHub.Capi,
+                    TelemetryEnabled = config.GitHub.TelemetryEnabled,
+                    Token = config.GitHub.Token,
+                    TokenProviderRegistrationId = registrationId,
+                    FetchManagedSettings = config.GitHub.FetchManagedSettings,
+                    InteractiveUser = config.GitHub.InteractiveUser,
+                    Mcp = config.GitHub.Mcp,
+                    TelemetryForwarding = _options.GitHub.OnTelemetry != null ? true : null
+                },
+                Experiments = new SessionExperimentRequest
+                {
+                    EnableExperimentalMode = config.Experiments.EnableExperimentalMode,
+                    Flags = config.Experiments.Flags,
+                    Assignments = config.Experiments.Assignments
+                },
+                Permissions = new SessionPermissionRequest
+                {
+                    Request = config.Permissions.OnRequest != null ? true : null,
+                    Sandbox = config.Permissions.Sandbox,
+                    Mode = config.Permissions.Mode
+                },
+                ConfigDirectory = config.ConfigDirectory,
+                EnableConfigDiscovery = config.EnableConfigDiscovery,
+                State = new SessionStateRequest
+                {
+                    SkipEmbeddingRetrieval = config.State.SkipEmbeddingRetrieval,
+                    EmbeddingCacheStorage = config.State.EmbeddingCacheStorage,
+                    EnableCrossSessionStore = config.State.EnableCrossSessionStore,
+                    InfiniteSessions = config.State.InfiniteSessions,
+                    Memory = config.State.Memory,
+                    HasMemoryStore = config.State.Memory?.StoreMemory is not null ? true : null
+                },
+                Instructions = new SessionInstructionRequest
+                {
+                    OrganizationText = config.Instructions.OrganizationText,
+                    OnDemandDiscovery = config.Instructions.OnDemandDiscovery,
+                    Directories = config.Instructions.Directories
+                },
+                Git = new SessionGitRequest
+                {
+                    EnableHostGitOperations = config.Git.EnableHostGitOperations
+                },
+                Skills = new SessionSkillRequest
+                {
+                    Enabled = config.Skills.Enabled,
+                    Directories = config.Skills.Directories,
+                    DisabledSkills = config.Skills.DisabledSkills,
+                    HasProvider = config.Skills.Provider is not null ? true : null
+                },
+                Events = new SessionEventRequest
+                {
+                    Streaming = config.Events.Streaming is true ? true : null,
+                    IncludeSubAgentStreamingEvents = config.Events.IncludeSubAgentStreamingEvents
+                },
+                Mcp = new SessionMcpRequest
+                {
+                    Servers = config.Mcp.Servers,
+                    OauthTokenStorage = config.Mcp.OauthTokenStorage,
+                    AuthClientIdMetadataUrl = config.Mcp.AuthClientIdMetadataUrl,
+                    EnvValueMode = "direct",
+                    EnableApps = config.Mcp.EnableApps ? true : null,
+                    DisabledServers = config.Mcp.DisabledServers
+                },
+                Execution = new SessionExecutionRequest
+                {
+                    Limits = config.Execution.Limits,
+                    Autopilot = config.Execution.Autopilot
+                },
+                Plugins = new SessionPluginRequest
+                {
+                    Directories = config.Plugins.Directories
+                },
+                Extensions = new SessionExtensionRequest
+                {
+                    Enabled = config.Extensions.Enabled,
+                    SdkPath = config.Extensions.SdkPath,
+                    Identity = config.Extensions.Identity
+                },
+                Policy = new SessionPolicyRequest
+                {
+                    ExcludedManagedSettings = config.Policy.ExcludedManagedSettings,
+                    EnforceManagedModelDefaults = config.Policy.EnforceManagedModelDefaults,
+                    ManagedSettings = config.Policy.ManagedSettings
+                },
+                Tools = new SessionToolRequest
+                {
+                    Definitions = config.Tools.Definitions?.Select(ToolDefinition.FromAIFunction).ToList(),
+                    AvailableTools = toolFilter.AvailableTools,
+                    ExcludedTools = toolFilter.ExcludedTools,
+                    LargeOutput = config.Tools.LargeOutput,
+                    Search = config.Tools.Search,
+                    ImageGeneration = config.Tools.ImageGeneration
+                },
+                Hooks = new SessionHookRequest
+                {
+                    HasHandlers = hasHooks ? true : null,
+                    EnableRepositoryHooks = config.Hooks.EnableRepositoryHooks,
+                    Directories = config.Hooks.Directories
+                },
+                Canvases = new SessionCanvasRequest
+                {
+                    Definitions = config.Canvases.Definitions,
+                    RequestRenderer = config.Canvases.RequestRenderer,
+                    Provider = config.Canvases.Provider,
+                    Open = config.Canvases.Open
+                }
+            };
 
             cancellationToken.ThrowIfCancellationRequested();
             lock (_sessionAdmissionLock)
@@ -1876,7 +1893,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             session.TranscriptRecovery = response.TranscriptRecovery;
             session.PermissionModeResult = response.PermissionModeResult;
             session.SetCapabilities(response.Capabilities);
-            if (config.AutoModeRecovery)
+            if (config.Interaction.AutoModeRecovery)
             {
                 if (registrationId is not null)
                 {
@@ -1891,7 +1908,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             }
             session.SetOpenCanvases(response.OpenCanvases);
 
-            if (config.OnMcpAuthRequest is not null)
+            if (config.Mcp.OnAuthRequest is not null)
             {
                 await session.Rpc.EventLog.RegisterInterestAsync("mcp.oauth_required", cancellationToken);
             }
@@ -2035,7 +2052,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// </summary>
     /// <param name="message">An optional message that will be reflected back in the response.</param>
     /// <param name="cancellationToken">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
-    /// <returns>A task that resolves with the <see cref="PingResponse"/> containing the message and server timestamp.</returns>
+    /// <returns>A task that resolves with the <see cref="PingResult"/> containing the message and server timestamp.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the client is not connected.</exception>
     /// <example>
     /// <code>
@@ -2043,11 +2060,11 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// Console.WriteLine($"Server responded at {response.Timestamp}");
     /// </code>
     /// </example>
-    public async Task<PingResponse> PingAsync(string? message = null, CancellationToken cancellationToken = default)
+    public async Task<PingResult> PingAsync(string? message = null, CancellationToken cancellationToken = default)
     {
         var connection = await EnsureConnectedAsync(cancellationToken);
 
-        return await InvokeRpcAsync<PingResponse>(
+        return await InvokeRpcAsync<PingResult>(
             connection.Rpc, "ping", [new PingRequest { Message = message }], cancellationToken);
     }
 
@@ -2089,7 +2106,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// The cache is cleared when the client disconnects.
     /// </remarks>
     /// <exception cref="InvalidOperationException">Thrown when the client is not connected or not authenticated.</exception>
-    public async Task<IList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
+    public async Task<IList<Model>> ListModelsAsync(CancellationToken cancellationToken = default)
     {
         var cache = _modelsCache;
         await cache.Lock.WaitAsync(cancellationToken);
@@ -2098,7 +2115,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             // Check cache (already inside lock)
             if (cache.Models is null)
             {
-                IList<ModelInfo> models;
+                IList<Model> models;
                 if (_onListModels is not null)
                 {
                     // Use custom handler instead of CLI RPC
@@ -2109,7 +2126,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                     var connection = await EnsureConnectedAsync(cancellationToken);
 
                     // Cache miss - fetch from backend while holding lock
-                    var response = await InvokeRpcAsync<GetModelsResponse>(
+                    var response = await InvokeRpcAsync<ModelList>(
                         connection.Rpc, "models.list", [], cancellationToken);
                     models = response.Models;
                 }
@@ -2137,7 +2154,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// var lastId = await client.GetLastSessionIdAsync();
     /// if (lastId != null)
     /// {
-    ///     var session = await client.ResumeSessionAsync(lastId, new() { OnPermissionRequest = PermissionHandler.ApproveAll });
+    ///     var session = await client.ResumeSessionAsync(lastId, new ResumeSessionOptions() { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
     /// }
     /// </code>
     /// </example>
@@ -2158,7 +2175,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// <param name="sessionId">The ID of the session to delete.</param>
     /// <param name="cancellationToken">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
     /// <returns>A task that represents the asynchronous delete operation.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the session does not exist or deletion fails.</exception>
+    /// <exception cref="RemoteRpcException">Thrown when the runtime rejects deletion, including when the session does not exist.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when a legacy runtime reports an unsuccessful deletion.</exception>
     /// <remarks>
     /// Unlike <see cref="CopilotSession.DisposeAsync"/>, which only releases in-memory
     /// resources and preserves session data for later resumption, this method is
@@ -2287,7 +2305,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// </remarks>
     /// <param name="sessionId">The ID of the session to display in the TUI.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <exception cref="InvalidOperationException">Thrown if the operation fails.</exception>
+    /// <exception cref="RemoteRpcException">Thrown when the runtime rejects the foreground change.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when a legacy runtime reports an unsuccessful foreground change.</exception>
     /// <example>
     /// <code>
     /// await client.SetForegroundSessionIdAsync("session-123");
@@ -2408,10 +2427,6 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
 
             throw new IOException($"Communication error with Copilot CLI: {ex.Message}", ex);
         }
-        catch (RemoteRpcException ex)
-        {
-            throw new IOException($"Communication error with Copilot CLI: {ex.Message}", ex);
-        }
     }
 
     private static string FormatCliExitedMessage(string message, string stderrOutput)
@@ -2478,12 +2493,12 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// </summary>
     private ClientGlobalApiHandlers? BuildClientGlobalApis()
     {
-        var onGitHubTelemetry = _options.OnGitHubTelemetry;
-        var installationConfirmationHandler = _options.InstallationConfirmationHandler;
+        var onGitHubTelemetry = _options.GitHub.OnTelemetry;
+        var installationConfirmationHandler = _options.Installations.ConfirmationHandler;
         var network = _options.Network;
         return new ClientGlobalApiHandlers
         {
-            ExtensionLaunchProvider = _options.ExtensionLaunchProvider,
+            ExtensionLaunchProvider = _options.Extensions.LaunchProvider,
             Network = network is { ResolveProxy: not null } or { AuthenticateNegotiate: not null } or { AuthenticateBasic: not null }
                 ? new NetworkAdapter(network)
                 : null,
@@ -2499,22 +2514,22 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         };
     }
 
-    private static void ValidateGitHubTokenConfig(SessionConfigBase config)
+    private static void ValidateGitHubTokenConfig(SessionOptionsBase config)
     {
-        if (config.GitHubToken is not null && config.GitHubTokenProvider is not null)
+        if (config.GitHub.Token is not null && config.GitHub.TokenProvider is not null)
         {
             throw new ArgumentException(
-                $"{nameof(SessionConfigBase.GitHubToken)} and {nameof(SessionConfigBase.GitHubTokenProvider)} cannot be used together.",
+                $"{nameof(SessionOptionsBase.GitHub.Token)} and {nameof(SessionOptionsBase.GitHub.TokenProvider)} cannot be used together.",
                 nameof(config));
         }
     }
 
-    private static void ValidateMemoryConfig(SessionConfigBase config)
+    private static void ValidateMemoryConfig(SessionOptionsBase config)
     {
-        if (config.Memory is { StoreMemory: not null, Enabled: not true })
+        if (config.State.Memory is { StoreMemory: not null, Enabled: not true })
         {
             throw new ArgumentException(
-                $"{nameof(SessionConfigBase.Memory)}.{nameof(MemoryConfiguration.StoreMemory)} requires {nameof(SessionConfigBase.Memory)}.{nameof(MemoryConfiguration.Enabled)} to be true.",
+                $"{nameof(SessionOptionsBase.State.Memory)}.{nameof(MemoryConfiguration.StoreMemory)} requires {nameof(SessionOptionsBase.State.Memory)}.{nameof(MemoryConfiguration.Enabled)} to be true.",
                 nameof(config));
         }
     }
@@ -2601,7 +2616,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// </summary>
     private async Task ConfigureLlmInferenceAsync(CancellationToken cancellationToken)
     {
-        if (_options.RequestHandler is null)
+        if (_options.Models.RequestHandler is null)
         {
             return;
         }
@@ -2656,8 +2671,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 ? null // FFI hosting is an ungated in-process connection; no token.
                 : _connection switch
                 {
-                    TcpRuntimeConnection tcp => tcp.ConnectionToken,
-                    UriRuntimeConnection uri => uri.ConnectionToken,
+                    SpawnedTcpRuntimeConnection tcp => tcp.ConnectionToken,
+                    TcpRuntimeConnection existing => existing.ConnectionToken,
                     _ => null,
                 };
             var connectResponse = await InvokeRpcAsync<ConnectResult>(
@@ -2669,7 +2684,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                     // handler is registered (mirrors the runtime, which reads this flag on the
                     // `connect` handshake so the first session's un-replayable `session.start`
                     // event is forwarded). Also sent on session.create/resume for older CLIs.
-                    _options.OnGitHubTelemetry != null ? true : null,
+                    _options.GitHub.OnTelemetry != null ? true : null,
                     // Declare the integrating application's identity so the runtime attributes the
                     // telemetry it emits on this connection to a consistent surface instead
                     // of its own build. Null when the app didn't supply it.
@@ -2685,7 +2700,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 throw new InvalidOperationException("This runtime does not support host-owned Entra token providers.");
             }
         }
-        catch (IOException ex) when (ex.InnerException is RemoteRpcException remoteEx && IsUnsupportedConnectMethod(remoteEx))
+        catch (RemoteRpcException ex) when (IsUnsupportedConnectMethod(ex))
         {
             if (_options.Entra is not null)
             {
@@ -2694,9 +2709,9 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             // Legacy server without `connect`; fall back to `ping`. A token, if any,
             // is silently dropped — the legacy server can't enforce one.
             usedFallbackPing = true;
-            var pingResponse = await InvokeRpcAsync<PingResponse>(
+            var pingResponse = await InvokeRpcAsync<PingResult>(
                 connection.Rpc, "ping", [new PingRequest()], connection.StderrBuffer, cancellationToken);
-            serverVersion = pingResponse.ProtocolVersion;
+            serverVersion = checked((int)pingResponse.ProtocolVersion);
         }
 
         if (!serverVersion.HasValue)
@@ -2757,14 +2772,16 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         var options = _options;
         var logger = _logger;
         var childProcessConnection = (ChildProcessRuntimeConnection)_connection;
-        var tcpConnection = _connection as TcpRuntimeConnection;
-        var useStdio = _connection is StdioRuntimeConnection;
+        var tcpConnection = _connection as SpawnedTcpRuntimeConnection;
+        var useStdio = _connection is SpawnedStdioRuntimeConnection;
 
         // Explicit CLI paths preserve the legacy launch contract. Otherwise use
         // the bundled native runtime pair. An empty COPILOT_CLI_PATH counts as unset.
-        var configuredEnvironment = childProcessConnection.Environment ?? options.Environment;
+        var configuredEnvironment = childProcessConnection.Environment;
         var envCliPath = configuredEnvironment is not null
-            ? configuredEnvironment.TryGetValue("COPILOT_CLI_PATH", out var configuredCliPath) ? configuredCliPath : null
+            ? configuredEnvironment.LastOrDefault(pair => string.Equals(
+                pair.Key, "COPILOT_CLI_PATH",
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)).Value
             : System.Environment.GetEnvironmentVariable("COPILOT_CLI_PATH");
         if (string.IsNullOrEmpty(envCliPath))
         {
@@ -2785,7 +2802,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         }
 
         args.AddRange(["--headless", "--no-auto-update"]);
-        if (options.LogLevel is { } logLevel && !string.IsNullOrEmpty(logLevel.Value))
+        if (options.Observability.LogLevel is { } logLevel && !string.IsNullOrEmpty(logLevel.Value))
         {
             args.AddRange(["--log-level", logLevel.Value]);
         }
@@ -2800,21 +2817,21 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         }
 
         // Add auth-related flags
-        if (!string.IsNullOrEmpty(options.GitHubToken))
+        if (!string.IsNullOrEmpty(options.GitHub.Token))
         {
             args.AddRange(["--auth-token-env", "COPILOT_SDK_AUTH_TOKEN"]);
         }
 
         // Default UseLoggedInUser to false when GitHubToken is provided
-        var useLoggedInUser = options.UseLoggedInUser ?? string.IsNullOrEmpty(options.GitHubToken);
+        var useLoggedInUser = options.GitHub.UseLoggedInUser ?? string.IsNullOrEmpty(options.GitHub.Token);
         if (!useLoggedInUser)
         {
             args.Add("--no-auto-login");
         }
 
-        if (options.SessionIdleTimeoutSeconds is > 0)
+        if ((options.Runtime as OwnedRuntimeConnection)?.SessionIdleTimeoutSeconds is > 0 and var idleTimeout)
         {
-            args.AddRange(["--session-idle-timeout", options.SessionIdleTimeoutSeconds.Value.ToString(CultureInfo.InvariantCulture)]);
+            args.AddRange(["--session-idle-timeout", idleTimeout.ToString(CultureInfo.InvariantCulture)]);
         }
 
         var (fileName, processArgs) = ResolveCliCommand(cliPath, args);
@@ -2829,11 +2846,11 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             RedirectStandardInput = useStdio,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            WorkingDirectory = options.WorkingDirectory,
+            WorkingDirectory = childProcessConnection.WorkingDirectory,
             CreateNoWindow = true
         };
 
-        var childEnvironment = options.Environment ?? childProcessConnection.Environment;
+        var childEnvironment = childProcessConnection.Environment;
         if (childEnvironment != null)
         {
             startInfo.Environment.Clear();
@@ -2853,9 +2870,9 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         }
 
         // Set auth token in environment if provided
-        if (!string.IsNullOrEmpty(options.GitHubToken))
+        if (!string.IsNullOrEmpty(options.GitHub.Token))
         {
-            startInfo.Environment["COPILOT_SDK_AUTH_TOKEN"] = options.GitHubToken;
+            startInfo.Environment["COPILOT_SDK_AUTH_TOKEN"] = options.GitHub.Token;
         }
 
         if (tcpConnection?.ConnectionToken is { Length: > 0 } token)
@@ -2863,9 +2880,9 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             startInfo.Environment["COPILOT_CONNECTION_TOKEN"] = token;
         }
 
-        if (!string.IsNullOrEmpty(options.BaseDirectory))
+        if (!string.IsNullOrEmpty((options.Runtime as OwnedRuntimeConnection)?.BaseDirectory))
         {
-            startInfo.Environment["COPILOT_HOME"] = options.BaseDirectory;
+            startInfo.Environment["COPILOT_HOME"] = (options.Runtime as OwnedRuntimeConnection)?.BaseDirectory;
         }
 
         // In empty mode, disable the system keychain. Keytar reads from a
@@ -2883,7 +2900,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         }
 
         // Set telemetry environment variables if configured
-        ApplyTelemetryEnvironment((key, value) => startInfo.Environment[key] = value, options.Telemetry);
+        ApplyTelemetryEnvironment((key, value) => startInfo.Environment[key] = value, options.Observability.Telemetry);
 
         var cliProcess = new Process { StartInfo = startInfo };
         try
@@ -2987,42 +3004,42 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 environment[key] = value;
             }
         }
-        if (!string.IsNullOrEmpty(options.GitHubToken))
+        if (!string.IsNullOrEmpty(options.GitHub.Token))
         {
-            environment["COPILOT_SDK_AUTH_TOKEN"] = options.GitHubToken!;
+            environment["COPILOT_SDK_AUTH_TOKEN"] = options.GitHub.Token!;
         }
-        if (!string.IsNullOrEmpty(options.BaseDirectory))
+        if (!string.IsNullOrEmpty((options.Runtime as OwnedRuntimeConnection)?.BaseDirectory))
         {
-            environment["COPILOT_HOME"] = options.BaseDirectory!;
-            environment["COPILOT_CACHE_HOME"] = Path.Combine(options.BaseDirectory!, "cache");
+            environment["COPILOT_HOME"] = (options.Runtime as OwnedRuntimeConnection)?.BaseDirectory!;
+            environment["COPILOT_CACHE_HOME"] = Path.Combine((options.Runtime as OwnedRuntimeConnection)?.BaseDirectory!, "cache");
         }
         if (options.Mode == CopilotClientMode.Empty)
         {
             environment["COPILOT_DISABLE_KEYTAR"] = "1";
         }
-        ApplyTelemetryEnvironment((key, value) => environment[key] = value, options.Telemetry);
+        ApplyTelemetryEnvironment((key, value) => environment[key] = value, options.Observability.Telemetry);
         return environment;
     }
 
     private static List<string> BuildInProcessRuntimeArguments(CopilotClientOptions options)
     {
         var args = new List<string>();
-        if (options.LogLevel is { } logLevel && !string.IsNullOrEmpty(logLevel.Value))
+        if (options.Observability.LogLevel is { } logLevel && !string.IsNullOrEmpty(logLevel.Value))
         {
             args.AddRange(["--log-level", logLevel.Value]);
         }
-        if (!string.IsNullOrEmpty(options.GitHubToken))
+        if (!string.IsNullOrEmpty(options.GitHub.Token))
         {
             args.AddRange(["--auth-token-env", "COPILOT_SDK_AUTH_TOKEN"]);
         }
-        var useLoggedInUser = options.UseLoggedInUser ?? string.IsNullOrEmpty(options.GitHubToken);
+        var useLoggedInUser = options.GitHub.UseLoggedInUser ?? string.IsNullOrEmpty(options.GitHub.Token);
         if (!useLoggedInUser)
         {
             args.Add("--no-auto-login");
         }
-        if (options.SessionIdleTimeoutSeconds is > 0)
+        if ((options.Runtime as OwnedRuntimeConnection)?.SessionIdleTimeoutSeconds is > 0 and var idleTimeout)
         {
-            args.AddRange(["--session-idle-timeout", options.SessionIdleTimeoutSeconds.Value.ToString(CultureInfo.InvariantCulture)]);
+            args.AddRange(["--session-idle-timeout", idleTimeout.ToString(CultureInfo.InvariantCulture)]);
         }
 
         var cliLoginSyncIntegrationId = System.Environment.GetEnvironmentVariable("GITHUB_COPILOT_INTEGRATION_ID")?.Trim();
@@ -3202,7 +3219,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 inputStream = ffiHost.ReceiveStream;
                 outputStream = ffiHost.SendStream;
             }
-            else if (_connection is StdioRuntimeConnection)
+            else if (_connection is SpawnedStdioRuntimeConnection)
             {
                 if (cliProcess == null)
                 {
@@ -3247,7 +3264,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 _logger);
 
             var connection = new Connection(rpc, cliProcess, networkStream, stderrPump, ffiHost);
-            if (_options.RequestHandler is { } requestHandler)
+            if (_options.Models.RequestHandler is { } requestHandler)
             {
                 connection.LlmInference = new LlmInferenceAdapter(requestHandler, () => connection.Server);
             }
@@ -3579,7 +3596,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         options.TypeInfoResolverChain.Add(TypesJsonContext.Default);
         options.TypeInfoResolverChain.Add(CopilotSession.SessionJsonContext.Default);
         options.TypeInfoResolverChain.Add(SessionEventsJsonContext.Default);
-        options.TypeInfoResolverChain.Add(GitHub.Copilot.Rpc.RpcJsonContext.Default);
+        options.TypeInfoResolverChain.Add(Microsoft.Copilot.Rpc.RpcJsonContext.Default);
 
         options.MakeReadOnly();
 
@@ -3911,7 +3928,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             return await session.HandleSkillProviderReadAsync(request.Name, cancellationToken);
         }
 
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
         public async ValueTask OnMemoryStore(StoredMemory request, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(request);
@@ -3919,7 +3936,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 ?? throw new InvalidOperationException("Memory store owner is unavailable");
             await session.HandleMemoryStoreAsync(request, cancellationToken);
         }
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 
     }
 
@@ -3997,110 +4014,44 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             return "\"" + arg.Replace("\"", "\\\"") + "\"";
         }
     }
-
-    // Request/Response types for RPC
-    internal record CreateSessionRequest(
-        string? Model,
-        string? SessionId,
-        string? Name,
-        string? ClientName,
-        string? ReasoningEffort,
-        bool? AllowMultipleToolCalls,
-        ReasoningSummary? ReasoningSummary,
-        ContextTier? ContextTier,
-        IList<ToolDefinition>? Tools,
-        bool? EnableCitations,
-        bool? EnableFileChangeTracking,
-        SystemMessageConfig? SystemMessage,
-        AskUserVariant? AskUserVariant,
-        IList<string>? AvailableTools,
-        IList<string>? ExcludedTools,
-        [property: JsonPropertyName("excludedBuiltinAgents")] IList<string>? ExcludedBuiltInAgents,
-        [property: JsonPropertyName("includedBuiltinAgents")] IList<string>? IncludedBuiltInAgents,
-        ProviderConfig? Provider,
-        CapiSessionOptions? Capi,
-        bool? EnableSessionTelemetry,
-        bool? IsExperimentalMode,
-        bool? RequestPermission,
-        bool? RequestUserInput,
-        bool? RequestExitPlanMode,
-        bool? RequestAutoModeSwitch,
-        bool? Hooks,
-        string? WorkingDirectory,
-        bool? Streaming,
-        bool? IncludeSubAgentStreamingEvents,
-        IDictionary<string, McpServerConfig>? McpServers,
-        DiagnosticsConfiguration? Diagnostics,
-        LifecycleDiagnosticsConfiguration? LifecycleDiagnostics,
-        McpOAuthTokenStorageMode? McpOAuthTokenStorage,
-        string? AuthClientIdMetadataUrl,
-        string? EnvValueMode,
-        IList<CustomAgentConfig>? CustomAgents,
-        DefaultAgentConfig? DefaultAgent,
-        string? Agent,
-        [property: JsonPropertyName("configDir")] string? ConfigDirectory,
-        bool? EnableConfigDiscovery,
-        [property: JsonPropertyName("customAgentsLocalOnly")] bool? CustomAgentsLocalOnly,
-        bool? SkipEmbeddingRetrieval,
-        EmbeddingCacheStorageMode? EmbeddingCacheStorage,
-        string? OrganizationCustomInstructions,
-        bool? EnableOnDemandInstructionDiscovery,
-        bool? EnableFileHooks,
-        bool? EnableHostGitOperations,
-        bool? EnableSessionStore,
-        bool? EnableSkills,
-        IList<string>? SkillDirectories,
-        IList<string>? DisabledSkills,
-        InfiniteSessionConfig? InfiniteSessions,
-        SessionLimitsConfig? SessionLimits,
-        AutopilotOptions? Autopilot,
-        IList<CommandWireDefinition>? Commands = null,
-        bool? RequestElicitation = null,
-        bool? RequestMcpApps = null,
-        bool? RequestShellAuthentication = null,
-        string? Traceparent = null,
-        string? Tracestate = null,
-        ModelCapabilitiesOverride? ModelCapabilities = null,
-        string? GitHubToken = null,
-        [property: JsonPropertyName("gitHubTokenProviderRegistrationId")] string? GitHubTokenProviderRegistrationId = null,
-        RemoteSessionMode? RemoteSession = null,
-        CloudSessionOptions? Cloud = null,
-        string? TrustWorkingDirectory = null,
-        bool? RefreshCustomInstructions = null,
-        IList<string>? InstructionDirectories = null,
-        IList<string>? AgentDirectories = null,
-        IList<string>? HookDirectories = null,
-        IList<string>? PluginDirectories = null,
-        [property: JsonPropertyName("disabledMcpServers")] IList<string>? DisabledMcpServers = null,
-        [property: JsonPropertyName("sandboxConfig")] SandboxConfig? SandboxConfig = null,
-        LargeToolOutputConfig? LargeOutput = null,
-        ToolSearchConfig? ToolSearch = null,
-        ImageGenerationConfig? ImageGeneration = null,
-        MemoryConfiguration? Memory = null,
-#pragma warning disable GHCP001
-        IList<CanvasDeclaration>? Canvases = null,
-        bool? RequestCanvasRenderer = null,
-        bool? RequestExtensions = null,
-        string? ExtensionSdkPath = null,
-        ExtensionInfo? ExtensionInfo = null,
-        CanvasProviderIdentity? CanvasProvider = null,
-        IList<NamedProviderConfig>? Providers = null,
-        IList<ProviderModelConfig>? Models = null,
-        [property: JsonPropertyName("featureFlags")] IDictionary<string, bool>? FeatureFlags = null,
-        [property: JsonPropertyName("expAssignments")] CopilotExpAssignmentResponse? ExpAssignments = null,
-        [property: JsonPropertyName("enableManagedSettings")] bool? EnableManagedSettings = null,
-        [property: JsonPropertyName("excludedManagedSettings")] IList<string>? ExcludedManagedSettings = null,
-        [property: JsonPropertyName("enforceManagedModelDefaults")] bool? EnforceManagedModelDefaults = null,
-        [property: JsonPropertyName("interactiveUser")] bool? InteractiveUser = null,
-        [property: JsonPropertyName("permissionMode")] PermissionMode? PermissionMode = null,
-        [property: JsonPropertyName("managedSettings")] ManagedSettings? ManagedSettings = null,
-        bool? EnableGitHubTelemetryForwarding = null,
-        [property: JsonPropertyName("githubMcpToolConfig")] GitHubMcpToolConfig? GitHubMcpToolConfig = null,
-        IList<string>? AdditionalDirectories = null,
-        bool? HasSkillProvider = null,
-        bool? RequestAutoModeRecovery = null,
-        bool? HasMemoryStore = null);
-#pragma warning restore GHCP001
+    internal sealed class CreateSessionRequest
+    {
+        [JsonPropertyName("model")] public string? Model { get; init; }
+        [JsonPropertyName("sessionId")] public string? SessionId { get; init; }
+        [JsonPropertyName("name")] public string? Name { get; init; }
+        [JsonPropertyName("clientName")] public string? ClientName { get; init; }
+        [JsonPropertyName("systemMessage")] public SystemMessageConfig? SystemMessage { get; init; }
+        [JsonPropertyName("workingDirectory")] public string? WorkingDirectory { get; init; }
+        [JsonPropertyName("diagnostics")] public DiagnosticsConfiguration? Diagnostics { get; init; }
+        [JsonPropertyName("lifecycleDiagnostics")] public LifecycleDiagnosticsConfiguration? LifecycleDiagnostics { get; init; }
+        [JsonPropertyName("traceparent")] public string? Traceparent { get; init; }
+        [JsonPropertyName("tracestate")] public string? Tracestate { get; init; }
+        [JsonPropertyName("remoteSession")] public RemoteSessionMode? RemoteSession { get; init; }
+        [JsonPropertyName("cloud")] public CloudSessionOptions? Cloud { get; init; }
+        [JsonPropertyName("inference")] public SessionInferenceRequest? Inference { get; init; }
+        [JsonPropertyName("tools")] public SessionToolRequest? Tools { get; init; }
+        [JsonPropertyName("filesystem")] public SessionFilesystemRequest? Filesystem { get; init; }
+        [JsonPropertyName("interaction")] public SessionInteractionRequest? Interaction { get; init; }
+        [JsonPropertyName("agents")] public SessionAgentRequest? Agents { get; init; }
+        [JsonPropertyName("github")] public SessionGitHubRequest? GitHub { get; init; }
+        [JsonPropertyName("experiments")] public SessionExperimentRequest? Experiments { get; init; }
+        [JsonPropertyName("permissions")] public SessionPermissionRequest? Permissions { get; init; }
+        [JsonPropertyName("hooks")] public SessionHookRequest? Hooks { get; init; }
+        [JsonPropertyName("events")] public SessionEventRequest? Events { get; init; }
+        [JsonPropertyName("mcp")] public SessionMcpRequest? Mcp { get; init; }
+        [JsonPropertyName("configDirectory")] public string? ConfigDirectory { get; init; }
+        [JsonPropertyName("enableConfigDiscovery")] public bool? EnableConfigDiscovery { get; init; }
+        [JsonPropertyName("state")] public SessionStateRequest? State { get; init; }
+        [JsonPropertyName("instructions")] public SessionInstructionRequest? Instructions { get; init; }
+        [JsonPropertyName("git")] public SessionGitRequest? Git { get; init; }
+        [JsonPropertyName("skills")] public SessionSkillRequest? Skills { get; init; }
+        [JsonPropertyName("execution")] public SessionExecutionRequest? Execution { get; init; }
+        [JsonPropertyName("plugins")] public SessionPluginRequest? Plugins { get; init; }
+        [JsonPropertyName("canvases")] public SessionCanvasRequest? Canvases { get; init; }
+        [JsonPropertyName("extensions")] public SessionExtensionRequest? Extensions { get; init; }
+        [JsonPropertyName("policy")] public SessionPolicyRequest? Policy { get; init; }
+    }
+#pragma warning restore MCPSDK001
 
     internal record ToolDefinition(
         string Name,
@@ -4142,123 +4093,58 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         string SessionId,
         string? WorkspacePath,
         SessionCapabilities? Capabilities = null,
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
         IList<OpenCanvasInstance>? OpenCanvases = null,
         PermissionsSetModeResult? PermissionModeResult = null);
-#pragma warning restore GHCP001
-
-    internal record ResumeSessionRequest(
-        string SessionId,
-        string? ClientName,
-        string? Model,
-        string? ReasoningEffort,
-        bool? AllowMultipleToolCalls,
-        ReasoningSummary? ReasoningSummary,
-        ContextTier? ContextTier,
-        IList<ToolDefinition>? Tools,
-        bool? EnableCitations,
-        bool? EnableFileChangeTracking,
-        SystemMessageConfig? SystemMessage,
-        AskUserVariant? AskUserVariant,
-        IList<string>? AvailableTools,
-        IList<string>? ExcludedTools,
-        [property: JsonPropertyName("excludedBuiltinAgents")] IList<string>? ExcludedBuiltInAgents,
-        [property: JsonPropertyName("includedBuiltinAgents")] IList<string>? IncludedBuiltInAgents,
-        ProviderConfig? Provider,
-        CapiSessionOptions? Capi,
-        bool? EnableSessionTelemetry,
-        bool? IsExperimentalMode,
-        bool? RequestPermission,
-        bool? RequestUserInput,
-        bool? RequestExitPlanMode,
-        bool? RequestAutoModeSwitch,
-        bool? Hooks,
-        string? WorkingDirectory,
-        [property: JsonPropertyName("configDir")] string? ConfigDirectory,
-        bool? EnableConfigDiscovery,
-        [property: JsonPropertyName("customAgentsLocalOnly")] bool? CustomAgentsLocalOnly,
-        bool? SkipEmbeddingRetrieval,
-        EmbeddingCacheStorageMode? EmbeddingCacheStorage,
-        string? OrganizationCustomInstructions,
-        bool? EnableOnDemandInstructionDiscovery,
-        bool? EnableFileHooks,
-        bool? EnableHostGitOperations,
-        bool? EnableSessionStore,
-        bool? EnableSkills,
-        [property: JsonPropertyName("disableResume")] bool? SuppressResumeEvent,
-        bool? Streaming,
-        bool? IncludeSubAgentStreamingEvents,
-        IDictionary<string, McpServerConfig>? McpServers,
-        DiagnosticsConfiguration? Diagnostics,
-        LifecycleDiagnosticsConfiguration? LifecycleDiagnostics,
-        McpOAuthTokenStorageMode? McpOAuthTokenStorage,
-        string? AuthClientIdMetadataUrl,
-        string? EnvValueMode,
-        IList<CustomAgentConfig>? CustomAgents,
-        DefaultAgentConfig? DefaultAgent,
-        string? Agent,
-        IList<string>? SkillDirectories,
-        IList<string>? DisabledSkills,
-        InfiniteSessionConfig? InfiniteSessions,
-        SessionLimitsConfig? SessionLimits,
-        AutopilotOptions? Autopilot,
-        IList<CommandWireDefinition>? Commands = null,
-        bool? RequestElicitation = null,
-        bool? RequestMcpApps = null,
-        bool? RequestShellAuthentication = null,
-        string? Traceparent = null,
-        string? Tracestate = null,
-        ModelCapabilitiesOverride? ModelCapabilities = null,
-        string? GitHubToken = null,
-        [property: JsonPropertyName("gitHubTokenProviderRegistrationId")] string? GitHubTokenProviderRegistrationId = null,
-        RemoteSessionMode? RemoteSession = null,
-        bool? ContinuePendingWork = null,
-        IList<string>? InstructionDirectories = null,
-        IList<string>? AgentDirectories = null,
-        IList<string>? HookDirectories = null,
-        IList<string>? PluginDirectories = null,
-        [property: JsonPropertyName("disabledMcpServers")] IList<string>? DisabledMcpServers = null,
-        [property: JsonPropertyName("sandboxConfig")] SandboxConfig? SandboxConfig = null,
-        LargeToolOutputConfig? LargeOutput = null,
-        ToolSearchConfig? ToolSearch = null,
-        ImageGenerationConfig? ImageGeneration = null,
-        MemoryConfiguration? Memory = null,
-#pragma warning disable GHCP001
-        IList<CanvasDeclaration>? Canvases = null,
-        bool? RequestCanvasRenderer = null,
-        bool? RequestExtensions = null,
-        string? ExtensionSdkPath = null,
-        ExtensionInfo? ExtensionInfo = null,
-        CanvasProviderIdentity? CanvasProvider = null,
-        IList<OpenCanvasInstance>? OpenCanvases = null,
-        IList<NamedProviderConfig>? Providers = null,
-        IList<ProviderModelConfig>? Models = null,
-        [property: JsonPropertyName("featureFlags")] IDictionary<string, bool>? FeatureFlags = null,
-        [property: JsonPropertyName("expAssignments")] CopilotExpAssignmentResponse? ExpAssignments = null,
-        [property: JsonPropertyName("enableManagedSettings")] bool? EnableManagedSettings = null,
-        [property: JsonPropertyName("excludedManagedSettings")] IList<string>? ExcludedManagedSettings = null,
-        [property: JsonPropertyName("enforceManagedModelDefaults")] bool? EnforceManagedModelDefaults = null,
-        [property: JsonPropertyName("interactiveUser")] bool? InteractiveUser = null,
-        [property: JsonPropertyName("permissionMode")] PermissionMode? PermissionMode = null,
-        [property: JsonPropertyName("managedSettings")] ManagedSettings? ManagedSettings = null,
-        bool? EnableGitHubTelemetryForwarding = null,
-        [property: JsonPropertyName("githubMcpToolConfig")] GitHubMcpToolConfig? GitHubMcpToolConfig = null,
-        IList<string>? AdditionalDirectories = null,
-        bool? AllowTranscriptRecovery = null,
-        bool? HasSkillProvider = null,
-        bool? RequestAutoModeRecovery = null,
-        bool? HasMemoryStore = null);
-#pragma warning restore GHCP001
+    internal sealed class ResumeSessionRequest
+    {
+        [JsonPropertyName("sessionId")] public required string SessionId { get; init; }
+        [JsonPropertyName("clientName")] public string? ClientName { get; init; }
+        [JsonPropertyName("model")] public string? Model { get; init; }
+        [JsonPropertyName("systemMessage")] public SystemMessageConfig? SystemMessage { get; init; }
+        [JsonPropertyName("workingDirectory")] public string? WorkingDirectory { get; init; }
+        [JsonPropertyName("suppressResumeEvent")] public bool? SuppressResumeEvent { get; init; }
+        [JsonPropertyName("diagnostics")] public DiagnosticsConfiguration? Diagnostics { get; init; }
+        [JsonPropertyName("lifecycleDiagnostics")] public LifecycleDiagnosticsConfiguration? LifecycleDiagnostics { get; init; }
+        [JsonPropertyName("traceparent")] public string? Traceparent { get; init; }
+        [JsonPropertyName("tracestate")] public string? Tracestate { get; init; }
+        [JsonPropertyName("remoteSession")] public RemoteSessionMode? RemoteSession { get; init; }
+        [JsonPropertyName("continuePendingWork")] public bool? ContinuePendingWork { get; init; }
+        [JsonPropertyName("allowTranscriptRecovery")] public bool? AllowTranscriptRecovery { get; init; }
+        [JsonPropertyName("inference")] public SessionInferenceRequest? Inference { get; init; }
+        [JsonPropertyName("tools")] public SessionToolRequest? Tools { get; init; }
+        [JsonPropertyName("filesystem")] public SessionFilesystemRequest? Filesystem { get; init; }
+        [JsonPropertyName("interaction")] public SessionInteractionRequest? Interaction { get; init; }
+        [JsonPropertyName("agents")] public SessionAgentRequest? Agents { get; init; }
+        [JsonPropertyName("github")] public SessionGitHubRequest? GitHub { get; init; }
+        [JsonPropertyName("experiments")] public SessionExperimentRequest? Experiments { get; init; }
+        [JsonPropertyName("permissions")] public SessionPermissionRequest? Permissions { get; init; }
+        [JsonPropertyName("hooks")] public SessionHookRequest? Hooks { get; init; }
+        [JsonPropertyName("configDirectory")] public string? ConfigDirectory { get; init; }
+        [JsonPropertyName("enableConfigDiscovery")] public bool? EnableConfigDiscovery { get; init; }
+        [JsonPropertyName("state")] public SessionStateRequest? State { get; init; }
+        [JsonPropertyName("instructions")] public SessionInstructionRequest? Instructions { get; init; }
+        [JsonPropertyName("git")] public SessionGitRequest? Git { get; init; }
+        [JsonPropertyName("skills")] public SessionSkillRequest? Skills { get; init; }
+        [JsonPropertyName("events")] public SessionEventRequest? Events { get; init; }
+        [JsonPropertyName("mcp")] public SessionMcpRequest? Mcp { get; init; }
+        [JsonPropertyName("execution")] public SessionExecutionRequest? Execution { get; init; }
+        [JsonPropertyName("plugins")] public SessionPluginRequest? Plugins { get; init; }
+        [JsonPropertyName("canvases")] public SessionCanvasRequest? Canvases { get; init; }
+        [JsonPropertyName("extensions")] public SessionExtensionRequest? Extensions { get; init; }
+        [JsonPropertyName("policy")] public SessionPolicyRequest? Policy { get; init; }
+    }
+#pragma warning restore MCPSDK001
 
     internal record ResumeSessionResponse(
         string SessionId,
         string? WorkspacePath,
         SessionCapabilities? Capabilities = null,
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
         IList<OpenCanvasInstance>? OpenCanvases = null,
         TranscriptRecoveryReport? TranscriptRecovery = null,
         PermissionsSetModeResult? PermissionModeResult = null);
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 
     internal record CommandWireDefinition(
         string Name,
@@ -4355,10 +4241,10 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     internal record SkillProviderListRequest(
         string SessionId);
 
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
     internal record SkillProviderListResult(
         IReadOnlyList<SkillProviderDescriptor> Skills);
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 
     internal record SkillProviderReadRequest(
         string SessionId,
@@ -4379,8 +4265,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         NumberHandling = JsonNumberHandling.AllowReadingFromString,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonSerializable(typeof(CreateSessionRequest))]
-    [JsonSerializable(typeof(SessionConfig))]
-    [JsonSerializable(typeof(ResumeSessionConfig))]
+    [JsonSerializable(typeof(CreateSessionOptions))]
+    [JsonSerializable(typeof(ResumeSessionOptions))]
     [JsonSerializable(typeof(AhpMaterializeRequest))]
     [JsonSerializable(typeof(AhpMaterializeResult))]
     [JsonSerializable(typeof(AhpReleaseRequest))]
@@ -4400,14 +4286,14 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     [JsonSerializable(typeof(GetLastSessionIdResponse))]
     [JsonSerializable(typeof(HooksInvokeResponse))]
     [JsonSerializable(typeof(SkillProviderListRequest))]
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
     [JsonSerializable(typeof(SkillProviderListResult))]
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
     [JsonSerializable(typeof(SkillProviderReadRequest))]
     [JsonSerializable(typeof(SkillProviderReadResult))]
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
     [JsonSerializable(typeof(StoredMemory))]
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
     [JsonSerializable(typeof(ListSessionsRequest))]
     [JsonSerializable(typeof(ListSessionsResponse))]
     [JsonSerializable(typeof(GetSessionMetadataRequest))]
@@ -4490,4 +4376,303 @@ internal sealed class GitHubTelemetryAdapter(Func<Rpc.GitHubTelemetryNotificatio
             _logger.LogWarning(ex, "Error handling gitHubTelemetry.event notification");
         }
     }
+}
+
+internal sealed class SessionInferenceRequest
+{
+    [JsonPropertyName("reasoningEffort")]
+    public string? ReasoningEffort { get; init; }
+
+    [JsonPropertyName("allowMultipleToolCalls")]
+    public bool? AllowMultipleToolCalls { get; init; }
+
+    [JsonPropertyName("reasoningSummary")]
+    public ReasoningSummary? ReasoningSummary { get; init; }
+
+    [JsonPropertyName("contextTier")]
+    public ContextTier? ContextTier { get; init; }
+
+    [JsonPropertyName("enableCitations")]
+    public bool? EnableCitations { get; init; }
+
+    [JsonPropertyName("defaultProvider")]
+    public JsonElement? DefaultProvider { get; init; }
+
+    [JsonPropertyName("capabilities")]
+    public ModelCapabilitiesOverride? Capabilities { get; init; }
+
+    [JsonPropertyName("providers")]
+    public IList<NamedProviderConfig>? Providers { get; init; }
+
+    [JsonPropertyName("models")]
+    public IList<ProviderModelConfig>? Models { get; init; }
+}
+internal sealed class SessionToolRequest
+{
+    [JsonPropertyName("definitions")]
+    public IList<CopilotClient.ToolDefinition>? Definitions { get; init; }
+
+    [JsonPropertyName("availableTools")]
+    public IList<string>? AvailableTools { get; init; }
+
+    [JsonPropertyName("excludedTools")]
+    public IList<string>? ExcludedTools { get; init; }
+
+    [JsonPropertyName("largeOutput")]
+    public LargeToolOutputConfig? LargeOutput { get; init; }
+
+    [JsonPropertyName("search")]
+    public ToolSearchConfig? Search { get; init; }
+
+    [JsonPropertyName("imageGeneration")]
+    public ImageGenerationConfig? ImageGeneration { get; init; }
+}
+internal sealed class SessionFilesystemRequest
+{
+    [JsonPropertyName("trackFileChanges")]
+    public bool? TrackFileChanges { get; init; }
+
+    [JsonPropertyName("trustWorkingDirectory")]
+    public string? TrustWorkingDirectory { get; init; }
+
+    [JsonPropertyName("additionalDirectories")]
+    public IList<string>? AdditionalDirectories { get; init; }
+}
+internal sealed class SessionInteractionRequest
+{
+    [JsonPropertyName("askUserVariant")]
+    public AskUserVariant? AskUserVariant { get; init; }
+
+    [JsonPropertyName("requestUserInput")]
+    public bool? RequestUserInput { get; init; }
+
+    [JsonPropertyName("requestExitPlanMode")]
+    public bool? RequestExitPlanMode { get; init; }
+
+    [JsonPropertyName("requestAutoModeSwitch")]
+    public bool? RequestAutoModeSwitch { get; init; }
+
+    [JsonPropertyName("commands")]
+    public IList<CopilotClient.CommandWireDefinition>? Commands { get; init; }
+
+    [JsonPropertyName("requestElicitation")]
+    public bool? RequestElicitation { get; init; }
+
+    [JsonPropertyName("requestShellAuthentication")]
+    public bool? RequestShellAuthentication { get; init; }
+
+    [JsonPropertyName("requestAutoModeRecovery")]
+    public bool? RequestAutoModeRecovery { get; init; }
+}
+internal sealed class SessionAgentRequest
+{
+    [JsonPropertyName("excludedBuiltinAgents")]
+    public IList<string>? ExcludedBuiltInAgents { get; init; }
+
+    [JsonPropertyName("includedBuiltinAgents")]
+    public IList<string>? IncludedBuiltInAgents { get; init; }
+
+    [JsonPropertyName("definitions")]
+    public IList<CustomAgentConfig>? Definitions { get; init; }
+
+    [JsonPropertyName("default")]
+    public DefaultAgentConfig? Default { get; init; }
+
+    [JsonPropertyName("selected")]
+    public string? Selected { get; init; }
+
+    [JsonPropertyName("localDiscoveryOnly")]
+    public bool? LocalDiscoveryOnly { get; init; }
+
+    [JsonPropertyName("directories")]
+    public IList<string>? Directories { get; init; }
+}
+internal sealed class SessionGitHubRequest
+{
+    [JsonPropertyName("capi")]
+    public CapiSessionOptions? Capi { get; init; }
+
+    [JsonPropertyName("telemetryEnabled")]
+    public bool? TelemetryEnabled { get; init; }
+
+    [JsonPropertyName("token")]
+    public string? Token { get; init; }
+
+    [JsonPropertyName("tokenProviderRegistrationId")]
+    public string? TokenProviderRegistrationId { get; init; }
+
+    [JsonPropertyName("fetchManagedSettings")]
+    public bool? FetchManagedSettings { get; init; }
+
+    [JsonPropertyName("interactiveUser")]
+    public bool? InteractiveUser { get; init; }
+
+    [JsonPropertyName("telemetryForwarding")]
+    public bool? TelemetryForwarding { get; init; }
+
+    [JsonPropertyName("mcp")]
+    public GitHubMcpToolConfig? Mcp { get; init; }
+}
+internal sealed class SessionExperimentRequest
+{
+    [JsonPropertyName("enableExperimentalMode")]
+    public bool? EnableExperimentalMode { get; init; }
+
+    [JsonPropertyName("flags")]
+    public IDictionary<string, bool>? Flags { get; init; }
+
+    [JsonPropertyName("assignments")]
+    public CopilotExpAssignmentResponse? Assignments { get; init; }
+}
+internal sealed class SessionPermissionRequest
+{
+    [JsonPropertyName("request")]
+    public bool? Request { get; init; }
+
+    [JsonPropertyName("sandbox")]
+    public SandboxConfig? Sandbox { get; init; }
+
+    [JsonPropertyName("mode")]
+    public PermissionMode? Mode { get; init; }
+}
+internal sealed class SessionHookRequest
+{
+    [JsonPropertyName("hasHandlers")]
+    public bool? HasHandlers { get; init; }
+
+    [JsonPropertyName("enableRepositoryHooks")]
+    public bool? EnableRepositoryHooks { get; init; }
+
+    [JsonPropertyName("directories")]
+    public IList<string>? Directories { get; init; }
+}
+internal sealed class SessionEventRequest
+{
+    [JsonPropertyName("streaming")]
+    public bool? Streaming { get; init; }
+
+    [JsonPropertyName("includeSubAgentStreamingEvents")]
+    public bool? IncludeSubAgentStreamingEvents { get; init; }
+}
+internal sealed class SessionMcpRequest
+{
+    [JsonPropertyName("servers")]
+    public IDictionary<string, McpServerConfig>? Servers { get; init; }
+
+    [JsonPropertyName("oauthTokenStorage")]
+    public McpOAuthTokenStorageMode? OauthTokenStorage { get; init; }
+
+    [JsonPropertyName("authClientIdMetadataUrl")]
+    public string? AuthClientIdMetadataUrl { get; init; }
+
+    [JsonPropertyName("envValueMode")]
+    public string? EnvValueMode { get; init; }
+
+    [JsonPropertyName("enableApps")]
+    public bool? EnableApps { get; init; }
+
+    [JsonPropertyName("disabledServers")]
+    public IList<string>? DisabledServers { get; init; }
+}
+internal sealed class SessionStateRequest
+{
+    [JsonPropertyName("skipEmbeddingRetrieval")]
+    public bool? SkipEmbeddingRetrieval { get; init; }
+
+    [JsonPropertyName("embeddingCacheStorage")]
+    public EmbeddingCacheStorageMode? EmbeddingCacheStorage { get; init; }
+
+    [JsonPropertyName("enableCrossSessionStore")]
+    public bool? EnableCrossSessionStore { get; init; }
+
+    [JsonPropertyName("infiniteSessions")]
+    public InfiniteSessionConfig? InfiniteSessions { get; init; }
+
+    [JsonPropertyName("memory")]
+    public MemoryConfiguration? Memory { get; init; }
+
+    [JsonPropertyName("hasMemoryStore")]
+    public bool? HasMemoryStore { get; init; }
+}
+internal sealed class SessionInstructionRequest
+{
+    [JsonPropertyName("organizationText")]
+    public string? OrganizationText { get; init; }
+
+    [JsonPropertyName("onDemandDiscovery")]
+    public bool? OnDemandDiscovery { get; init; }
+
+    [JsonPropertyName("refreshCustomInstructions")]
+    public bool? RefreshCustomInstructions { get; init; }
+
+    [JsonPropertyName("directories")]
+    public IList<string>? Directories { get; init; }
+}
+internal sealed class SessionGitRequest
+{
+    [JsonPropertyName("enableHostGitOperations")]
+    public bool? EnableHostGitOperations { get; init; }
+}
+internal sealed class SessionSkillRequest
+{
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; init; }
+
+    [JsonPropertyName("directories")]
+    public IList<string>? Directories { get; init; }
+
+    [JsonPropertyName("disabledSkills")]
+    public IList<string>? DisabledSkills { get; init; }
+
+    [JsonPropertyName("hasProvider")]
+    public bool? HasProvider { get; init; }
+}
+internal sealed class SessionExecutionRequest
+{
+    [JsonPropertyName("limits")]
+    public SessionLimitsConfig? Limits { get; init; }
+
+    [JsonPropertyName("autopilot")]
+    public AutopilotOptions? Autopilot { get; init; }
+}
+internal sealed class SessionPluginRequest
+{
+    [JsonPropertyName("directories")]
+    public IList<string>? Directories { get; init; }
+}
+internal sealed class SessionCanvasRequest
+{
+    [JsonPropertyName("definitions")]
+    public IList<CanvasDeclaration>? Definitions { get; init; }
+
+    [JsonPropertyName("requestRenderer")]
+    public bool? RequestRenderer { get; init; }
+
+    [JsonPropertyName("provider")]
+    public CanvasProviderIdentity? Provider { get; init; }
+
+    [JsonPropertyName("open")]
+    public IList<OpenCanvasInstance>? Open { get; init; }
+}
+internal sealed class SessionExtensionRequest
+{
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; init; }
+
+    [JsonPropertyName("sdkPath")]
+    public string? SdkPath { get; init; }
+
+    [JsonPropertyName("identity")]
+    public ExtensionInfo? Identity { get; init; }
+}
+internal sealed class SessionPolicyRequest
+{
+    [JsonPropertyName("excludedManagedSettings")]
+    public IList<string>? ExcludedManagedSettings { get; init; }
+
+    [JsonPropertyName("enforceManagedModelDefaults")]
+    public bool? EnforceManagedModelDefaults { get; init; }
+
+    [JsonPropertyName("managedSettings")]
+    public ManagedSettings? ManagedSettings { get; init; }
 }

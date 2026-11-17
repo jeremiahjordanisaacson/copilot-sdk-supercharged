@@ -1,16 +1,15 @@
+use copilot_sdk::{RuntimeConnection, SpawnedTcpRuntimeOptions, TcpRuntimeOptions};
 use std::net::TcpListener;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::{
+use copilot_sdk::handler::{
     ApproveAllHandler, ElicitationHandler, PermissionHandler, PermissionResult,
 };
-use github_copilot_sdk::session_events::{
-    CapabilitiesChangedData, CommandsChangedData, SessionEventType,
-};
-use github_copilot_sdk::{
+use copilot_sdk::session_events::{CapabilitiesChangedData, CommandsChangedData, SessionEventType};
+use copilot_sdk::{
     Client, CommandContext, CommandDefinition, CommandHandler, ElicitationRequest,
-    ElicitationResult, RequestId, ResumeSessionConfig, SessionId, Transport,
+    ElicitationResult, RequestId, ResumeSessionOptions, SessionId,
 };
 
 use super::support::{DEFAULT_TEST_TOKEN, E2eContext, wait_for_event, with_e2e_context};
@@ -47,10 +46,14 @@ async fn client_receives_commands_changed_when_another_client_joins_with_command
                         })
                     });
                 let session2 = client2
-                    .resume_session(resume_config(session1.id().clone()).with_commands(vec![
-                            CommandDefinition::new("deploy", Arc::new(NoopCommandHandler))
-                                .with_description("Deploy the app"),
-                        ]))
+                    .resume_session(resume_config(session1.id().clone()).with_interaction(
+                        |group| {
+                            group.with_commands(vec![
+                                CommandDefinition::new("deploy", Arc::new(NoopCommandHandler))
+                                    .with_description("Deploy the app"),
+                            ])
+                        },
+                    ))
                     .await
                     .expect("resume session from second client");
                 commands_changed.await;
@@ -104,8 +107,14 @@ async fn capabilities_changed_fires_when_second_client_joins_with_elicitation_ha
                 let session2 = client2
                     .resume_session(
                         resume_config(session1.id().clone())
-                            .with_permission_handler(Arc::new(ElicitationApproveHandler))
-                            .with_elicitation_handler(Arc::new(ElicitationApproveHandler)),
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ElicitationApproveHandler))
+                            })
+                            .with_interaction(|group| {
+                                group.with_on_elicitation_request(Arc::new(
+                                    ElicitationApproveHandler,
+                                ))
+                            }),
                     )
                     .await
                     .expect("resume session with elicitation handler");
@@ -159,8 +168,14 @@ async fn capabilities_changed_fires_when_elicitation_provider_disconnects() {
                 let _session2 = client2
                     .resume_session(
                         resume_config(session1.id().clone())
-                            .with_permission_handler(Arc::new(ElicitationApproveHandler))
-                            .with_elicitation_handler(Arc::new(ElicitationApproveHandler)),
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ElicitationApproveHandler))
+                            })
+                            .with_interaction(|group| {
+                                group.with_on_elicitation_request(Arc::new(
+                                    ElicitationApproveHandler,
+                                ))
+                            }),
                     )
                     .await
                     .expect("resume session with elicitation handler");
@@ -194,28 +209,35 @@ async fn capabilities_changed_fires_when_elicitation_provider_disconnects() {
     .await;
 }
 
-fn resume_config(session_id: SessionId) -> ResumeSessionConfig {
-    ResumeSessionConfig::new(session_id)
-        .with_github_token(DEFAULT_TEST_TOKEN)
-        .with_permission_handler(Arc::new(ApproveAllHandler))
+fn resume_config(session_id: SessionId) -> ResumeSessionOptions {
+    ResumeSessionOptions::new(session_id)
+        .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
         .with_suppress_resume_event(true)
 }
 
 async fn start_tcp_server(ctx: &E2eContext, port: u16) -> Client {
-    Client::start(ctx.client_options_with_transport(Transport::Tcp {
-        port,
-        connection_token: Some(SHARED_TOKEN.to_string()),
-    }))
+    Client::start(
+        ctx.client_options_with_transport(RuntimeConnection::SpawnedTcp(
+            SpawnedTcpRuntimeOptions {
+                process: Default::default(),
+                port,
+                connection_token: Some(SHARED_TOKEN.to_string()),
+            },
+        )),
+    )
     .await
     .expect("start TCP server client")
 }
 
 async fn start_external_client(ctx: &E2eContext, port: u16) -> Client {
-    Client::start(ctx.client_options_with_transport(Transport::External {
-        host: "127.0.0.1".to_string(),
-        port,
-        connection_token: Some(SHARED_TOKEN.to_string()),
-    }))
+    Client::start(
+        ctx.client_options_with_transport(RuntimeConnection::Tcp(TcpRuntimeOptions {
+            host: "127.0.0.1".to_string(),
+            port,
+            connection_token: Some(SHARED_TOKEN.to_string()),
+        })),
+    )
     .await
     .expect("start external client")
 }
@@ -229,7 +251,7 @@ struct NoopCommandHandler;
 
 #[async_trait]
 impl CommandHandler for NoopCommandHandler {
-    async fn on_command(&self, _ctx: CommandContext) -> Result<(), github_copilot_sdk::Error> {
+    async fn on_command(&self, _ctx: CommandContext) -> Result<(), copilot_sdk::Error> {
         Ok(())
     }
 }
@@ -242,7 +264,7 @@ impl PermissionHandler for ElicitationApproveHandler {
         &self,
         _session_id: SessionId,
         _request_id: RequestId,
-        _data: github_copilot_sdk::PermissionRequestData,
+        _data: copilot_sdk::PermissionRequestData,
     ) -> PermissionResult {
         PermissionResult::approve_once()
     }

@@ -4,7 +4,7 @@
 
 using System.Text.Json.Serialization;
 
-namespace GitHub.Copilot.Rpc;
+namespace Microsoft.Copilot.Rpc;
 
 /// <summary>
 /// SDK-only <see cref="PermissionDecision"/> value indicating the handler
@@ -20,7 +20,7 @@ public sealed class PermissionDecisionNoResult : PermissionDecision
 
 /// <summary>
 /// Static factories for the common <see cref="PermissionDecision"/> variants
-/// returned by <c>OnPermissionRequest</c> handlers. Use these for quick
+/// returned by <c>Permissions.OnRequest</c> handlers. Use these for quick
 /// discoverability via <c>PermissionDecision.&lt;dot&gt;</c>. For richer
 /// decisions (per-session, per-location, permanent) that need an
 /// <c>Approval</c> payload, instantiate the variant class directly.

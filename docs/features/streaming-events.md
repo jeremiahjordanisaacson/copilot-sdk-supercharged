@@ -119,19 +119,23 @@ package main
 import (
 	"context"
 	"fmt"
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func main() {
 	ctx := context.Background()
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
-	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-		Model:     "auto",
-		Streaming: copilot.Bool(true),
-		OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-			return &rpc.PermissionDecisionApproveOnce{}, nil
+	session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Model: "auto",
+		Events: copilot.SessionEventOptions{
+			Streaming: copilot.Bool(true),
+		},
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+				return &rpc.PermissionDecisionApproveOnce{}, nil
+			},
 		},
 	})
 
@@ -175,8 +179,8 @@ session.On<SessionEvent>(evt =>
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.*;
-import com.github.copilot.generated.*;
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.generated.*;
 
 public class SubscribingToEventsExample {
     static void subscribe(CopilotSession session) {
@@ -220,13 +224,14 @@ A session can emit events before its create or resume call returns. The agent ma
 > **(Rust)** `Client::prepare_session` and `Client::prepare_resume_session` return a `PreparedSession` that owns the session's event channel before any protocol activity happens. Subscribe first, then call `start()`.
 
 ```rust
-use github_copilot_sdk::{Client, SessionConfig};
+use copilot_sdk::{Client, CreateSessionOptions};
 
 async fn create_without_missing_startup_events(
     client: &Client,
-) -> Result<(), github_copilot_sdk::Error> {
+) -> Result<(), copilot_sdk::Error> {
     let prepared = client.prepare_session(
-        SessionConfig::default().with_event_buffer_capacity(2048),
+        CreateSessionOptions::default()
+            .with_events(|__sdk_group| __sdk_group.with_buffer_capacity(2048)),
     )?;
 
     // Installed before any wire activity: nothing is dropped for lack of a receiver.
@@ -262,7 +267,7 @@ Sub-agent events share the parent session stream and include envelope-level `age
 <summary><strong>TypeScript</strong></summary>
 
 ```typescript
-import type { CopilotSession } from "@github/copilot-sdk";
+import type { CopilotSession } from "@microsoft/copilot-sdk";
 
 export function subscribeParentResponse(session: CopilotSession): void {
     session.on("assistant.message_delta", (event) => {
@@ -304,7 +309,7 @@ package example
 import (
 	"fmt"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func subscribeParentResponse(session *copilot.Session) {
@@ -327,7 +332,7 @@ func subscribeParentResponse(session *copilot.Session) {
 
 ```csharp
 using System;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 static class ParentAgentResponseExample
 {
@@ -350,8 +355,8 @@ static class ParentAgentResponseExample
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotSession;
-import com.github.copilot.generated.AssistantMessageDeltaEvent;
+import com.microsoft.copilot.CopilotSession;
+import com.microsoft.copilot.generated.AssistantMessageDeltaEvent;
 
 final class ParentAgentResponseExample {
     static void subscribeParentResponse(CopilotSession session) {
@@ -370,7 +375,7 @@ final class ParentAgentResponseExample {
 <summary><strong>Rust</strong></summary>
 
 ```rust
-use github_copilot_sdk::session::Session;
+use copilot_sdk::session::Session;
 
 async fn subscribe_parent_response(session: &Session) {
     let mut events = session.subscribe();
@@ -444,7 +449,6 @@ The assistant's complete response for this LLM call. May include tool invocation
 | `phase` | `string` | | Generation phase (e.g., `"thinking"` vs `"response"`) |
 | `outputTokens` | `number` | | Output tokens this message adds to replayed context, for token accounting. Use `assistant.usage` for billed usage |
 | `interactionId` | `string` | | CAPI interaction ID for telemetry |
-| `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
 
 **`ToolRequest` fields:**
 
@@ -463,7 +467,6 @@ Ephemeral. Incremental chunk of the assistant's text response, streamed in real 
 |------------|------|----------|-------------|
 | `messageId` | `string` | ✅ | Matches the corresponding `assistant.message` event |
 | `deltaContent` | `string` | ✅ | Text chunk to append to the message |
-| `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
 
 ### `assistant.turn_end`
 
@@ -500,7 +503,6 @@ Ephemeral. Token usage and cost information for an individual API call.
 | `serviceRequestId` | `string` | | Copilot service request ID (`x-copilot-service-request-id`) for CAPI log correlation |
 | `apiEndpoint` | `"/chat/completions" \| "/v1/messages" \| "/responses" \| "ws:/responses" \| "/interactions"` | | API endpoint used for the model call; useful for observability and cost attribution. `ws:/responses` is the websocket variant of the responses API; `/interactions` is the native Gemini Interactions API, served by CAPI or by a BYOK `google` provider |
 | `providerCallId` | `string` | | GitHub request tracing ID (`x-github-request-id`) |
-| `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
 | `quotaSnapshots` | `Record<string, QuotaSnapshot>` | | Per-quota resource usage, keyed by quota identifier |
 | `copilotUsage` | `CopilotUsage` | | Itemized token cost breakdown from the API |
 
@@ -528,16 +530,6 @@ Emitted when a tool begins executing. MCP identity: `mcpConfigServerName ?? mcpS
 | `mcpServerName` | `string` | | Configured MCP server key |
 | `mcpServerDisplayName` | `string` | | Explicit display label; otherwise display `mcpServerName` |
 | `mcpToolName` | `string` | | Original tool name on the MCP server |
-| `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
-
-### `tool.execution_partial_result`
-
-Deprecated. Use `tool.shell_output` for live terminal output. This ephemeral event remains emitted alongside the replacement during migration; subscribe to only one representation to avoid displaying the same output twice.
-
-| Data Field | Type | Required | Description |
-|------------|------|----------|-------------|
-| `toolCallId` | `string` | ✅ | Matches the corresponding `tool.execution_start` |
-| `partialOutput` | `string` | ✅ | Bounded, cumulative replacement snapshot with stdout and stderr merged; not an append-only chunk |
 
 ### `tool.shell_output`
 
@@ -581,7 +573,6 @@ Emitted when a tool finishes executing—successfully or with an error.
 | `result` | `Result` | | Present on success. On failure, present when the tool returned content with its error, or when the text sent to the LLM differs from `error.message`; `content` is then that text |
 | `error` | `{ message, code? }` | | Present on failure |
 | `toolTelemetry` | `object` | | Tool-specific telemetry (e.g., CodeQL check counts) |
-| `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
 
 **`Result` fields:**
 
@@ -1042,7 +1033,6 @@ This table lists every event type documented on this page with its key `data` pa
 | `assistant.usage` | ✅ | Assistant | `model`, `apiEndpoint?`, `inputTokens?`, `outputTokens?`, `cost?`, `duration?` |
 | `tool.user_requested` | | Tool | `toolCallId`, `toolName`, `arguments?` |
 | `tool.execution_start` | | Tool | `toolCallId`, `toolName`, `arguments?`, `mcpServerName?`, `mcpServerDisplayName?` |
-| `tool.execution_partial_result` | ✅ | Tool | `toolCallId`, `partialOutput` |
 | `tool.shell_output` | ✅ | Tool | `toolCallId`, `text`, `stream?`, `sequence` |
 | `tool.execution_progress` | ✅ | Tool | `toolCallId`, `progressMessage` |
 | `tool.execution_complete` | | Tool | `toolCallId`, `success`, `result?`, `error?` |

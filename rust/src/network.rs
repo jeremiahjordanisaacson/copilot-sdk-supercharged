@@ -291,19 +291,12 @@ pub(crate) async fn register(client: &crate::Client, config: NetworkConfig) -> R
     if resolve_proxy.is_none() && authenticate_negotiate.is_none() && authenticate_basic.is_none() {
         return Ok(());
     }
-    let mut request = crate::rpc::NetworkSetProviderOptions::new();
-    if let Some(scope) = scope {
-        request = request.scope(scope);
-    }
-    if resolve_proxy.is_some() {
-        request = request.resolve_proxy(Default::default());
-    }
-    if authenticate_negotiate.is_some() {
-        request = request.authenticate_negotiate(Default::default());
-    }
-    if authenticate_basic.is_some() {
-        request = request.authenticate_basic(Default::default());
-    }
+    let request = crate::rpc::NetworkSetProviderRequest {
+        scope,
+        resolve_proxy: resolve_proxy.as_ref().map(|_| Default::default()),
+        authenticate_negotiate: authenticate_negotiate.as_ref().map(|_| Default::default()),
+        authenticate_basic: authenticate_basic.as_ref().map(|_| Default::default()),
+    };
     let mut installed = Vec::new();
     let submitted = install(
         client,

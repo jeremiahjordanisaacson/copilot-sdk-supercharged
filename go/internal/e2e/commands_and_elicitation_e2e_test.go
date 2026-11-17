@@ -1,28 +1,25 @@
 package e2e
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestCommandsE2E(t *testing.T) {
 	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client1 := ctx.NewClient(func(opts *copilot.ClientOptions) {
-		opts.Connection = copilot.TCPConnection{Path: opts.Connection.(copilot.StdioConnection).Path, ConnectionToken: sharedTCPToken}
+		useTCP(opts, 0, sharedTCPToken)
 	})
 	t.Cleanup(func() { client1.ForceStop() })
 
 	// Start client1 with an init session to get the port
-	initSession, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	})
+	initSession, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 	if err != nil {
 		t.Fatalf("Failed to create init session: %v", err)
 	}
@@ -33,18 +30,14 @@ func TestCommandsE2E(t *testing.T) {
 		t.Fatalf("Expected non-zero port from TCP mode client")
 	}
 
-	client2 := copilot.NewClient(&copilot.ClientOptions{
-		Connection: copilot.URIConnection{URL: fmt.Sprintf("localhost:%d", runtimePort), ConnectionToken: sharedTCPToken},
-	})
+	client2 := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.TCPConnection{Host: "localhost", Port: runtimePort, ConnectionToken: sharedTCPToken}})
 	t.Cleanup(func() { client2.ForceStop() })
 
 	t.Run("session commands list returns builtins and respects client command filter", func(t *testing.T) {
-		session, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Commands: []copilot.CommandDefinition{
-				{Name: "deploy", Description: "Deploy the app", Handler: func(_ copilot.CommandContext) error { return nil }},
-				{Name: "rollback", Description: "Rollback the app", Handler: func(_ copilot.CommandContext) error { return nil }},
-			},
+		session, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{Commands: []copilot.CommandDefinition{
+			{Name: "deploy", Description: "Deploy the app", Handler: func(_ copilot.CommandContext) error { return nil }},
+			{Name: "rollback", Description: "Rollback the app", Handler: func(_ copilot.CommandContext) error { return nil }},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -87,19 +80,17 @@ func TestCommandsE2E(t *testing.T) {
 
 	t.Run("session commands execute runs registered command handler", func(t *testing.T) {
 		invoked := make(chan copilot.CommandContext, 1)
-		session, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Commands: []copilot.CommandDefinition{{
-				Name:        "deploy",
-				Description: "Deploy the app",
-				Handler: func(ctx copilot.CommandContext) error {
-					select {
-					case invoked <- ctx:
-					default:
-					}
-					return nil
-				},
-			}},
+		session, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{Commands: []copilot.CommandDefinition{{
+			Name:        "deploy",
+			Description: "Deploy the app",
+			Handler: func(ctx copilot.CommandContext) error {
+				select {
+				case invoked <- ctx:
+				default:
+				}
+				return nil
+			},
+		}}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -138,9 +129,7 @@ func TestCommandsE2E(t *testing.T) {
 	})
 
 	t.Run("session commands enqueue accepts deterministic command", func(t *testing.T) {
-		session, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -156,9 +145,7 @@ func TestCommandsE2E(t *testing.T) {
 	})
 
 	t.Run("session commands respond to queued command returns false for unknown request id", func(t *testing.T) {
-		session, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -180,9 +167,7 @@ func TestCommandsE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Client1 creates a session without commands
-		session1, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -200,16 +185,13 @@ func TestCommandsE2E(t *testing.T) {
 		defer unsubscribe()
 
 		// Client2 joins with commands
-		session2, err := client2.ResumeSession(t.Context(), session1.SessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SuppressResumeEvent: true,
-			Commands: []copilot.CommandDefinition{
-				{
-					Name:        "deploy",
-					Description: "Deploy the app",
-					Handler:     func(ctx copilot.CommandContext) error { return nil },
-				},
+		session2, err := client2.ResumeSession(t.Context(), session1.SessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SuppressResumeEvent: true, Interaction: copilot.SessionInteractionOptions{Commands: []copilot.CommandDefinition{
+			{
+				Name:        "deploy",
+				Description: "Deploy the app",
+				Handler:     func(ctx copilot.CommandContext) error { return nil },
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
@@ -245,12 +227,10 @@ func TestCommandsE2E(t *testing.T) {
 	t.Run("session with commands creates successfully", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Commands: []copilot.CommandDefinition{
-				{Name: "deploy", Description: "Deploy the app", Handler: func(_ copilot.CommandContext) error { return nil }},
-				{Name: "rollback", Handler: func(_ copilot.CommandContext) error { return nil }},
-			},
+		session, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{Commands: []copilot.CommandDefinition{
+			{Name: "deploy", Description: "Deploy the app", Handler: func(_ copilot.CommandContext) error { return nil }},
+			{Name: "rollback", Handler: func(_ copilot.CommandContext) error { return nil }},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -264,20 +244,16 @@ func TestCommandsE2E(t *testing.T) {
 	t.Run("session with commands resumes successfully", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session1, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
 		sessionID := session1.SessionID
 		t.Cleanup(func() { _ = session1.Disconnect() })
 
-		session2, err := client1.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Commands: []copilot.CommandDefinition{
-				{Name: "deploy", Description: "Deploy", Handler: func(_ copilot.CommandContext) error { return nil }},
-			},
+		session2, err := client1.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{Commands: []copilot.CommandDefinition{
+			{Name: "deploy", Description: "Deploy", Handler: func(_ copilot.CommandContext) error { return nil }},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
@@ -291,9 +267,7 @@ func TestCommandsE2E(t *testing.T) {
 	t.Run("session with no commands creates successfully", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -346,9 +320,7 @@ func TestUIElicitationE2E(t *testing.T) {
 	t.Run("elicitation methods error in headless mode", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -394,11 +366,9 @@ func TestUIElicitationCallbackE2E(t *testing.T) {
 	t.Run("session with OnElicitationRequest reports elicitation capability", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnElicitationRequest: func(ctx copilot.ElicitationContext) (copilot.ElicitationResult, error) {
-				return copilot.ElicitationResult{Action: copilot.ElicitationActionAccept, Content: map[string]any{}}, nil
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnElicitationRequest: func(ctx copilot.ElicitationContext) (copilot.ElicitationResult, error) {
+			return copilot.ElicitationResult{Action: copilot.ElicitationActionAccept, Content: map[string]any{}}, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -415,9 +385,7 @@ func TestUIElicitationCallbackE2E(t *testing.T) {
 	t.Run("session without OnElicitationRequest reports no elicitation capability", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -431,20 +399,18 @@ func TestUIElicitationCallbackE2E(t *testing.T) {
 	t.Run("confirm returns true when handler accepts", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
-				if ec.Message != "Confirm?" {
-					t.Errorf("Expected Message='Confirm?', got %q", ec.Message)
-				}
-				if !schemaHasProperty(ec.RequestedSchema, "confirmed") {
-					t.Errorf("Expected RequestedSchema to contain 'confirmed' property")
-				}
-				return copilot.ElicitationResult{
-					Action:  copilot.ElicitationActionAccept,
-					Content: map[string]any{"confirmed": true},
-				}, nil
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
+			if ec.Message != "Confirm?" {
+				t.Errorf("Expected Message='Confirm?', got %q", ec.Message)
+			}
+			if !schemaHasProperty(ec.RequestedSchema, "confirmed") {
+				t.Errorf("Expected RequestedSchema to contain 'confirmed' property")
+			}
+			return copilot.ElicitationResult{
+				Action:  copilot.ElicitationActionAccept,
+				Content: map[string]any{"confirmed": true},
+			}, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -462,11 +428,9 @@ func TestUIElicitationCallbackE2E(t *testing.T) {
 	t.Run("confirm returns false when handler declines", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
-				return copilot.ElicitationResult{Action: copilot.ElicitationActionDecline}, nil
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
+			return copilot.ElicitationResult{Action: copilot.ElicitationActionDecline}, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -484,20 +448,18 @@ func TestUIElicitationCallbackE2E(t *testing.T) {
 	t.Run("select returns selected option", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
-				if ec.Message != "Choose" {
-					t.Errorf("Expected Message='Choose', got %q", ec.Message)
-				}
-				if !schemaHasProperty(ec.RequestedSchema, "selection") {
-					t.Errorf("Expected RequestedSchema to contain 'selection' property")
-				}
-				return copilot.ElicitationResult{
-					Action:  copilot.ElicitationActionAccept,
-					Content: map[string]any{"selection": "beta"},
-				}, nil
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
+			if ec.Message != "Choose" {
+				t.Errorf("Expected Message='Choose', got %q", ec.Message)
+			}
+			if !schemaHasProperty(ec.RequestedSchema, "selection") {
+				t.Errorf("Expected RequestedSchema to contain 'selection' property")
+			}
+			return copilot.ElicitationResult{
+				Action:  copilot.ElicitationActionAccept,
+				Content: map[string]any{"selection": "beta"},
+			}, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -518,20 +480,18 @@ func TestUIElicitationCallbackE2E(t *testing.T) {
 	t.Run("input returns freeform value", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
-				if ec.Message != "Enter value" {
-					t.Errorf("Expected Message='Enter value', got %q", ec.Message)
-				}
-				if !schemaHasProperty(ec.RequestedSchema, "value") {
-					t.Errorf("Expected RequestedSchema to contain 'value' property")
-				}
-				return copilot.ElicitationResult{
-					Action:  copilot.ElicitationActionAccept,
-					Content: map[string]any{"value": "typed value"},
-				}, nil
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
+			if ec.Message != "Enter value" {
+				t.Errorf("Expected Message='Enter value', got %q", ec.Message)
+			}
+			if !schemaHasProperty(ec.RequestedSchema, "value") {
+				t.Errorf("Expected RequestedSchema to contain 'value' property")
+			}
+			return copilot.ElicitationResult{
+				Action:  copilot.ElicitationActionAccept,
+				Content: map[string]any{"value": "typed value"},
+			}, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -567,19 +527,17 @@ func TestUIElicitationCallbackE2E(t *testing.T) {
 		}
 		var idx int
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
-				if ec.Message != "Name?" {
-					t.Errorf("Expected Message='Name?', got %q", ec.Message)
-				}
-				if idx >= len(responses) {
-					t.Fatalf("Handler called more times than expected (%d)", idx+1)
-				}
-				resp := responses[idx]
-				idx++
-				return resp, nil
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
+			if ec.Message != "Name?" {
+				t.Errorf("Expected Message='Name?', got %q", ec.Message)
+			}
+			if idx >= len(responses) {
+				t.Fatalf("Handler called more times than expected (%d)", idx+1)
+			}
+			resp := responses[idx]
+			idx++
+			return resp, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -623,9 +581,7 @@ func TestUIElicitationCallbackE2E(t *testing.T) {
 	t.Run("defaults capabilities when not provided", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -637,11 +593,9 @@ func TestUIElicitationCallbackE2E(t *testing.T) {
 	t.Run("sends requestElicitation when handler provided", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
-				return copilot.ElicitationResult{Action: copilot.ElicitationActionAccept, Content: map[string]any{}}, nil
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnElicitationRequest: func(ec copilot.ElicitationContext) (copilot.ElicitationResult, error) {
+			return copilot.ElicitationResult{Action: copilot.ElicitationActionAccept, Content: map[string]any{}}, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -667,14 +621,12 @@ func TestUIElicitationMultiClientE2E(t *testing.T) {
 	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client1 := ctx.NewClient(func(opts *copilot.ClientOptions) {
-		opts.Connection = copilot.TCPConnection{Path: opts.Connection.(copilot.StdioConnection).Path, ConnectionToken: sharedTCPToken}
+		useTCP(opts, 0, sharedTCPToken)
 	})
 	t.Cleanup(func() { client1.ForceStop() })
 
 	// Start client1 with an init session to get the port
-	initSession, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	})
+	initSession, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 	if err != nil {
 		t.Fatalf("Failed to create init session: %v", err)
 	}
@@ -689,9 +641,7 @@ func TestUIElicitationMultiClientE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Client1 creates a session without elicitation handler
-		session1, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -714,15 +664,10 @@ func TestUIElicitationMultiClientE2E(t *testing.T) {
 		})
 
 		// Client2 joins with elicitation handler — should trigger capabilities.changed
-		client2 := copilot.NewClient(&copilot.ClientOptions{
-			Connection: copilot.URIConnection{URL: fmt.Sprintf("localhost:%d", runtimePort), ConnectionToken: sharedTCPToken},
-		})
-		session2, err := client2.ResumeSession(t.Context(), session1.SessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SuppressResumeEvent: true,
-			OnElicitationRequest: func(ctx copilot.ElicitationContext) (copilot.ElicitationResult, error) {
-				return copilot.ElicitationResult{Action: copilot.ElicitationActionAccept, Content: map[string]any{}}, nil
-			},
+		client2 := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.TCPConnection{Host: "localhost", Port: runtimePort, ConnectionToken: sharedTCPToken}})
+		session2, err := client2.ResumeSession(t.Context(), session1.SessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SuppressResumeEvent: true, Interaction: copilot.SessionInteractionOptions{OnElicitationRequest: func(ctx copilot.ElicitationContext) (copilot.ElicitationResult, error) {
+			return copilot.ElicitationResult{Action: copilot.ElicitationActionAccept, Content: map[string]any{}}, nil
+		}},
 		})
 		if err != nil {
 			client2.ForceStop()
@@ -749,9 +694,7 @@ func TestUIElicitationMultiClientE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Client1 creates a session without elicitation handler
-		session1, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -774,15 +717,10 @@ func TestUIElicitationMultiClientE2E(t *testing.T) {
 		})
 
 		// Client3 (dedicated for this test) joins with elicitation handler
-		client3 := copilot.NewClient(&copilot.ClientOptions{
-			Connection: copilot.URIConnection{URL: fmt.Sprintf("localhost:%d", runtimePort), ConnectionToken: sharedTCPToken},
-		})
-		_, err = client3.ResumeSession(t.Context(), session1.SessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SuppressResumeEvent: true,
-			OnElicitationRequest: func(ctx copilot.ElicitationContext) (copilot.ElicitationResult, error) {
-				return copilot.ElicitationResult{Action: copilot.ElicitationActionAccept, Content: map[string]any{}}, nil
-			},
+		client3 := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.TCPConnection{Host: "localhost", Port: runtimePort, ConnectionToken: sharedTCPToken}})
+		_, err = client3.ResumeSession(t.Context(), session1.SessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SuppressResumeEvent: true, Interaction: copilot.SessionInteractionOptions{OnElicitationRequest: func(ctx copilot.ElicitationContext) (copilot.ElicitationResult, error) {
+			return copilot.ElicitationResult{Action: copilot.ElicitationActionAccept, Content: map[string]any{}}, nil
+		}},
 		})
 		if err != nil {
 			client3.ForceStop()

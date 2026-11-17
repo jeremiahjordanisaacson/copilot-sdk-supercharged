@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 type failingWriteProvider struct {

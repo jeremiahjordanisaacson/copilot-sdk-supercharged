@@ -15,7 +15,7 @@ use crate::types::{MemoryConfiguration, SectionOverride, SystemMessageConfig};
 
 /// Controls SDK defaults for ambient CLI-style behavior.
 ///
-/// - [`ClientMode::CopilotCli`] (default): defaults equivalent to Copilot CLI.
+/// - [`ClientMode::CodingAgent`]: defaults equivalent to Copilot CLI.
 ///   Useful when building a coding agent that shares sessions with Copilot CLI.
 ///   **Do not use this mode for server-based multi-user applications** — the
 ///   default coding agent has tools and capabilities that operate across
@@ -26,11 +26,10 @@ use crate::types::{MemoryConfiguration, SectionOverride, SystemMessageConfig};
 ///   See [`Client::list_models`](crate::Client::list_models) for how a client
 ///   that authenticates only per session lists models, including the
 ///   authentication used with SDK-owned runtimes and external servers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientMode {
-    /// Defaults equivalent to Copilot CLI (the default).
-    #[default]
-    CopilotCli,
+    /// Defaults equivalent to Copilot CLI.
+    CodingAgent,
     /// Disables optional features by default; app must opt in explicitly.
     Empty,
 }
@@ -80,13 +79,13 @@ fn validate_name(kind: &str, name: &str) -> Result<(), crate::Error> {
 /// # Example
 ///
 /// ```
-/// # use github_copilot_sdk::mode::{ToolSet, BUILTIN_TOOLS_ISOLATED};
+/// # use copilot_sdk::mode::{ToolSet, BUILTIN_TOOLS_ISOLATED};
 /// let tools = ToolSet::new()
 ///     .add_builtin_many(BUILTIN_TOOLS_ISOLATED)?
 ///     .add_mcp("*")?
 ///     .add_custom("*")?
 ///     .to_vec();
-/// # Ok::<(), github_copilot_sdk::Error>(())
+/// # Ok::<(), copilot_sdk::Error>(())
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct ToolSet {
@@ -279,7 +278,7 @@ pub(crate) fn system_message_for_mode(
 /// Returns the memory configuration to use, adjusted for the current mode.
 ///
 /// In [`ClientMode::Empty`] the memory feature defaults to disabled so an app
-/// must opt in explicitly. In [`ClientMode::CopilotCli`] no SDK default is
+/// must opt in explicitly. In [`ClientMode::CodingAgent`] no SDK default is
 /// applied: the configuration is left unset so the runtime applies its own
 /// default for the memory feature. A value supplied by the app always wins.
 pub(crate) fn memory_for_mode(

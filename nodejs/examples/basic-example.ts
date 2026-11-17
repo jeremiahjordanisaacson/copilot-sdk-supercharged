@@ -3,7 +3,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { z } from "zod";
-import { approveAll, CopilotClient, defineTool } from "@github/copilot-sdk";
+import { approveAll, CopilotClient, defineTool } from "@microsoft/copilot-sdk";
 
 console.log("🚀 Starting Copilot SDK Example\n");
 
@@ -20,10 +20,19 @@ const lookupFactTool = defineTool("lookup_fact", {
     handler: ({ topic }) => facts[topic.toLowerCase()] ?? `No fact stored for ${topic}.`,
 });
 
-await using client = new CopilotClient({ logLevel: "info" });
+await using client = new CopilotClient({
+    mode: "coding-agent",
+    observability: {
+        logLevel: "info",
+    },
+});
 await using session = await client.createSession({
-    onPermissionRequest: approveAll,
-    tools: [lookupFactTool],
+    permissions: {
+        onRequest: approveAll,
+    },
+    tools: {
+        definitions: [lookupFactTool],
+    },
 });
 console.log(`✅ Session created: ${session.sessionId}\n`);
 

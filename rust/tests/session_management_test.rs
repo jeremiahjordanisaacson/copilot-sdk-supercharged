@@ -6,12 +6,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use github_copilot_sdk::session::Session;
-use github_copilot_sdk::session_management::{
+use copilot_sdk::session::Session;
+use copilot_sdk::session_management::{
     SessionManagementConfigureRequest, SessionManagementCreateHostRequest,
     SessionManagementCreateResult, SessionManagementScope,
 };
-use github_copilot_sdk::{Client, Error, ErrorKind, SessionConfig, SessionCreationHandler};
+use copilot_sdk::{Client, CreateSessionOptions, Error, ErrorKind, SessionCreationHandler};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream, duplex};
 use tokio::sync::Notify;
@@ -77,12 +77,18 @@ impl Fixture {
     async fn new() -> Self {
         let (client_write, mut reader) = duplex(8192);
         let (mut writer, client_read) = duplex(8192);
-        let client = Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
+        let client = Client::from_streams(
+            copilot_sdk::ClientMode::CodingAgent,
+            client_read,
+            client_write,
+            std::env::temp_dir(),
+        )
+        .unwrap();
         let create = tokio::spawn({
             let client = client.clone();
             async move {
                 client
-                    .create_session(SessionConfig::default())
+                    .create_session(CreateSessionOptions::default())
                     .await
                     .unwrap()
             }

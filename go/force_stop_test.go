@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 type responseRetirementPeer struct {
@@ -209,18 +209,14 @@ func TestForceStopReleasesRetainedEventCallbacks(t *testing.T) {
 		t.Run(fmt.Sprintf("blocked handler=%t", blockedHandler), func(t *testing.T) {
 			t.Parallel()
 			peer := newResponseRetirementPeer(t, 0)
-			client := copilot.NewClient(&copilot.ClientOptions{
-				Connection: copilot.URIConnection{URL: peer.listener.Addr().String()},
-			})
+			client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.TCPConnection{Host: "127.0.0.1", Port: peer.listener.Addr().(*net.TCPAddr).Port}})
 			t.Cleanup(client.ForceStop)
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			if err := client.Start(ctx); err != nil {
 				t.Fatal("start:", err)
 			}
-			session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-				SessionID: "retirement-session", OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			})
+			session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{SessionID: "retirement-session", Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 			if err != nil {
 				t.Fatal("create:", err)
 			}
@@ -283,14 +279,12 @@ func createRetirementHookSession(t *testing.T, ctx context.Context, client *copi
 	capture := &responseRetirementCapture{data: [64]byte{2}}
 	collected := make(chan struct{})
 	runtime.AddCleanup(capture, func(done chan struct{}) { close(done) }, collected)
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		SessionID: "retirement-session", OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		Hooks: &copilot.SessionHooks{
-			OnSessionEnd: func(copilot.SessionEndHookInput, copilot.HookInvocation) (*copilot.SessionEndHookOutput, error) {
-				runtime.KeepAlive(capture)
-				return nil, nil
-			},
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{SessionID: "retirement-session", Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Hooks: copilot.SessionHookOptions{Handlers: &copilot.SessionHooks{
+		OnSessionEnd: func(copilot.SessionEndHookInput, copilot.HookInvocation) (*copilot.SessionEndHookOutput, error) {
+			runtime.KeepAlive(capture)
+			return nil, nil
 		},
+	}},
 	})
 	if err != nil {
 		t.Fatal("create:", err)
@@ -300,9 +294,7 @@ func createRetirementHookSession(t *testing.T, ctx context.Context, client *copi
 
 func TestForceStopReleasesRetainedHookCallbacks(t *testing.T) {
 	peer := newResponseRetirementPeer(t, 0)
-	client := copilot.NewClient(&copilot.ClientOptions{
-		Connection: copilot.URIConnection{URL: peer.listener.Addr().String()},
-	})
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.TCPConnection{Host: "127.0.0.1", Port: peer.listener.Addr().(*net.TCPAddr).Port}})
 	t.Cleanup(client.ForceStop)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
@@ -321,9 +313,7 @@ func TestForceStopRejectsAcknowledgedPlainResponseWaits(t *testing.T) {
 			t.Run(fmt.Sprintf("%d waits/blocked handler=%t", count, blockedHandler), func(t *testing.T) {
 				t.Parallel()
 				peer := newResponseRetirementPeer(t, count)
-				client := copilot.NewClient(&copilot.ClientOptions{
-					Connection: copilot.URIConnection{URL: peer.listener.Addr().String()},
-				})
+				client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.TCPConnection{Host: "127.0.0.1", Port: peer.listener.Addr().(*net.TCPAddr).Port}})
 				t.Cleanup(client.ForceStop)
 				operationCtx, cancelOperation := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancelOperation()
@@ -331,9 +321,7 @@ func TestForceStopRejectsAcknowledgedPlainResponseWaits(t *testing.T) {
 					t.Fatal("start:", err)
 				}
 
-				session, err := client.CreateSession(operationCtx, &copilot.SessionConfig{
-					SessionID: "retirement-session", OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-				})
+				session, err := client.CreateSession(operationCtx, &copilot.CreateSessionOptions{SessionID: "retirement-session", Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 				if err != nil {
 					t.Fatal("create session:", err)
 				}

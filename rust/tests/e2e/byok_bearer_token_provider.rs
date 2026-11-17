@@ -7,11 +7,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::{
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::{
     BearerTokenError, CopilotHttpRequest, CopilotHttpResponse, CopilotRequestContext,
-    CopilotRequestError, CopilotRequestHandler, MessageOptions, NamedProviderConfig,
-    ProviderModelConfig, ProviderTokenArgs, SessionConfig,
+    CopilotRequestError, CopilotRequestHandler, CreateSessionOptions, MessageOptions,
+    NamedProviderConfig, ProviderModelConfig, ProviderTokenArgs,
 };
 use http::HeaderMap;
 
@@ -121,7 +121,7 @@ fn synth_non_inference_response(url: &str) -> CopilotHttpResponse {
 }
 
 async fn run_turn(
-    client: &github_copilot_sdk::Client,
+    client: &copilot_sdk::Client,
     providers: Vec<NamedProviderConfig>,
     models: Vec<ProviderModelConfig>,
     selection_id: &str,
@@ -129,11 +129,11 @@ async fn run_turn(
 ) {
     let session = client
         .create_session(
-            SessionConfig::default()
-                .with_permission_handler(Arc::new(ApproveAllHandler))
+            CreateSessionOptions::default()
+                .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
                 .with_model(selection_id)
-                .with_providers(providers)
-                .with_models(models),
+                .with_inference(|group| group.with_providers(providers))
+                .with_inference(|group| group.with_models(models)),
         )
         .await
         .expect("create session");

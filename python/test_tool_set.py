@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from copilot import BUILTIN_TOOLS_ISOLATED, CopilotClient, ToolSet, UriRuntimeConnection
+from copilot import (
+    BUILTIN_TOOLS_ISOLATED,
+    CopilotClient,
+    RuntimeConnection,
+    TcpRuntimeConnection,
+    ToolSet,
+)
 from copilot._mode import (
     _custom_agents_local_only_default,
     _embedding_cache_storage_default,
@@ -84,7 +90,7 @@ class TestEmptyModeValidation:
                 mode="empty",
                 base_directory=None,
                 session_fs_set=False,
-                is_uri_connection=False,
+                is_tcp_connection=False,
             )
 
     def test_empty_mode_accepts_base_directory(self):
@@ -92,7 +98,7 @@ class TestEmptyModeValidation:
             mode="empty",
             base_directory="/tmp/x",
             session_fs_set=False,
-            is_uri_connection=False,
+            is_tcp_connection=False,
         )
 
     def test_empty_mode_accepts_session_fs(self):
@@ -100,7 +106,7 @@ class TestEmptyModeValidation:
             mode="empty",
             base_directory=None,
             session_fs_set=True,
-            is_uri_connection=False,
+            is_tcp_connection=False,
         )
 
     def test_empty_mode_accepts_uri_connection(self):
@@ -108,15 +114,15 @@ class TestEmptyModeValidation:
             mode="empty",
             base_directory=None,
             session_fs_set=False,
-            is_uri_connection=True,
+            is_tcp_connection=True,
         )
 
-    def test_copilot_cli_mode_no_storage_required(self):
+    def test_coding_agent_mode_no_storage_required(self):
         _require_storage_for_empty_mode(
-            mode="copilot-cli",
+            mode="coding-agent",
             base_directory=None,
             session_fs_set=False,
-            is_uri_connection=False,
+            is_tcp_connection=False,
         )
 
     def test_empty_mode_requires_available_tools(self):
@@ -126,8 +132,8 @@ class TestEmptyModeValidation:
     def test_empty_mode_accepts_available_tools(self):
         _require_available_tools_for_empty_mode("empty", ["builtin:bash"])
 
-    def test_copilot_cli_mode_no_tool_filter_required(self):
-        _require_available_tools_for_empty_mode("copilot-cli", None)
+    def test_coding_agent_mode_no_tool_filter_required(self):
+        _require_available_tools_for_empty_mode("coding-agent", None)
 
 
 class TestToolFilterListValidation:
@@ -143,10 +149,10 @@ class TestToolFilterListValidation:
 
 
 class TestSystemMessageForMode:
-    def test_copilot_cli_pass_through(self):
-        assert _system_message_for_mode("copilot-cli", None) is None
+    def test_coding_agent_pass_through(self):
+        assert _system_message_for_mode("coding-agent", None) is None
         msg = {"mode": "append", "content": "hi"}
-        assert _system_message_for_mode("copilot-cli", msg) is msg
+        assert _system_message_for_mode("coding-agent", msg) is msg
 
     def test_empty_mode_none_supplied(self):
         out = _system_message_for_mode("empty", None)
@@ -188,9 +194,9 @@ class TestEmptyModeEmbeddingCacheStorageDefaults:
         assert _embedding_cache_storage_default("empty", "persistent") == "persistent"
         assert _embedding_cache_storage_default("empty", "in-memory") == "in-memory"
 
-    def test_copilot_cli_does_not_change(self):
-        assert _embedding_cache_storage_default("copilot-cli", None) is None
-        assert _embedding_cache_storage_default("copilot-cli", "persistent") == "persistent"
+    def test_coding_agent_does_not_change(self):
+        assert _embedding_cache_storage_default("coding-agent", None) is None
+        assert _embedding_cache_storage_default("coding-agent", "persistent") == "persistent"
 
 
 class TestEmptyModeBooleanDefaults:
@@ -240,51 +246,51 @@ class TestEmptyModeBooleanDefaults:
             _custom_agents_local_only_default,
         ],
     )
-    def test_copilot_cli_does_not_change(self, helper):
-        assert helper("copilot-cli", None) is None
+    def test_coding_agent_does_not_change(self, helper):
+        assert helper("coding-agent", None) is None
 
 
 class TestPostCreatePatch:
     def test_empty_mode_defaults(self):
         patch = _post_create_options_patch("empty", None, None, None, None)
         assert patch == {
-            "skipCustomInstructions": True,
-            "customAgentsLocalOnly": True,
-            "coauthorEnabled": False,
-            "manageScheduleEnabled": False,
-            "installedPlugins": [],
-            "includedBuiltinSkills": [],
+            "instructions": {"skipCustomInstructions": True},
+            "agents": {"localDiscoveryOnly": True},
+            "git": {"coauthorEnabled": False},
+            "tools": {"manageScheduleEnabled": False},
+            "plugins": {"installed": []},
+            "skills": {"includedBuiltinSkills": []},
         }
 
     def test_empty_mode_caller_wins(self):
         patch = _post_create_options_patch("empty", False, False, True, True)
         assert patch == {
-            "skipCustomInstructions": False,
-            "customAgentsLocalOnly": False,
-            "coauthorEnabled": True,
-            "manageScheduleEnabled": True,
-            "installedPlugins": [],
-            "includedBuiltinSkills": [],
+            "instructions": {"skipCustomInstructions": False},
+            "agents": {"localDiscoveryOnly": False},
+            "git": {"coauthorEnabled": True},
+            "tools": {"manageScheduleEnabled": True},
+            "plugins": {"installed": []},
+            "skills": {"includedBuiltinSkills": []},
         }
 
     def test_empty_mode_preserves_explicit_builtin_skill_allowlist(self):
         patch = _post_create_options_patch("empty", None, None, None, None, ["code-review"])
         assert patch is not None
-        assert patch["includedBuiltinSkills"] == ["code-review"]
+        assert patch["skills"]["includedBuiltinSkills"] == ["code-review"]
 
-    def test_copilot_cli_returns_none_when_unset(self):
-        assert _post_create_options_patch("copilot-cli", None, None, None, None) is None
+    def test_coding_agent_returns_none_when_unset(self):
+        assert _post_create_options_patch("coding-agent", None, None, None, None) is None
         # Non-empty mode never injects the built-in skill restriction.
         assert "includedBuiltinSkills" not in (
-            _post_create_options_patch("copilot-cli", True, None, False, None) or {}
-        )
+            _post_create_options_patch("coding-agent", True, None, False, None) or {}
+        ).get("skills", {})
 
-    def test_copilot_cli_passes_through_explicit_values(self):
-        patch = _post_create_options_patch("copilot-cli", True, None, False, None, ["code-review"])
+    def test_coding_agent_passes_through_explicit_values(self):
+        patch = _post_create_options_patch("coding-agent", True, None, False, None, ["code-review"])
         assert patch == {
-            "skipCustomInstructions": True,
-            "coauthorEnabled": False,
-            "includedBuiltinSkills": ["code-review"],
+            "instructions": {"skipCustomInstructions": True},
+            "git": {"coauthorEnabled": False},
+            "skills": {"includedBuiltinSkills": ["code-review"]},
         }
 
 
@@ -322,7 +328,7 @@ class TestApplyPostCreateOptionsPatch:
     def _make_client(self):
         return CopilotClient(
             mode="empty",
-            connection=UriRuntimeConnection(url="http://localhost:1234"),
+            runtime=TcpRuntimeConnection(host="localhost", port=1234),
         )
 
     async def test_empty_mode_sends_included_builtin_skills_empty(self):
@@ -333,8 +339,8 @@ class TestApplyPostCreateOptionsPatch:
         params = session.rpc.options.captured[0]
         # The Empty post-patch must reach the wire request as an empty list, not
         # be silently dropped during translation.
-        assert params.included_builtin_skills == []
-        assert params.installed_plugins == []
+        assert params.to_dict()["skills"]["includedBuiltinSkills"] == []
+        assert params.to_dict()["plugins"]["installed"] == []
 
     async def test_empty_mode_explicit_allowlist_reaches_wire(self):
         client = self._make_client()
@@ -343,26 +349,26 @@ class TestApplyPostCreateOptionsPatch:
             session, "empty", False, False, True, True, ["code-review"]
         )
         params = session.rpc.options.captured[0]
-        assert params.included_builtin_skills == ["code-review"]
+        assert params.to_dict()["skills"]["includedBuiltinSkills"] == ["code-review"]
 
-    async def test_copilot_cli_mode_omits_included_builtin_skills(self):
+    async def test_coding_agent_mode_omits_included_builtin_skills(self):
         client = self._make_client()
         session = _FakeSession()
         # Non-empty mode with no overrides sends no patch at all.
         await client._apply_post_create_options_patch(
-            session, "copilot-cli", None, None, None, None
+            session, "coding-agent", None, None, None, None
         )
         assert session.rpc.options.captured == []
 
-    async def test_copilot_cli_mode_never_sets_included_builtin_skills(self):
+    async def test_coding_agent_mode_never_sets_included_builtin_skills(self):
         client = self._make_client()
         session = _FakeSession()
         await client._apply_post_create_options_patch(
-            session, "copilot-cli", True, None, False, None
+            session, "coding-agent", True, None, False, None
         )
         params = session.rpc.options.captured[0]
-        # copilot-cli mode must not inject the built-in skill restriction.
-        assert params.included_builtin_skills is None
+        # coding-agent mode must not inject the built-in skill restriction.
+        assert "skills" not in params.to_dict()
 
 
 class TestClientConstruction:
@@ -371,23 +377,33 @@ class TestClientConstruction:
             CopilotClient(mode="empty")
 
     def test_empty_mode_with_base_directory_ok(self, tmp_path):
-        # Use URI connection to skip bundled-CLI discovery.
         client = CopilotClient(
             mode="empty",
-            base_directory=str(tmp_path),
-            connection=UriRuntimeConnection(url="http://localhost:1234"),
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path="runtime", base_directory=str(tmp_path)
+            ),
         )
         assert client._options.mode == "empty"
 
-    def test_empty_mode_with_uri_connection_ok(self):
+    def test_empty_mode_with_tcp_connection_ok(self):
         client = CopilotClient(
             mode="empty",
-            connection=UriRuntimeConnection(url="http://localhost:1234"),
+            runtime=TcpRuntimeConnection(host="localhost", port=1234),
         )
         assert client._options.mode == "empty"
 
-    def test_default_mode_copilot_cli(self):
+    def test_requires_explicit_mode(self):
+        with pytest.raises(TypeError, match="mode"):
+            CopilotClient()
+
+    @pytest.mark.parametrize("mode", [None, "copilot-cli", "invalid"])
+    def test_rejects_invalid_mode(self, mode):
+        with pytest.raises(ValueError, match="mode must be"):
+            CopilotClient(mode=mode)
+
+    def test_explicit_coding_agent_mode(self):
         client = CopilotClient(
-            connection=UriRuntimeConnection(url="http://localhost:1234"),
+            mode="coding-agent",
+            runtime=TcpRuntimeConnection(host="localhost", port=1234),
         )
-        assert client._options.mode == "copilot-cli"
+        assert client._options.mode == "coding-agent"

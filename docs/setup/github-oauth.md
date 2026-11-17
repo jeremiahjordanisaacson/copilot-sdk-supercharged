@@ -120,13 +120,16 @@ Create an SDK client for each authenticated user, passing their token:
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "@microsoft/copilot-sdk";
 
 // Create a client for an authenticated user
 function createClientForUser(userToken: string): CopilotClient {
     return new CopilotClient({
-        gitHubToken: userToken,
-        useLoggedInUser: false,  // Don't fall back to CLI login
+        mode: "coding-agent",
+        github: {
+            token: userToken,
+            useLoggedInUser: false,
+        },
     });
 }
 
@@ -149,18 +152,21 @@ const response = await session.sendAndWait({ prompt: "Hello!" });
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
+
 def create_client_for_user(user_token: str) -> CopilotClient:
-    return CopilotClient(
-        github_token=user_token,
-        use_logged_in_user=False,
-    )
+    return CopilotClient(mode="coding-agent", github={"token": user_token, "use_logged_in_user": False})
+
 
 # Usage
 user_id = "123"
 client = create_client_for_user("gho_user_access_token")
 await client.start()
 
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all, model="auto", session_id=f"user-{user_id}-session")
+session = await client.create_session(
+    model="auto",
+    session_id=f"user-{user_id}-session",
+    permissions={"on_request": PermissionHandler.approve_all},
+)
 
 response = await session.send_and_wait("Hello!")
 ```
@@ -177,13 +183,16 @@ package main
 import (
 	"context"
 	"fmt"
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func createClientForUser(userToken string) *copilot.Client {
 	return copilot.NewClient(&copilot.ClientOptions{
-		GitHubToken:     userToken,
-		UseLoggedInUser: copilot.Bool(false),
+		Mode: copilot.ModeCodingAgent,
+		GitHub: copilot.ClientGitHubOptions{
+			Token:           userToken,
+			UseLoggedInUser: copilot.Bool(false),
+		},
 	})
 }
 
@@ -195,11 +204,13 @@ func main() {
 	client.Start(ctx)
 	defer client.Stop()
 
-	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
+	session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
 		SessionID: fmt.Sprintf("user-%s-session", userID),
 		Model:     "auto",
 	})
-	response, _ := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: "Hello!"})
+	response, _ := session.SendAndWait(ctx, copilot.MessageOptions{
+		Prompt: "Hello!",
+	})
 	_ = response
 }
 ```
@@ -207,10 +218,13 @@ func main() {
 
 ```go
 func createClientForUser(userToken string) *copilot.Client {
-    return copilot.NewClient(&copilot.ClientOptions{
-        GitHubToken:     userToken,
-        UseLoggedInUser: copilot.Bool(false),
-    })
+	return copilot.NewClient(&copilot.ClientOptions{
+		Mode: copilot.ModeCodingAgent,
+		GitHub: copilot.ClientGitHubOptions{
+			Token:           userToken,
+			UseLoggedInUser: copilot.Bool(false),
+		},
+	})
 }
 
 // Usage
@@ -218,11 +232,14 @@ client := createClientForUser("gho_user_access_token")
 client.Start(ctx)
 defer client.Stop()
 
-session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-    SessionID: fmt.Sprintf("user-%s-session", userID),
-    Model:     "auto",
+session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	SessionID: fmt.Sprintf("user-%s-session", userID),
+	Model:     "auto",
 })
-response, _ := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: "Hello!"})
+response, _ := session.SendAndWait(ctx, copilot.MessageOptions{
+	Prompt: "Hello!",
+})
+
 ```
 
 </details>
@@ -232,47 +249,53 @@ response, _ := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: "Hello!"}
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
-CopilotClient CreateClientForUser(string userToken) =>
-    new CopilotClient(new CopilotClientOptions
+CopilotClient CreateClientForUser(string userToken) => new CopilotClient(new CopilotClientOptions
+{
+    Mode = CopilotClientMode.CodingAgent,
+    GitHub = new ClientGitHubOptions
     {
-        GitHubToken = userToken,
-        UseLoggedInUser = false,
-    });
-
+        Token = userToken,
+        UseLoggedInUser = false
+    }
+});
 var userId = "user1";
-
 await using var client = CreateClientForUser("gho_user_access_token");
-await using var session = await client.CreateSessionAsync(new SessionConfig
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
     SessionId = $"user-{userId}-session",
-    Model = "auto",
+    Model = "auto"
 });
-
-var response = await session.SendAndWaitAsync(
-    new MessageOptions { Prompt = "Hello!" });
+var response = await session.SendAndWaitAsync(new MessageOptions
+{
+    Prompt = "Hello!"
+});
 ```
 <!-- /docs-validate: hidden -->
 
 ```csharp
-CopilotClient CreateClientForUser(string userToken) =>
-    new CopilotClient(new CopilotClientOptions
+CopilotClient CreateClientForUser(string userToken) => new CopilotClient(new CopilotClientOptions
+{
+    Mode = CopilotClientMode.CodingAgent,
+    GitHub = new ClientGitHubOptions
     {
-        GitHubToken = userToken,
-        UseLoggedInUser = false,
-    });
+        Token = userToken,
+        UseLoggedInUser = false
+    }
+});
 
 // Usage
 await using var client = CreateClientForUser("gho_user_access_token");
-await using var session = await client.CreateSessionAsync(new SessionConfig
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
     SessionId = $"user-{userId}-session",
-    Model = "auto",
+    Model = "auto"
 });
-
-var response = await session.SendAndWaitAsync(
-    new MessageOptions { Prompt = "Hello!" });
+var response = await session.SendAndWaitAsync(new MessageOptions
+{
+    Prompt = "Hello!"
+});
 ```
 
 </details>
@@ -282,16 +305,18 @@ var response = await session.SendAndWaitAsync(
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 
 public class UserClientExample {
     static CopilotClient createClientForUser(String userToken) throws Exception {
-        var client = new CopilotClient(new CopilotClientOptions()
-            .setGitHubToken(userToken)
-            .setUseLoggedInUser(false)
-        );
-        client.start().get();
+        var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+                .setGitHub(new ClientGitHubOptions()
+                        .setToken(userToken)
+                        .setUseLoggedInUser(false)));
+        client
+                .start()
+                .get();
         return client;
     }
 
@@ -299,43 +324,55 @@ public class UserClientExample {
         // Usage — use try-with-resources to ensure cleanup
         var userId = "user1";
         try (var client = createClientForUser("gho_user_access_token")) {
-            var session = client.createSession(new SessionConfig()
-                .setSessionId(String.format("user-%s-session", userId))
-                .setModel("auto")
-                .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-            ).get();
+            var session = client
+                    .createSession(new CreateSessionOptions()
+                            .setSessionId(String
+                                    .format("user-%s-session", userId))
+                            .setModel("auto")
+                            .setPermissions(new SessionPermissionOptions()
+                                    .setOnRequest(PermissionHandler.APPROVE_ALL)))
+                    .get();
 
-            var response = session.sendAndWait(new MessageOptions()
-                .setPrompt("Hello!")).get();
+            var response = session
+                    .sendAndWait(new MessageOptions()
+                            .setPrompt("Hello!"))
+                    .get();
         }
     }
 }
 ```
 <!-- /docs-validate: hidden -->
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 
 CopilotClient createClientForUser(String userToken) throws Exception {
-    var client = new CopilotClient(new CopilotClientOptions()
-        .setGitHubToken(userToken)
-        .setUseLoggedInUser(false)
-    );
-    client.start().get();
+    var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+            .setGitHub(new ClientGitHubOptions()
+                    .setToken(userToken)
+                    .setUseLoggedInUser(false)));
+    client
+            .start()
+            .get();
     return client;
 }
 
 // Usage — use try-with-resources to ensure cleanup
 var userId = "user1";
 try (var client = createClientForUser("gho_user_access_token")) {
-    var session = client.createSession(new SessionConfig()
-        .setSessionId(String.format("user-%s-session", userId))
-        .setModel("auto")
-        .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-    ).get();
+    var session = client
+            .createSession(new CreateSessionOptions()
+                    .setSessionId(String
+                            .format("user-%s-session", userId))
+                    .setModel("auto")
+                    .setPermissions(new SessionPermissionOptions()
+                            .setOnRequest(PermissionHandler.APPROVE_ALL)))
+            .get();
 
-    var response = session.sendAndWait(new MessageOptions()
-        .setPrompt("Hello!")).get();
+    var response = session
+            .sendAndWait(new MessageOptions()
+                    .setPrompt("Hello!"))
+            .get();
 }
 ```
 
@@ -381,7 +418,7 @@ After OAuth, check that the user belongs to your organization:
 <!-- docs-validate: hidden -->
 <!-- docs-validate: strict -->
 ```typescript
-import type { CopilotClient } from "@github/copilot-sdk";
+import type { CopilotClient } from "@microsoft/copilot-sdk";
 
 declare const code: string;
 declare function handleOAuthCallback(code: string): Promise<string>;
@@ -434,8 +471,12 @@ For GitHub Enterprise Managed Users, the flow is identical—EMU users authentic
 // No special SDK configuration needed for EMU
 // Enterprise policies are enforced server-side by GitHub
 const client = new CopilotClient({
-    gitHubToken: emuUserToken,  // Works the same as regular tokens
-    useLoggedInUser: false,
+    mode: "coding-agent",
+    github: {
+        token: emuUserToken,
+        // Works the same as regular tokens
+        useLoggedInUser: false,
+    },
 });
 ```
 
@@ -498,10 +539,16 @@ const clients = new Map<string, CopilotClient>();
 
 function getClientForUser(userId: string, token: string): CopilotClient {
     if (!clients.has(userId)) {
-        clients.set(userId, new CopilotClient({
-            gitHubToken: token,
-            useLoggedInUser: false,
-        }));
+        clients.set(
+            userId,
+            new CopilotClient({
+                mode: "coding-agent",
+                github: {
+                    token: token,
+                    useLoggedInUser: false,
+                },
+            }),
+        );
     }
     return clients.get(userId)!;
 }

@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using System;
@@ -14,7 +14,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 internal static class GeneratedStringEnumJson
 {
@@ -49,7 +49,7 @@ internal static class GeneratedStringEnumJson
 internal static class Diagnostics
 {
     /// <summary>Indicates an experimental API that may change or be removed.</summary>
-    internal const string Experimental = "GHCP001";
+    internal const string Experimental = "MCPSDK001";
 }
 
 /// <summary>
@@ -123,7 +123,7 @@ public interface ISkillProvider
     /// or provider replacement on resume) or the connection closes.
     /// </param>
     /// <returns>The available skill descriptors.</returns>
-    Task<IReadOnlyList<SkillProviderDescriptor>> ListSkillsAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<SkillProviderDescriptor>> ListSkillsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Reads the SKILL.md markdown for a named skill.</summary>
     /// <param name="name">The skill name requested by the runtime.</param>
@@ -132,7 +132,7 @@ public interface ISkillProvider
     /// or provider replacement on resume) or the connection closes.
     /// </param>
     /// <returns>The skill markdown, or <see langword="null"/> when the skill is not found.</returns>
-    Task<string?> ReadSkillAsync(string name, CancellationToken cancellationToken);
+    Task<string?> ReadSkillAsync(string name, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -202,12 +202,25 @@ public abstract class RuntimeConnection
 
     /// <summary>
     /// Spawn a runtime child process and communicate over its stdin/stdout.
-    /// This is the default if no <see cref="CopilotClientOptions.Connection"/> is set.
     /// </summary>
     /// <param name="path">Path to the runtime executable. When <c>null</c>, the bundled runtime is used.</param>
     /// <param name="args">Extra command-line arguments to pass to the runtime process.</param>
-    public static StdioRuntimeConnection ForStdio(string? path = null, IList<string>? args = null)
-        => new() { Path = path, Args = args };
+    /// <param name="environment">Replacement child-process environment.</param>
+    /// <param name="workingDirectory">Child-process working directory.</param>
+    /// <param name="baseDirectory">Runtime data home.</param>
+    /// <param name="sessionIdleTimeoutSeconds">Idle-session timeout; zero or null disables cleanup.</param>
+    public static SpawnedStdioRuntimeConnection ForSpawnedStdio(string? path = null, IList<string>? args = null,
+        IReadOnlyDictionary<string, string>? environment = null, string? workingDirectory = null,
+        string? baseDirectory = null, int? sessionIdleTimeoutSeconds = null)
+        => new()
+        {
+            Path = path,
+            Args = args,
+            Environment = environment,
+            WorkingDirectory = workingDirectory,
+            BaseDirectory = baseDirectory,
+            SessionIdleTimeoutSeconds = sessionIdleTimeoutSeconds
+        };
 
     /// <summary>
     /// Spawn a runtime child process that listens on a TCP socket and connect to it.
@@ -218,36 +231,79 @@ public abstract class RuntimeConnection
     /// When <c>null</c>, a GUID is generated automatically.</param>
     /// <param name="path">Path to the runtime executable. When <c>null</c>, the bundled runtime is used.</param>
     /// <param name="args">Extra command-line arguments to pass to the runtime process.</param>
-    public static TcpRuntimeConnection ForTcp(int port = 0, string? connectionToken = null, string? path = null, IList<string>? args = null)
-        => new() { Port = port, ConnectionToken = connectionToken, Path = path, Args = args };
+    /// <param name="environment">Replacement child-process environment.</param>
+    /// <param name="workingDirectory">Child-process working directory.</param>
+    /// <param name="baseDirectory">Runtime data home.</param>
+    /// <param name="sessionIdleTimeoutSeconds">Idle-session timeout; zero or null disables cleanup.</param>
+    public static SpawnedTcpRuntimeConnection ForSpawnedTcp(int port = 0, string? connectionToken = null, string? path = null,
+        IList<string>? args = null, IReadOnlyDictionary<string, string>? environment = null,
+        string? workingDirectory = null, string? baseDirectory = null, int? sessionIdleTimeoutSeconds = null)
+        => new()
+        {
+            Port = port,
+            ConnectionToken = connectionToken,
+            Path = path,
+            Args = args,
+            Environment = environment,
+            WorkingDirectory = workingDirectory,
+            BaseDirectory = baseDirectory,
+            SessionIdleTimeoutSeconds = sessionIdleTimeoutSeconds
+        };
 
     /// <summary>
-    /// Connect to an already-running runtime at a given URI.
+    /// Connect to an already-running runtime over plaintext TCP without owning its lifetime.
     /// </summary>
-    /// <param name="url">URL of the runtime to connect to. Accepts <c>"port"</c>, <c>"host:port"</c>, or a full URL.</param>
+    /// <param name="host">Hostname or IP address, without a scheme, port, path, or IPv6 brackets.</param>
+    /// <param name="port">TCP port, from 1 through 65535.</param>
     /// <param name="connectionToken">Optional shared secret to authenticate the connection.</param>
-    public static UriRuntimeConnection ForUri(string url, string? connectionToken = null)
-        => new() { Url = url, ConnectionToken = connectionToken };
+    public static TcpRuntimeConnection ForTcp(string host, int port, string? connectionToken = null)
+        => new() { Host = host, Port = port, ConnectionToken = connectionToken };
 
     /// <summary>
     /// Host the runtime in-process by loading its native library and communicating
     /// over the C ABI (FFI) — no child process is spawned by the SDK for JSON-RPC
     /// transport. The bundled runtime is used; to point at a non-default runtime
     /// entrypoint, set the <c>COPILOT_CLI_PATH</c> environment variable.
+    /// This is the default when no connection or environment override is supplied.
     /// </summary>
     /// <remarks>
     /// Works across the SDK's target frameworks: modern .NET uses <c>NativeLibrary</c>,
     /// while <c>netstandard2.0</c> consumers use a built-in fallback native loader.
     /// </remarks>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public static InProcessRuntimeConnection ForInProcess()
-        => new();
+    public static InProcessRuntimeConnection ForInProcess(string? baseDirectory = null,
+        int? sessionIdleTimeoutSeconds = null)
+        => new() { BaseDirectory = baseDirectory, SessionIdleTimeoutSeconds = sessionIdleTimeoutSeconds };
+
+    /// <summary>Resolves the installed SDK default synchronously at call time without starting a runtime.</summary>
+    /// <param name="baseDirectory">Runtime data home.</param>
+    /// <param name="sessionIdleTimeoutSeconds">Idle-session timeout; zero or null disables cleanup.</param>
+    /// <remarks>Honors COPILOT_SDK_DEFAULT_CONNECTION (stdio or inprocess, case-insensitive).
+    /// Unset or empty uses in-process hosting. Invalid values throw.</remarks>
+    public static OwnedRuntimeConnection ForDefault(string? baseDirectory = null, int? sessionIdleTimeoutSeconds = null)
+    {
+        var value = System.Environment.GetEnvironmentVariable("COPILOT_SDK_DEFAULT_CONNECTION");
+        if (string.Equals(value, "stdio", StringComparison.OrdinalIgnoreCase))
+            return ForSpawnedStdio(baseDirectory: baseDirectory, sessionIdleTimeoutSeconds: sessionIdleTimeoutSeconds);
+        if (string.IsNullOrEmpty(value) || string.Equals(value, "inprocess", StringComparison.OrdinalIgnoreCase))
+            return ForInProcess(baseDirectory, sessionIdleTimeoutSeconds);
+        throw new ArgumentException($"Invalid COPILOT_SDK_DEFAULT_CONNECTION value '{value}'. Expected 'inprocess', 'stdio', or unset.");
+    }
+}
+
+/// <summary>Settings shared by runtimes owned by this client.</summary>
+public abstract class OwnedRuntimeConnection : RuntimeConnection
+{
+    internal OwnedRuntimeConnection() { }
+    /// <summary>Runtime data home, also used to scope the in-process cache.</summary>
+    public string? BaseDirectory { get; set; }
+    /// <summary>Idle-session cleanup in seconds. Zero or null disables cleanup.</summary>
+    public int? SessionIdleTimeoutSeconds { get; set; }
 }
 
 /// <summary>
 /// Base for <see cref="RuntimeConnection"/> kinds that spawn a runtime child process.
 /// </summary>
-public abstract class ChildProcessRuntimeConnection : RuntimeConnection
+public abstract class ChildProcessRuntimeConnection : OwnedRuntimeConnection
 {
     internal ChildProcessRuntimeConnection() { }
 
@@ -261,31 +317,31 @@ public abstract class ChildProcessRuntimeConnection : RuntimeConnection
     /// Gets or sets the environment variables passed to the spawned runtime process,
     /// replacing the inherited environment.
     /// </summary>
-    /// <remarks>
-    /// Cannot be combined with <see cref="CopilotClientOptions.Environment"/>; setting both throws
-    /// an <see cref="ArgumentException"/> when the client is constructed.
-    /// </remarks>
+    /// <remarks>Null inherits the current environment; an empty dictionary starts with no inherited variables.
+    /// The SDK still adds its managed runtime settings.</remarks>
     public IReadOnlyDictionary<string, string>? Environment { get; set; }
+
+    /// <summary>Working directory for the child process. Null inherits the current process directory.</summary>
+    public string? WorkingDirectory { get; set; }
 }
 
 /// <summary>
 /// Spawns a runtime child process and communicates over stdin/stdout. Construct via
-/// <see cref="RuntimeConnection.ForStdio(string?, IList{string}?)"/>.
+/// <see cref="RuntimeConnection.ForSpawnedStdio"/>.
 /// </summary>
-public sealed class StdioRuntimeConnection : ChildProcessRuntimeConnection
+public sealed class SpawnedStdioRuntimeConnection : ChildProcessRuntimeConnection
 {
-    internal StdioRuntimeConnection() { }
+    internal SpawnedStdioRuntimeConnection() { }
 }
 
 /// <summary>
 /// Hosts the runtime in-process by loading its native library and communicating
-/// over the C ABI (FFI). Construct via <see cref="RuntimeConnection.ForInProcess()"/>.
+/// over the C ABI (FFI). Construct via <see cref="RuntimeConnection.ForInProcess"/>.
 /// Works across the SDK's target frameworks (modern .NET and <c>netstandard2.0</c>).
 /// To point at a non-default runtime entrypoint, set the <c>COPILOT_CLI_PATH</c>
 /// environment variable.
 /// </summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-public sealed class InProcessRuntimeConnection : RuntimeConnection
+public sealed class InProcessRuntimeConnection : OwnedRuntimeConnection
 {
     internal InProcessRuntimeConnection() { }
 
@@ -298,16 +354,17 @@ public sealed class InProcessRuntimeConnection : RuntimeConnection
     /// scheduler may also be used for other runtime-owned native UI operations.
     /// Temporary OneAuth workaround; this API may be removed if no longer needed.
     /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public Func<Action, Task>? RunOnUiThread { get; set; }
 }
 
 /// <summary>
 /// Spawns a runtime child process listening on a TCP socket. Construct via
-/// <see cref="RuntimeConnection.ForTcp(int, string?, string?, IList{string}?)"/>.
+/// <see cref="RuntimeConnection.ForSpawnedTcp"/>.
 /// </summary>
-public sealed class TcpRuntimeConnection : ChildProcessRuntimeConnection
+public sealed class SpawnedTcpRuntimeConnection : ChildProcessRuntimeConnection
 {
-    internal TcpRuntimeConnection() { }
+    internal SpawnedTcpRuntimeConnection() { }
 
     /// <summary>
     /// TCP port to listen on. <c>0</c> (the default) auto-allocates a free port.
@@ -323,18 +380,20 @@ public sealed class TcpRuntimeConnection : ChildProcessRuntimeConnection
 }
 
 /// <summary>
-/// Connects to an already-running runtime at the specified URL. Construct via
-/// <see cref="RuntimeConnection.ForUri(string, string?)"/>.
+/// Connects to an already-running runtime over plaintext TCP. Construct via
+/// <see cref="RuntimeConnection.ForTcp(string, int, string?)"/>.
 /// </summary>
-public sealed class UriRuntimeConnection : RuntimeConnection
+public sealed class TcpRuntimeConnection : RuntimeConnection
 {
-    internal UriRuntimeConnection() { }
+    internal TcpRuntimeConnection() { }
 
     /// <summary>
-    /// URL of the runtime to connect to. Accepts <c>"port"</c>, <c>"host:port"</c>,
-    /// or a full URL.
+    /// Hostname or IP address, without a scheme, port, path, or IPv6 brackets.
     /// </summary>
-    public required string Url { get; set; }
+    public required string Host { get; set; }
+
+    /// <summary>TCP port, from 1 through 65535.</summary>
+    public required int Port { get; set; }
 
     /// <summary>Optional shared secret to authenticate the connection.</summary>
     public string? ConnectionToken { get; set; }
@@ -354,9 +413,9 @@ public enum CopilotClientMode
     /// </para>
     /// <list type="bullet">
     /// <item>The client constructor requires
-    ///     <see cref="CopilotClientOptions.BaseDirectory"/> or
+    ///     <see cref="OwnedRuntimeConnection.BaseDirectory"/> or
     ///     <see cref="CopilotClientOptions.SessionFs"/> to be set.</item>
-    /// <item><see cref="SessionConfigBase.AvailableTools"/> must be supplied on
+    /// <item><see cref="SessionToolOptions.AvailableTools"/> must be supplied on
     ///     every session — no tools are exposed by default.</item>
     /// <item>The SDK injects safe defaults for ambient session features
     ///     (telemetry, custom instructions, plugins, environment context, etc.).</item>
@@ -368,7 +427,7 @@ public enum CopilotClientMode
     Empty,
 
     /// <summary>
-    /// Uses defaults equivalent to GitHub Copilot CLI. The default. Useful when
+    /// Uses defaults equivalent to GitHub Copilot CLI. Useful when
     /// building a coding agent that shares sessions with Copilot CLI.
     /// <para>
     /// <b>Do not use this mode for server-based multi-user applications</b> —
@@ -376,7 +435,7 @@ public enum CopilotClientMode
     /// sessions and can access the host OS environment.
     /// </para>
     /// </summary>
-    CopilotCli,
+    CodingAgent,
 }
 
 /// <summary>
@@ -436,191 +495,59 @@ public sealed class CopilotClientOptions
     /// Initializes a new instance of the <see cref="CopilotClientOptions"/> class.
     /// </summary>
     public CopilotClientOptions() { }
-
     /// <summary>
     /// Initializes a new instance of the <see cref="CopilotClientOptions"/> class
     /// by copying the properties of the specified instance.
     /// </summary>
-    private CopilotClientOptions(CopilotClientOptions? other)
+    [System.Diagnostics.CodeAnalysis.SetsRequiredMembers]
+    private CopilotClientOptions(CopilotClientOptions other)
     {
-        if (other is null) return;
-
-        Connection = other.Connection;
+        Runtime = other.Runtime;
         InternalTestOptions = other.InternalTestOptions;
-        WorkingDirectory = other.WorkingDirectory;
-        BaseDirectory = other.BaseDirectory;
-        BuiltinPluginDirectories = other.BuiltinPluginDirectories is null ? null : [.. other.BuiltinPluginDirectories];
-        Environment = other.Environment;
-        GitHubToken = other.GitHubToken;
-        Logger = other.Logger;
-        LogLevel = other.LogLevel;
-        Telemetry = other.Telemetry;
-        UseLoggedInUser = other.UseLoggedInUser;
-        OnListModels = other.OnListModels;
         SessionFs = other.SessionFs;
-        RequestHandler = other.RequestHandler;
-        ExtensionLaunchProvider = other.ExtensionLaunchProvider;
         Network = other.Network;
-        InstallationConfirmationHandler = other.InstallationConfirmationHandler;
-        OnGitHubTelemetry = other.OnGitHubTelemetry;
-        SessionIdleTimeoutSeconds = other.SessionIdleTimeoutSeconds;
         ClientInfo = other.ClientInfo;
         Entra = other.Entra;
         Mode = other.Mode;
+        Plugins = (ClientPluginOptions)other.Plugins.Clone();
+        Observability = (ClientObservabilityOptions)other.Observability.Clone();
+        GitHub = (ClientGitHubOptions)other.GitHub.Clone();
+        Models = (ClientModelOptions)other.Models.Clone();
+        Extensions = (ClientExtensionOptions)other.Extensions.Clone();
+        Installations = (ClientInstallationOptions)other.Installations.Clone();
     }
-
     /// <summary>
     /// Selects the SDK defaulting strategy. See <see cref="CopilotClientMode"/>.
     /// </summary>
     /// <remarks>
     /// When set to <see cref="CopilotClientMode.Empty"/>, the SDK validates that
     /// the app has supplied the required configuration
-    /// (<see cref="BaseDirectory"/> or <see cref="SessionFs"/>, plus
-    /// <see cref="SessionConfigBase.AvailableTools"/> on each session).
+    /// (<see cref="OwnedRuntimeConnection.BaseDirectory"/> or <see cref="SessionFs"/>, plus
+    /// <see cref="SessionToolOptions.AvailableTools"/> on each session).
     /// </remarks>
-    public CopilotClientMode Mode { get; set; } = CopilotClientMode.CopilotCli;
+    public required CopilotClientMode Mode { get; set; }
 
     /// <summary>
     /// How to connect to the runtime. When <c>null</c>, the default is
-    /// <see cref="RuntimeConnection.ForStdio(string?, IList{string}?)"/> with the bundled runtime.
+    /// <see cref="RuntimeConnection.ForDefault"/>, which uses the bundled in-process runtime unless overridden.
     /// </summary>
-    public RuntimeConnection? Connection { get; set; }
-
-    /// <summary>
-    /// Working directory for the runtime process.
-    /// Not supported in-process; use <see cref="SessionConfigBase.WorkingDirectory"/> instead.
-    /// </summary>
-    public string? WorkingDirectory { get; set; }
-
-    /// <summary>
-    /// Base directory for Copilot data (session state, config, etc.).
-    /// Sets the <c>COPILOT_HOME</c> environment variable for the runtime host.
-    /// In-process hosts also keep their runtime cache in its <c>cache</c> subdirectory.
-    /// When <see langword="null"/>, the runtime defaults to <c>~/.copilot</c>.
-    /// Ignored when connecting to an existing runtime via
-    /// <see cref="RuntimeConnection.ForUri(string, string?)"/>.
-    /// </summary>
-    public string? BaseDirectory { get; set; }
-
-    /// <summary>
-    /// Absolute paths to trusted plugin directories bundled by the host.
-    /// When non-empty, the complete set is registered with the runtime during
-    /// startup before sessions can be created.
-    /// </summary>
-    public IList<string>? BuiltinPluginDirectories { get; set; }
-
-    /// <summary>
-    /// Log level for the Copilot runtime. Use the well-known values on
-    /// <see cref="CopilotLogLevel"/> (<see cref="CopilotLogLevel.None"/>,
-    /// <see cref="CopilotLogLevel.Error"/>, <see cref="CopilotLogLevel.Warning"/>,
-    /// <see cref="CopilotLogLevel.Info"/>, <see cref="CopilotLogLevel.Debug"/>,
-    /// <see cref="CopilotLogLevel.All"/>). When <c>null</c>, the runtime's default
-    /// log level is used.
-    /// </summary>
-    public CopilotLogLevel? LogLevel { get; set; }
-
-    /// <summary>
-    /// Gets or sets runtime environment values, replacing the inherited environment for child processes.
-    /// </summary>
-    /// <remarks>
-    /// Unsupported with <see cref="RuntimeConnection.ForInProcess"/>; use typed client/session options.
-    /// For child-process transports, prefer
-    /// <see cref="ChildProcessRuntimeConnection.Environment"/>; setting both throws.
-    /// </remarks>
-    public IReadOnlyDictionary<string, string>? Environment { get; set; }
-
-    /// <summary>Logger instance for SDK diagnostic output.</summary>
-    public ILogger? Logger { get; set; }
-
-    /// <summary>
-    /// GitHub token to use for authentication.
-    /// When provided, the token is passed to the runtime via environment variable.
-    /// This takes priority over other authentication methods.
-    /// </summary>
-    public string? GitHubToken { get; set; }
-
-    /// <summary>
-    /// Whether to use the logged-in user for authentication.
-    /// When true, the runtime will attempt to use stored OAuth tokens or gh CLI auth.
-    /// When false, only explicit tokens such as GitHubToken are used; environment variable
-    /// tokens (COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN) are ignored.
-    /// Default: true (but defaults to false when GitHubToken is provided).
-    /// </summary>
-    public bool? UseLoggedInUser { get; set; }
-
-    /// <summary>
-    /// Custom handler for listing available models.
-    /// When provided, <c>ListModelsAsync()</c> calls this handler instead of
-    /// querying the runtime. Useful in BYOK mode to return models
-    /// available from your custom provider.
-    /// </summary>
-    public Func<CancellationToken, Task<IList<ModelInfo>>>? OnListModels { get; set; }
+    public RuntimeConnection? Runtime { get; set; }
 
     /// <summary>
     /// Custom session filesystem provider configuration.
     /// When set, the client registers as the session filesystem provider on connect,
     /// routing session-scoped file I/O through per-session handlers created via
-    /// <see cref="SessionConfigBase.CreateSessionFsProvider"/>.
+    /// <see cref="SessionStateOptions.CreateSessionFsProvider"/>.
     /// </summary>
     public SessionFsConfig? SessionFs { get; set; }
-
-    /// <summary>
-    /// Configures interception of the LLM inference requests the runtime would
-    /// otherwise issue itself (for both CAPI and BYOK providers). When set, the
-    /// client registers a client-global LLM inference handler on connect, so
-    /// every model-layer HTTP / WebSocket request is routed to this
-    /// <see cref="CopilotRequestHandler"/> subclass instead of the runtime's own
-    /// outbound call.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public CopilotRequestHandler? RequestHandler { get; set; }
-
-    /// <summary>
-    /// Connection-level extension launch profile provider.
-    /// When set, the SDK registers the provider during <c>StartAsync()</c>
-    /// before any session can be created.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public IExtensionLaunchProviderHandler? ExtensionLaunchProvider { get; set; }
 
     /// <summary>
     /// Network callbacks through which the SDK host decides the runtime's proxies
     /// and supplies its proxy credentials. When at least one callback is set, the SDK
     /// registers the callbacks during <c>StartAsync()</c> before any session can be created.
     /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public NetworkConfig? Network { get; set; }
-
-    /// <summary>
-    /// Connection-global human review for experimental installation operations.
-    /// Does not register or enable installation capabilities on the runtime.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public InstallationConfirmationHandler? InstallationConfirmationHandler { get; set; }
-
-    /// <summary>
-    /// Experimental. Receives GitHub telemetry events the runtime forwards to this
-    /// connection; setting a handler opts created/resumed sessions into forwarding.
-    /// The SDK awaits the handler task so it may perform asynchronous work.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public Func<Rpc.GitHubTelemetryNotification, Task>? OnGitHubTelemetry { get; set; }
-
-    /// <summary>
-    /// OpenTelemetry configuration for the runtime.
-    /// When set to a non-<see langword="null"/> instance, the runtime is started with OpenTelemetry instrumentation enabled.
-    /// </summary>
-    public TelemetryConfig? Telemetry { get; set; }
-
-    /// <summary>
-    /// Server-wide idle timeout for sessions in seconds.
-    /// Sessions without activity for this duration are automatically cleaned up.
-    /// Set to <c>0</c> or leave as <see langword="null"/> to disable (sessions live indefinitely).
-    /// This option is only used when the SDK spawns the runtime; it is ignored
-    /// when connecting to an external runtime via <see cref="RuntimeConnection.ForUri(string, string?)"/>.
-    /// </summary>
-    public int? SessionIdleTimeoutSeconds { get; set; }
 
     /// <summary>
     /// Declares the integrating application's identity, forwarded to the runtime on the
@@ -636,7 +563,7 @@ public sealed class CopilotClientOptions
     /// Host application's Entra registration, shared by its sessions.
     /// Required for built-in Entra sign-in and token renewal; other authentication methods remain available.
     /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     [EditorBrowsable(EditorBrowsableState.Never)]
     public EntraAuthOptions? Entra { get; set; }
 
@@ -650,6 +577,29 @@ public sealed class CopilotClientOptions
     /// deep-cloned; the original and the clone will share those objects.
     /// </remarks>
     public CopilotClientOptions Clone() => new(this);
+    /// <summary>Options for plugins.</summary>
+    [JsonPropertyName("plugins")]
+    public ClientPluginOptions Plugins { get; set; } = new();
+
+    /// <summary>Options for observability.</summary>
+    [JsonPropertyName("observability")]
+    public ClientObservabilityOptions Observability { get; set; } = new();
+
+    /// <summary>Options for github.</summary>
+    [JsonPropertyName("github")]
+    public ClientGitHubOptions GitHub { get; set; } = new();
+
+    /// <summary>Options for models.</summary>
+    [JsonPropertyName("models")]
+    public ClientModelOptions Models { get; set; } = new();
+
+    /// <summary>Options for extensions.</summary>
+    [JsonPropertyName("extensions")]
+    public ClientExtensionOptions Extensions { get; set; } = new();
+
+    /// <summary>Options for installations.</summary>
+    [JsonPropertyName("installations")]
+    public ClientInstallationOptions Installations { get; set; } = new();
 }
 
 /// <summary>
@@ -1046,7 +996,7 @@ public sealed class ToolInvocation
     /// of its session events). <c>null</c> for a root-agent call, and for every call
     /// when the runtime does not attribute sub-agent tool calls.
     /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public string? AgentId { get; set; }
     /// <summary>
     /// Runtime request id of this call: the key <c>session.tools.handlePendingToolCall</c>
@@ -1054,7 +1004,7 @@ public sealed class ToolInvocation
     /// after the session is resumed with pending work continued; a sub-agent's call can
     /// be answered only while that sub-agent is still running.
     /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public string? RequestId { get; set; }
 }
 
@@ -1074,7 +1024,7 @@ public sealed class PermissionInvocation
     /// <summary>
     /// Program invocation owning this permission request; absent for ordinary requests.
     /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public string? ProgramToolCallId { get; set; }
 
     /// <summary>
@@ -1085,7 +1035,7 @@ public sealed class PermissionInvocation
     /// remains authoritative for the final permission result. It is absent
     /// with older runtimes and legacy direct permission callbacks.
     /// </remarks>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public AssistedApprovalAssessment? AssistedApprovalAssessment { get; set; }
 
     /// <summary>
@@ -1132,9 +1082,9 @@ public sealed class UserInputRequest
     /// Runtime request ID of the pending <c>user_input.requested</c> request.
     /// </summary>
     /// <remarks>
-    /// Pass it as <c>RequestId</c> to the session's
-    /// <see cref="UiApi.HandlePendingUserInputAsync(UIHandlePendingUserInputRequest, System.Threading.CancellationToken)"/>,
-    /// with a <c>DecisionContext</c> when a person answered, to correlate an out-of-band answer
+    /// Pass it as <c>requestId</c> to the session's
+    /// <see cref="UiApi.HandlePendingUserInputAsync"/>,
+    /// with a <c>decisionContext</c> when a person answered, to correlate an out-of-band answer
     /// with this request. <see langword="null"/> when the runtime predates this field.
     /// </remarks>
     [JsonPropertyName("requestId")]
@@ -1168,7 +1118,7 @@ public sealed class UserInputResponse
     /// answer as the person's own authority for Assisted Permissions, but only from the
     /// session's owning connection; an answer from any other connection settles without it.
     /// </remarks>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     [JsonPropertyName("decisionContext")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PermissionDecisionContext? DecisionContext { get; set; }
@@ -1417,9 +1367,9 @@ public sealed class ExitPlanModeRequest
     /// Runtime request ID of the pending <c>exit_plan_mode.requested</c> request.
     /// </summary>
     /// <remarks>
-    /// Pass it as <c>RequestId</c> to the session's
-    /// <see cref="UiApi.HandlePendingExitPlanModeAsync(UIHandlePendingExitPlanModeRequest, System.Threading.CancellationToken)"/>,
-    /// with a <c>DecisionContext</c> when a person decided, to correlate an out-of-band
+    /// Pass it as <c>requestId</c> to the session's
+    /// <see cref="UiApi.HandlePendingExitPlanModeAsync"/>,
+    /// with a <c>decisionContext</c> when a person decided, to correlate an out-of-band
     /// decision with this request. <see langword="null"/> when the runtime predates this field.
     /// </remarks>
     [JsonPropertyName("requestId")]
@@ -1459,7 +1409,7 @@ public sealed class ExitPlanModeResult
     /// review as the person's own for Assisted Permissions, but only from the session's
     /// owning connection; a review from any other connection settles without it.
     /// </remarks>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     [JsonPropertyName("decisionContext")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PermissionDecisionContext? DecisionContext { get; set; }
@@ -1647,7 +1597,7 @@ public sealed class ElicitationResult
 
     /// <summary>
     /// Who answered and how, when this result is returned from an
-    /// <see cref="SessionConfigBase.OnElicitationRequest"/> handler. Leave
+    /// <see cref="SessionInteractionOptions.OnElicitationRequest"/> handler. Leave
     /// <see langword="null"/> for automated answers.
     /// </summary>
     /// <remarks>
@@ -1658,7 +1608,7 @@ public sealed class ElicitationResult
     /// Permissions, but only from the session's owning connection. Results returned by
     /// <see cref="ISessionUiApi.ElicitAsync"/> never carry a context.
     /// </remarks>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public PermissionDecisionContext? DecisionContext { get; set; }
 }
 
@@ -1765,7 +1715,7 @@ public sealed class ElicitationContext
 /// <summary>
 /// Context for an MCP OAuth request callback.
 /// </summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class McpAuthContext
 {
     /// <summary>Identifier of the session that triggered the MCP OAuth request.</summary>
@@ -1799,7 +1749,7 @@ public sealed class McpAuthContext
 /// <summary>
 /// Host-provided OAuth token data for a pending MCP OAuth request.
 /// </summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class McpAuthToken
 {
     /// <summary>Access token acquired by the SDK host.</summary>
@@ -1815,7 +1765,7 @@ public sealed class McpAuthToken
 /// <summary>
 /// Result returned by an MCP auth request handler.
 /// </summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class McpAuthResult
 {
     /// <summary>Whether the request should be cancelled instead of resolved with a token.</summary>
@@ -1867,12 +1817,12 @@ public sealed class SessionUiCapabilities
 
     /// <summary>
     /// Whether the runtime has accepted the session's MCP Apps (SEP-1865) opt-in.
-    /// <c>true</c> when the consumer set <see cref="SessionConfigBase.EnableMcpApps"/>
+    /// <c>true</c> when the consumer set <see cref="SessionMcpOptions.EnableApps"/>
     /// to <c>true</c> on create/resume <b>and</b> the runtime's <c>MCP_APPS</c> feature flag
     /// (or <c>COPILOT_MCP_APPS=true</c> env override) is on. Otherwise absent or
     /// <c>false</c>, indicating the runtime silently dropped the opt-in.
     /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public bool? McpApps { get; set; }
 }
 
@@ -3333,7 +3283,7 @@ public sealed class ProviderConfig
     /// without sending the static credential or running the command.
     /// </summary>
     [JsonIgnore]
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public Func<ProviderTokenArgs, Task<string>>? BearerTokenProvider { get; set; }
 
     /// <summary>
@@ -3352,7 +3302,7 @@ public sealed class ProviderConfig
     /// Well-known model name used by the runtime to look up agent configuration
     /// (tools, prompts, reasoning behavior) and default token limits. Also used
     /// as the wire model when <see cref="WireModel"/> is not set.
-    /// Falls back to <see cref="SessionConfigBase.Model"/>.
+    /// Falls back to <see cref="SessionOptionsBase.Model"/>.
     /// </summary>
     [JsonPropertyName("modelId")]
     public string? ModelId { get; set; }
@@ -3361,7 +3311,7 @@ public sealed class ProviderConfig
     /// Model name sent to the provider API for inference. Use this when the
     /// provider's model name (e.g. an Azure deployment name or a custom
     /// fine-tune name) differs from <see cref="ModelId"/>.
-    /// Falls back to <see cref="ModelId"/>, then <see cref="SessionConfigBase.Model"/>.
+    /// Falls back to <see cref="ModelId"/>, then <see cref="SessionOptionsBase.Model"/>.
     /// </summary>
     [JsonPropertyName("wireModel")]
     public string? WireModel { get; set; }
@@ -3388,6 +3338,10 @@ public sealed class ProviderConfig
 /// </summary>
 public sealed class CapiSessionOptions
 {
+    /// <summary>Enables Copilot API models independently of GitHub identity.</summary>
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; set; }
+
     /// <summary>
     /// When <see langword="false"/>, forces the HTTP Responses transport for the CAPI Responses API
     /// instead of the default WebSocket transport.
@@ -3433,7 +3387,7 @@ public sealed class CapiSessionOptions
     /// Cannot be combined with <see cref="AutoTier"/>. To change the tier on a live session,
     /// use <see cref="CopilotSession.SetFusionTierAsync"/>.
     /// </remarks>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     [JsonPropertyName("fusionTier")]
     public FusionTier? FusionTier { get; set; }
 }
@@ -3454,14 +3408,11 @@ public sealed class AzureOptions
 /// A named BYOK provider connection (transport + credentials only), referenced by
 /// <see cref="ProviderModelConfig"/> entries via <see cref="Name"/>.
 /// <para>
-/// Unlike the singular, whole-session <see cref="ProviderConfig"/> — which bypasses
-/// Copilot API authentication — named providers are additive and coexist with Copilot
-/// API auth, so models from CAPI and one or more BYOK providers can be mixed within a
-/// single session and across sub-agents. Combining named providers/models with
-/// <see cref="SessionConfigBase.Provider"/> is rejected.
+/// Connections coexist with GitHub identity. <see cref="CapiSessionOptions.Enabled"/>
+/// controls Copilot model availability independently.
 /// </para>
 /// </summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class NamedProviderConfig
 {
     /// <summary>
@@ -3489,6 +3440,10 @@ public sealed class NamedProviderConfig
     [JsonPropertyName("wireApi")]
     public string? WireApi { get; set; }
 
+    /// <summary>Transport: "http" (default), or "websockets" for OpenAI Responses.</summary>
+    [JsonPropertyName("transport")]
+    public string? Transport { get; set; }
+
     /// <summary>
     /// Product serving this provider's models, such as <c>ollama</c> or <c>lm_studio</c>, reported
     /// in telemetry as <c>model_provider</c>. Allowed values are <c>openai</c>, <c>anthropic</c>,
@@ -3509,6 +3464,13 @@ public sealed class NamedProviderConfig
     /// </summary>
     [JsonPropertyName("apiKey")]
     public string? ApiKey { get; set; }
+
+    /// <summary>
+    /// Command run before each request to obtain a fresh API key. Failure fails
+    /// the request without static fallback. Bearer authentication takes precedence.
+    /// </summary>
+    [JsonPropertyName("apiKeyCommand")]
+    public string? ApiKeyCommand { get; set; }
 
     /// <summary>
     /// Bearer token for authentication. Sets the Authorization header directly.
@@ -3537,7 +3499,7 @@ public sealed class NamedProviderConfig
     /// and does not send the static credential.
     /// </summary>
     [JsonIgnore]
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public Func<ProviderTokenArgs, Task<string>>? BearerTokenProvider { get; set; }
 
     /// <summary>
@@ -3559,7 +3521,7 @@ public sealed class NamedProviderConfig
 /// (shown in the model list and passed to model switching) is the provider-qualified
 /// <c>provider/id</c>, so BYOK ids never collide with bare CAPI ids.
 /// </summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class ProviderModelConfig
 {
     /// <summary>
@@ -3861,7 +3823,7 @@ public sealed class CustomAgentConfig
     /// List of skill names to preload into this agent's context.
     /// When set, the full content of each listed skill is eagerly injected into
     /// the agent's context at startup. Skills are resolved by name from the
-    /// session's configured skill directories (<see cref="SessionConfigBase.SkillDirectories"/>).
+    /// session's configured skill directories (<see cref="SessionSkillOptions.Directories"/>).
     /// When omitted, no skills are injected (opt-in model).
     /// </summary>
     [JsonPropertyName("skills")]
@@ -3894,7 +3856,7 @@ public sealed class CustomAgentConfig
 
 /// <summary>
 /// Configuration for the default agent (the built-in agent that handles turns when no custom agent is selected).
-/// Use <see cref="ExcludedTools"/> to hide specific tools from the default agent
+/// Use <see cref="SessionToolOptions.ExcludedTools"/> to hide specific tools from the default agent
 /// while keeping them available to custom sub-agents.
 /// </summary>
 public sealed class DefaultAgentConfig
@@ -4075,7 +4037,7 @@ public sealed class MemoryConfiguration
     /// task completes; a failure fails the tool call with a generic message and
     /// nothing is stored elsewhere. While set, the runtime retrieves no memories and
     /// <c>vote_memory</c> is unavailable, so supply recall yourself, for example
-    /// through <see cref="SessionConfigBase.SystemMessage"/>. Requires
+    /// through <see cref="SessionOptionsBase.SystemMessage"/>. Requires
     /// <see cref="Enabled"/> to be <see langword="true"/>; creating or resuming a session
     /// otherwise throws <see cref="ArgumentException"/>. Not supported for cloud sessions.
     /// </remarks>
@@ -4176,14 +4138,14 @@ public struct SetModelOptions
     /// <see cref="FusionTier"/>. The <c>balance</c>, <c>hydrafusion</c> and
     /// <c>hydrafusion-max</c> identifiers it replaces remain accepted but are deprecated.
     /// </remarks>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public AutoTier? AutoTier { get; set; }
 
     /// <summary>
     /// Returns to the provider's default Auto routing as part of this switch.
     /// Mutually exclusive with <see cref="AutoTier"/>.
     /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public bool ResetAutoTier { get; set; }
 
     /// <summary>
@@ -4196,7 +4158,7 @@ public struct SetModelOptions
     /// and <see cref="ResetAutoTier"/>. Use <see cref="CopilotSession.SetFusionTierAsync"/> to
     /// change the tier without changing the selected model.
     /// </remarks>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public FusionTier? FusionTier { get; set; }
 }
 
@@ -4358,7 +4320,7 @@ public sealed class ManagedSettingsPermissions
 /// This layer is startup-only and is not persisted with the session. It must be
 /// re-supplied on <see cref="CopilotClient.ResumeSessionAsync"/> to remain in
 /// effect; omitting it on resume clears the previously injected layer. It can be
-/// combined with <see cref="SessionConfigBase.EnableManagedSettings"/>. Older
+/// combined with <see cref="SessionGitHubOptions.FetchManagedSettings"/>. Older
 /// runtimes may ignore this additive field, so hosts must not rely on injected
 /// policy until they ship a compatible runtime.
 /// </remarks>
@@ -4386,146 +4348,49 @@ public enum AskUserVariant
 
 /// <summary>
 /// Shared configuration properties for creating or resuming a Copilot session.
-/// Use <see cref="SessionConfig"/> when creating a new session, or
-/// <see cref="ResumeSessionConfig"/> when resuming an existing one.
+/// Use <see cref="CreateSessionOptions"/> when creating a new session, or
+/// <see cref="ResumeSessionOptions"/> when resuming an existing one.
 /// </summary>
-public abstract class SessionConfigBase
+public abstract class SessionOptionsBase
 {
-    /// <summary>
-    /// Whether the model may request multiple tool calls per response. Defaults to true.
-    /// False sends a provider hint, not an execution guarantee: all returned calls
-    /// are still handled and handlers may run concurrently. Re-supply on cold resume.
-    /// </summary>
-    public bool? AllowMultipleToolCalls { get; set; }
-
-    /// <summary>Initializes a new instance of the <see cref="SessionConfigBase"/> class.</summary>
-    protected SessionConfigBase() { }
+    /// <summary>Initializes a new instance of the <see cref="SessionOptionsBase"/> class.</summary>
+    protected SessionOptionsBase() { }
 
     /// <summary>
-    /// Initializes a new instance of <see cref="SessionConfigBase"/> by copying the
+    /// Initializes a new instance of <see cref="SessionOptionsBase"/> by copying the
     /// properties of the specified instance.
     /// </summary>
-    protected SessionConfigBase(SessionConfigBase? other)
+    protected SessionOptionsBase(SessionOptionsBase? other)
     {
         if (other is null) return;
-
-        AvailableTools = other.AvailableTools is not null ? [.. other.AvailableTools] : null;
         ClientName = other.ClientName;
-        Commands = other.Commands is not null ? [.. other.Commands] : null;
-        ConfigDirectory = other.ConfigDirectory;
-        CustomAgents = other.CustomAgents is not null ? [.. other.CustomAgents] : null;
-        DefaultAgent = other.DefaultAgent;
-        Agent = other.Agent;
-        DisabledSkills = other.DisabledSkills is not null ? [.. other.DisabledSkills] : null;
-        IncludedBuiltinSkills = other.IncludedBuiltinSkills is not null ? [.. other.IncludedBuiltinSkills] : null;
-        DisabledMcpServers = other.DisabledMcpServers is not null ? [.. other.DisabledMcpServers] : null;
-        SandboxConfig = other.SandboxConfig;
-        EnableCitations = other.EnableCitations;
-        EnableFileChangeTracking = other.EnableFileChangeTracking;
-        EnableConfigDiscovery = other.EnableConfigDiscovery;
-        SkipEmbeddingRetrieval = other.SkipEmbeddingRetrieval;
-        EmbeddingCacheStorage = other.EmbeddingCacheStorage;
-        OrganizationCustomInstructions = other.OrganizationCustomInstructions;
-        EnableOnDemandInstructionDiscovery = other.EnableOnDemandInstructionDiscovery;
-        EnableFileHooks = other.EnableFileHooks;
-        EnableHostGitOperations = other.EnableHostGitOperations;
-        EnableSessionStore = other.EnableSessionStore;
-        EnableSkills = other.EnableSkills;
-        EnableMcpApps = other.EnableMcpApps;
-        GitHubMcpToolConfig = other.GitHubMcpToolConfig is null
-            ? null
-            : new GitHubMcpToolConfig
-            {
-                EnableAllTools = other.GitHubMcpToolConfig.EnableAllTools,
-                AdditionalToolsets = other.GitHubMcpToolConfig.AdditionalToolsets is not null
-                    ? [.. other.GitHubMcpToolConfig.AdditionalToolsets]
-                    : null,
-                AdditionalTools = other.GitHubMcpToolConfig.AdditionalTools is not null
-                    ? [.. other.GitHubMcpToolConfig.AdditionalTools]
-                    : null,
-                EnableInsidersMode = other.GitHubMcpToolConfig.EnableInsidersMode,
-                DisableFormDeferral = other.GitHubMcpToolConfig.DisableFormDeferral,
-            };
-        ExcludedBuiltInAgents = other.ExcludedBuiltInAgents is not null ? [.. other.ExcludedBuiltInAgents] : null;
-        IncludedBuiltInAgents = other.IncludedBuiltInAgents is not null ? [.. other.IncludedBuiltInAgents] : null;
-        ExcludedTools = other.ExcludedTools is not null ? [.. other.ExcludedTools] : null;
-        Hooks = other.Hooks;
-        InfiniteSessions = other.InfiniteSessions;
-        LargeOutput = other.LargeOutput;
-        ToolSearch = other.ToolSearch;
-        ImageGeneration = other.ImageGeneration;
-        Memory = other.Memory;
-        McpServers = other.McpServers is not null
-            ? (other.McpServers is Dictionary<string, McpServerConfig> dict
-                ? new Dictionary<string, McpServerConfig>(dict, dict.Comparer)
-                : new Dictionary<string, McpServerConfig>(other.McpServers))
-            : null;
-        McpOAuthTokenStorage = other.McpOAuthTokenStorage;
         Diagnostics = other.Diagnostics;
         LifecycleDiagnostics = other.LifecycleDiagnostics;
-        AuthClientIdMetadataUrl = other.AuthClientIdMetadataUrl;
         Model = other.Model;
-        ModelCapabilities = other.ModelCapabilities;
-        OnAutoModeSwitchRequest = other.OnAutoModeSwitchRequest;
-        AutoModeRecovery = other.AutoModeRecovery;
-        OnElicitationRequest = other.OnElicitationRequest;
-        OnEvent = other.OnEvent;
-        OnExitPlanModeRequest = other.OnExitPlanModeRequest;
-        OnMcpAuthRequest = other.OnMcpAuthRequest;
-        OnPermissionRequest = other.OnPermissionRequest;
-        OnShellAuthenticationRequest = other.OnShellAuthenticationRequest;
-        OnUserInputRequest = other.OnUserInputRequest;
-        Provider = other.Provider;
-        Capi = other.Capi;
-        Providers = other.Providers is not null ? [.. other.Providers] : null;
-        Models = other.Models is not null ? [.. other.Models] : null;
-        EnableSessionTelemetry = other.EnableSessionTelemetry;
-        EnableExperimentalMode = other.EnableExperimentalMode;
-        SkipCustomInstructions = other.SkipCustomInstructions;
-        CustomAgentsLocalOnly = other.CustomAgentsLocalOnly;
-        CoauthorEnabled = other.CoauthorEnabled;
-        ManageScheduleEnabled = other.ManageScheduleEnabled;
-        ReasoningEffort = other.ReasoningEffort;
-        AllowMultipleToolCalls = other.AllowMultipleToolCalls;
-        ReasoningSummary = other.ReasoningSummary;
-        ContextTier = other.ContextTier;
-        AskUserVariant = other.AskUserVariant;
-        CreateSessionFsProvider = other.CreateSessionFsProvider;
-        GitHubToken = other.GitHubToken;
-        GitHubTokenProvider = other.GitHubTokenProvider;
-        FeatureFlags = other.FeatureFlags is not null
-            ? new Dictionary<string, bool>(other.FeatureFlags)
-            : null;
-        ExpAssignments = other.ExpAssignments;
-        EnableManagedSettings = other.EnableManagedSettings;
-        ExcludedManagedSettings = other.ExcludedManagedSettings?.ToList();
-        EnforceManagedModelDefaults = other.EnforceManagedModelDefaults;
-        InteractiveUser = other.InteractiveUser;
-        PermissionMode = other.PermissionMode;
-        ManagedSettings = other.ManagedSettings;
-        SkillProvider = other.SkillProvider;
-#pragma warning disable GHCP001
-        Canvases = other.Canvases is not null ? [.. other.Canvases] : null;
-        RequestCanvasRenderer = other.RequestCanvasRenderer;
-        RequestExtensions = other.RequestExtensions;
-        ExtensionSdkPath = other.ExtensionSdkPath;
-        ExtensionInfo = other.ExtensionInfo;
-        CanvasProvider = other.CanvasProvider;
-        CanvasHandler = other.CanvasHandler;
-#pragma warning restore GHCP001
-        SkillDirectories = other.SkillDirectories is not null ? [.. other.SkillDirectories] : null;
-        AgentDirectories = other.AgentDirectories is not null ? [.. other.AgentDirectories] : null;
-        HookDirectories = other.HookDirectories is not null ? [.. other.HookDirectories] : null;
-        PluginDirectories = other.PluginDirectories is not null ? [.. other.PluginDirectories] : null;
-        InstructionDirectories = other.InstructionDirectories is not null ? [.. other.InstructionDirectories] : null;
-        SessionLimits = other.SessionLimits;
-        Autopilot = other.Autopilot;
-        Streaming = other.Streaming;
-        IncludeSubAgentStreamingEvents = other.IncludeSubAgentStreamingEvents;
         SystemMessage = other.SystemMessage;
-        Tools = other.Tools is not null ? [.. other.Tools] : null;
         WorkingDirectory = other.WorkingDirectory;
-        AdditionalDirectories = other.AdditionalDirectories is not null ? [.. other.AdditionalDirectories] : null;
+        Inference = (SessionInferenceOptions)other.Inference.Clone();
+        Filesystem = (SessionFilesystemOptions)other.Filesystem.Clone();
+        ConfigDirectory = other.ConfigDirectory;
+        EnableConfigDiscovery = other.EnableConfigDiscovery;
+        State = (SessionStateOptions)other.State.Clone();
+        Instructions = (SessionInstructionOptions)other.Instructions.Clone();
+        Hooks = (SessionHookOptions)other.Hooks.Clone();
+        Git = (SessionGitOptions)other.Git.Clone();
+        Skills = (SessionSkillOptions)other.Skills.Clone();
+        Tools = (SessionToolOptions)other.Tools.Clone();
+        Interaction = (SessionInteractionOptions)other.Interaction.Clone();
+        Agents = (SessionAgentOptions)other.Agents.Clone();
+        GitHub = (SessionGitHubOptions)other.GitHub.Clone();
+        Experiments = (SessionExperimentOptions)other.Experiments.Clone();
+        Permissions = (SessionPermissionOptions)other.Permissions.Clone();
+        Mcp = (SessionMcpOptions)other.Mcp.Clone();
+        Events = (SessionEventOptions)other.Events.Clone();
+        Plugins = (SessionPluginOptions)other.Plugins.Clone();
+        Execution = (SessionExecutionOptions)other.Execution.Clone();
+        Policy = (SessionPolicyOptions)other.Policy.Clone();
+        Canvases = (SessionCanvasOptions)other.Canvases.Clone();
+        Extensions = (SessionExtensionOptions)other.Extensions.Clone();
     }
 
     /// <summary>Client name to identify the application using the SDK.</summary>
@@ -4534,378 +4399,11 @@ public abstract class SessionConfigBase
     /// <summary>Model identifier to use for this session (e.g., "gpt-4o").</summary>
     public string? Model { get; set; }
 
-    /// <summary>
-    /// Reasoning effort level for models that support it.
-    /// Valid values: "low", "medium", "high", "xhigh", "max".
-    /// Only applies to models where capabilities.supports.reasoningEffort is true.
-    /// </summary>
-    public string? ReasoningEffort { get; set; }
-
-    /// <summary>
-    /// Reasoning summary mode for models that support configurable reasoning summaries.
-    /// </summary>
-    /// <remarks>
-    /// Use <see cref="ReasoningSummary.None"/> to suppress summary output regardless of whether reasoning is enabled.
-    /// </remarks>
-    public ReasoningSummary? ReasoningSummary { get; set; }
-
-    /// <summary>
-    /// Context window tier for models that support it.
-    /// Use <see cref="ContextTier.Default"/> or <see cref="ContextTier.LongContext"/>
-    /// for the currently known tiers.
-    /// </summary>
-    public ContextTier? ContextTier { get; set; }
-
-    /// <summary>Per-property overrides for model capabilities, deep-merged over runtime defaults.</summary>
-    public ModelCapabilitiesOverride? ModelCapabilities { get; set; }
-
-    /// <summary>
-    /// Enables native model citations for models that support them.
-    /// </summary>
-    /// <remarks>
-    /// Citations are experimental, off by default, and currently available for Anthropic models.
-    /// This option may change or be removed while citation support is experimental.
-    /// </remarks>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public bool? EnableCitations { get; set; }
-
-    /// <summary>
-    /// Opts in to capturing file changes for session rewind and cumulative
-    /// session diff.
-    /// </summary>
-    /// <remarks>
-    /// On create, capture starts with the first turn. On resume, tracking can be
-    /// enabled only when the session still has a valid baseline; earlier untracked
-    /// changes cannot be reconstructed.
-    /// </remarks>
-    public bool? EnableFileChangeTracking { get; set; }
-
-    /// <summary>
-    /// Override the default configuration directory location.
-    /// When specified, the session will use this directory for storing config and state.
-    /// </summary>
-    public string? ConfigDirectory { get; set; }
-
-    /// <summary>
-    /// Enables runtime discovery of supported configuration. Explicitly supplied
-    /// configuration takes precedence over discovered values.
-    /// </summary>
-    public bool? EnableConfigDiscovery { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, skips embedding-based retrieval for this session.
-    /// Use in multitenant deployments to prevent cross-session information leakage
-    /// through the shared embedding cache.
-    /// </summary>
-    public bool? SkipEmbeddingRetrieval { get; set; }
-
-    /// <summary>
-    /// Controls how the embedding cache is stored for this session.
-    /// <see cref="EmbeddingCacheStorageMode.Persistent"/>: Embeddings are cached on disk and shared across sessions/restarts.
-    /// <see cref="EmbeddingCacheStorageMode.InMemory"/>: Embeddings are cached in memory only and discarded when the session ends.
-    /// </summary>
-    public EmbeddingCacheStorageMode? EmbeddingCacheStorage { get; set; }
-
-    /// <summary>
-    /// Organization-level custom instructions to include in the system prompt.
-    /// Allows hosts to inject organization-specific guidance without relying on
-    /// filesystem-based instruction discovery.
-    /// </summary>
-    public string? OrganizationCustomInstructions { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, enables on-demand discovery of instruction files
-    /// (for example <c>AGENTS.md</c> and <c>.github/copilot-instructions.md</c>)
-    /// after successful file views.
-    /// </summary>
-    public bool? EnableOnDemandInstructionDiscovery { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, enables repository-origin file hooks from
-    /// <c>.github/hooks/</c> and trusted repository-configured roots.
-    /// Does not control explicit <see cref="HookDirectories"/> or callback <see cref="Hooks"/>.
-    /// </summary>
-    public bool? EnableFileHooks { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, enables git operations on the host filesystem
-    /// such as branch detection, file status, and commit history. When
-    /// <see langword="false"/>, no git context is surfaced in the system prompt.
-    /// </summary>
-    public bool? EnableHostGitOperations { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, enables the cross-session store for search and
-    /// retrieval across sessions. When <see langword="false"/>, session content is
-    /// not written to or read from the shared session store.
-    /// </summary>
-    public bool? EnableSessionStore { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, enables skill loading, including built-in
-    /// skills and discovered skill directories. When <see langword="false"/>, no
-    /// skills are loaded regardless of <see cref="SkillDirectories"/> or
-    /// <see cref="EnableConfigDiscovery"/>.
-    /// </summary>
-    public bool? EnableSkills { get; set; }
-
-    /// <summary>
-    /// Session-scoped skill provider. When set, the runtime can list and read
-    /// skills by calling back into this SDK host.
-    /// </summary>
-    /// <remarks>
-    /// Experimental. The provider is ephemeral and is never persisted; supply it
-    /// again when resuming a session. In <see cref="CopilotClientMode.Empty"/>,
-    /// set <see cref="EnableSkills"/> to <see langword="true"/> to make provider
-    /// skills active. Providers can be called concurrently.
-    /// </remarks>
-    [JsonIgnore]
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public ISkillProvider? SkillProvider { get; set; }
-
-    /// <summary>
-    /// Built-in skill names to include in the session. In
-    /// <see cref="CopilotClientMode.Empty"/>, omitting this option excludes all
-    /// runtime-bundled skills; specifying names opts those built-ins back in.
-    /// Skills from other sources remain eligible.
-    /// </summary>
-    public IList<string>? IncludedBuiltinSkills { get; set; }
-
-    /// <summary>
-    /// Custom tool declarations available to the language model during the session.
-    /// Declarations backed by an <see cref="AIFunction"/> are invoked automatically; declarations without one
-    /// are left for the client to handle via external tool request events.
-    /// </summary>
-    public ICollection<AIFunctionDeclaration>? Tools { get; set; }
-
     /// <summary>System message configuration for the session.</summary>
     public SystemMessageConfig? SystemMessage { get; set; }
 
-    /// <summary>
-    /// Selects the model-facing shape of the built-in <c>ask_user</c> tool.
-    /// The default is <see cref="GitHub.Copilot.AskUserVariant.Legacy"/>. To use
-    /// <see cref="GitHub.Copilot.AskUserVariant.Elicitation"/>, also provide
-    /// <see cref="OnElicitationRequest"/> so the host can answer structured forms.
-    /// The runtime resolves this option when it creates or cold-resumes the session.
-    /// </summary>
-    public AskUserVariant? AskUserVariant { get; set; }
-
-    /// <summary>List of tool names to allow; only these tools will be available when specified.</summary>
-    public IList<string>? AvailableTools { get; set; }
-
-    /// <summary>List of tool names to exclude from the session.</summary>
-    public IList<string>? ExcludedTools { get; set; }
-
-    /// <summary>
-    /// Built-in subagent names to exclude from this session.
-    /// </summary>
-    /// <remarks>
-    /// Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a
-    /// custom agent with the same name is available.
-    /// </remarks>
-    [JsonPropertyName("excludedBuiltinAgents")]
-    public IList<string>? ExcludedBuiltInAgents { get; set; }
-
-    /// <summary>Built-in subagent names to allow, subject to availability and exclusions.</summary>
-    /// <remarks>
-    /// An empty list disables all built-in subagents; custom agents remain available,
-    /// including same-name agents. Null uses defaults on create or cold resume and
-    /// preserves the current allowlist on warm resume. Not persisted; re-supply on
-    /// resume after restart.
-    /// </remarks>
-    [JsonPropertyName("includedBuiltinAgents")]
-    public IList<string>? IncludedBuiltInAgents { get; set; }
-
-    /// <summary>Custom model provider configuration for the session.</summary>
-    public ProviderConfig? Provider { get; set; }
-
-    /// <summary>
-    /// CAPI (Copilot API) provider-scoped configuration for the session.
-    /// </summary>
-    public CapiSessionOptions? Capi { get; set; }
-
-    /// <summary>
-    /// Named BYOK provider connections (transport + credentials). Additive to Copilot
-    /// API authentication (unlike <see cref="Provider"/>); combine with <see cref="Models"/>.
-    /// Cannot be combined with <see cref="Provider"/>.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public IList<NamedProviderConfig>? Providers { get; set; }
-
-    /// <summary>
-    /// BYOK model definitions added to the session's selectable model list, each
-    /// referencing a <see cref="Providers"/> entry by name.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public IList<ProviderModelConfig>? Models { get; set; }
-
-    /// <summary>
-    /// Enables or disables internal session telemetry for this session.
-    /// When <c>false</c>, disables session telemetry. When <c>true</c>, enables it for eligible
-    /// GitHub-authenticated sessions, including custom <see cref="Provider"/> (BYOK) sessions.
-    /// When <c>null</c>, preserves a resident session's choice; otherwise defaults to enabled.
-    /// Host and account policies still control uploads.
-    /// This is independent of <see cref="CopilotClientOptions.Telemetry"/>, which configures
-    /// OpenTelemetry export for observability.
-    /// </summary>
-    public bool? EnableSessionTelemetry { get; set; }
-
-    /// <summary>
-    /// Controls whether the session enables experimental features.
-    /// </summary>
-    /// <remarks>
-    /// Defaults to <see langword="false"/> in <see cref="CopilotClientMode.Empty"/>.
-    /// Otherwise, the runtime decides when left <see langword="null"/>.
-    /// </remarks>
-    public bool? EnableExperimentalMode { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, suppresses loading of custom instruction files
-    /// (e.g. <c>.github/copilot-instructions.md</c>, <c>AGENTS.md</c>) from the working directory.
-    /// When <see langword="null"/>, the SDK chooses based on
-    /// <see cref="CopilotClientOptions.Mode"/>: <c>true</c> under
-    /// <see cref="CopilotClientMode.Empty"/> (instructions are not loaded
-    /// unless the app explicitly opts in), <c>null</c> otherwise.
-    /// </summary>
-    public bool? SkipCustomInstructions { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, custom-agent discovery is restricted to the
-    /// session's local working directory (no organisation-level discovery).
-    /// When <see langword="null"/>, the SDK chooses based on
-    /// <see cref="CopilotClientOptions.Mode"/>: <c>true</c> under
-    /// <see cref="CopilotClientMode.Empty"/>, <c>null</c> otherwise.
-    /// </summary>
-    public bool? CustomAgentsLocalOnly { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, allows the runtime to append a
-    /// <c>Co-authored-by</c> trailer when it commits on behalf of the user.
-    /// Subagents inherit this setting.
-    /// When <see langword="null"/>, the SDK chooses based on
-    /// <see cref="CopilotClientOptions.Mode"/>: <c>false</c> under
-    /// <see cref="CopilotClientMode.Empty"/>, <c>null</c> otherwise.
-    /// </summary>
-    public bool? CoauthorEnabled { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, enables the <c>manage_schedule</c> tool
-    /// (host scheduler integration). When <see langword="null"/>, the SDK
-    /// chooses based on <see cref="CopilotClientOptions.Mode"/>: <c>false</c>
-    /// under <see cref="CopilotClientMode.Empty"/>, <c>null</c> otherwise.
-    /// </summary>
-    public bool? ManageScheduleEnabled { get; set; }
-
-    /// <summary>Handler for permission requests from the server.</summary>
-    public Func<PermissionRequest, PermissionInvocation, Task<PermissionDecision>>? OnPermissionRequest { get; set; }
-
-    /// <summary>
-    /// Handler for user input requests from the agent. When provided with the default
-    /// <see cref="GitHub.Copilot.AskUserVariant.Legacy"/> variant, enables the
-    /// question-and-answer form of the <c>ask_user</c> tool.
-    /// </summary>
-    public Func<UserInputRequest, UserInputInvocation, Task<UserInputResponse>>? OnUserInputRequest { get; set; }
-
-    /// <summary>
-    /// Handler for passwords and other answers that shell commands run by the agent ask for.
-    /// When provided, <c>sudo -A</c>, <c>ssh</c>, and <c>git</c> prompts reach this handler
-    /// instead of failing for lack of a terminal. Return <see cref="ShellAuthenticationResponse.Cancel"/>
-    /// when nobody can answer. The <see cref="CancellationToken"/> is cancelled when the answer is
-    /// no longer needed, for example because the command ended, the prompt timed out, or the
-    /// session ended or switched to autopilot; close the input when it is. An exception, a response
-    /// that isn't an accept, or an answer after the token is cancelled cancels the prompt.
-    /// </summary>
-    public Func<ShellAuthenticationRequest, CancellationToken, Task<ShellAuthenticationResponse>>? OnShellAuthenticationRequest { get; set; }
-
-    /// <summary>Slash commands registered for this session.</summary>
-    public IList<CommandDefinition>? Commands { get; set; }
-
-    /// <summary>Handler for elicitation requests from the server or MCP tools.</summary>
-    public Func<ElicitationContext, Task<ElicitationResult>>? OnElicitationRequest { get; set; }
-
-    /// <summary>Handler for exit-plan-mode requests from the server.</summary>
-    public Func<ExitPlanModeRequest, ExitPlanModeInvocation, Task<ExitPlanModeResult>>? OnExitPlanModeRequest { get; set; }
-
-    /// <summary>Handler for auto-mode-switch requests from the server.</summary>
-    public Func<AutoModeSwitchRequest, AutoModeSwitchInvocation, Task<AutoModeSwitchResponse>>? OnAutoModeSwitchRequest { get; set; }
-
-    /// <summary>
-    /// Opt in to runtime-owned recovery of an eligible active request using Auto.
-    /// Requires <see cref="OnAutoModeSwitchRequest"/> and a positive
-    /// <c>session.Capabilities.Ui.AutoModeRecovery</c> acknowledgment. Unsupported
-    /// enrollment rejects create/resume and detaches the session. Defaults to false;
-    /// re-supply when resuming. Consent has no runtime deadline. Do not resend or rewind.
-    /// </summary>
-    public bool AutoModeRecovery { get; set; }
-
-    /// <summary>
-    /// Enable MCP Apps (SEP-1865) UI passthrough on this session.
-    /// <para>
-    /// When <c>true</c> <b>and</b> the runtime has MCP Apps enabled (via the
-    /// <c>MCP_APPS</c> feature flag or <c>COPILOT_MCP_APPS=true</c> environment override), the
-    /// runtime adds the <c>mcp-apps</c> capability to the session, which causes it to advertise
-    /// the <c>extensions.io.modelcontextprotocol/ui</c> extension to MCP servers (so they expose
-    /// <c>_meta.ui.resourceUri</c> on tools) and to expose the
-    /// <c>session.rpc.mcp.apps.{listTools,callTool,readResource,setHostContext,getHostContext,diagnose}</c>
-    /// JSON-RPC methods.
-    /// </para>
-    /// <para>
-    /// If the runtime gate is off, the opt-in is silently dropped server-side (the runtime logs a
-    /// warning); the session is created normally but the MCP Apps surface is unavailable. Inspect
-    /// the runtime's <c>capabilities.ui.mcpApps</c> on the create/resume response to detect this.
-    /// </para>
-    /// <para>
-    /// SDK consumers MUST set this to <c>true</c> only when they have an iframe renderer that can
-    /// display <c>ui://</c> MCP App bundles. Setting it without a renderer will cause MCP servers
-    /// to register UI-enabled tool variants the consumer cannot display.
-    /// </para>
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public bool EnableMcpApps { get; set; }
-
-    /// <summary>
-    /// Configuration for the built-in GitHub MCP server.
-    /// <c>DisableFormDeferral</c> only applies to that server and only has an
-    /// effect when MCP Apps and form-backed GitHub tools are enabled.
-    /// </summary>
-    public GitHubMcpToolConfig? GitHubMcpToolConfig { get; set; }
-
-    /// <summary>Hook handlers for session lifecycle events.</summary>
-    public SessionHooks? Hooks { get; set; }
-
     /// <summary>Working directory for the session.</summary>
     public string? WorkingDirectory { get; set; }
-
-    /// <summary>
-    /// Additional directories the agent may access beyond <see cref="WorkingDirectory"/>.
-    /// Relative paths resolve against the session working directory. Re-supply them when resuming.
-    /// </summary>
-    public IList<string>? AdditionalDirectories { get; set; }
-
-    /// <summary>
-    /// Enable streaming of assistant message and reasoning chunks.
-    /// When true, assistant.message_delta and assistant.reasoning_delta events
-    /// with deltaContent are sent as the response is generated.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? Streaming { get; set; }
-
-    /// <summary>
-    /// Include sub-agent streaming events in the event stream. When true, streaming
-    /// delta events from sub-agents (e.g., <c>assistant.message_delta</c>,
-    /// <c>assistant.reasoning_delta</c>, <c>assistant.streaming_delta</c> with
-    /// <c>agentId</c> set) are forwarded to this connection. When false, only
-    /// non-streaming sub-agent events and <c>subagent.*</c> lifecycle events are
-    /// forwarded; streaming deltas from sub-agents are suppressed.
-    /// Default: true.
-    /// </summary>
-    public bool IncludeSubAgentStreamingEvents { get; set; } = true;
-
-    /// <summary>
-    /// MCP server configurations for the session.
-    /// Keys are server names, values are server configurations (<see cref="McpStdioServerConfig"/> or <see cref="McpHttpServerConfig"/>).
-    /// </summary>
-    public IDictionary<string, McpServerConfig>? McpServers { get; set; }
 
     /// <summary>
     /// Enables session-scoped MCP diagnostic capture. Diagnostics are off by default.
@@ -4918,352 +4416,126 @@ public abstract class SessionConfigBase
     /// <summary>
     /// Configures the startup-only experimental runtime lifecycle diagnostic read and persistence surfaces.
     /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     internal LifecycleDiagnosticsConfiguration? LifecycleDiagnostics { get; set; }
 
-    /// <summary>
-    /// Controls how MCP OAuth tokens are stored for this session.
-    /// Default: <see cref="McpOAuthTokenStorageMode.InMemory"/> for safe multitenant behavior.
-    /// </summary>
-    public McpOAuthTokenStorageMode? McpOAuthTokenStorage { get; set; }
+    /// <summary>Options for inference.</summary>
+    [JsonPropertyName("inference")]
+    public SessionInferenceOptions Inference { get; set; } = new();
+
+    /// <summary>Options for filesystem.</summary>
+    [JsonPropertyName("filesystem")]
+    public SessionFilesystemOptions Filesystem { get; set; } = new();
 
     /// <summary>
-    /// OAuth Client ID Metadata Document URL identifying the host for MCP authorization.
-    /// When unset, no host identity is supplied.
+    /// Override the default configuration directory location.
+    /// When specified, the session will use this directory for storing config and state.
     /// </summary>
-    public string? AuthClientIdMetadataUrl { get; set; }
-
-    /// <summary>Custom agent configurations for the session.</summary>
-    public IList<CustomAgentConfig>? CustomAgents { get; set; }
+    [JsonPropertyName("configDirectory")]
+    public string? ConfigDirectory { get; set; }
 
     /// <summary>
-    /// Configuration for the default agent (the built-in agent that handles turns when no custom agent is selected).
-    /// Use <see cref="DefaultAgentConfig.ExcludedTools"/> to hide specific tools from the default agent
-    /// while keeping them available to custom sub-agents.
+    /// Enables runtime discovery of supported configuration. Explicitly supplied
+    /// configuration takes precedence over discovered values.
     /// </summary>
-    public DefaultAgentConfig? DefaultAgent { get; set; }
+    [JsonPropertyName("enableConfigDiscovery")]
+    public bool? EnableConfigDiscovery { get; set; }
 
-    /// <summary>
-    /// Name of the custom agent to activate when the session starts.
-    /// Must match the <see cref="CustomAgentConfig.Name"/> of one of the agents in <see cref="CustomAgents"/>.
-    /// </summary>
-    public string? Agent { get; set; }
+    /// <summary>Options for state.</summary>
+    [JsonPropertyName("state")]
+    public SessionStateOptions State { get; set; } = new();
 
-    /// <summary>Explicit discovery-only skill roots, not general filesystem grants.</summary>
-    /// <remarks>
-    /// Available without <see cref="EnableConfigDiscovery"/>, subject to skill/managed disables.
-    /// Relative paths resolve once when supplied against the request's effective
-    /// <see cref="WorkingDirectory"/>; retained roots do not move when it changes.
-    /// Null and omission are equivalent; an empty list clears only the explicit SDK contribution.
-    /// </remarks>
-    public IList<string>? SkillDirectories { get; set; }
+    /// <summary>Options for instructions.</summary>
+    [JsonPropertyName("instructions")]
+    public SessionInstructionOptions Instructions { get; set; } = new();
 
-    /// <summary>Explicit discovery-only agent roots, separate from <see cref="CustomAgents"/>.</summary>
-    /// <remarks>
-    /// No general filesystem grant. Available without <see cref="EnableConfigDiscovery"/>,
-    /// subject to source/managed disables. Relative paths resolve once when supplied against
-    /// the request's effective <see cref="WorkingDirectory"/>; retained roots do not move.
-    /// Null and omission are equivalent; an empty list clears only the explicit SDK contribution.
-    /// </remarks>
-    public IList<string>? AgentDirectories { get; set; }
+    /// <summary>Options for hooks.</summary>
+    [JsonPropertyName("hooks")]
+    public SessionHookOptions Hooks { get; set; } = new();
 
-    /// <summary>Explicit discovery-only file-hook roots, separate from callback <see cref="Hooks"/>.</summary>
-    /// <remarks>
-    /// No general filesystem grant. Available without <see cref="EnableConfigDiscovery"/> or
-    /// <see cref="EnableFileHooks"/> (repository-origin hooks only), subject to hook/managed disables.
-    /// Relative paths resolve once when supplied against the request's effective
-    /// <see cref="WorkingDirectory"/>; retained roots do not move when it changes.
-    /// Null and omission are equivalent; an empty list clears only the explicit SDK contribution.
-    /// </remarks>
-    public IList<string>? HookDirectories { get; set; }
+    /// <summary>Options for git.</summary>
+    [JsonPropertyName("git")]
+    public SessionGitOptions Git { get; set; } = new();
 
-    /// <summary>
-    /// Local filesystem paths to Open Plugins-format directories
-    /// (https://open-plugins.com/) to load for this session.
-    /// </summary>
-    /// <remarks>
-    /// Relative paths resolve against <see cref="WorkingDirectory"/> (or the
-    /// runtime cwd if unset). Treated as an explicit opt-in: plugin agents
-    /// and rules load even when <see cref="EnableConfigDiscovery"/> is false.
-    /// </remarks>
-    public IList<string>? PluginDirectories { get; set; }
+    /// <summary>Options for skills.</summary>
+    [JsonPropertyName("skills")]
+    public SessionSkillOptions Skills { get; set; } = new();
 
-    /// <summary>Explicit discovery-only instruction roots using existing SDK formats.</summary>
-    /// <remarks>
-    /// No general filesystem grant. Available without <see cref="EnableConfigDiscovery"/>,
-    /// subject to instruction/managed disables. Relative paths resolve once when supplied
-    /// against the request's effective <see cref="WorkingDirectory"/>; retained roots do not move.
-    /// Null and omission are equivalent; an empty list clears only the explicit SDK contribution.
-    /// </remarks>
-    public IList<string>? InstructionDirectories { get; set; }
+    /// <summary>Options for tools.</summary>
+    [JsonPropertyName("tools")]
+    public SessionToolOptions Tools { get; set; } = new();
 
-    /// <summary>List of skill names to disable.</summary>
-    public IList<string>? DisabledSkills { get; set; }
+    /// <summary>Options for interaction.</summary>
+    [JsonPropertyName("interaction")]
+    public SessionInteractionOptions Interaction { get; set; } = new();
 
-    /// <summary>
-    /// Exact MCP server names to disable for this session. Disabled servers are not
-    /// started or authenticated on create or cold resume; a resident resume cannot
-    /// stop servers that are already running.
-    /// </summary>
-    public IList<string>? DisabledMcpServers { get; set; }
+    /// <summary>Options for agents.</summary>
+    [JsonPropertyName("agents")]
+    public SessionAgentOptions Agents { get; set; } = new();
 
-    /// <summary>
-    /// Sandbox configuration applied when the session is constructed, before MCP servers start.
-    /// Same shape as the sandboxConfig option of session options update;
-    /// an identical later update is a no-op.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public SandboxConfig? SandboxConfig { get; set; }
+    /// <summary>Options for github.</summary>
+    [JsonPropertyName("github")]
+    public SessionGitHubOptions GitHub { get; set; } = new();
 
-    /// <summary>
-    /// Infinite session configuration for persistent workspaces and automatic compaction.
-    /// When enabled (default), sessions automatically manage context limits and persist state.
-    /// </summary>
-    public InfiniteSessionConfig? InfiniteSessions { get; set; }
+    /// <summary>Options for experiments.</summary>
+    [JsonPropertyName("experiments")]
+    public SessionExperimentOptions Experiments { get; set; } = new();
 
-    /// <summary>
-    /// Optional limits for the session's current accounting window.
-    /// </summary>
-    /// <remarks>
-    /// These settings only model the caller's configured limits. Enforcement and
-    /// limit-exhaustion behavior are handled by the runtime.
-    /// </remarks>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public SessionLimitsConfig? SessionLimits { get; set; }
+    /// <summary>Options for permissions.</summary>
+    [JsonPropertyName("permissions")]
+    public SessionPermissionOptions Permissions { get; set; } = new();
 
-    /// <summary>
-    /// Autopilot policy, independent of session mode. Omitted fields use defaults on
-    /// create and preserve resident values on warm resume. Re-supply on cold resume.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public AutopilotOptions? Autopilot { get; set; }
+    /// <summary>Options for mcp.</summary>
+    [JsonPropertyName("mcp")]
+    public SessionMcpOptions Mcp { get; set; } = new();
 
-    /// <summary>
-    /// Configuration for handling large tool outputs. When a tool produces
-    /// output exceeding the configured size, the output is written to a temp
-    /// file and a reference is returned to the model instead of the full
-    /// payload.
-    /// </summary>
-    public LargeToolOutputConfig? LargeOutput { get; set; }
+    /// <summary>Options for events.</summary>
+    [JsonPropertyName("events")]
+    public SessionEventOptions Events { get; set; } = new();
 
-    /// <summary>
-    /// Overrides the runtime's built-in tool-search behavior.
-    /// Tool search defers tools to keep the model's active tool set small. When <see langword="null"/>,
-    /// the runtime default applies.
-    /// </summary>
-    public ToolSearchConfig? ToolSearch { get; set; }
+    /// <summary>Options for plugins.</summary>
+    [JsonPropertyName("plugins")]
+    public SessionPluginOptions Plugins { get; set; } = new();
 
-    /// <summary>Non-persisted image generation opt-in. Re-supply after runtime restart.</summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public ImageGenerationConfig? ImageGeneration { get; set; }
+    /// <summary>Options for execution.</summary>
+    [JsonPropertyName("execution")]
+    public SessionExecutionOptions Execution { get; set; } = new();
 
-    /// <summary>
-    /// Configuration for session memory. When set, controls whether the
-    /// session can read and write persistent memory.
-    /// </summary>
-    public MemoryConfiguration? Memory { get; set; }
+    /// <summary>Options for policy.</summary>
+    [JsonPropertyName("policy")]
+    public SessionPolicyOptions Policy { get; set; } = new();
 
-    /// <summary>
-    /// Optional event handler registered on the session before the session.create / session.resume
-    /// RPC is issued, ensuring early events are delivered.
-    /// </summary>
-    public Action<SessionEvent>? OnEvent { get; set; }
+    /// <summary>Options for canvases.</summary>
+    [JsonPropertyName("canvases")]
+    public SessionCanvasOptions Canvases { get; set; } = new();
 
-    /// <summary>
-    /// Supplies a handler for session filesystem operations.
-    /// This is used only when <see cref="CopilotClientOptions.SessionFs"/> is configured.
-    /// </summary>
-    public Func<CopilotSession, SessionFsProvider>? CreateSessionFsProvider { get; set; }
-
-    /// <summary>
-    /// GitHub token for per-session authentication.
-    /// When provided, the runtime resolves this token into a full GitHub identity
-    /// and stores it on the session for content exclusion, model routing, and quota checks.
-    /// </summary>
-    public string? GitHubToken { get; set; }
-
-    /// <summary>
-    /// Gets or sets a callback that acquires session-scoped GitHub tokens on
-    /// demand. Initial cancellation, callback errors, and invalid token responses
-    /// reject session creation or resume instead of falling back to ambient
-    /// authentication. This cannot be combined with <see cref="GitHubToken"/>.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    [JsonIgnore]
-    public Func<GitHubTokenProviderArgs, Task<GitHubTokenProviderResult>>? GitHubTokenProvider { get; set; }
-
-    /// <summary>
-    /// ExP assignment ("flight") data injected by a trusted integrator, in the
-    /// same JSON shape the Copilot CLI fetches from the experimentation service
-    /// (<c>CopilotExpAssignmentResponse</c>). When provided, the runtime feeds it
-    /// into the same feature-flag path as CLI-fetched assignments and stamps it
-    /// onto telemetry and the CAPI request header. When unset, the session does
-    /// not block on ExP. Intended for out-of-process integrators that fetch ExP
-    /// data themselves; malformed payloads are dropped by the runtime (fail-open).
-    /// Serialized on the wire as <c>expAssignments</c>.
-    /// </summary>
-    /// <remarks>
-    /// This is an internal/trusted-integrator option and is hidden from editor
-    /// completion. It is not part of the broadly advertised public surface.
-    /// </remarks>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public CopilotExpAssignmentResponse? ExpAssignments { get; set; }
-
-    /// <summary>
-    /// Feature-flag values resolved by the host for this session.
-    /// Re-supply them when resuming after a runtime restart.
-    /// </summary>
-    public IDictionary<string, bool>? FeatureFlags { get; set; }
-
-    /// <summary>
-    /// Opt-in: when <c>true</c>, the runtime self-fetches enterprise managed
-    /// settings (bypass-permissions policy) at session bootstrap using the
-    /// session's <see cref="GitHubToken"/>. Requires <see cref="GitHubToken"/> to
-    /// be set; if omitted, the runtime is expected to reject session creation
-    /// (fail-closed). When unset, behaves exactly as before. Serialized on the
-    /// wire as <c>enableManagedSettings</c>.
-    /// </summary>
-    public bool? EnableManagedSettings { get; set; }
-
-    /// <summary>
-    /// Exact dotted setting paths excluded from fetched, device, and policy-helper
-    /// policy. Host-injected policy and availability checks are unaffected.
-    /// Not persisted; re-supply on resume, where omission restores full enforcement.
-    /// Use EnableManagedSettings to enable self-fetching.
-    /// </summary>
-    public IList<string>? ExcludedManagedSettings { get; set; }
-
-    /// <summary>
-    /// When true, enforces locked managed model controls for this session.
-    /// Conflicting model changes are rejected; overridable managed defaults
-    /// remain mutable.
-    /// </summary>
-    public bool? EnforceManagedModelDefaults { get; set; }
-
-    /// <summary>
-    /// Declares that a human drives this session's conversation, enabling
-    /// user-message analysis telemetry for user-authored messages. Automated
-    /// messages remain excluded. Defaults to false for SDK sessions; ignored
-    /// for cloud sessions and when resuming a session already active in the
-    /// runtime process.
-    /// </summary>
-    public bool? InteractiveUser { get; set; }
-
-    /// <summary>
-    /// Permission mode applied before the session's first turn: before
-    /// session creation returns, and before a resume continues pending work.
-    /// Uses the same checks as <c>session.Rpc.Permissions.SetModeAsync</c>; a
-    /// mode that managed policy or session capabilities refuse leaves the
-    /// current mode in place. <see cref="CopilotSession.PermissionModeResult"/>
-    /// reports whether it was applied and the authoritative mode. Leave unset to
-    /// keep the default mode on create, or the restored mode on resume. Not
-    /// supported for cloud sessions.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public PermissionMode? PermissionMode { get; set; }
-
-    /// <summary>
-    /// Optional managed-settings layer injected at session bootstrap. Currently
-    /// carries a permissions object that composes restrictively with any
-    /// server- or device-level managed settings. This layer is startup-only and
-    /// is not persisted: it must be re-supplied on resume to remain in effect,
-    /// and omitting it on resume clears the previously injected layer. Can be
-    /// combined with <see cref="EnableManagedSettings"/>. Serialized on the wire
-    /// as <c>managedSettings</c>.
-    /// </summary>
-    public ManagedSettings? ManagedSettings { get; set; }
-
-#pragma warning disable GHCP001
-    /// <summary>
-    /// Canvas declarations advertised by this connection. The runtime forwards
-    /// these to the agent and routes inbound <c>canvas.*</c> requests for any
-    /// declared canvas to <see cref="CanvasHandler"/>.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public IList<CanvasDeclaration>? Canvases { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, asks the host to expose canvas renderer tools
-    /// for this session. The host typically grants this only to trusted clients.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public bool? RequestCanvasRenderer { get; set; }
-
-    /// <summary>
-    /// When <see langword="true"/>, asks the host to expose extension-discovery
-    /// tools for this session. The host typically grants this only to trusted clients.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public bool? RequestExtensions { get; set; }
-
-    /// <summary>
-    /// Optional override path to a <c>copilot-sdk/</c> folder to inject into
-    /// extension subprocesses for this session in place of the bundled SDK.
-    /// When unset or invalid (missing folder, or missing <c>index.js</c> /
-    /// <c>extension.js</c>), the runtime falls back to the bundled SDK
-    /// without throwing. Takes precedence over any server-level default.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public string? ExtensionSdkPath { get; set; }
-
-    /// <summary>
-    /// Stable extension identity for canvas/tool providers on this connection.
-    /// Required when <see cref="Canvases"/> is set so the runtime can attribute
-    /// declared canvases back to this provider.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public ExtensionInfo? ExtensionInfo { get; set; }
-
-    /// <summary>
-    /// Stable identity for a host/SDK connection that supplies built-in
-    /// canvases. When set, the runtime uses <see cref="CanvasProviderIdentity.Id"/>
-    /// verbatim as the agent-facing canvas extension id, so canvases declared on
-    /// a control connection survive reconnect and CLI restart. Honored on
-    /// session create and resume.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public CanvasProviderIdentity? CanvasProvider { get; set; }
-
-    /// <summary>
-    /// Provider-side canvas lifecycle handler. The SDK routes inbound
-    /// <c>canvas.open</c> / <c>canvas.close</c> / <c>canvas.action.invoke</c>
-    /// requests to this handler.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    [JsonIgnore]
-    public ICanvasHandler? CanvasHandler { get; set; }
-#pragma warning restore GHCP001
-
-    /// <summary>
-    /// Optional handler for MCP OAuth requests from MCP servers.
-    /// When provided, the SDK can satisfy MCP server OAuth requests with host-provided token data or cancellation.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    [JsonIgnore]
-    public Func<McpAuthContext, Task<McpAuthResult?>>? OnMcpAuthRequest { get; set; }
+    /// <summary>Options for extensions.</summary>
+    [JsonPropertyName("extensions")]
+    public SessionExtensionOptions Extensions { get; set; } = new();
 }
 
 /// <summary>
 /// Configuration options for creating a new Copilot session.
 /// </summary>
-public sealed class SessionConfig : SessionConfigBase
+public sealed class CreateSessionOptions : SessionOptionsBase
 {
-    /// <summary>Initializes a new instance of the <see cref="SessionConfig"/> class.</summary>
-    public SessionConfig() { }
+    /// <summary>Initializes a new instance of the <see cref="CreateSessionOptions"/> class.</summary>
+    public CreateSessionOptions()
+    {
+        Instructions = new();
+        Filesystem = new();
+    }
 
     /// <summary>
-    /// Initializes a new instance of <see cref="SessionConfig"/> by copying the
+    /// Initializes a new instance of <see cref="CreateSessionOptions"/> by copying the
     /// properties of the specified instance.
     /// </summary>
-    private SessionConfig(SessionConfig? other) : base(other)
+    private CreateSessionOptions(CreateSessionOptions? other) : base(other)
     {
         if (other is null) return;
-
         SessionId = other.SessionId;
         Name = other.Name;
         Cloud = other.Cloud;
-        TrustWorkingDirectory = other.TrustWorkingDirectory;
-        RefreshCustomInstructions = other.RefreshCustomInstructions;
     }
 
     /// <summary>Optional session identifier; a new ID is generated if not provided.</summary>
@@ -5285,21 +4557,7 @@ public sealed class SessionConfig : SessionConfigBase
     public CloudSessionOptions? Cloud { get; set; }
 
     /// <summary>
-    /// Trusts the working directory for this session ("session") or persistently
-    /// for the user ("user"). Omitted leaves existing folder trust unchanged.
-    /// </summary>
-    public WorkingDirectoryTrust? TrustWorkingDirectory { get; set; }
-
-    /// <summary>
-    /// When true, invalidates process-wide custom-instruction discovery caches before
-    /// constructing this new session. Omitted or false reuses the caches.
-    /// Other sessions in this runtime may observe updated instructions on later turns
-    /// or discovery. This does not watch files or override instruction enablement.
-    /// </summary>
-    public bool? RefreshCustomInstructions { get; set; }
-
-    /// <summary>
-    /// Creates a shallow clone of this <see cref="SessionConfig"/> instance.
+    /// Creates a shallow clone of this <see cref="CreateSessionOptions"/> instance.
     /// </summary>
     /// <remarks>
     /// Mutable collection properties are copied into new collection instances so that modifications
@@ -5308,7 +4566,48 @@ public sealed class SessionConfig : SessionConfigBase
     /// hooks, infinite session configuration, and delegates) are not deep-cloned; the original
     /// and the clone will share those nested objects, and changes to them may affect both.
     /// </remarks>
-    public SessionConfig Clone() => new(this);
+    public CreateSessionOptions Clone() => new(this);
+    /// <summary>Options for filesystem.</summary>
+    [JsonPropertyName("filesystem")]
+    public new CreateSessionFilesystemOptions Filesystem
+    {
+        get
+        {
+            if (base.Filesystem is not CreateSessionFilesystemOptions options)
+            {
+                options = new()
+                {
+                    AdditionalDirectories = base.Filesystem.AdditionalDirectories,
+                    TrackFileChanges = base.Filesystem.TrackFileChanges,
+                };
+                base.Filesystem = options;
+            }
+            return options;
+        }
+        set => base.Filesystem = value;
+    }
+
+    /// <summary>Options for instructions.</summary>
+    [JsonPropertyName("instructions")]
+    public new CreateSessionInstructionOptions Instructions
+    {
+        get
+        {
+            if (base.Instructions is not CreateSessionInstructionOptions options)
+            {
+                options = new()
+                {
+                    OrganizationText = base.Instructions.OrganizationText,
+                    OnDemandDiscovery = base.Instructions.OnDemandDiscovery,
+                    SkipCustomInstructions = base.Instructions.SkipCustomInstructions,
+                    Directories = base.Instructions.Directories,
+                };
+                base.Instructions = options;
+            }
+            return options;
+        }
+        set => base.Instructions = value;
+    }
 }
 
 /// <summary>Details of a transcript repair performed while resuming a session.</summary>
@@ -5323,25 +4622,21 @@ public sealed record TranscriptRecoveryReport(
 /// <summary>
 /// Configuration options for resuming an existing Copilot session.
 /// </summary>
-public sealed class ResumeSessionConfig : SessionConfigBase
+public sealed class ResumeSessionOptions : SessionOptionsBase
 {
-    /// <summary>Initializes a new instance of the <see cref="ResumeSessionConfig"/> class.</summary>
-    public ResumeSessionConfig() { }
-
+    /// <summary>Initializes a new instance of the <see cref="ResumeSessionOptions"/> class.</summary>
+    public ResumeSessionOptions() { Canvases = new(); }
     /// <summary>
-    /// Initializes a new instance of <see cref="ResumeSessionConfig"/> by copying the
+    /// Initializes a new instance of <see cref="ResumeSessionOptions"/> by copying the
     /// properties of the specified instance.
     /// </summary>
-    private ResumeSessionConfig(ResumeSessionConfig? other) : base(other)
+    private ResumeSessionOptions(ResumeSessionOptions? other) : base(other)
     {
         if (other is null) return;
-
         SuppressResumeEvent = other.SuppressResumeEvent;
         ContinuePendingWork = other.ContinuePendingWork;
         AllowTranscriptRecovery = other.AllowTranscriptRecovery;
-        OpenCanvases = other.OpenCanvases is not null ? [.. other.OpenCanvases] : null;
     }
-
     /// <summary>
     /// When true, the session.resume event is not emitted.
     /// Default: false (resume event is emitted).
@@ -5374,19 +4669,10 @@ public sealed class ResumeSessionConfig : SessionConfigBase
     /// inspect <see cref="CopilotSession.TranscriptRecovery"/> after resume.
     /// </summary>
     public bool? AllowTranscriptRecovery { get; set; }
-
-#pragma warning disable GHCP001
-    /// <summary>
-    /// Snapshot of canvases that were already open when the session was suspended.
-    /// When provided on resume, the runtime can rehydrate canvas state so consumers
-    /// do not need to re-open canvases that were active before the previous shutdown.
-    /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-    public IList<OpenCanvasInstance>? OpenCanvases { get; set; }
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 
     /// <summary>
-    /// Creates a shallow clone of this <see cref="ResumeSessionConfig"/> instance.
+    /// Creates a shallow clone of this <see cref="ResumeSessionOptions"/> instance.
     /// </summary>
     /// <remarks>
     /// Mutable collection properties are copied into new collection instances so that modifications
@@ -5395,7 +4681,30 @@ public sealed class ResumeSessionConfig : SessionConfigBase
     /// hooks, infinite session configuration, and delegates) are not deep-cloned; the original
     /// and the clone will share those nested objects, and changes to them may affect both.
     /// </remarks>
-    public ResumeSessionConfig Clone() => new(this);
+    public ResumeSessionOptions Clone() => new(this);
+    /// <summary>Options for canvases.</summary>
+    [JsonPropertyName("canvases")]
+    public new ResumeSessionCanvasOptions Canvases
+    {
+        get
+        {
+            if (base.Canvases is not ResumeSessionCanvasOptions options)
+            {
+#pragma warning disable MCPSDK001
+                options = new()
+                {
+                    Definitions = base.Canvases.Definitions,
+                    RequestRenderer = base.Canvases.RequestRenderer,
+                    Provider = base.Canvases.Provider,
+                    Handler = base.Canvases.Handler,
+                };
+#pragma warning restore MCPSDK001
+                base.Canvases = options;
+            }
+            return options;
+        }
+        set => base.Canvases = value;
+    }
 }
 
 /// <summary>
@@ -5480,7 +4789,7 @@ public sealed class MessageOptions
     /// it is not a persisted session default.
     /// Use <see cref="CopilotSession.Rpc"/> for advanced response-format options.
     /// </summary>
-    [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public JsonElement? ResponseSchema { get; set; }
 
     /// <summary>
@@ -5511,22 +4820,6 @@ public sealed class SessionContext
     /// <summary>GitHub repository in "owner/repo" format.</summary>
     public string? Repository { get; set; }
     /// <summary>Current git branch.</summary>
-    public string? Branch { get; set; }
-}
-
-/// <summary>
-/// Filter options for listing sessions.
-/// </summary>
-public sealed class SessionListFilter
-{
-    /// <summary>Filter by exact working directory match.</summary>
-    [JsonPropertyName("cwd")]
-    public string? WorkingDirectory { get; set; }
-    /// <summary>Filter by git root.</summary>
-    public string? GitRoot { get; set; }
-    /// <summary>Filter by repository (owner/repo format).</summary>
-    public string? Repository { get; set; }
-    /// <summary>Filter by branch.</summary>
     public string? Branch { get; set; }
 }
 
@@ -5577,25 +4870,6 @@ internal class PingRequest
 }
 
 /// <summary>
-/// Response from a server ping request.
-/// </summary>
-public sealed class PingResponse
-{
-    /// <summary>
-    /// Echo of the ping message.
-    /// </summary>
-    public string Message { get; set; } = string.Empty;
-    /// <summary>
-    /// ISO 8601 timestamp when the ping was processed.
-    /// </summary>
-    public DateTimeOffset Timestamp { get; set; }
-    /// <summary>
-    /// Protocol version supported by the server.
-    /// </summary>
-    public int? ProtocolVersion { get; set; }
-}
-
-/// <summary>
 /// Response from status.get
 /// </summary>
 public sealed class GetStatusResponse
@@ -5610,7 +4884,7 @@ public sealed class GetStatusResponse
 
     /// <summary>Host diagnostics, when supplied by the runtime.</summary>
     [JsonPropertyName("hostDiagnostics")]
-    public GitHub.Copilot.Rpc.HostDiagnostics? HostDiagnostics { get; set; }
+    public Microsoft.Copilot.Rpc.HostDiagnostics? HostDiagnostics { get; set; }
 }
 
 /// <summary>
@@ -5647,183 +4921,6 @@ public sealed class GetAuthStatusResponse
     /// <summary>Human-readable status message</summary>
     [JsonPropertyName("statusMessage")]
     public string? StatusMessage { get; set; }
-}
-
-/// <summary>
-/// Model vision-specific limits
-/// </summary>
-public sealed class ModelVisionLimits
-{
-    /// <summary>
-    /// List of supported image MIME types (e.g., "image/png", "image/jpeg").
-    /// </summary>
-    [JsonPropertyName("supported_media_types")]
-    public IList<string> SupportedMediaTypes { get => field ??= []; set; }
-
-    /// <summary>
-    /// Maximum number of images allowed in a single prompt.
-    /// </summary>
-    [JsonPropertyName("max_prompt_images")]
-    public int MaxPromptImages { get; set; }
-
-    /// <summary>
-    /// Maximum size in bytes for a single prompt image.
-    /// </summary>
-    [JsonPropertyName("max_prompt_image_size")]
-    public int MaxPromptImageSize { get; set; }
-}
-
-/// <summary>
-/// Model limits
-/// </summary>
-public sealed class ModelLimits
-{
-    /// <summary>
-    /// Maximum number of tokens allowed in the prompt.
-    /// </summary>
-    [JsonPropertyName("max_prompt_tokens")]
-    public int? MaxPromptTokens { get; set; }
-
-    /// <summary>
-    /// Maximum number of tokens the model can generate in one response.
-    /// </summary>
-    [JsonPropertyName("max_output_tokens")]
-    public int? MaxOutputTokens { get; set; }
-
-    /// <summary>
-    /// Maximum total tokens in the context window.
-    /// </summary>
-    [JsonPropertyName("max_context_window_tokens")]
-    public int MaxContextWindowTokens { get; set; }
-
-    /// <summary>
-    /// Vision-specific limits for the model.
-    /// </summary>
-    [JsonPropertyName("vision")]
-    public ModelVisionLimits? Vision { get; set; }
-}
-
-/// <summary>
-/// Model support flags
-/// </summary>
-public sealed class ModelSupports
-{
-    /// <summary>
-    /// Whether this model supports image/vision inputs.
-    /// </summary>
-    [JsonPropertyName("vision")]
-    public bool Vision { get; set; }
-
-    /// <summary>
-    /// Whether this model supports reasoning effort configuration.
-    /// </summary>
-    [JsonPropertyName("reasoningEffort")]
-    public bool ReasoningEffort { get; set; }
-}
-
-/// <summary>
-/// Model capabilities and limits
-/// </summary>
-public sealed class ModelCapabilities
-{
-    /// <summary>
-    /// Feature support flags for the model.
-    /// </summary>
-    [JsonPropertyName("supports")]
-    public ModelSupports Supports { get; set; } = new();
-
-    /// <summary>
-    /// Token and resource limits for the model.
-    /// </summary>
-    [JsonPropertyName("limits")]
-    public ModelLimits Limits { get; set; } = new();
-}
-
-/// <summary>
-/// Model policy state
-/// </summary>
-public sealed class ModelPolicy
-{
-    /// <summary>
-    /// Policy state of the model (e.g., "enabled", "disabled").
-    /// </summary>
-    [JsonPropertyName("state")]
-    public string State { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Terms or conditions associated with using the model.
-    /// </summary>
-    [JsonPropertyName("terms")]
-    public string Terms { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// Model billing information
-/// </summary>
-public sealed class ModelBilling
-{
-    /// <summary>
-    /// Billing cost multiplier relative to the base model rate.
-    /// </summary>
-    [JsonPropertyName("multiplier")]
-    public double? Multiplier { get; set; }
-
-    /// <summary>
-    /// Token-level pricing information for this model.
-    /// </summary>
-    [JsonPropertyName("tokenPrices")]
-    public ModelBillingTokenPrices? TokenPrices { get; set; }
-}
-
-/// <summary>
-/// Information about an available model
-/// </summary>
-public sealed class ModelInfo
-{
-    /// <summary>Model identifier (e.g., "claude-sonnet-4.5")</summary>
-    [JsonPropertyName("id")]
-    public string Id { get; set; } = string.Empty;
-
-    /// <summary>Display name</summary>
-    [JsonPropertyName("name")]
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>Native serving provider, when attributed by the runtime. Absent for configured BYOK models.</summary>
-    [JsonPropertyName("provider")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public ModelProviderRef? Provider { get; set; }
-
-    /// <summary>Model capabilities and limits</summary>
-    [JsonPropertyName("capabilities")]
-    public ModelCapabilities Capabilities { get; set; } = new();
-
-    /// <summary>Policy state</summary>
-    [JsonPropertyName("policy")]
-    public ModelPolicy? Policy { get; set; }
-
-    /// <summary>Billing information</summary>
-    [JsonPropertyName("billing")]
-    public ModelBilling? Billing { get; set; }
-
-    /// <summary>Supported reasoning effort levels (only present if model supports reasoning effort)</summary>
-    [JsonPropertyName("supportedReasoningEfforts")]
-    public IList<string>? SupportedReasoningEfforts { get; set; }
-
-    /// <summary>Default reasoning effort level (only present if model supports reasoning effort)</summary>
-    [JsonPropertyName("defaultReasoningEffort")]
-    public string? DefaultReasoningEffort { get; set; }
-}
-
-/// <summary>
-/// Response from models.list
-/// </summary>
-public sealed class GetModelsResponse
-{
-    /// <summary>
-    /// List of available models.
-    /// </summary>
-    [JsonPropertyName("models")]
-    public IList<ModelInfo> Models { get => field ??= []; set; }
 }
 
 // ============================================================================
@@ -5976,29 +5073,19 @@ public sealed class SystemMessageTransformRpcResponse
 [JsonSerializable(typeof(ExitPlanModeResult))]
 [JsonSerializable(typeof(GetAuthStatusResponse))]
 [JsonSerializable(typeof(GetForegroundSessionResponse))]
-[JsonSerializable(typeof(GetModelsResponse))]
 [JsonSerializable(typeof(GetStatusResponse))]
-[JsonSerializable(typeof(GitHub.Copilot.Rpc.HostDiagnostics))]
+[JsonSerializable(typeof(Microsoft.Copilot.Rpc.HostDiagnostics))]
 [JsonSerializable(typeof(McpServerConfig))]
 [JsonSerializable(typeof(MessageOptions))]
-[JsonSerializable(typeof(ModelBilling))]
-[JsonSerializable(typeof(GitHub.Copilot.Rpc.ModelBillingTokenPrices))]
-[JsonSerializable(typeof(GitHub.Copilot.Rpc.ModelBillingTokenPricesLongContext))]
-[JsonSerializable(typeof(ModelCapabilities))]
+[JsonSerializable(typeof(Microsoft.Copilot.Rpc.ModelBillingTokenPrices))]
+[JsonSerializable(typeof(Microsoft.Copilot.Rpc.ModelBillingTokenPricesLongContext))]
 [JsonSerializable(typeof(ModelCapabilitiesOverride))]
-[JsonSerializable(typeof(ModelInfo))]
-[JsonSerializable(typeof(ModelLimits))]
-[JsonSerializable(typeof(ModelPolicy))]
-[JsonSerializable(typeof(ModelSupports))]
-[JsonSerializable(typeof(ModelVisionLimits))]
 [JsonSerializable(typeof(PingRequest))]
-[JsonSerializable(typeof(PingResponse))]
 [JsonSerializable(typeof(ProviderConfig))]
 [JsonSerializable(typeof(CapiSessionOptions))]
 [JsonSerializable(typeof(SessionContext))]
 [JsonSerializable(typeof(SessionLifecycleEvent))]
 [JsonSerializable(typeof(SessionLifecycleEventMetadata))]
-[JsonSerializable(typeof(SessionListFilter))]
 [JsonSerializable(typeof(SectionOverride))]
 [JsonSerializable(typeof(SessionMetadata))]
 [JsonSerializable(typeof(SetForegroundSessionResponse))]
@@ -6014,11 +5101,1278 @@ public sealed class SystemMessageTransformRpcResponse
 [JsonSerializable(typeof(object))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
 [JsonSerializable(typeof(string[]))]
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
 [JsonSerializable(typeof(CanvasDeclaration))]
 [JsonSerializable(typeof(CanvasProviderOpenResult))]
 [JsonSerializable(typeof(CanvasHostContext))]
 [JsonSerializable(typeof(ExtensionInfo))]
 [JsonSerializable(typeof(CanvasProviderIdentity))]
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 internal partial class TypesJsonContext : JsonSerializerContext;
+
+
+/// <summary>Options for plugins.</summary>
+public class ClientPluginOptions
+{
+    /// <summary>
+    /// Absolute paths to trusted plugin directories bundled by the host.
+    /// When non-empty, the complete set is registered with the runtime during
+    /// startup before sessions can be created.
+    /// </summary>
+    [JsonPropertyName("builtinDirectories")]
+    public IList<string>? BuiltinDirectories { get; set; }
+
+    internal ClientPluginOptions Clone()
+    {
+        var copy = (ClientPluginOptions)MemberwiseClone();
+        copy.BuiltinDirectories = this.BuiltinDirectories is null ? null : [.. this.BuiltinDirectories];
+        return copy;
+    }
+}
+/// <summary>Options for observability.</summary>
+public class ClientObservabilityOptions
+{
+    /// <summary>
+    /// Log level for the Copilot runtime. Use the well-known values on
+    /// <see cref = "CopilotLogLevel"/> (<see cref = "CopilotLogLevel.None"/>,
+    /// <see cref = "CopilotLogLevel.Error"/>, <see cref = "CopilotLogLevel.Warning"/>,
+    /// <see cref = "CopilotLogLevel.Info"/>, <see cref = "CopilotLogLevel.Debug"/>,
+    /// <see cref = "CopilotLogLevel.All"/>). When <c>null</c>, the runtime's default
+    /// log level is used.
+    /// </summary>
+    [JsonPropertyName("logLevel")]
+    public CopilotLogLevel? LogLevel { get; set; }
+
+    /// <summary>Logger instance for SDK diagnostic output.</summary>
+    [JsonPropertyName("logger")]
+    public ILogger? Logger { get; set; }
+
+    /// <summary>
+    /// OpenTelemetry configuration for the runtime.
+    /// When set to a non-<see langword="null"/> instance, the runtime is started with OpenTelemetry instrumentation enabled.
+    /// </summary>
+    [JsonPropertyName("telemetry")]
+    public TelemetryConfig? Telemetry { get; set; }
+
+    internal ClientObservabilityOptions Clone()
+    {
+        var copy = (ClientObservabilityOptions)MemberwiseClone();
+        copy.LogLevel = this.LogLevel;
+        copy.Logger = this.Logger;
+        copy.Telemetry = this.Telemetry;
+        return copy;
+    }
+}
+/// <summary>Options for github.</summary>
+public class ClientGitHubOptions
+{
+    /// <summary>
+    /// GitHub token to use for authentication.
+    /// When provided, the token is passed to the runtime via environment variable.
+    /// This takes priority over other authentication methods.
+    /// </summary>
+    [JsonPropertyName("token")]
+    public string? Token { get; set; }
+
+    /// <summary>
+    /// Whether to use the logged-in user for authentication.
+    /// When true, the runtime will attempt to use stored OAuth tokens or gh CLI auth.
+    /// When false, only explicit tokens such as GitHubToken are used; environment variable
+    /// tokens (COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN) are ignored.
+    /// Default: true (but defaults to false when GitHubToken is provided).
+    /// </summary>
+    [JsonPropertyName("useLoggedInUser")]
+    public bool? UseLoggedInUser { get; set; }
+
+    /// <summary>
+    /// Experimental. Receives GitHub telemetry events the runtime forwards to this
+    /// connection; setting a handler opts created/resumed sessions into forwarding.
+    /// The SDK awaits the handler task so it may perform asynchronous work.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [JsonPropertyName("onTelemetry")]
+    public Func<Rpc.GitHubTelemetryNotification, Task>? OnTelemetry { get; set; }
+
+    internal ClientGitHubOptions Clone()
+    {
+        var copy = (ClientGitHubOptions)MemberwiseClone();
+        copy.Token = this.Token;
+        copy.UseLoggedInUser = this.UseLoggedInUser;
+        copy.OnTelemetry = this.OnTelemetry;
+        return copy;
+    }
+}
+/// <summary>Options for models.</summary>
+public class ClientModelOptions
+{
+    /// <summary>
+    /// Custom handler for listing available models.
+    /// When provided, <c>ListModelsAsync()</c> calls this handler instead of
+    /// querying the runtime. Useful in BYOK mode to return models
+    /// available from your custom provider.
+    /// </summary>
+    [JsonPropertyName("onListModels")]
+    public Func<CancellationToken, Task<IList<Model>>>? OnListModels { get; set; }
+
+    /// <summary>
+    /// Configures interception of the LLM inference requests the runtime would
+    /// otherwise issue itself (for both CAPI and BYOK providers). When set, the
+    /// client registers a client-global LLM inference handler on connect, so
+    /// every model-layer HTTP / WebSocket request is routed to this
+    /// <see cref = "CopilotRequestHandler"/> subclass instead of the runtime's own
+    /// outbound call.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("requestHandler")]
+    public CopilotRequestHandler? RequestHandler { get; set; }
+
+    internal ClientModelOptions Clone()
+    {
+        var copy = (ClientModelOptions)MemberwiseClone();
+        copy.OnListModels = this.OnListModels;
+        copy.RequestHandler = this.RequestHandler;
+        return copy;
+    }
+}
+/// <summary>Options for extensions.</summary>
+public class ClientExtensionOptions
+{
+    /// <summary>
+    /// Connection-level extension launch profile provider.
+    /// When set, the SDK registers the provider during <c>StartAsync()</c>
+    /// before any session can be created.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("launchProvider")]
+    public IExtensionLaunchProviderHandler? LaunchProvider { get; set; }
+
+    internal ClientExtensionOptions Clone()
+    {
+        var copy = (ClientExtensionOptions)MemberwiseClone();
+        copy.LaunchProvider = this.LaunchProvider;
+        return copy;
+    }
+}
+/// <summary>Options for installations.</summary>
+public class ClientInstallationOptions
+{
+    /// <summary>
+    /// Connection-global human review for experimental installation operations.
+    /// Does not register or enable installation capabilities on the runtime.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("confirmationHandler")]
+    public InstallationConfirmationHandler? ConfirmationHandler { get; set; }
+
+    internal ClientInstallationOptions Clone()
+    {
+        var copy = (ClientInstallationOptions)MemberwiseClone();
+        copy.ConfirmationHandler = this.ConfirmationHandler;
+        return copy;
+    }
+}
+
+/// <summary>Options for inference.</summary>
+public class SessionInferenceOptions
+{
+    /// <summary>
+    /// Whether the model may request multiple tool calls per response. Defaults to true.
+    /// False sends a provider hint, not an execution guarantee: all returned calls
+    /// are still handled and handlers may run concurrently. Re-supply on cold resume.
+    /// </summary>
+    [JsonPropertyName("allowMultipleToolCalls")]
+    public bool? AllowMultipleToolCalls { get; set; }
+
+    /// <summary>
+    /// Reasoning effort level for models that support it.
+    /// Valid values: "low", "medium", "high", "xhigh", "max".
+    /// Only applies to models where capabilities.supports.reasoningEffort is true.
+    /// </summary>
+    [JsonPropertyName("reasoningEffort")]
+    public string? ReasoningEffort { get; set; }
+
+    /// <summary>
+    /// Reasoning summary mode for models that support configurable reasoning summaries.
+    /// </summary>
+    /// <remarks>
+    /// Use <see cref = "ReasoningSummary.None"/> to suppress summary output regardless of whether reasoning is enabled.
+    /// </remarks>
+    [JsonPropertyName("reasoningSummary")]
+    public ReasoningSummary? ReasoningSummary { get; set; }
+
+    /// <summary>
+    /// Context window tier for models that support it.
+    /// Use <see cref = "ContextTier.Default"/> or <see cref = "ContextTier.LongContext"/>
+    /// for the currently known tiers.
+    /// </summary>
+    [JsonPropertyName("contextTier")]
+    public ContextTier? ContextTier { get; set; }
+
+    /// <summary>Per-property overrides for model capabilities, deep-merged over runtime defaults.</summary>
+    [JsonPropertyName("capabilities")]
+    public ModelCapabilitiesOverride? Capabilities { get; set; }
+
+    /// <summary>
+    /// Enables native model citations for models that support them.
+    /// </summary>
+    /// <remarks>
+    /// Citations are experimental, off by default, and currently available for Anthropic models.
+    /// This option may change or be removed while citation support is experimental.
+    /// </remarks>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("enableCitations")]
+    public bool? EnableCitations { get; set; }
+
+    private string? _defaultProvider;
+    private bool _hasDefaultProvider;
+
+    /// <summary>
+    /// Named connection for unqualified BYOK selections. Requires GitHub.Capi.Enabled=false.
+    /// Omit to create without a default or preserve it on resume; assign null to clear it.
+    /// Does not select the initial model. Pass-through uses inferred metadata and session
+    /// processing, without provider-wide model defaults.
+    /// </summary>
+    [JsonIgnore]
+    public string? DefaultProvider
+    {
+        get => _defaultProvider;
+        set
+        {
+            _defaultProvider = value;
+            _hasDefaultProvider = true;
+        }
+    }
+
+    [JsonInclude]
+    [JsonPropertyName("defaultProvider")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal JsonElement? DefaultProviderForWire
+    {
+        get => _hasDefaultProvider
+            ? JsonSerializer.SerializeToElement(_defaultProvider, TypesJsonContext.Default.String)
+            : null;
+        set => DefaultProvider = value is { ValueKind: JsonValueKind.String } element ? element.GetString() : null;
+    }
+
+    /// <summary>
+    /// Named BYOK connections, independent of GitHub identity; combine with
+    /// <see cref="Models"/> for registered model metadata.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("providers")]
+    public IList<NamedProviderConfig>? Providers { get; set; }
+
+    /// <summary>
+    /// BYOK model definitions added to the session's selectable model list, each
+    /// referencing a <see cref = "SessionInferenceOptions.Providers"/> entry by name.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("models")]
+    public IList<ProviderModelConfig>? Models { get; set; }
+
+    internal SessionInferenceOptions Clone()
+    {
+        var copy = (SessionInferenceOptions)MemberwiseClone();
+        copy.AllowMultipleToolCalls = this.AllowMultipleToolCalls;
+        copy.ReasoningEffort = this.ReasoningEffort;
+        copy.ReasoningSummary = this.ReasoningSummary;
+        copy.ContextTier = this.ContextTier;
+        copy.Capabilities = this.Capabilities;
+        copy.EnableCitations = this.EnableCitations;
+        copy.Providers = this.Providers is not null ? [.. this.Providers] : null;
+        copy.Models = this.Models is not null ? [.. this.Models] : null;
+        return copy;
+    }
+}
+/// <summary>Options for filesystem.</summary>
+public class SessionFilesystemOptions
+{
+    /// <summary>
+    /// Opts in to capturing file changes for session rewind and cumulative
+    /// session diff.
+    /// </summary>
+    /// <remarks>
+    /// On create, capture starts with the first turn. On resume, tracking can be
+    /// enabled only when the session still has a valid baseline; earlier untracked
+    /// changes cannot be reconstructed.
+    /// </remarks>
+    [JsonPropertyName("trackFileChanges")]
+    public bool? TrackFileChanges { get; set; }
+
+    /// <summary>
+    /// Additional directories the agent may access beyond <see cref = "ChildProcessRuntimeConnection.WorkingDirectory"/>.
+    /// Relative paths resolve against the session working directory. Re-supply them when resuming.
+    /// </summary>
+    [JsonPropertyName("additionalDirectories")]
+    public IList<string>? AdditionalDirectories { get; set; }
+
+    internal SessionFilesystemOptions Clone()
+    {
+        var copy = (SessionFilesystemOptions)MemberwiseClone();
+        copy.TrackFileChanges = this.TrackFileChanges;
+        copy.AdditionalDirectories = this.AdditionalDirectories is not null ? [.. this.AdditionalDirectories] : null;
+        return copy;
+    }
+}
+/// <summary>Options for state.</summary>
+public class SessionStateOptions
+{
+    /// <summary>
+    /// When <see langword="true"/>, skips embedding-based retrieval for this session.
+    /// Use in multitenant deployments to prevent cross-session information leakage
+    /// through the shared embedding cache.
+    /// </summary>
+    [JsonPropertyName("skipEmbeddingRetrieval")]
+    public bool? SkipEmbeddingRetrieval { get; set; }
+
+    /// <summary>
+    /// Controls how the embedding cache is stored for this session.
+    /// <see cref = "EmbeddingCacheStorageMode.Persistent"/>: Embeddings are cached on disk and shared across sessions/restarts.
+    /// <see cref = "EmbeddingCacheStorageMode.InMemory"/>: Embeddings are cached in memory only and discarded when the session ends.
+    /// </summary>
+    [JsonPropertyName("embeddingCacheStorage")]
+    public EmbeddingCacheStorageMode? EmbeddingCacheStorage { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, enables the cross-session store for search and
+    /// retrieval across sessions. When <see langword="false"/>, session content is
+    /// not written to or read from the shared session store.
+    /// </summary>
+    [JsonPropertyName("enableCrossSessionStore")]
+    public bool? EnableCrossSessionStore { get; set; }
+
+    /// <summary>
+    /// Infinite session configuration for persistent workspaces and automatic compaction.
+    /// When enabled (default), sessions automatically manage context limits and persist state.
+    /// </summary>
+    [JsonPropertyName("infiniteSessions")]
+    public InfiniteSessionConfig? InfiniteSessions { get; set; }
+
+    /// <summary>
+    /// Configuration for session memory. When set, controls whether the
+    /// session can read and write persistent memory.
+    /// </summary>
+    [JsonPropertyName("memory")]
+    public MemoryConfiguration? Memory { get; set; }
+
+    /// <summary>
+    /// Supplies a handler for session filesystem operations.
+    /// This is used only when <see cref = "CopilotClientOptions.SessionFs"/> is configured.
+    /// </summary>
+    [JsonPropertyName("createSessionFsProvider")]
+    public Func<CopilotSession, SessionFsProvider>? CreateSessionFsProvider { get; set; }
+
+    internal SessionStateOptions Clone()
+    {
+        var copy = (SessionStateOptions)MemberwiseClone();
+        copy.SkipEmbeddingRetrieval = this.SkipEmbeddingRetrieval;
+        copy.EmbeddingCacheStorage = this.EmbeddingCacheStorage;
+        copy.EnableCrossSessionStore = this.EnableCrossSessionStore;
+        copy.InfiniteSessions = this.InfiniteSessions;
+        copy.Memory = this.Memory;
+        copy.CreateSessionFsProvider = this.CreateSessionFsProvider;
+        return copy;
+    }
+}
+/// <summary>Options for instructions.</summary>
+public class SessionInstructionOptions
+{
+    /// <summary>
+    /// Organization-level custom instructions to include in the system prompt.
+    /// Allows hosts to inject organization-specific guidance without relying on
+    /// filesystem-based instruction discovery.
+    /// </summary>
+    [JsonPropertyName("organizationText")]
+    public string? OrganizationText { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, enables on-demand discovery of instruction files
+    /// (for example <c>AGENTS.md</c> and <c>.github/copilot-instructions.md</c>)
+    /// after successful file views.
+    /// </summary>
+    [JsonPropertyName("onDemandDiscovery")]
+    public bool? OnDemandDiscovery { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, suppresses loading of custom instruction files
+    /// (e.g. <c>.github/copilot-instructions.md</c>, <c>AGENTS.md</c>) from the working directory.
+    /// When <see langword="null"/>, the SDK chooses based on
+    /// <see cref = "CopilotClientOptions.Mode"/>: <c>true</c> under
+    /// <see cref = "CopilotClientMode.Empty"/> (instructions are not loaded
+    /// unless the app explicitly opts in), <c>null</c> otherwise.
+    /// </summary>
+    [JsonPropertyName("skipCustomInstructions")]
+    public bool? SkipCustomInstructions { get; set; }
+
+    /// <summary>Explicit discovery-only instruction roots using existing SDK formats.</summary>
+    /// <remarks>
+    /// No general filesystem grant. Available without <see cref = "SessionOptionsBase.EnableConfigDiscovery"/>,
+    /// subject to instruction/managed disables. Relative paths resolve once when supplied
+    /// against the request's effective <see cref = "ChildProcessRuntimeConnection.WorkingDirectory"/>; retained roots do not move.
+    /// Null and omission are equivalent; an empty list clears only the explicit SDK contribution.
+    /// </remarks>
+    [JsonPropertyName("directories")]
+    public IList<string>? Directories { get; set; }
+
+    internal SessionInstructionOptions Clone()
+    {
+        var copy = (SessionInstructionOptions)MemberwiseClone();
+        copy.OrganizationText = this.OrganizationText;
+        copy.OnDemandDiscovery = this.OnDemandDiscovery;
+        copy.SkipCustomInstructions = this.SkipCustomInstructions;
+        copy.Directories = this.Directories is not null ? [.. this.Directories] : null;
+        return copy;
+    }
+}
+/// <summary>Options for hooks.</summary>
+public class SessionHookOptions
+{
+    /// <summary>
+    /// When <see langword="true"/>, enables repository-origin file hooks from
+    /// <c>.github/hooks/</c> and trusted repository-configured roots.
+    /// Does not control explicit <see cref = "SessionHookOptions.Directories"/> or callback <see cref = "SessionHookOptions.Handlers"/>.
+    /// </summary>
+    [JsonPropertyName("enableRepositoryHooks")]
+    public bool? EnableRepositoryHooks { get; set; }
+
+    /// <summary>Hook handlers for session lifecycle events.</summary>
+    [JsonPropertyName("handlers")]
+    public SessionHooks? Handlers { get; set; }
+
+    /// <summary>Explicit discovery-only file-hook roots, separate from callback <see cref = "SessionHookOptions.Handlers"/>.</summary>
+    /// <remarks>
+    /// No general filesystem grant. Available without <see cref = "SessionOptionsBase.EnableConfigDiscovery"/> or
+    /// <see cref = "SessionHookOptions.EnableRepositoryHooks"/> (repository-origin hooks only), subject to hook/managed disables.
+    /// Relative paths resolve once when supplied against the request's effective
+    /// <see cref = "ChildProcessRuntimeConnection.WorkingDirectory"/>; retained roots do not move when it changes.
+    /// Null and omission are equivalent; an empty list clears only the explicit SDK contribution.
+    /// </remarks>
+    [JsonPropertyName("directories")]
+    public IList<string>? Directories { get; set; }
+
+    internal SessionHookOptions Clone()
+    {
+        var copy = (SessionHookOptions)MemberwiseClone();
+        copy.EnableRepositoryHooks = this.EnableRepositoryHooks;
+        copy.Handlers = this.Handlers;
+        copy.Directories = this.Directories is not null ? [.. this.Directories] : null;
+        return copy;
+    }
+}
+/// <summary>Options for git.</summary>
+public class SessionGitOptions
+{
+    /// <summary>
+    /// When <see langword="true"/>, enables git operations on the host filesystem
+    /// such as branch detection, file status, and commit history. When
+    /// <see langword="false"/>, no git context is surfaced in the system prompt.
+    /// </summary>
+    [JsonPropertyName("enableHostGitOperations")]
+    public bool? EnableHostGitOperations { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, allows the runtime to append a
+    /// <c>Co-authored-by</c> trailer when it commits on behalf of the user.
+    /// Subagents inherit this setting.
+    /// When <see langword="null"/>, the SDK chooses based on
+    /// <see cref = "CopilotClientOptions.Mode"/>: <c>false</c> under
+    /// <see cref = "CopilotClientMode.Empty"/>, <c>null</c> otherwise.
+    /// </summary>
+    [JsonPropertyName("coauthorEnabled")]
+    public bool? CoauthorEnabled { get; set; }
+
+    internal SessionGitOptions Clone()
+    {
+        var copy = (SessionGitOptions)MemberwiseClone();
+        copy.EnableHostGitOperations = this.EnableHostGitOperations;
+        copy.CoauthorEnabled = this.CoauthorEnabled;
+        return copy;
+    }
+}
+/// <summary>Options for skills.</summary>
+public class SessionSkillOptions
+{
+    /// <summary>
+    /// When <see langword="true"/>, enables skill loading, including built-in
+    /// skills and discovered skill directories. When <see langword="false"/>, no
+    /// skills are loaded regardless of <see cref = "SessionSkillOptions.Directories"/> or
+    /// <see cref = "SessionOptionsBase.EnableConfigDiscovery"/>.
+    /// </summary>
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; set; }
+
+    /// <summary>
+    /// Session-scoped skill provider. When set, the runtime can list and read
+    /// skills by calling back into this SDK host.
+    /// </summary>
+    /// <remarks>
+    /// Experimental. The provider is ephemeral and is never persisted; supply it
+    /// again when resuming a session. In <see cref = "CopilotClientMode.Empty"/>,
+    /// set <see cref = "SessionSkillOptions.Enabled"/> to <see langword="true"/> to make provider
+    /// skills active. Providers can be called concurrently.
+    /// </remarks>
+    [JsonIgnore]
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("provider")]
+    public ISkillProvider? Provider { get; set; }
+
+    /// <summary>
+    /// Built-in skill names to include in the session. In
+    /// <see cref = "CopilotClientMode.Empty"/>, omitting this option excludes all
+    /// runtime-bundled skills; specifying names opts those built-ins back in.
+    /// Skills from other sources remain eligible.
+    /// </summary>
+    [JsonPropertyName("includedBuiltinSkills")]
+    public IList<string>? IncludedBuiltinSkills { get; set; }
+
+    /// <summary>Explicit discovery-only skill roots, not general filesystem grants.</summary>
+    /// <remarks>
+    /// Available without <see cref = "SessionOptionsBase.EnableConfigDiscovery"/>, subject to skill/managed disables.
+    /// Relative paths resolve once when supplied against the request's effective
+    /// <see cref = "ChildProcessRuntimeConnection.WorkingDirectory"/>; retained roots do not move when it changes.
+    /// Null and omission are equivalent; an empty list clears only the explicit SDK contribution.
+    /// </remarks>
+    [JsonPropertyName("directories")]
+    public IList<string>? Directories { get; set; }
+
+    /// <summary>List of skill names to disable.</summary>
+    [JsonPropertyName("disabledSkills")]
+    public IList<string>? DisabledSkills { get; set; }
+
+    internal SessionSkillOptions Clone()
+    {
+        var copy = (SessionSkillOptions)MemberwiseClone();
+        copy.Enabled = this.Enabled;
+        copy.Provider = this.Provider;
+        copy.IncludedBuiltinSkills = this.IncludedBuiltinSkills is not null ? [.. this.IncludedBuiltinSkills] : null;
+        copy.Directories = this.Directories is not null ? [.. this.Directories] : null;
+        copy.DisabledSkills = this.DisabledSkills is not null ? [.. this.DisabledSkills] : null;
+        return copy;
+    }
+}
+/// <summary>Options for tools.</summary>
+public class SessionToolOptions
+{
+    /// <summary>
+    /// Custom tool declarations available to the language model during the session.
+    /// Declarations backed by an <see cref = "AIFunction"/> are invoked automatically; declarations without one
+    /// are left for the client to handle via external tool request events.
+    /// </summary>
+    [JsonPropertyName("definitions")]
+    public ICollection<AIFunctionDeclaration>? Definitions { get; set; }
+
+    /// <summary>List of tool names to allow; only these tools will be available when specified.</summary>
+    [JsonPropertyName("availableTools")]
+    public IList<string>? AvailableTools { get; set; }
+
+    /// <summary>List of tool names to exclude from the session.</summary>
+    [JsonPropertyName("excludedTools")]
+    public IList<string>? ExcludedTools { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, enables the <c>manage_schedule</c> tool
+    /// (host scheduler integration). When <see langword="null"/>, the SDK
+    /// chooses based on <see cref = "CopilotClientOptions.Mode"/>: <c>false</c>
+    /// under <see cref = "CopilotClientMode.Empty"/>, <c>null</c> otherwise.
+    /// </summary>
+    [JsonPropertyName("manageScheduleEnabled")]
+    public bool? ManageScheduleEnabled { get; set; }
+
+    /// <summary>
+    /// Configuration for handling large tool outputs. When a tool produces
+    /// output exceeding the configured size, the output is written to a temp
+    /// file and a reference is returned to the model instead of the full
+    /// payload.
+    /// </summary>
+    [JsonPropertyName("largeOutput")]
+    public LargeToolOutputConfig? LargeOutput { get; set; }
+
+    /// <summary>
+    /// Overrides the runtime's built-in tool-search behavior.
+    /// Tool search defers tools to keep the model's active tool set small. When <see langword="null"/>,
+    /// the runtime default applies.
+    /// </summary>
+    [JsonPropertyName("search")]
+    public ToolSearchConfig? Search { get; set; }
+
+    /// <summary>Non-persisted image generation opt-in. Re-supply after runtime restart.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("imageGeneration")]
+    public ImageGenerationConfig? ImageGeneration { get; set; }
+
+    internal SessionToolOptions Clone()
+    {
+        var copy = (SessionToolOptions)MemberwiseClone();
+        copy.Definitions = this.Definitions is not null ? [.. this.Definitions] : null;
+        copy.AvailableTools = this.AvailableTools is not null ? [.. this.AvailableTools] : null;
+        copy.ExcludedTools = this.ExcludedTools is not null ? [.. this.ExcludedTools] : null;
+        copy.ManageScheduleEnabled = this.ManageScheduleEnabled;
+        copy.LargeOutput = this.LargeOutput;
+        copy.Search = this.Search;
+        copy.ImageGeneration = this.ImageGeneration;
+        return copy;
+    }
+}
+/// <summary>Options for interaction.</summary>
+public class SessionInteractionOptions
+{
+    /// <summary>
+    /// Selects the model-facing shape of the built-in <c>ask_user</c> tool.
+    /// The default is <see cref = "Microsoft.Copilot.AskUserVariant.Legacy"/>. To use
+    /// <see cref = "Microsoft.Copilot.AskUserVariant.Elicitation"/>, also provide
+    /// <see cref = "SessionInteractionOptions.OnElicitationRequest"/> so the host can answer structured forms.
+    /// The runtime resolves this option when it creates or cold-resumes the session.
+    /// </summary>
+    [JsonPropertyName("askUserVariant")]
+    public AskUserVariant? AskUserVariant { get; set; }
+
+    /// <summary>
+    /// Handler for user input requests from the agent. When provided with the default
+    /// <see cref = "Microsoft.Copilot.AskUserVariant.Legacy"/> variant, enables the
+    /// question-and-answer form of the <c>ask_user</c> tool.
+    /// </summary>
+    [JsonPropertyName("onUserInputRequest")]
+    public Func<UserInputRequest, UserInputInvocation, Task<UserInputResponse>>? OnUserInputRequest { get; set; }
+
+    /// <summary>
+    /// Handler for passwords and other answers that shell commands run by the agent ask for.
+    /// When provided, <c>sudo -A</c>, <c>ssh</c>, and <c>git</c> prompts reach this handler
+    /// instead of failing for lack of a terminal. Return <see cref = "ShellAuthenticationResponse.Cancel"/>
+    /// when nobody can answer. The <see cref = "CancellationToken"/> is cancelled when the answer is
+    /// no longer needed, for example because the command ended, the prompt timed out, or the
+    /// session ended or switched to autopilot; close the input when it is. An exception, a response
+    /// that isn't an accept, or an answer after the token is cancelled cancels the prompt.
+    /// </summary>
+    [JsonPropertyName("onShellAuthenticationRequest")]
+    public Func<ShellAuthenticationRequest, CancellationToken, Task<ShellAuthenticationResponse>>? OnShellAuthenticationRequest { get; set; }
+
+    /// <summary>Slash commands registered for this session.</summary>
+    [JsonPropertyName("commands")]
+    public IList<CommandDefinition>? Commands { get; set; }
+
+    /// <summary>Handler for elicitation requests from the server or MCP tools.</summary>
+    [JsonPropertyName("onElicitationRequest")]
+    public Func<ElicitationContext, Task<ElicitationResult>>? OnElicitationRequest { get; set; }
+
+    /// <summary>Handler for exit-plan-mode requests from the server.</summary>
+    [JsonPropertyName("onExitPlanModeRequest")]
+    public Func<ExitPlanModeRequest, ExitPlanModeInvocation, Task<ExitPlanModeResult>>? OnExitPlanModeRequest { get; set; }
+
+    /// <summary>Handler for auto-mode-switch requests from the server.</summary>
+    [JsonPropertyName("onAutoModeSwitchRequest")]
+    public Func<AutoModeSwitchRequest, AutoModeSwitchInvocation, Task<AutoModeSwitchResponse>>? OnAutoModeSwitchRequest { get; set; }
+
+    /// <summary>
+    /// Opt in to runtime-owned recovery of an eligible active request using Auto.
+    /// Requires <see cref = "SessionInteractionOptions.OnAutoModeSwitchRequest"/> and a positive
+    /// <c>session.Capabilities.Ui.AutoModeRecovery</c> acknowledgment. Unsupported
+    /// enrollment rejects create/resume and detaches the session. Defaults to false;
+    /// re-supply when resuming. Consent has no runtime deadline. Do not resend or rewind.
+    /// </summary>
+    [JsonPropertyName("autoModeRecovery")]
+    public bool AutoModeRecovery { get; set; }
+
+    internal SessionInteractionOptions Clone()
+    {
+        var copy = (SessionInteractionOptions)MemberwiseClone();
+        copy.AskUserVariant = this.AskUserVariant;
+        copy.OnUserInputRequest = this.OnUserInputRequest;
+        copy.OnShellAuthenticationRequest = this.OnShellAuthenticationRequest;
+        copy.Commands = this.Commands is not null ? [.. this.Commands] : null;
+        copy.OnElicitationRequest = this.OnElicitationRequest;
+        copy.OnExitPlanModeRequest = this.OnExitPlanModeRequest;
+        copy.OnAutoModeSwitchRequest = this.OnAutoModeSwitchRequest;
+        copy.AutoModeRecovery = this.AutoModeRecovery;
+        return copy;
+    }
+}
+/// <summary>Options for agents.</summary>
+public class SessionAgentOptions
+{
+    /// <summary>Built-in agents to exclude from discovery.</summary>
+    [JsonPropertyName("excludedBuiltinAgents")]
+    public IList<string>? ExcludedBuiltInAgents { get; set; }
+
+    /// <summary>Built-in agents to include; an empty list disables all built-ins.</summary>
+    [JsonPropertyName("includedBuiltinAgents")]
+    public IList<string>? IncludedBuiltInAgents { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, custom-agent discovery is restricted to the
+    /// session's local working directory (no organisation-level discovery).
+    /// When <see langword="null"/>, the SDK chooses based on
+    /// <see cref = "CopilotClientOptions.Mode"/>: <c>true</c> under
+    /// <see cref = "CopilotClientMode.Empty"/>, <c>null</c> otherwise.
+    /// </summary>
+    [JsonPropertyName("localDiscoveryOnly")]
+    public bool? LocalDiscoveryOnly { get; set; }
+
+    /// <summary>Custom agent configurations for the session.</summary>
+    [JsonPropertyName("definitions")]
+    public IList<CustomAgentConfig>? Definitions { get; set; }
+
+    /// <summary>
+    /// Configuration for the default agent (the built-in agent that handles turns when no custom agent is selected).
+    /// Use <see cref = "DefaultAgentConfig.ExcludedTools"/> to hide specific tools from the default agent
+    /// while keeping them available to custom sub-agents.
+    /// </summary>
+    [JsonPropertyName("default")]
+    public DefaultAgentConfig? Default { get; set; }
+
+    /// <summary>
+    /// Name of the custom agent to activate when the session starts.
+    /// Must match the <see cref = "CustomAgentConfig.Name"/> of one of the agents in <see cref = "SessionAgentOptions.Definitions"/>.
+    /// </summary>
+    [JsonPropertyName("selected")]
+    public string? Selected { get; set; }
+
+    /// <summary>Explicit discovery-only agent roots, separate from <see cref = "SessionAgentOptions.Definitions"/>.</summary>
+    /// <remarks>
+    /// No general filesystem grant. Available without <see cref = "SessionOptionsBase.EnableConfigDiscovery"/>,
+    /// subject to source/managed disables. Relative paths resolve once when supplied against
+    /// the request's effective <see cref = "ChildProcessRuntimeConnection.WorkingDirectory"/>; retained roots do not move.
+    /// Null and omission are equivalent; an empty list clears only the explicit SDK contribution.
+    /// </remarks>
+    [JsonPropertyName("directories")]
+    public IList<string>? Directories { get; set; }
+
+    internal SessionAgentOptions Clone()
+    {
+        var copy = (SessionAgentOptions)MemberwiseClone();
+        copy.ExcludedBuiltInAgents = this.ExcludedBuiltInAgents is not null ? [.. this.ExcludedBuiltInAgents] : null;
+        copy.IncludedBuiltInAgents = this.IncludedBuiltInAgents is not null ? [.. this.IncludedBuiltInAgents] : null;
+        copy.LocalDiscoveryOnly = this.LocalDiscoveryOnly;
+        copy.Definitions = this.Definitions is not null ? [.. this.Definitions] : null;
+        copy.Default = this.Default;
+        copy.Selected = this.Selected;
+        copy.Directories = this.Directories is not null ? [.. this.Directories] : null;
+        return copy;
+    }
+}
+/// <summary>Options for github.</summary>
+public class SessionGitHubOptions
+{
+    /// <summary>
+    /// CAPI (Copilot API) provider-scoped configuration for the session.
+    /// </summary>
+    [JsonPropertyName("capi")]
+    public CapiSessionOptions? Capi { get; set; }
+
+    /// <summary>
+    /// Enables or disables internal session telemetry for this session.
+    /// When <c>false</c>, disables session telemetry. When <c>true</c>, enables it for eligible
+    /// GitHub-authenticated sessions, including BYOK sessions.
+    /// When <c>null</c>, preserves a resident session's choice; otherwise defaults to enabled.
+    /// Host and account policies still control uploads.
+    /// This is independent of <see cref = "ClientObservabilityOptions.Telemetry"/>, which configures
+    /// OpenTelemetry export for observability.
+    /// </summary>
+    [JsonPropertyName("telemetryEnabled")]
+    public bool? TelemetryEnabled { get; set; }
+
+    /// <summary>
+    /// Configuration for the built-in GitHub MCP server.
+    /// <c>DisableFormDeferral</c> only applies to that server and only has an
+    /// effect when MCP Apps and form-backed GitHub tools are enabled.
+    /// </summary>
+    [JsonPropertyName("mcp")]
+    public GitHubMcpToolConfig? Mcp { get; set; }
+
+    /// <summary>
+    /// GitHub token for per-session authentication.
+    /// When provided, the runtime resolves this token into a full GitHub identity
+    /// and stores it on the session for content exclusion, model routing, and quota checks.
+    /// </summary>
+    [JsonPropertyName("token")]
+    public string? Token { get; set; }
+
+    /// <summary>
+    /// Gets or sets a callback that acquires session-scoped GitHub tokens on
+    /// demand. Initial cancellation, callback errors, and invalid token responses
+    /// reject session creation or resume instead of falling back to ambient
+    /// authentication. This cannot be combined with <see cref = "SessionGitHubOptions.Token"/>.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore]
+    [JsonPropertyName("tokenProvider")]
+    public Func<GitHubTokenProviderArgs, Task<GitHubTokenProviderResult>>? TokenProvider { get; set; }
+
+    /// <summary>
+    /// Opt-in: when <c>true</c>, the runtime self-fetches enterprise managed
+    /// settings (bypass-permissions policy) at session bootstrap using the
+    /// session's <see cref = "SessionGitHubOptions.Token"/>. Requires <see cref = "SessionGitHubOptions.Token"/> to
+    /// be set; if omitted, the runtime is expected to reject session creation
+    /// (fail-closed). When unset, behaves exactly as before. Serialized on the
+    /// wire as <c>enableManagedSettings</c>.
+    /// </summary>
+    [JsonPropertyName("fetchManagedSettings")]
+    public bool? FetchManagedSettings { get; set; }
+
+    /// <summary>
+    /// Declares that a human drives this session's conversation, enabling
+    /// user-message analysis telemetry for user-authored messages. Automated
+    /// messages remain excluded. Defaults to false for SDK sessions; ignored
+    /// for cloud sessions and when resuming a session already active in the
+    /// runtime process.
+    /// </summary>
+    [JsonPropertyName("interactiveUser")]
+    public bool? InteractiveUser { get; set; }
+
+    internal SessionGitHubOptions Clone()
+    {
+        var copy = (SessionGitHubOptions)MemberwiseClone();
+        copy.Capi = this.Capi;
+        copy.TelemetryEnabled = this.TelemetryEnabled;
+        copy.Mcp = this.Mcp is null ? null : new GitHubMcpToolConfig
+        {
+            EnableAllTools = this.Mcp.EnableAllTools,
+            AdditionalToolsets = this.Mcp.AdditionalToolsets is not null ? [.. this.Mcp.AdditionalToolsets] : null,
+            AdditionalTools = this.Mcp.AdditionalTools is not null ? [.. this.Mcp.AdditionalTools] : null,
+            EnableInsidersMode = this.Mcp.EnableInsidersMode,
+            DisableFormDeferral = this.Mcp.DisableFormDeferral,
+        };
+        copy.Token = this.Token;
+        copy.TokenProvider = this.TokenProvider;
+        copy.FetchManagedSettings = this.FetchManagedSettings;
+        copy.InteractiveUser = this.InteractiveUser;
+        return copy;
+    }
+}
+/// <summary>Options for experiments.</summary>
+public class SessionExperimentOptions
+{
+    /// <summary>
+    /// Controls whether the session enables experimental features.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see langword="false"/> in <see cref = "CopilotClientMode.Empty"/>.
+    /// Otherwise, the runtime decides when left <see langword="null"/>.
+    /// </remarks>
+    [JsonPropertyName("enableExperimentalMode")]
+    public bool? EnableExperimentalMode { get; set; }
+
+    /// <summary>
+    /// ExP assignment ("flight") data injected by a trusted integrator, in the
+    /// same JSON shape the Copilot CLI fetches from the experimentation service
+    /// (<c>CopilotExpAssignmentResponse</c>). When provided, the runtime feeds it
+    /// into the same feature-flag path as CLI-fetched assignments and stamps it
+    /// onto telemetry and the CAPI request header. When unset, the session does
+    /// not block on ExP. Intended for out-of-process integrators that fetch ExP
+    /// data themselves; malformed payloads are dropped by the runtime (fail-open).
+    /// Serialized on the wire as <c>expAssignments</c>.
+    /// </summary>
+    /// <remarks>
+    /// This is an internal/trusted-integrator option and is hidden from editor
+    /// completion. It is not part of the broadly advertised public surface.
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [JsonPropertyName("assignments")]
+    public CopilotExpAssignmentResponse? Assignments { get; set; }
+
+    /// <summary>
+    /// Feature-flag values resolved by the host for this session.
+    /// Re-supply them when resuming after a runtime restart.
+    /// </summary>
+    [JsonPropertyName("flags")]
+    public IDictionary<string, bool>? Flags { get; set; }
+
+    internal SessionExperimentOptions Clone()
+    {
+        var copy = (SessionExperimentOptions)MemberwiseClone();
+        copy.EnableExperimentalMode = this.EnableExperimentalMode;
+        copy.Assignments = this.Assignments;
+        copy.Flags = this.Flags is not null ? new Dictionary<string, bool>(this.Flags) : null;
+        return copy;
+    }
+}
+/// <summary>Options for permissions.</summary>
+public class SessionPermissionOptions
+{
+    /// <summary>Handler for permission requests from the server.</summary>
+    [JsonPropertyName("onRequest")]
+    public Func<PermissionRequest, PermissionInvocation, Task<PermissionDecision>>? OnRequest { get; set; }
+
+    /// <summary>
+    /// Sandbox configuration applied when the session is constructed, before MCP servers start.
+    /// Same shape as the sandboxConfig option of session options update;
+    /// an identical later update is a no-op.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("sandbox")]
+    public SandboxConfig? Sandbox { get; set; }
+
+    /// <summary>
+    /// Permission mode applied before the session's first turn: before
+    /// session creation returns, and before a resume continues pending work.
+    /// Uses the same checks as <c>session.Rpc.Permissions.SetModeAsync</c>; a
+    /// mode that managed policy or session capabilities refuse leaves the
+    /// current mode in place. <see cref = "CopilotSession.PermissionModeResult"/>
+    /// reports whether it was applied and the authoritative mode. Leave unset to
+    /// keep the default mode on create, or the restored mode on resume. Not
+    /// supported for cloud sessions.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("mode")]
+    public PermissionMode? Mode { get; set; }
+
+    internal SessionPermissionOptions Clone()
+    {
+        var copy = (SessionPermissionOptions)MemberwiseClone();
+        copy.OnRequest = this.OnRequest;
+        copy.Sandbox = this.Sandbox;
+        copy.Mode = this.Mode;
+        return copy;
+    }
+}
+/// <summary>Options for mcp.</summary>
+public class SessionMcpOptions
+{
+    /// <summary>
+    /// Enable MCP Apps (SEP-1865) UI passthrough on this session.
+    /// <para>
+    /// When <c>true</c> <b>and</b> the runtime has MCP Apps enabled (via the
+    /// <c>MCP_APPS</c> feature flag or <c>COPILOT_MCP_APPS=true</c> environment override), the
+    /// runtime adds the <c>mcp-apps</c> capability to the session, which causes it to advertise
+    /// the <c>extensions.io.modelcontextprotocol/ui</c> extension to MCP servers (so they expose
+    /// <c>_meta.ui.resourceUri</c> on tools) and to expose the
+    /// <c>session.rpc.mcp.apps.{listTools,callTool,readResource,setHostContext,getHostContext,diagnose}</c>
+    /// JSON-RPC methods.
+    /// </para>
+    /// <para>
+    /// If the runtime gate is off, the opt-in is silently dropped server-side (the runtime logs a
+    /// warning); the session is created normally but the MCP Apps surface is unavailable. Inspect
+    /// the runtime's <c>capabilities.ui.mcpApps</c> on the create/resume response to detect this.
+    /// </para>
+    /// <para>
+    /// SDK consumers MUST set this to <c>true</c> only when they have an iframe renderer that can
+    /// display <c>ui://</c> MCP App bundles. Setting it without a renderer will cause MCP servers
+    /// to register UI-enabled tool variants the consumer cannot display.
+    /// </para>
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("enableApps")]
+    public bool EnableApps { get; set; }
+
+    /// <summary>
+    /// MCP server configurations for the session.
+    /// Keys are server names, values are server configurations (<see cref = "McpStdioServerConfig"/> or <see cref = "McpHttpServerConfig"/>).
+    /// </summary>
+    [JsonPropertyName("servers")]
+    public IDictionary<string, McpServerConfig>? Servers { get; set; }
+
+    /// <summary>
+    /// Controls how MCP OAuth tokens are stored for this session.
+    /// Default: <see cref = "McpOAuthTokenStorageMode.InMemory"/> for safe multitenant behavior.
+    /// </summary>
+    [JsonPropertyName("oauthTokenStorage")]
+    public McpOAuthTokenStorageMode? OauthTokenStorage { get; set; }
+
+    /// <summary>
+    /// OAuth Client ID Metadata Document URL identifying the host for MCP authorization.
+    /// When unset, no host identity is supplied.
+    /// </summary>
+    [JsonPropertyName("authClientIdMetadataUrl")]
+    public string? AuthClientIdMetadataUrl { get; set; }
+
+    /// <summary>
+    /// Exact MCP server names to disable for this session. Disabled servers are not
+    /// started or authenticated on create or cold resume; a resident resume cannot
+    /// stop servers that are already running.
+    /// </summary>
+    [JsonPropertyName("disabledServers")]
+    public IList<string>? DisabledServers { get; set; }
+
+#pragma warning restore MCPSDK001
+    /// <summary>
+    /// Optional handler for MCP OAuth requests from MCP servers.
+    /// When provided, the SDK can satisfy MCP server OAuth requests with host-provided token data or cancellation.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore]
+    [JsonPropertyName("onAuthRequest")]
+    public Func<McpAuthContext, Task<McpAuthResult?>>? OnAuthRequest { get; set; }
+
+    internal SessionMcpOptions Clone()
+    {
+        var copy = (SessionMcpOptions)MemberwiseClone();
+        copy.EnableApps = this.EnableApps;
+        copy.Servers = this.Servers is not null ? (this.Servers is Dictionary<string, McpServerConfig> dict ? new Dictionary<string, McpServerConfig>(dict, dict.Comparer) : new Dictionary<string, McpServerConfig>(this.Servers)) : null;
+        copy.OauthTokenStorage = this.OauthTokenStorage;
+        copy.AuthClientIdMetadataUrl = this.AuthClientIdMetadataUrl;
+        copy.DisabledServers = this.DisabledServers is not null ? [.. this.DisabledServers] : null;
+        copy.OnAuthRequest = this.OnAuthRequest;
+        return copy;
+    }
+}
+/// <summary>Options for events.</summary>
+public class SessionEventOptions
+{
+    /// <summary>
+    /// Enable streaming of assistant message and reasoning chunks.
+    /// When true, assistant.message_delta and assistant.reasoning_delta events
+    /// with deltaContent are sent as the response is generated.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("streaming")]
+    public bool? Streaming { get; set; }
+
+    /// <summary>
+    /// Include sub-agent streaming events in the event stream. When true, streaming
+    /// delta events from sub-agents (e.g., <c>assistant.message_delta</c>,
+    /// <c>assistant.reasoning_delta</c>, <c>assistant.streaming_delta</c> with
+    /// <c>agentId</c> set) are forwarded to this connection. When false, only
+    /// non-streaming sub-agent events and <c>subagent.*</c> lifecycle events are
+    /// forwarded; streaming deltas from sub-agents are suppressed.
+    /// Default: true.
+    /// </summary>
+    [JsonPropertyName("includeSubAgentStreamingEvents")]
+    public bool IncludeSubAgentStreamingEvents { get; set; } = true;
+
+    /// <summary>
+    /// Optional event handler registered on the session before the session.create / session.resume
+    /// RPC is issued, ensuring early events are delivered.
+    /// </summary>
+    [JsonPropertyName("onEvent")]
+    public Action<SessionEvent>? OnEvent { get; set; }
+
+    internal SessionEventOptions Clone()
+    {
+        var copy = (SessionEventOptions)MemberwiseClone();
+        copy.Streaming = this.Streaming;
+        copy.IncludeSubAgentStreamingEvents = this.IncludeSubAgentStreamingEvents;
+        copy.OnEvent = this.OnEvent;
+        return copy;
+    }
+}
+/// <summary>Options for plugins.</summary>
+public class SessionPluginOptions
+{
+    /// <summary>
+    /// Local filesystem paths to Open Plugins-format directories
+    /// (https://open-plugins.com/) to load for this session.
+    /// </summary>
+    /// <remarks>
+    /// Relative paths resolve against <see cref = "ChildProcessRuntimeConnection.WorkingDirectory"/> (or the
+    /// runtime cwd if unset). Treated as an explicit opt-in: plugin agents
+    /// and rules load even when <see cref = "SessionOptionsBase.EnableConfigDiscovery"/> is false.
+    /// </remarks>
+    [JsonPropertyName("directories")]
+    public IList<string>? Directories { get; set; }
+
+    internal SessionPluginOptions Clone()
+    {
+        var copy = (SessionPluginOptions)MemberwiseClone();
+        copy.Directories = this.Directories is not null ? [.. this.Directories] : null;
+        return copy;
+    }
+}
+/// <summary>Options for execution.</summary>
+public class SessionExecutionOptions
+{
+    /// <summary>
+    /// Optional limits for the session's current accounting window.
+    /// </summary>
+    /// <remarks>
+    /// These settings only model the caller's configured limits. Enforcement and
+    /// limit-exhaustion behavior are handled by the runtime.
+    /// </remarks>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("limits")]
+    public SessionLimitsConfig? Limits { get; set; }
+
+    /// <summary>
+    /// Autopilot policy, independent of session mode. Omitted fields use defaults on
+    /// create and preserve resident values on warm resume. Re-supply on cold resume.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("autopilot")]
+    public AutopilotOptions? Autopilot { get; set; }
+
+    internal SessionExecutionOptions Clone()
+    {
+        var copy = (SessionExecutionOptions)MemberwiseClone();
+        copy.Limits = this.Limits;
+        copy.Autopilot = this.Autopilot;
+        return copy;
+    }
+}
+/// <summary>Options for policy.</summary>
+public class SessionPolicyOptions
+{
+    /// <summary>
+    /// Exact dotted setting paths excluded from fetched, device, and policy-helper
+    /// policy. Host-injected policy and availability checks are unaffected.
+    /// Not persisted; re-supply on resume, where omission restores full enforcement.
+    /// Use EnableManagedSettings to enable self-fetching.
+    /// </summary>
+    [JsonPropertyName("excludedManagedSettings")]
+    public IList<string>? ExcludedManagedSettings { get; set; }
+
+    /// <summary>
+    /// When true, enforces locked managed model controls for this session.
+    /// Conflicting model changes are rejected; overridable managed defaults
+    /// remain mutable.
+    /// </summary>
+    [JsonPropertyName("enforceManagedModelDefaults")]
+    public bool? EnforceManagedModelDefaults { get; set; }
+
+    /// <summary>
+    /// Optional managed-settings layer injected at session bootstrap. Currently
+    /// carries a permissions object that composes restrictively with any
+    /// server- or device-level managed settings. This layer is startup-only and
+    /// is not persisted: it must be re-supplied on resume to remain in effect,
+    /// and omitting it on resume clears the previously injected layer. Can be
+    /// combined with <see cref = "SessionGitHubOptions.FetchManagedSettings"/>. Serialized on the wire
+    /// as <c>managedSettings</c>.
+    /// </summary>
+    [JsonPropertyName("managedSettings")]
+    public ManagedSettings? ManagedSettings { get; set; }
+
+    internal SessionPolicyOptions Clone()
+    {
+        var copy = (SessionPolicyOptions)MemberwiseClone();
+        copy.ExcludedManagedSettings = this.ExcludedManagedSettings?.ToList();
+        copy.EnforceManagedModelDefaults = this.EnforceManagedModelDefaults;
+        copy.ManagedSettings = this.ManagedSettings;
+        return copy;
+    }
+}
+/// <summary>Options for canvases.</summary>
+public class SessionCanvasOptions
+{
+#pragma warning disable MCPSDK001
+    /// <summary>
+    /// Canvas declarations advertised by this connection. The runtime forwards
+    /// these to the agent and routes inbound <c>canvas.*</c> requests for any
+    /// declared canvas to <see cref = "SessionCanvasOptions.Handler"/>.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("definitions")]
+    public IList<CanvasDeclaration>? Definitions { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, asks the host to expose canvas renderer tools
+    /// for this session. The host typically grants this only to trusted clients.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("requestRenderer")]
+    public bool? RequestRenderer { get; set; }
+
+    /// <summary>
+    /// Stable identity for a host/SDK connection that supplies built-in
+    /// canvases. When set, the runtime uses <see cref = "CanvasProviderIdentity.Id"/>
+    /// verbatim as the agent-facing canvas extension id, so canvases declared on
+    /// a control connection survive reconnect and CLI restart. Honored on
+    /// session create and resume.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("provider")]
+    public CanvasProviderIdentity? Provider { get; set; }
+
+    /// <summary>
+    /// Provider-side canvas lifecycle handler. The SDK routes inbound
+    /// <c>canvas.open</c> / <c>canvas.close</c> / <c>canvas.action.invoke</c>
+    /// requests to this handler.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore]
+    [JsonPropertyName("handler")]
+    public ICanvasHandler? Handler { get; set; }
+
+    internal SessionCanvasOptions Clone()
+    {
+        var copy = (SessionCanvasOptions)MemberwiseClone();
+        copy.Definitions = this.Definitions is not null ? [.. this.Definitions] : null;
+        copy.RequestRenderer = this.RequestRenderer;
+        copy.Provider = this.Provider;
+        copy.Handler = this.Handler;
+        if (copy is ResumeSessionCanvasOptions resume)
+        {
+            resume.Open = resume.Open is not null ? [.. resume.Open] : null;
+        }
+        return copy;
+    }
+}
+/// <summary>Options for extensions.</summary>
+public class SessionExtensionOptions
+{
+    /// <summary>
+    /// When <see langword="true"/>, asks the host to expose extension-discovery
+    /// tools for this session. The host typically grants this only to trusted clients.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; set; }
+
+    /// <summary>
+    /// Optional override path to a <c>copilot-sdk/</c> folder to inject into
+    /// extension subprocesses for this session in place of the bundled SDK.
+    /// When unset or invalid (missing folder, or missing <c>index.js</c> /
+    /// <c>extension.js</c>), the runtime falls back to the bundled SDK
+    /// without throwing. Takes precedence over any server-level default.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("sdkPath")]
+    public string? SdkPath { get; set; }
+
+    /// <summary>
+    /// Stable extension identity for canvas/tool providers on this connection.
+    /// Required when <see cref = "SessionCanvasOptions.Definitions"/> is set so the runtime can attribute
+    /// declared canvases back to this provider.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("identity")]
+    public ExtensionInfo? Identity { get; set; }
+
+    internal SessionExtensionOptions Clone()
+    {
+        var copy = (SessionExtensionOptions)MemberwiseClone();
+        copy.Enabled = this.Enabled;
+        copy.SdkPath = this.SdkPath;
+        copy.Identity = this.Identity;
+        return copy;
+    }
+}
+
+/// <summary>Options for filesystem.</summary>
+public class CreateSessionFilesystemOptions : SessionFilesystemOptions
+{
+    /// <summary>
+    /// Trusts the working directory for this session ("session") or persistently
+    /// for the user ("user"). Omitted leaves existing folder trust unchanged.
+    /// </summary>
+    [JsonPropertyName("trustWorkingDirectory")]
+    public WorkingDirectoryTrust? TrustWorkingDirectory { get; set; }
+
+}
+
+/// <summary>Options for instructions.</summary>
+public class CreateSessionInstructionOptions : SessionInstructionOptions
+{
+    /// <summary>
+    /// When true, invalidates process-wide custom-instruction discovery caches before
+    /// constructing this new session. Omitted or false reuses the caches.
+    /// Other sessions in this runtime may observe updated instructions on later turns
+    /// or discovery. This does not watch files or override instruction enablement.
+    /// </summary>
+    [JsonPropertyName("refreshCustomInstructions")]
+    public bool? RefreshCustomInstructions { get; set; }
+
+}
+
+
+/// <summary>Options for canvases.</summary>
+public class ResumeSessionCanvasOptions : SessionCanvasOptions
+{
+
+#pragma warning disable MCPSDK001
+    /// <summary>
+    /// Snapshot of canvases that were already open when the session was suspended.
+    /// When provided on resume, the runtime can rehydrate canvas state so consumers
+    /// do not need to re-open canvases that were active before the previous shutdown.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonPropertyName("open")] public IList<OpenCanvasInstance>? Open { get; set; }
+
+}

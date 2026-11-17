@@ -1,14 +1,15 @@
+use crate::byok;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::hooks::{AgentStopInput, AgentStopOutput, HookContext, SessionHooks};
-use github_copilot_sdk::rpc::SendMessagesRequest;
-use github_copilot_sdk::tool::{define_tool, schema_for};
-use github_copilot_sdk::{DeliveryMode, MessageOptions, ProviderConfig, SessionConfig, ToolResult};
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::hooks::{AgentStopInput, AgentStopOutput, HookContext, SessionHooks};
+use copilot_sdk::rpc::SendMessagesRequest;
+use copilot_sdk::tool::{define_tool, schema_for};
+use copilot_sdk::{CreateSessionOptions, DeliveryMode, MessageOptions, ProviderConfig, ToolResult};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -51,27 +52,33 @@ struct Second {
 #[derive(Deserialize, JsonSchema)]
 struct NoArgs {}
 
-fn config(proxy: &str) -> SessionConfig {
-    SessionConfig::default()
+fn config(proxy: &str) -> CreateSessionOptions {
+    CreateSessionOptions::default()
         .with_model("gpt-4.1")
-        .with_permission_handler(Arc::new(ApproveAllHandler))
-        .with_available_tools(["custom:*"])
-        .with_provider(
-            ProviderConfig::new(proxy)
-                .with_provider_type("openai")
-                .with_wire_api("completions")
-                .with_api_key(DEFAULT_TEST_TOKEN)
-                .with_model_id("gpt-4.1")
-                .with_wire_model("gpt-4.1")
-                .with_headers(HashMap::from([
-                    (
-                        "Copilot-Integration-Id".into(),
-                        "copilot-developer-cli".into(),
-                    ),
-                    ("Copilot-Harness-Id".into(), "copilot-sdk".into()),
-                    ("X-GitHub-Api-Version".into(), "2026-08-01".into()),
-                ])),
-        )
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+        .with_tools(|group| group.with_available_tools(["custom:*"]))
+        .with_inference(|group| {
+            byok::inference(
+                group,
+                ProviderConfig::new(proxy)
+                    .with_provider_type("openai")
+                    .with_wire_api("completions")
+                    .with_api_key(DEFAULT_TEST_TOKEN)
+                    .with_model_id("gpt-4.1")
+                    .with_wire_model("gpt-4.1")
+                    .with_headers(HashMap::from([
+                        (
+                            "Copilot-Integration-Id".into(),
+                            "copilot-developer-cli".into(),
+                        ),
+                        ("Copilot-Harness-Id".into(), "copilot-sdk".into()),
+                        ("X-GitHub-Api-Version".into(), "2026-08-01".into()),
+                    ])),
+            )
+        })
+        .with_github(|group| {
+            group.with_capi(copilot_sdk::CapiSessionOptions::default().with_enabled(false))
+        })
 }
 
 #[tokio::test]
@@ -100,8 +107,8 @@ async fn infers_typed_result_after_custom_tool() {
                 let session = client
                     .create_session(
                         config(ctx.proxy_url())
-                            .with_tools(vec![tool])
-                            .with_streaming(true),
+                            .with_tools(|group| group.with_definitions(vec![tool]))
+                            .with_events(|group| group.with_streaming(true)),
                     )
                     .await
                     .unwrap();
@@ -225,7 +232,7 @@ async fn typed_wait_returns_stop_hook_correction_after_terminal_tool() {
                 reason: "Correct the answer to 99, not 63. Do not use tools.",
             });
             let client = ctx.start_client().await;
-            let session = client.create_session(config(ctx.proxy_url()).with_tools(vec![tool]).with_hooks(hooks.clone())).await.unwrap();
+            let session = client.create_session(config(ctx.proxy_url()).with_tools(|group| group.with_definitions(vec![tool])).with_hooks(|group| group.with_handlers(hooks.clone()))).await.unwrap();
             let result: Answer = session.send_and_wait_typed(
                 "Call lookup_number exactly once, then add 5 to the returned number. Do not guess its result."
             ).await.unwrap();
@@ -265,7 +272,10 @@ async fn concurrent_typed_sends_return_their_own_results() {
                 );
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(config(ctx.proxy_url()).with_tools(vec![tool]))
+                    .create_session(
+                        config(ctx.proxy_url())
+                            .with_tools(|group| group.with_definitions(vec![tool])),
+                    )
                     .await
                     .unwrap();
                 let first = session.send_and_wait_typed::<First>(
@@ -313,7 +323,10 @@ async fn typed_wait_returns_stop_hook_correction() {
                 });
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(config(ctx.proxy_url()).with_hooks(hooks.clone()))
+                    .create_session(
+                        config(ctx.proxy_url())
+                            .with_hooks(|group| group.with_handlers(hooks.clone())),
+                    )
                     .await
                     .unwrap();
                 let events = session.subscribe();
@@ -408,7 +421,10 @@ async fn typed_wait_returns_late_steering_response() {
                 let _release = ReleaseOnDrop(gate.release.clone());
                 let client = ctx.start_client().await;
                 let session = client
-                    .create_session(config(ctx.proxy_url()).with_hooks(gate.clone()))
+                    .create_session(
+                        config(ctx.proxy_url())
+                            .with_hooks(|group| group.with_handlers(gate.clone())),
+                    )
                     .await
                     .unwrap();
                 let events = session.subscribe();
@@ -478,7 +494,7 @@ async fn send_selects_correlated_response_after_idle() {
                 let tool = define_tool("read_inventory", "Read the current widget count and color.",
                     |_inv, _: NoArgs| async { Ok(ToolResult::Text("The inventory contains 42 red widgets.".into())) });
                 let client = ctx.start_client().await;
-                let session = client.create_session(config(ctx.proxy_url()).with_hooks(gate.clone()).with_tools(vec![tool])).await.unwrap();
+                let session = client.create_session(config(ctx.proxy_url()).with_hooks(|group| group.with_handlers(gate.clone())).with_tools(|group| group.with_definitions(vec![tool]))).await.unwrap();
                 let events = session.subscribe();
                 let origin = session.send(MessageOptions::new("Call read_inventory once, then report the current widget count and color.")
                     .with_response_schema(schema_for::<Inventory>())).await.unwrap();
@@ -562,7 +578,7 @@ async fn typed_result_after_terminal_tool_and_steering() {
                 tool.is_terminal = true;
                 tool.skip_permission = true;
                 let client = ctx.start_client().await;
-                let session = client.create_session(config(ctx.proxy_url()).with_tools(vec![tool])).await.unwrap();
+                let session = client.create_session(config(ctx.proxy_url()).with_tools(|group| group.with_definitions(vec![tool]))).await.unwrap();
                 let waiting = session.send_and_wait_typed::<ToolAnswer>(
                     "Call lookup_number exactly once, then add 5 to the returned number. Do not guess its result.");
                 let steer = async {

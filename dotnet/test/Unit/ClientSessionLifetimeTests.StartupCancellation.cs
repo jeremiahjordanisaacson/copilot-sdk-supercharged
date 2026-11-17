@@ -5,7 +5,7 @@
 #if NET8_0_OR_GREATER
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -25,7 +25,7 @@ public sealed partial class ClientSessionLifetimeTests
             entered.TrySetResult();
             await release.Task.WaitAsync(token);
         };
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var starting = client.StartAsync();
         try
         {
@@ -54,7 +54,7 @@ public sealed partial class ClientSessionLifetimeTests
         {
             "start" => client.StartAsync(cancellationToken),
             "ping" => client.PingAsync(cancellationToken: cancellationToken),
-            _ => client.CreateSessionAsync(new SessionConfig(), cancellationToken),
+            _ => client.CreateSessionAsync(new CreateSessionOptions(), cancellationToken),
         };
     }
 }

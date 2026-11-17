@@ -3,7 +3,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 #if NET8_0_OR_GREATER
-#pragma warning disable GHCP001 // Live tool replacement is intentionally experimental.
+#pragma warning disable MCPSDK001 // Live tool replacement is intentionally experimental.
 
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -15,10 +15,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed class SetToolsTests
 {
@@ -37,8 +37,8 @@ public sealed class SetToolsTests
     public async Task SetToolsAsync_Sends_Complete_Payload_And_Empty_Descriptions(string? namespaceDescription)
     {
         await using var server = await SetToolsFakeServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.ClearRequests();
 
         await session.SetToolsAsync([
@@ -110,13 +110,10 @@ public sealed class SetToolsTests
     public async Task DeclarationOnly_Request_Does_Not_Run_The_Previous_Handler()
     {
         await using var server = await SetToolsFakeServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var calls = 0;
-        await using var session = await client.CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(() => Interlocked.Increment(ref calls),
-                new AIFunctionFactoryOptions { Name = "lookup" })],
-        });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(() => Interlocked.Increment(ref calls), new AIFunctionFactoryOptions { Name = "lookup" })] } });
         var observed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var subscription = session.On<ExternalToolRequestedEvent>(requested =>
         {
@@ -145,11 +142,9 @@ public sealed class SetToolsTests
         await using var server = await SetToolsFakeServer.StartAsync();
         var releaseSet = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.BeforeSetToolsResponseAsync = _ => releaseSet.Task;
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
-        {
-            Tools = [Tool("replaceable_tool", "old")],
-        });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [Tool("replaceable_tool", "old")] } });
         server.ClearRequests();
 
         var replacement = session.SetToolsAsync([Tool("replaceable_tool", "new")]);
@@ -170,13 +165,11 @@ public sealed class SetToolsTests
     {
         await using var server = await SetToolsFakeServer.StartAsync();
         server.RejectNextSetTools("invalid tool name");
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
-        {
-            Tools = [Tool("stable_tool", "old")],
-        });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [Tool("stable_tool", "old")] } });
 
-        await Assert.ThrowsAsync<IOException>(() => session.SetToolsAsync([Tool("stable_tool", "new")]));
+        await Assert.ThrowsAsync<RemoteRpcException>(() => session.SetToolsAsync([Tool("stable_tool", "new")]));
 
         var result = await InvokeToolAsync(server, session, "stable_tool", "stable-request");
         Assert.Equal("old", result);
@@ -188,8 +181,8 @@ public sealed class SetToolsTests
         await using var server = await SetToolsFakeServer.StartAsync();
         var releaseSet = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.BeforeSetToolsResponseAsync = _ => releaseSet.Task;
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         var replacement = session.SetToolsAsync([Tool("retired_tool", "must-not-install")]);
         var timeout = TimeSpan.FromSeconds(5);
         Exception? bodyFailure = null;
@@ -200,7 +193,7 @@ public sealed class SetToolsTests
             releaseSet.TrySetResult();
 
             await Assert.ThrowsAsync<ObjectDisposedException>(() => replacement.WaitAsync(timeout));
-            await using var liveSession = await client.CreateSessionAsync(new SessionConfig()).WaitAsync(timeout);
+            await using var liveSession = await client.CreateSessionAsync(new CreateSessionOptions()).WaitAsync(timeout);
             Assert.NotEqual(session.SessionId, liveSession.SessionId);
         }
         catch (Exception error)
@@ -233,11 +226,9 @@ public sealed class SetToolsTests
     public async Task SetToolsAsync_Empty_Set_Removes_Handlers()
     {
         await using var server = await SetToolsFakeServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
-        {
-            Tools = [Tool("removed_tool", "old")],
-        });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [Tool("removed_tool", "old")] } });
 
         await session.SetToolsAsync([]);
 
@@ -254,11 +245,9 @@ public sealed class SetToolsTests
         var setCall = 0;
         server.BeforeSetToolsResponseAsync = _ => Interlocked.Increment(ref setCall) == 1 ? releaseFirst.Task : Task.CompletedTask;
         server.RejectSetToolsCall(1, "first failed");
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
-        {
-            Tools = [Tool("ordered_tool", "initial")],
-        });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [Tool("ordered_tool", "initial")] } });
         server.ClearRequests();
 
         var first = session.SetToolsAsync([Tool("ordered_tool", "first")]);
@@ -268,7 +257,7 @@ public sealed class SetToolsTests
         Assert.Single(server.Requests, request => request.Method == "session.tools.set");
 
         releaseFirst.SetResult();
-        await Assert.ThrowsAsync<IOException>(() => first);
+        await Assert.ThrowsAsync<RemoteRpcException>(() => first);
         await second;
 
         var setRequests = server.Requests.Where(request => request.Method == "session.tools.set").ToList();
@@ -285,14 +274,17 @@ public sealed class SetToolsTests
         var releaseSet = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.BeforeSetToolsResponseAsync = _ => releaseSet.Task;
         using var acceptanceContext = new DeferredSynchronizationContext();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
         {
-            Tools = [AIFunctionFactory.Create(() =>
+            Tools = new SessionToolOptions
             {
-                acceptanceContext.Resume();
-                return "old";
-            }, new AIFunctionFactoryOptions { Name = "cancel_tool", Description = "Returns old" })],
+                Definitions = [AIFunctionFactory.Create(() =>
+{
+    acceptanceContext.Resume();
+    return "old";
+}, new AIFunctionFactoryOptions { Name = "cancel_tool", Description = "Returns old" })]
+            }
         });
 
         try
@@ -330,14 +322,17 @@ public sealed class SetToolsTests
     {
         using var deadline = new CancellationTokenSource();
         await using var server = await SetToolsFakeServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
         {
-            Tools = [AIFunctionFactory.Create(() =>
+            Tools = new SessionToolOptions
             {
-                deadline.Cancel();
-                return "new";
-            }, new AIFunctionFactoryOptions { Name = "late_tool", Description = "Returns after the wait deadline" })],
+                Definitions = [AIFunctionFactory.Create(() =>
+{
+    deadline.Cancel();
+    return "new";
+}, new AIFunctionFactoryOptions { Name = "late_tool", Description = "Returns after the wait deadline" })]
+            }
         });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
@@ -354,11 +349,9 @@ public sealed class SetToolsTests
         var logger = new SetToolsResponseLogger();
         var releaseSet = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.BeforeSetToolsResponseAsync = _ => releaseSet.Task;
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url), Logger = logger });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
-        {
-            Tools = [Tool("cancel_tool", "old")],
-        });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port), Observability = new ClientObservabilityOptions { Logger = logger } });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [Tool("cancel_tool", "old")] } });
 
         using var cts = new CancellationTokenSource();
         try
@@ -415,11 +408,9 @@ public sealed class SetToolsTests
         await using var server = await SetToolsFakeServer.StartAsync();
         var releaseSet = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.BeforeSetToolsResponseAsync = _ => releaseSet.Task;
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig
-        {
-            Tools = [Tool("queued_tool", "old")],
-        });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [Tool("queued_tool", "old")] } });
         server.ClearRequests();
 
         var first = session.SetToolsAsync([Tool("queued_tool", "first")]);
@@ -449,8 +440,8 @@ public sealed class SetToolsTests
         await using var server = await SetToolsFakeServer.StartAsync();
         var releaseSet = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.BeforeSetToolsResponseAsync = _ => releaseSet.Task;
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
 
         var first = session.SetToolsAsync([Tool("queued_tool", "first")]);
         await server.WaitForRequestAsync("session.tools.set");
@@ -722,14 +713,8 @@ public sealed class SetToolsTests
             _serverTask = RunAsync();
         }
 
-        public string Url
-        {
-            get
-            {
-                var endpoint = (IPEndPoint)_listener.LocalEndpoint;
-                return $"http://127.0.0.1:{endpoint.Port}";
-            }
-        }
+        public string Host => ((IPEndPoint)_listener.LocalEndpoint).Address.ToString();
+        public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
 
         public Func<RpcRequestRecord, Task>? BeforeSetToolsResponseAsync { get; set; }
 
@@ -912,7 +897,7 @@ public sealed class SetToolsTests
                 "connect" => new Dictionary<string, object?>
                 {
                     ["ok"] = true,
-                    ["protocolVersion"] = 3,
+                    ["protocolVersion"] = 4,
                     ["version"] = "test",
                 },
                 "session.create" => new Dictionary<string, object?>
@@ -1010,5 +995,5 @@ public sealed class SetToolsTests
     }
 }
 
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 #endif

@@ -14,7 +14,7 @@
 //!
 //! Tool dispatch uses its own per-tool registry built from
 //! [`Tool::with_handler`](crate::types::Tool::with_handler) on entries passed to
-//! [`SessionConfig::with_tools`](crate::types::SessionConfig::with_tools).
+//! [`SessionToolOptions::with_definitions`](crate::types::SessionToolOptions::with_definitions).
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -44,7 +44,7 @@ use crate::types::{
 /// instead.
 ///
 /// ```
-/// use github_copilot_sdk::handler::PermissionResult;
+/// use copilot_sdk::handler::PermissionResult;
 ///
 /// fn is_decision(result: PermissionResult) -> bool {
 ///     match result {
@@ -109,8 +109,8 @@ impl PermissionResult {
     /// It is a no-op on [`PermissionResult::NoResult`].
     ///
     /// ```rust,no_run
-    /// # use github_copilot_sdk::handler::PermissionResult;
-    /// # use github_copilot_sdk::{
+    /// # use copilot_sdk::handler::PermissionResult;
+    /// # use copilot_sdk::{
     /// #     PermissionDecisionContext, PermissionDecisionOutcome, PermissionDecisionSource,
     /// #     PermissionDecisionSurface,
     /// # };
@@ -237,8 +237,8 @@ pub enum AutoModeSwitchResponse {
 /// Handler for `permission.requested` broadcasts.
 ///
 /// Install via
-/// [`SessionConfig::with_permission_handler`](crate::types::SessionConfig::with_permission_handler)
-/// (or the matching method on [`ResumeSessionConfig`](crate::types::ResumeSessionConfig)).
+/// [`SessionPermissionOptions::with_on_request`](crate::types::SessionPermissionOptions::with_on_request)
+/// (or the matching method on [`ResumeSessionOptions`](crate::types::ResumeSessionOptions)).
 /// When no permission handler is supplied, the SDK sends
 /// `requestPermission: false` on the wire and the runtime short-circuits
 /// permission prompts for this client.

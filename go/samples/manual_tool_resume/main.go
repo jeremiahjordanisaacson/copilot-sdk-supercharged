@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/rpc"
-	"github.com/github/copilot-sdk/go/samples/internal/sampleutil"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/samples/internal/sampleutil"
 )
 
 const timeout = 2 * time.Minute
@@ -43,7 +43,7 @@ func newClient() *copilot.Client {
 	if err != nil {
 		panic(err)
 	}
-	return copilot.NewClient(&copilot.ClientOptions{Connection: copilot.StdioConnection{Path: cliPath}})
+	return copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedStdioConnection{Path: cliPath}})
 }
 
 func watchPermission(session *copilot.Session) (<-chan *copilot.PermissionRequestedData, func()) {
@@ -118,10 +118,7 @@ func main() {
 	if err := client1.Start(ctx); err != nil {
 		panic(err)
 	}
-	session1, err := client1.CreateSession(ctx, &copilot.SessionConfig{
-		Tools:               []copilot.Tool{tool},
-		OnPermissionRequest: leavePermissionPending,
-	})
+	session1, err := client1.CreateSession(ctx, &copilot.CreateSessionOptions{Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{tool}}, Permissions: copilot.SessionPermissionOptions{OnRequest: leavePermissionPending}})
 	if err != nil {
 		panic(err)
 	}
@@ -155,11 +152,7 @@ func main() {
 	if err := client2.Start(ctx); err != nil {
 		panic(err)
 	}
-	session2, err := client2.ResumeSession(ctx, sessionID, &copilot.ResumeSessionConfig{
-		Tools:               []copilot.Tool{tool},
-		OnPermissionRequest: leavePermissionPending,
-		ContinuePendingWork: copilot.Bool(true),
-	})
+	session2, err := client2.ResumeSession(ctx, sessionID, &copilot.ResumeSessionOptions{Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{tool}}, Permissions: copilot.SessionPermissionOptions{OnRequest: leavePermissionPending}, ContinuePendingWork: copilot.Bool(true)})
 	if err != nil {
 		panic(err)
 	}
@@ -192,11 +185,7 @@ func main() {
 	if err := client3.Start(ctx); err != nil {
 		panic(err)
 	}
-	session3, err := client3.ResumeSession(ctx, sessionID, &copilot.ResumeSessionConfig{
-		Tools:               []copilot.Tool{tool},
-		OnPermissionRequest: leavePermissionPending,
-		ContinuePendingWork: copilot.Bool(true),
-	})
+	session3, err := client3.ResumeSession(ctx, sessionID, &copilot.ResumeSessionOptions{Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{tool}}, Permissions: copilot.SessionPermissionOptions{OnRequest: leavePermissionPending}, ContinuePendingWork: copilot.Bool(true)})
 	if err != nil {
 		panic(err)
 	}

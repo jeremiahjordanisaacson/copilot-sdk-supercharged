@@ -3,7 +3,7 @@
 //
 // Usage:
 //
-//	go run github.com/github/copilot-sdk/go/cmd/bundler [--platform GOOS/GOARCH] [--output DIR] [--cli-version VERSION] [--check-only]
+//	go run github.com/microsoft/copilot-sdk/go/v2/cmd/bundler [--platform GOOS/GOARCH] [--output DIR] [--cli-version VERSION] [--check-only]
 //
 //	--platform: Target platform using Go conventions (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64). Defaults to current platform.
 //	--output: Output directory for embedded artifacts. Defaults to the current directory.
@@ -37,11 +37,11 @@ import (
 
 const (
 	// Keep these URLs centralized so reviewers can verify all outbound calls in one place.
-	sdkModule                     = "github.com/github/copilot-sdk/go"
-	packageJSONURLFmt             = "https://raw.githubusercontent.com/github/copilot-sdk/%s/nodejs/package.json"
-	packageLockURLFmt             = "https://raw.githubusercontent.com/github/copilot-sdk/%s/nodejs/package-lock.json"
+	sdkModule                     = "github.com/microsoft/copilot-sdk/go/v2"
+	packageJSONURLFmt             = "https://raw.githubusercontent.com/microsoft/copilot-sdk/%s/nodejs/package.json"
+	packageLockURLFmt             = "https://raw.githubusercontent.com/microsoft/copilot-sdk/%s/nodejs/package-lock.json"
 	defaultCLIDownloadBaseURL     = "https://github.com/github/copilot-cli/releases/download"
-	unstableDownloadBaseURL       = "https://github.com/github/copilot-sdk/releases/download"
+	unstableDownloadBaseURL       = "https://github.com/microsoft/copilot-sdk/releases/download"
 	cliDownloadBaseURLEnvironment = "COPILOT_CLI_DOWNLOAD_BASE_URL"
 	defaultPackageName            = "main"
 )
@@ -182,7 +182,7 @@ func resolveCLIVersion(flagValue string) string {
 	version, err := detectCLIVersion()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error detecting CLI version: %v\n", err)
-		fmt.Fprintln(os.Stderr, "Hint: specify --cli-version explicitly, or run from a Go module that depends on github.com/github/copilot-sdk/go")
+		fmt.Fprintln(os.Stderr, "Hint: specify --cli-version explicitly, or run from a Go module that depends on github.com/microsoft/copilot-sdk/go/v2")
 		os.Exit(1)
 	}
 	fmt.Printf("Auto-detected CLI version: %s\n", version)
@@ -303,9 +303,9 @@ func getSDKVersion() (string, error) {
 // fetchCLIVersionFromRepo fetches package.json from GitHub and extracts the CLI version.
 func fetchCLIVersionFromRepo(sdkVersion string) (string, error) {
 	// Convert Go module version to Git ref
-	// v0.1.0 -> v0.1.0
-	// v0.1.0-beta.1 -> v0.1.0-beta.1
-	// v0.0.0-20240101120000-abcdef123456 -> abcdef123456 (pseudo-version)
+	// v2.0.0 -> v2.0.0 (the root tag paired with go/v2.0.0)
+	// v2.0.0-preview.1 -> v2.0.0-preview.1
+	// v2.0.0-20240101120000-abcdef123456 -> abcdef123456 (pseudo-version)
 	gitRef := sdkVersion
 
 	// Pseudo-versions end with a 12-character commit hash.
@@ -648,9 +648,8 @@ func runtimeLibExt(goos string) string {
 	}
 }
 
-// generateGoFile creates separate source files for normal and in-process builds.
-// Both embed the CLI, while only the copilot_inprocess-tagged file embeds the
-// native runtime library.
+// generateGoFile embeds the CLI and native runtime in both normal builds and
+// builds using the legacy copilot_inprocess tag.
 func generateGoFile(
 	goos,
 	goarch,
@@ -866,7 +865,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/github/copilot-sdk/go/embeddedcli"
+	"github.com/microsoft/copilot-sdk/go/v2/embeddedcli"
 	"github.com/klauspost/compress/zstd"
 )
 

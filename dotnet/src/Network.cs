@@ -3,9 +3,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 using System.Diagnostics.CodeAnalysis;
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>
 /// Network callbacks through which the SDK host takes over parts of the runtime's networking, for example when the
@@ -115,15 +115,12 @@ internal sealed class NetworkAdapter : INetworkHandler
 
     /// <summary>Registers the configured callbacks, and the scope when set, with the runtime.</summary>
     internal Task RegisterAsync(ServerNetworkApi network, CancellationToken cancellationToken) =>
-        network.SetProviderWithOptionsAsync(
-            new NetworkSetProviderRequest
-            {
-                Scope = _scope,
-                ResolveProxy = _resolveProxy is null ? null : new NetworkResolveProxyOptions(),
-                AuthenticateNegotiate = _authenticateNegotiate is null ? null : new NetworkAuthenticateNegotiateOptions(),
-                AuthenticateBasic = _authenticateBasic is null ? null : new NetworkAuthenticateBasicOptions(),
-            },
-            cancellationToken);
+        network.SetProviderAsync(
+            scope: _scope,
+            resolveProxy: _resolveProxy is null ? null : new NetworkResolveProxyOptions(),
+            authenticateNegotiate: _authenticateNegotiate is null ? null : new NetworkAuthenticateNegotiateOptions(),
+            authenticateBasic: _authenticateBasic is null ? null : new NetworkAuthenticateBasicOptions(),
+            cancellationToken: cancellationToken);
 
     public async Task<NetworkResolveProxyResult> ResolveProxyAsync(
         NetworkResolveProxyRequest request,

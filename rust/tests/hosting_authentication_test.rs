@@ -2,6 +2,8 @@
 #![cfg(feature = "test-support")]
 #![allow(clippy::unwrap_used)]
 
+#[path = "support/byok.rs"]
+mod byok;
 #[allow(dead_code)]
 #[path = "e2e/runtime_host_support.rs"]
 mod host_support;
@@ -9,17 +11,18 @@ mod host_support;
 #[path = "e2e/support.rs"]
 mod support;
 
+use copilot_sdk::{OwnedRuntimeOptions, RuntimeConnection, SpawnedProcessOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures_util::FutureExt;
-use github_copilot_sdk::handler::ApproveAllHandler;
-use github_copilot_sdk::{
+use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::{
     AhpAuthenticationRequest, AhpAuthenticationResult, AhpHostAuthentication, AhpHostOptions,
     AhpSessionAuthentication, AhpSessionRequest, AhpSessionResumeRequest, CliProgram, Client,
-    ClientMode, ClientOptions, ProviderConfig, Transport,
+    ClientMode, ClientOptions, ProviderConfig,
 };
+use futures_util::FutureExt;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -30,28 +33,29 @@ const RESOURCE: &str = "https://copilot.github.com/hosting/authentication";
 
 fn options(home: &Path) -> ClientOptions {
     let cli = PathBuf::from(std::env::var("COPILOT_CLI_PATH").expect("set built CLI path"));
-    let mut options = ClientOptions::default()
-        .with_transport(Transport::Stdio)
-        .with_cwd(home.parent().unwrap().join("work"))
-        .with_base_directory(home)
-        .with_use_logged_in_user(false)
-        .with_env([
-            ("COPILOT_HOME", home.to_str().unwrap()),
-            ("GH_TOKEN", ""),
-            ("GITHUB_TOKEN", ""),
-            ("COPILOT_GITHUB_TOKEN", ""),
-            ("COPILOT_SDK_AUTH_TOKEN", ""),
-            ("COPILOT_HMAC_KEY", ""),
-            ("CAPI_HMAC_KEY", ""),
-        ]);
+    let mut process = SpawnedProcessOptions::new()
+        .with_working_directory(home.parent().unwrap().join("work"))
+        .with_env(std::env::vars_os().chain([
+            ("COPILOT_HOME".into(), home.as_os_str().to_owned()),
+            ("GH_TOKEN".into(), "".into()),
+            ("GITHUB_TOKEN".into(), "".into()),
+            ("COPILOT_GITHUB_TOKEN".into(), "".into()),
+            ("COPILOT_SDK_AUTH_TOKEN".into(), "".into()),
+            ("COPILOT_HMAC_KEY".into(), "".into()),
+            ("CAPI_HMAC_KEY".into(), "".into()),
+        ]));
     if cli.extension().is_some_and(|ext| ext == "js") {
-        options = options
+        process = process
             .with_program(CliProgram::Path("node".into()))
-            .with_prefix_args([cli]);
+            .with_args([cli]);
     } else {
-        options = options.with_program(CliProgram::Path(cli));
+        process = process.with_program(CliProgram::Path(cli));
     }
-    options
+    ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
+        .with_runtime(RuntimeConnection::SpawnedStdio(
+            process.with_owned(|_| OwnedRuntimeOptions::new().with_base_directory(home)),
+        ))
+        .with_github(|group| group.with_use_logged_in_user(false))
 }
 
 fn fixture_home() -> (tempfile::TempDir, PathBuf) {
@@ -91,7 +95,7 @@ async fn real_host_rejects_missing_policy_bad_identity_and_invalid_expiry() {
     let (_fixture, home_path) = fixture_home();
     let owner = Client::start(options(&home_path)).await.unwrap();
     let result = std::panic::AssertUnwindSafe(async {
-        for mode in [ClientMode::CopilotCli, ClientMode::Empty] {
+        for mode in [ClientMode::CodingAgent, ClientMode::Empty] {
             let client = Client::start(options(&home_path).with_mode(mode))
                 .await
                 .unwrap();
@@ -257,15 +261,27 @@ async fn real_host_custom_and_anonymous_byok_create_and_cold_resume() {
                         .with_allow_creating_new_sessions(true)
                         .with_create_session(move |request: AhpSessionRequest, client: Client| {
                             assert!(request.authentication == create_expected);
-                            assert!(request.config.github_token.is_none());
-                            assert!(request.config.github_token_provider.is_none());
+                            assert!(request.config.github.token.is_none());
+                            assert!(request.config.github.token_provider.is_none());
                             let config = request
                                 .config
                                 .clone()
-                                .with_provider(create_provider.clone())
+                                .with_inference(|group| {
+                                    byok::inference(group, create_provider.clone())
+                                })
+                                .with_github(|group| {
+                                    group.with_capi(
+                                        copilot_sdk::CapiSessionOptions::default()
+                                            .with_enabled(false),
+                                    )
+                                })
                                 .with_model("claude-sonnet-5")
-                                .with_extension_sdk_path(create_extension.clone())
-                                .with_permission_handler(Arc::new(ApproveAllHandler));
+                                .with_extensions(|group| {
+                                    group.with_sdk_path(create_extension.clone())
+                                })
+                                .with_permissions(|group| {
+                                    group.with_on_request(Arc::new(ApproveAllHandler))
+                                });
                             let created_tx = created_tx.clone();
                             async move {
                                 let session = Arc::new(client.create_session(config).await?);
@@ -314,15 +330,27 @@ async fn real_host_custom_and_anonymous_byok_create_and_cold_resume() {
                         .with_resume_session(
                             move |request: AhpSessionResumeRequest, client: Client| {
                                 assert!(request.authentication == resume_expected);
-                                assert!(request.config.github_token.is_none());
-                                assert!(request.config.github_token_provider.is_none());
+                                assert!(request.config.github.token.is_none());
+                                assert!(request.config.github.token_provider.is_none());
                                 let config = request
                                     .config
                                     .clone()
-                                    .with_provider(resume_provider.clone())
+                                    .with_inference(|group| {
+                                        byok::inference(group, resume_provider.clone())
+                                    })
+                                    .with_github(|group| {
+                                        group.with_capi(
+                                            copilot_sdk::CapiSessionOptions::default()
+                                                .with_enabled(false),
+                                        )
+                                    })
                                     .with_model("claude-sonnet-5")
-                                    .with_extension_sdk_path(resume_extension.clone())
-                                    .with_permission_handler(Arc::new(ApproveAllHandler));
+                                    .with_extensions(|group| {
+                                        group.with_sdk_path(resume_extension.clone())
+                                    })
+                                    .with_permissions(|group| {
+                                        group.with_on_request(Arc::new(ApproveAllHandler))
+                                    });
                                 let resumed_tx = resumed_tx.clone();
                                 async move {
                                     let session = Arc::new(client.resume_session(config).await?);

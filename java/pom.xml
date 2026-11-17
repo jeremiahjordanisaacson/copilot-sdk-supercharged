@@ -5,13 +5,13 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.github</groupId>
-    <artifactId>copilot-sdk-java-parent</artifactId>
+    <groupId>com.microsoft</groupId>
+    <artifactId>copilot-sdk-parent</artifactId>
     <version>${revision}</version>
     <packaging>pom</packaging>
 
-    <name>GitHub Copilot SDK :: Java :: Parent</name>
-    <description>Parent POM for the GitHub Copilot Java SDK multi-module reactor</description>
+    <name>Microsoft Copilot SDK :: Java :: Parent</name>
+    <description>Parent POM for the Microsoft Copilot SDK multi-module reactor</description>
     <url>https://github.com/github/copilot-sdk</url>
 
     <licenses>
@@ -23,8 +23,8 @@
 
     <developers>
         <developer>
-            <name>GitHub Copilot SDK Team</name>
-            <organization>GitHub</organization>
+            <name>Microsoft Copilot SDK Team</name>
+            <organization>Microsoft</organization>
             <organizationUrl>https://github.com/github</organizationUrl>
         </developer>
     </developers>

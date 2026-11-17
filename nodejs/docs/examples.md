@@ -1,13 +1,13 @@
 # Copilot CLI Extension Examples
 
-A practical guide to writing extensions using the `@github/copilot-sdk` extension API.
+A practical guide to writing extensions using the `@microsoft/copilot-sdk` extension API.
 
 ## Extension Skeleton
 
 Every extension starts with the same boilerplate:
 
 ```js
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 const session = await joinSession({
     hooks: {
@@ -478,7 +478,7 @@ Correlate `tool.execution_start` / `tool.execution_complete` events by `toolCall
 ```js
 import { existsSync, watchFile, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 const agentEdits = new Set(); // toolCallIds for in-flight agent edits
 const recentAgentPaths = new Set(); // paths recently written by the agent
@@ -532,7 +532,7 @@ Filter out agent edits by tracking `tool.execution_start` / `tool.execution_comp
 ```js
 import { watch, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 const agentEditPaths = new Set();
 
@@ -625,7 +625,7 @@ const session = await joinSession({
 
 ### Handling agent questions (ask_user)
 
-Register `onUserInputRequest` to enable the agent's `ask_user` tool:
+Register `interaction.onUserInputRequest` to enable the agent's `ask_user` tool:
 
 ```js
 const session = await joinSession({
@@ -649,7 +649,7 @@ Use the same VS Code setup as in
 ```js
 import { execFile, spawn } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 const isWindows = process.platform === "win32";
 const vscodeExecutable = isWindows ? process.env.VSCODE_EXECUTABLE : "code";
