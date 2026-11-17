@@ -20,15 +20,11 @@ Copilot: In Tokyo it's 75°F and sunny. Great day to be outside!
 
 Before you begin, make sure you have:
 
-- A matching **native Copilot runtime** for your deployment platform. See [Bundled runtime](./setup/bundled-cli.md) for acquisition and bundling.
-- Authentication through a supported GitHub token, signed-in CLI credentials, or [BYOK](./auth/byok.md).
+- A matching **native Copilot runtime** for your deployment platform. Step 1 sets it up with the SDK: the Node.js, .NET, and Rust SDKs bundle it, Python downloads it, Go embeds it with a bundler tool, and Java uses a platform runtime artifact. See [Bundled runtime](./setup/bundled-cli.md) for acquisition and bundling.
+- Authentication through a supported GitHub token, signed-in CLI credentials, or [BYOK](./auth/byok.md). See the [Authentication guide](./auth/authenticate.md).
 - Your preferred language runtime, at or above the version its SDK requires. Each SDK states its own floor in the Prerequisites section of its README: [Node.js](../nodejs/README.md#prerequisites), [Python](../python/README.md#prerequisites), [Go](../go/README.md#prerequisites), [Rust](../rust/README.md#prerequisites), [Java](../java/README.md#prerequisites), [.NET](../dotnet/README.md#prerequisites).
 
-If you use signed-in CLI credentials, install the CLI separately and verify it:
-
-```bash
-copilot --version
-```
+You don't need to install the GitHub Copilot CLI: by default, the SDK hosts the Copilot runtime in your application's process. The CLI is only one way to sign in (`copilot login`) and store credentials that the SDK can use; a GitHub token or BYOK works without it.
 
 ## Step 1: install the SDK
 
@@ -2187,40 +2183,42 @@ Each override supports five static actions: `replace`, `remove`, `append`, `prep
 
 See the language-specific SDK READMEs for examples in [TypeScript](../nodejs/README.md), [Python](../python/README.md), [Go](../go/README.md), [Rust](../rust/README.md), [Java](../java/README.md), and [C#](../dotnet/README.md).
 
-## Connecting to an external CLI server
+## Connecting to a standalone runtime server
 
-By default, the SDK manages a native runtime host inside your application process. You can instead run the CLI in server mode separately and have the SDK connect to it. This can be useful for:
+By default, the SDK hosts the Copilot runtime inside your application process and manages its lifecycle. The runtime is a separate component from the GitHub Copilot CLI, so you can also host it in other ways: run it as a child process of your application by selecting a [spawned connection](./setup/in-process-runtime.md#migrate-to-the-v2-default) explicitly, or run it yourself as a standalone runtime server and attach the SDK to it. A runtime server is multi-tenant: one runtime can serve many SDK clients and many concurrent sessions. Running your own server can be useful for:
 
-- **Debugging**: Keep the CLI running between SDK restarts to inspect logs
-- **Resource sharing**: Multiple SDK clients can connect to the same CLI server
-- **Development**: Run the CLI with custom settings or in a different environment
+- **Debugging**: Keep the runtime running between SDK restarts to inspect logs
+- **Resource sharing**: Multiple SDK clients can connect to the same runtime server
+- **Development**: Run the runtime with custom settings or in a different environment
 
-### Running the CLI in server mode
+### Running the runtime server
 
-Start the CLI in server mode using the `--headless` flag and optionally specify a port:
+Start the `copilot-runtime` executable with `--server` and optionally specify a port:
 
 ```bash
-copilot --headless --port 4321
+copilot-runtime --server --port 4321
 ```
 
-If you don't specify a port, the CLI will choose a random available port.
+Get `copilot-runtime` from a `github-copilot-<version>-<platform>.tgz` asset on the [GitHub Copilot CLI releases](https://github.com/github/copilot-cli/releases) page (inside the archive it's `package/prebuilds/<platform>/copilot-runtime`), and use a runtime version that matches your SDK. Extract the whole package and keep its layout intact: the executable loads `runtime.node` from its own directory and finds its built-in agents, skills and search tools in the package root. Commands in this section call it as `copilot-runtime`: run it by its full path inside the extracted package, or add the directory that contains it (`package/prebuilds/<platform>/`) to your `PATH`.
 
-By default the headless server only accepts connections from loopback (`127.0.0.1`), so the SDK must run on the same machine. To accept connections from other hosts (for example when running the CLI in a container or on a separate server), bind to a non-loopback address with `--host`. A non-loopback bind requires a connection token, or the server refuses to start:
+If you don't specify a port, the runtime chooses a random available port and prints the port it listens on.
+
+By default the runtime server only accepts connections from loopback (`127.0.0.1`), so the SDK must run on the same machine. To accept connections from other hosts (for example when running the runtime in a container or on a separate server), bind to a non-loopback address with `--host`. A non-loopback bind requires a connection token, or the server refuses to start:
 
 ```bash
 # Listen on all interfaces; set a shared secret the clients will send
 export COPILOT_CONNECTION_TOKEN="$(openssl rand -hex 32)"
-copilot --headless --host 0.0.0.0 --port 4321
+copilot-runtime --server --host 0.0.0.0 --port 4321
 ```
 
 > [!WARNING]
-> Exposing the headless server on a non-loopback address makes it reachable by anyone who can route to that address. The server requires `COPILOT_CONNECTION_TOKEN` to be set to a non-empty value for a non-loopback bind, and clients must send the same value as `connectionToken`; still pair it with network controls (firewall, private network, reverse proxy) appropriate for your environment.
+> Exposing the runtime server on a non-loopback address makes it reachable by anyone who can route to that address. The server requires `COPILOT_CONNECTION_TOKEN` to be set to a non-empty value for a non-loopback bind, and clients must send the same value as `connectionToken`; still pair it with network controls (firewall, private network, reverse proxy) appropriate for your environment.
 
-The connection carries plaintext JSON-RPC over TCP, not HTTP or TLS. Node.js, Python, Go, .NET, and Java reject `https://`; `http://` is an address alias. Connection tokens do not encrypt traffic, so confidentiality requires an encrypted tunnel or equivalent application-managed protection.
+The connection carries plaintext JSON-RPC over TCP, not HTTP or TLS, so clients pass a bare hostname or IP address and a separate port, without a scheme such as `http://` or `https://`. Connection tokens do not encrypt traffic, so confidentiality requires an encrypted tunnel or equivalent application-managed protection.
 
-### Connecting the SDK to the external server
+### Connecting the SDK to the runtime server
 
-Once the CLI is running in server mode, connect your SDK client using its TCP host and port:
+Once the runtime server is running, attach your SDK client to it with a TCP connection to its host and port:
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
@@ -2403,7 +2401,11 @@ var session = client
 
 </details>
 
-**Note:** When a TCP connection is provided (`RuntimeConnection.forTcp` in Node.js, `RuntimeConnection.for_tcp` in Python, `RuntimeConnection.ForTcp` in .NET, Go's `TCPConnection`, or Java's `RuntimeConnection.forTcp`), or Rust uses `RuntimeConnection::Tcp`, the SDK will not spawn or manage a CLI process - it will only connect to the existing server at the specified host and port.
+**Note:** When a TCP connection is provided (`RuntimeConnection.forTcp` in Node.js, `RuntimeConnection.for_tcp` in Python, `RuntimeConnection.ForTcp` in .NET, Go's `TCPConnection`, or Java's `RuntimeConnection.forTcp`), or Rust uses `RuntimeConnection::Tcp` (`RuntimeConnection::for_tcp`), the SDK does not start, host, or stop a runtime - it only connects to the existing server at the specified host and port.
+
+If the server was started with `COPILOT_CONNECTION_TOKEN`, pass the same value as the connection token: `RuntimeConnection.forTcp(host, port, { connectionToken })` in Node.js, `connection_token=` in Python, `connectionToken:` in .NET, `ConnectionToken` on Go's `TCPConnection`, `setConnectionToken(...)` on Java's connection, or `connection_token` on Rust's `TcpRuntimeOptions`.
+
+An attached client doesn't own the runtime, so configure runtime-wide settings when you start the server: for example, its state directory with `COPILOT_HOME` or `--config-dir`, and idle-session cleanup with `--session-idle-timeout <seconds>`. The SDK rejects runtime startup settings on an attached client, such as default authentication and the telemetry exporter and log level (`github.token`, `github.useLoggedInUser`, `observability.telemetry`, and `observability.logLevel` in TypeScript). Session-scoped authentication still works.
 
 ## Telemetry and observability
 
@@ -2566,7 +2568,7 @@ Dependency: `io.opentelemetry:opentelemetry-api`
 | Source name     | `sourceName`     | `source_name`     | `SourceName`     | `source_name`     | `sourceName`     | `SourceName`     | Instrumentation scope name                                             |
 | Capture content | `captureContent` | `capture_content` | `CaptureContent` | `capture_content` | `captureContent` | `CaptureContent` | Whether to capture message content                                     |
 
-The OTLP protocol field configures the CLI's `"otlp-http"` exporter for all signals. Leave it unset to use the CLI default, or set it to `"http/protobuf"` to export protobuf over HTTP.
+The OTLP protocol field configures the runtime's `"otlp-http"` exporter for all signals. Leave it unset to use the runtime default, or set it to `"http/protobuf"` to export protobuf over HTTP.
 
 ### File export
 
@@ -2592,8 +2594,8 @@ const client = new CopilotClient({
 
 Trace context is propagated automatically—no manual instrumentation is needed:
 
-- **SDK → CLI**: `traceparent` and `tracestate` headers from the current span/activity are included in `session.create`, `session.resume`, and `session.send` RPC calls.
-- **CLI → SDK**: When the CLI invokes tool handlers, the trace context from the CLI's span is propagated so your tool code runs under the correct parent span.
+- **SDK → runtime**: `traceparent` and `tracestate` headers from the current span/activity are included in `session.create`, `session.resume`, and `session.send` RPC calls.
+- **Runtime → SDK**: When the runtime invokes tool handlers, the trace context from the runtime's span is propagated so your tool code runs under the correct parent span.
 
 📖 **[OpenTelemetry Instrumentation Guide →](./observability/opentelemetry.md)**—TelemetryConfig options, trace context propagation, and per-language dependencies.
 

@@ -29,7 +29,7 @@ For an existing integration, migrate runtime ownership first, then the restructu
 
 ## In-process runtime hosting by default
 
-All six SDKs now default to loading the native Rust runtime into your application's process instead of starting a separate Copilot CLI process. This removes the child-process requirement for ordinary SDK use: applications can host the runtime directly without creating and managing a separate CLI process or sending runtime requests across process boundaries.
+All six SDKs now default to loading the native Rust runtime into your application's process instead of starting a separate runtime process. This removes the child-process requirement for ordinary SDK use: applications can host the runtime directly without creating and managing a separate runtime process or sending runtime requests across process boundaries.
 
 > [!WARNING]
 > In-process hosting is not a sandbox and provides no crash isolation. A native runtime crash can terminate your application.

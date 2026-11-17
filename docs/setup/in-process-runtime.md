@@ -1,6 +1,6 @@
 # Run the Copilot runtime in process
 
-SDK v2 hosts the native Copilot runtime in your application process by default instead of starting a separate Copilot CLI process. Sessions, events, tools, hooks, and JSON-RPC framing remain the same.
+SDK v2 hosts the native Copilot runtime in your application process by default instead of starting a separate runtime process. Sessions, events, tools, hooks, and JSON-RPC framing remain the same.
 
 > [!WARNING]
 > In-process hosting is not a sandbox and provides no crash isolation from the runtime. A native crash can terminate your application. Test startup, model turns, and shutdown on every operating system and architecture that you deploy.
@@ -253,7 +253,7 @@ The native library can remain loaded until the application process exits. Do not
 In-process hosting has these current constraints:
 
 - **Shared process state**: all clients share the host process environment, current working directory, native library, and runtime worker pool.
-- **Restricted process options**: arbitrary environment maps, client working directories, executable paths, and CLI arguments are rejected where applicable.
+- **Restricted process options**: arbitrary environment maps, client working directories, executable paths, and extra runtime arguments are rejected where applicable.
 - **No per-client working directory**: set working directories per session instead.
 - **One runtime version per process**: loading another native library path or version is not supported.
 - **macOS library validation**: hardened hosts must permit loading the runtime's signed native library. Verifying its signature alone does not establish host/library Team ID compatibility.

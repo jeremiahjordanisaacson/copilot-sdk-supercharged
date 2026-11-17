@@ -280,7 +280,7 @@ Anthropic models always use the Anthropic Messages API regardless of this settin
 
 - Use for native Azure OpenAI endpoints
 - `baseUrl` / `base_url` accepts a resource host or a full project URL, such as `https://<host>/api/projects/hosted-agents-ncus`, with or without a trailing slash.
-- The runtime preserves the project prefix when constructing Azure API paths. For `wireApi: "responses"` with `azure.apiVersion` omitted, the project URL above produces `https://<host>/api/projects/hosted-agents-ncus/openai/v1/responses`. Project URLs require an updated Copilot CLI runtime.
+- The runtime preserves the project prefix when constructing Azure API paths. For `wireApi: "responses"` with `azure.apiVersion` omitted, the project URL above produces `https://<host>/api/projects/hosted-agents-ncus/openai/v1/responses`. Project URLs require an updated Copilot runtime.
 
 **Anthropic (`type: "anthropic"`)**
 
@@ -447,7 +447,7 @@ For more details about acquiring and refreshing Microsoft Entra bearer tokens, s
 
 ## Custom model listing
 
-When using BYOK, the CLI server may not know which models your provider supports. You can supply a custom `onListModels` handler at the client level so that `client.listModels()` returns your provider's models in the generated `Model` format. This lets downstream consumers discover available models without querying the CLI.
+When using BYOK, the runtime may not know which models your provider supports. You can supply a custom `onListModels` handler at the client level so that `client.listModels()` returns your provider's models in the generated `Model` format. This lets downstream consumers discover available models without querying the runtime.
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
@@ -602,7 +602,7 @@ var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientM
 
 </details>
 
-Results are cached after the first call, just like the default behavior. The handler completely replaces the CLI's `models.list` RPC—no fallback to the server occurs.
+Results are cached after the first call, just like the default behavior. The handler completely replaces the runtime's `models.list` RPC—no fallback to the runtime occurs.
 
 ## Limitations
 

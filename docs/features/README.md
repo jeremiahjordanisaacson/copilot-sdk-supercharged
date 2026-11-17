@@ -8,7 +8,7 @@ These guides cover the capabilities you can add to your Copilot SDK application.
 
 | Feature | Description |
 |---|---|
-| [The Agent Loop](./agent-loop.md) | How the CLI processes a prompt—the tool-use loop, turns, and completion signals |
+| [The Agent Loop](./agent-loop.md) | How the runtime processes a prompt—the tool-use loop, turns, and completion signals |
 | [Hooks](./hooks.md) | Intercept and customize session behavior—control tool execution, transform results, handle errors |
 | [Custom Agents](./custom-agents.md) | Define specialized sub-agents with scoped tools and instructions |
 | [Changing Tools](./changing-tools.md) | Replace the tools a client supplies to a live session |

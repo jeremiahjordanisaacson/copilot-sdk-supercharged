@@ -2,7 +2,7 @@
 
 # Customization discovery locations
 
-GitHub Copilot can discover versioned skills, agents, instructions, and file hooks directly from package installations, submodules, and vendored directories. You don't need to copy them into conventional directories.
+The Copilot runtime can discover versioned skills, agents, instructions, and file hooks directly from package installations, submodules, and vendored directories. You don't need to copy them into conventional directories.
 
 ## Repository settings
 
@@ -25,7 +25,7 @@ File content from repository-defined discovery locations is read through a valid
 
 Repository locations require trust covering the declaring checkout root and remain subject to each customization type's existing discovery switches, disabled entries, and managed policy. Persisted trust for only a subdirectory doesn't authorize its parent checkout's settings. Listing a location doesn't enable a disabled customization type or grant filesystem access.
 
-In the CLI, remembered folder trust refreshes repository customizations in the current session, even if model catalog initialization failed. `/skills reload` also rechecks persisted trust and repository discovery settings.
+In the interactive CLI, remembered folder trust refreshes repository customizations in the current session, even if model catalog initialization failed. `/skills reload` also rechecks persisted trust and repository discovery settings.
 
 ## SDK inputs
 

@@ -43,7 +43,7 @@ Repository hooks and settings require workspace trust. Ambient user hooks requir
 
 Repository filesystem hooks are separate from the SDK callbacks described in
 this guide. To load them from additional directories during local session
-creation or cold resume, supply `additionalDirectories`; CLI `--add-dir` also participates by default.
+creation or cold resume, supply `additionalDirectories`; `--add-dir` launch arguments (for the runtime or the interactive CLI) also participate by default.
 `DISABLE_ADDITIONAL_DIRECTORY_HOOKS=true` restores primary-only scope;
 `enableFileHooks` can enable or disable repository hooks through `session.rpc.options.update`; explicit SDK hook directories and callbacks are independent.
 

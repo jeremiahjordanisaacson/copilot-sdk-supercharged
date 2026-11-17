@@ -11,10 +11,10 @@ The implementation spans the runtime repository and the hosting library it links
 Build from the runtime checkout; Cargo obtains the pinned `copilotd-hosting`
 library from its recorded Git source.
 The SDK lives in the runtime repository at `src/sdk`; its source revision is
-the runtime commit, not a separate `github/copilot-sdk` commit. Run SDK commands
+the runtime commit, not a separate `microsoft/copilot-sdk` commit. Run SDK commands
 from `src/sdk` unless a command names another working directory.
 
-Both runtime and SDK pin SDK protocol version 3. The standard AHP client is
+Both runtime and SDK pin SDK protocol version 4. The standard AHP client is
 pinned to `@microsoft/agent-host-protocol@0.9.0`. The host serves AHP 1.0
 and retains AHP 0.9 compatibility; the CLI client still negotiates AHP 0.9.
 The host prototype `d62d982`

@@ -1,6 +1,6 @@
 # Default setup (bundled runtime)
 
-SDK v2 loads the native runtime into your application process by default. Node.js and .NET include platform runtime assets; Rust bundles them with its default features. Go applications use the bundler, and Java applications add a platform runtime classifier.
+SDK v2 loads the native Copilot runtime into your application process by default, so you don't install the GitHub Copilot CLI or run a separate runtime process. Node.js and .NET include platform runtime assets; Rust bundles them with its default features. Go applications use the bundler, and Java applications add a platform runtime classifier.
 
 The Python SDK recommends a one-time download step after installation:
 
@@ -14,19 +14,19 @@ This downloads the matching runtime and caches it locally. If you skip this step
 
 ## How it works
 
-After the matching native artifacts are installed, the SDK loads the Rust runtime through its C ABI and communicates using framed JSON-RPC in memory. No separate CLI process or Node.js interpreter is needed. See [In-process runtime](./in-process-runtime.md) for platform requirements, shared-process limitations, and explicit subprocess alternatives.
+After the matching native artifacts are installed, the SDK loads the Rust runtime through its C ABI and communicates using framed JSON-RPC in memory. No separate runtime process or Node.js interpreter is needed. See [In-process runtime](./in-process-runtime.md) for platform requirements, shared-process limitations, and explicit subprocess alternatives.
 
 ```mermaid
 flowchart TB
     subgraph Bundle["Your Application"]
         App["Application Code"]
         SDK["SDK Client"]
-        CLIBin["Native Copilot runtime<br/>(loaded in process)"]
+        Runtime["Native Copilot runtime<br/>(loaded in process)"]
     end
 
     App --> SDK
-    SDK -- "JSON-RPC / C ABI" --> CLIBin
-    CLIBin -- "API calls" --> Copilot["☁️ GitHub Copilot"]
+    SDK -- "JSON-RPC / C ABI" --> Runtime
+    Runtime -- "API calls" --> Copilot["☁️ GitHub Copilot"]
 
     style Bundle fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
 ```
@@ -36,6 +36,11 @@ flowchart TB
 * The SDK pins the runtime version to ensure compatibility
 * Users authenticate through your app (or use env vars / BYOK)
 * Sessions are managed per-user on their machine
+
+In-process hosting is not a sandbox and provides no crash isolation. To host the runtime outside your application process instead:
+
+* **Child process**: select a spawned connection, such as `RuntimeConnection.forSpawnedStdio()` or `RuntimeConnection.forSpawnedTcp()` (TypeScript and Java names; each SDK has an equivalent), and the SDK starts the runtime as a child process. See [Migrate to the v2 default](./in-process-runtime.md#migrate-to-the-v2-default) and [Use your own runtime binary](./local-cli.md).
+* **Standalone runtime server**: start `copilot-runtime --server` yourself and attach to it over TCP with `RuntimeConnection.forTcp(host, port)`. One runtime server can serve many SDK clients and concurrent sessions. See [Backend services](./backend-services.md).
 
 ## Quick start
 
@@ -196,7 +201,7 @@ You need to decide how your users will authenticate. Here are the common pattern
 flowchart TB
     App["Bundled App"]
 
-    App --> A["User signs in to CLI<br/>(keychain credentials)"]
+    App --> A["User signs in<br/>(keychain credentials)"]
     App --> B["App provides token<br/>(OAuth / env var)"]
     App --> C["BYOK<br/>(your own API keys)"]
 
@@ -209,7 +214,7 @@ flowchart TB
 
 ### Option A: user's signed-in credentials (simplest)
 
-The user signs in to the CLI once, and your app uses those credentials. No extra code needed—this is the default behavior.
+The user signs in once (for example, by running `copilot login` with the GitHub Copilot CLI), and your app uses the stored credentials. No extra code needed—this is the default behavior.
 
 ```typescript
 import { CopilotClient } from "@microsoft/copilot-sdk";

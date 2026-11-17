@@ -20,8 +20,8 @@ This guide is a sister to [Scaling and multi-tenancy](./scaling.md). Use that gu
 | Option                                          | Use it for                                        | Notes                                                                                                                  |
 | ----------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `mode: "empty"`                                 | Disabling ambient OS tools and CLI defaults       | Required for multi-user or shared scenarios.                                                                           |
-| `OwnedRuntimeOptions.sessionIdleTimeoutSeconds` | Cleaning idle sessions                            | Configure external servers separately.                                                                                 |
-| `OwnedRuntimeOptions.baseDirectory`             | Isolating `COPILOT_HOME` per owned runtime        | Set `COPILOT_HOME` on external servers.                                                                                |
+| `OwnedRuntimeOptions.sessionIdleTimeoutSeconds` | Cleaning idle sessions                            | On a runtime server, pass `--session-idle-timeout` instead.                                                            |
+| `OwnedRuntimeOptions.baseDirectory`             | Isolating `COPILOT_HOME` per owned runtime        | On a runtime server, set `COPILOT_HOME` or pass `--config-dir` instead.                                                |
 | `sessionFs`                                     | Routing session filesystem storage off local disk | Pair with per-session filesystem providers.                                                                            |
 | `RuntimeConnection.forTcp(host, port)`          | Sharing one already-running runtime               | Language names vary; see samples below.                                                                                |
 | `state.memory.storeMemory`                      | Keeping agent memories in application storage     | Your app owns storage, isolation and recall.                                                                           |
@@ -31,7 +31,7 @@ For callback-backed credentials, see [Rotating session-scoped GitHub tokens](../
 
 ### `mode: "empty"`
 
-`mode: "empty"` disables optional Copilot CLI behavior by default. In multi-user server mode, this is the safe baseline because your application must explicitly decide which tools, MCP servers, skills, and workspace paths a session can access.
+`mode: "empty"` disables the optional CLI-style behavior of `mode: "coding-agent"` by default. In multi-user server mode, this is the safe baseline because your application must explicitly decide which tools, MCP servers, skills, and workspace paths a session can access.
 
 Do not use `mode: "coding-agent"` for shared servers. That mode is intended for CLI-like coding agents and can expose ambient host filesystem capabilities.
 
@@ -396,7 +396,7 @@ let session = client
 
 ### `sessionIdleTimeoutSeconds`
 
-Set `sessionIdleTimeoutSeconds` in owned-runtime options to clean up inactive sessions. Configure external servers separately to reduce memory and filesystem pressure.
+Set `sessionIdleTimeoutSeconds` in owned-runtime options to clean up inactive sessions and reduce memory and filesystem pressure. A client attached to a runtime server can't set it; pass `--session-idle-timeout <seconds>` when you start the server instead.
 
 | Language   | Public option                            |
 | ---------- | ---------------------------------------- |
@@ -425,9 +425,9 @@ const client = new CopilotClient({
 });
 ```
 
-The runtime stores session state under the configured `COPILOT_HOME`, including `session-state/{sessionId}`. If your app runs multiple runtime instances, give each instance a distinct directory unless you intentionally use shared storage.
+`RuntimeConnection.forDefault(...)` applies these settings to the SDK's default hosting: in your application process, or in a spawned process when `COPILOT_SDK_DEFAULT_CONNECTION=stdio`. The runtime stores session state under the configured `COPILOT_HOME`, including `session-state/{sessionId}`. If your app runs multiple runtime instances, give each instance a distinct directory unless you intentionally use shared storage.
 
-Attached TCP connections do not expose `baseDirectory`. Configure `COPILOT_HOME` on the external runtime process instead.
+Attached TCP connections do not expose `baseDirectory`. Set `COPILOT_HOME`, or pass `--config-dir`, on the runtime server instead.
 
 ### `sessionFs`
 
@@ -480,7 +480,7 @@ Java does not currently expose a verified public `sessionFs` option, so this gui
 
 ### `RuntimeConnection.forTcp(host, port)`
 
-Use an external runtime connection when multiple SDK clients should share one already-running runtime. This is common in backend services where the runtime process is managed separately from request handlers.
+Use an external runtime connection when multiple SDK clients should share one already-running runtime, such as a standalone runtime server started with `copilot-runtime --server`. This is common in backend services where the runtime process is managed separately from request handlers.
 
 | Language   | External runtime connection                                                  |
 | ---------- | ---------------------------------------------------------------------------- |
@@ -491,7 +491,9 @@ Use an external runtime connection when multiple SDK clients should share one al
 | Java       | `RuntimeConnection.forTcp(host, port)`                                       |
 | Rust       | `RuntimeConnection::Tcp(TcpRuntimeOptions { host, port, connection_token })` |
 
-External runtimes manage their own process-level authentication and storage. Pass per-session tokens on `createSession` or `resumeSession` when you need user-specific auth.
+If the server requires a connection token, pass it with the connection, for example `RuntimeConnection.forTcp(host, port, { connectionToken })` in TypeScript. [Backend services setup](./backend-services.md#step-2-connect-the-sdk) shows the option in each language.
+
+External runtimes manage their own process-level authentication and storage. Don't set runtime startup options such as the client-level `github.token`, `observability.telemetry`, `baseDirectory` or `sessionIdleTimeoutSeconds` on an attached client; configure them on the runtime server instead. Pass per-session tokens on `createSession` or `resumeSession` when you need user-specific auth.
 
 ### Per-session `gitHubToken`
 
@@ -601,12 +603,12 @@ Other SDKs: Python `MemoryConfiguration(store_memory=...)`, Go `SessionStateOpti
 Partners building branded agents can set an integration ID for Mission Control requests. The runtime reads `GITHUB_COPILOT_INTEGRATION_ID` and stamps it as the `Copilot-Integration-Id` HTTP header on every Mission Control request.
 
 ```bash
-GITHUB_COPILOT_INTEGRATION_ID=my-product-agent copilot --headless --port 4321
+GITHUB_COPILOT_INTEGRATION_ID=my-product-agent copilot-runtime --server --port 4321
 ```
 
 The default integration ID is `copilot-developer-cli`. Use a stable value such as `my-product-agent` for attribution and routing. The integration ID is currently configured by environment variable only; it is not a first-class SDK option.
 
-If the SDK spawns the runtime, pass the environment variable through the client environment option. If you connect with `RuntimeConnection.forTcp(host, port)`, set the environment variable on the runtime process itself.
+When the SDK hosts the runtime (in process by default, or as a spawned process), set the variable in your application's environment before you create the first client; a spawned connection can also pass it in its `env` option. If you connect with `RuntimeConnection.forTcp(host, port)`, set the environment variable on the runtime server process itself.
 
 ## Session-level isolation guarantees
 
@@ -629,13 +631,13 @@ Session state is stored under `COPILOT_HOME/session-state/{sessionId}` unless yo
 
 ## Pattern comparison
 
-| Pattern                                    | Use when                                                                                       | Trade-offs                                                                                                    |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Pattern 1: isolated CLI per user           | You need the strongest isolation boundary or separate process credentials per user.            | Strong isolation; higher resource cost. See [Scaling and multi-tenancy](./scaling.md).                        |
-| Pattern 2: shared CLI with `mode: "empty"` | You want one runtime to serve many users while your app controls tools, auth, and session IDs. | Efficient; requires careful tool registration, per-session tokens, and application-level access checks.       |
-| Pattern 3: hybrid                          | You route compute-heavy work to cloud sessions and light work to local sessions.               | Flexible; requires workload routing and policy handling. See [Cloud Sessions](../features/cloud-sessions.md). |
+| Pattern                                        | Use when                                                                                       | Trade-offs                                                                                                    |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Pattern 1: isolated runtime per user           | You need the strongest isolation boundary or separate process credentials per user.            | Strong isolation; higher resource cost. See [Scaling and multi-tenancy](./scaling.md).                        |
+| Pattern 2: shared runtime with `mode: "empty"` | You want one runtime to serve many users while your app controls tools, auth, and session IDs. | Efficient; requires careful tool registration, per-session tokens, and application-level access checks.       |
+| Pattern 3: hybrid                              | You route compute-heavy work to cloud sessions and light work to local sessions.               | Flexible; requires workload routing and policy handling. See [Cloud Sessions](../features/cloud-sessions.md). |
 
-### Pattern 2: shared CLI with `mode: "empty"`
+### Pattern 2: shared runtime with `mode: "empty"`
 
 In this pattern, all users connect through your backend to one runtime pool. The application performs user authentication, chooses a session ID, passes the user's GitHub token on the session, and provides an explicit tool allowlist.
 
@@ -661,21 +663,21 @@ Use these rules:
 - Check ownership before `resumeSession`, `deleteSession`, or any UI action that references a session ID.
 - Pass `gitHubToken` per session when requests should run as the user.
 - Register only the tools the session needs, and prefer source-qualified allowlists such as `custom:*` or `mcp:search_docs`.
-- Set `sessionIdleTimeoutSeconds` and delete completed workflow sessions explicitly.
+- Set an idle timeout (`sessionIdleTimeoutSeconds` on an SDK-owned runtime, or `--session-idle-timeout` on a runtime server) and delete completed workflow sessions explicitly.
 
 ## Common pitfalls
 
 - Selecting `mode: "coding-agent"` instead of `mode: "empty"`. Coding-agent mode exposes CLI-style behavior and may expose the host filesystem through ambient tools.
-- Not setting `sessionIdleTimeoutSeconds`. Long-running servers can accumulate idle sessions if they do not clean them up.
+- Not setting an idle timeout (`sessionIdleTimeoutSeconds`, or `--session-idle-timeout` on a runtime server). Long-running servers can accumulate idle sessions if they do not clean them up.
 - Sharing one `gitHubToken` across users instead of passing a per-session token.
 - Trusting client-provided session IDs without checking ownership in your backend.
-- Setting `baseDirectory` on a client that connects to an existing runtime and expecting it to move runtime storage. Configure the runtime process instead.
+- Setting runtime startup options, such as `baseDirectory` or a client-level `github.token`, on a client attached to an existing runtime. Attached clients don't accept them; configure the runtime server instead.
 - Allowing broad tool patterns such as `builtin:*` without reviewing whether each tool is appropriate for your users.
 
 ## See also
 
 - [Scaling and multi-tenancy](./scaling.md): deployment topologies, storage patterns, and isolation comparisons
-- [Backend services setup](./backend-services.md): running the runtime in headless server mode
+- [Backend services setup](./backend-services.md): running a standalone runtime server
 - [BYOK](../auth/byok.md): using your own model provider credentials
 - [Cloud Sessions](../features/cloud-sessions.md): routing selected work to cloud sessions
 - [Session Persistence](../features/session-persistence.md): managing resumable session state

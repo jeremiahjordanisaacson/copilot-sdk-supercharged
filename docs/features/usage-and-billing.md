@@ -33,12 +33,12 @@ Check `observationKind`, `quantityKind`, and `acquisitionStatus` before interpre
 
 For Microsoft 365 Copilot, access and capacity are service verdicts, while quantities are advisory. For example, `allowed`/`available` with both quantities explicitly zero means **0 / 0 AIC reported**, not 100% consumed or inconsistent state. A missing entitlement is different from a zero entitlement. The `-1` entitlement sentinel means unlimited entitlement without changing the reported capacity state. Inference headers can reflect cached admission state; neither those headers nor an on-demand quota refresh establish the charge for the preceding call.
 
-Usage totals belong to a session, not the active account. In the CLI, switching away from a non-empty Microsoft 365 Copilot session requires starting a new session. The previous session retains its usage and history for resume; the new session starts its own totals.
+Usage totals belong to a session, not the active account. In the interactive CLI, switching away from a non-empty Microsoft 365 Copilot session requires starting a new session. The previous session retains its usage and history for resume; the new session starts its own totals.
 
 > [!NOTE]
-> `session.quota`, `session.usage.getMetrics`, `session.metadata.contextInfo`, and `session.metadata.recomputeContextTokens` are marked experimental in the generated RPC surface. In .NET they raise the `MCPSDK001` experimental diagnostic, which you suppress with `#pragma warning disable MCPSDK001` or a project-level `<NoWarn>MCPSDK001</NoWarn>`. Pin both the SDK and the Copilot CLI runtime if your application depends on them.
+> `session.quota`, `session.usage.getMetrics`, `session.metadata.contextInfo`, and `session.metadata.recomputeContextTokens` are marked experimental in the generated RPC surface. In .NET they raise the `MCPSDK001` experimental diagnostic, which you suppress with `#pragma warning disable MCPSDK001` or a project-level `<NoWarn>MCPSDK001</NoWarn>`. Pin both the SDK and the Copilot runtime if your application depends on them.
 
-The field tables below list only the fields used in the examples on this page. The complete, always-current field reference is the generated SDK types plus [Streaming events](./streaming-events.md), which is regenerated from the CLI schema on every dependency bump. Treat those as the source of truth and this page as a task-oriented guide.
+The field tables below list only the fields used in the examples on this page. The complete, always-current field reference is the generated SDK types plus [Streaming events](./streaming-events.md), which is regenerated from the runtime schema on every dependency bump. Treat those as the source of truth and this page as a task-oriented guide.
 
 ## Per-call token counts
 

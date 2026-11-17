@@ -4,7 +4,7 @@ Session limits let an application set an AI Credits budget for a Copilot session
 
 ## Configure a session limit
 
-Set `maxAiCredits` to the AI Credits soft cap for the session's current accounting window. Usage is checked after model calls return, so one response can exceed the configured value before the runtime blocks the next model call. The SDK forwards this value to the Copilot CLI when it creates or resumes the session.
+Set `maxAiCredits` to the AI Credits soft cap for the session's current accounting window. Usage is checked after model calls return, so one response can exceed the configured value before the runtime blocks the next model call. The SDK forwards this value to the Copilot runtime when it creates or resumes the session.
 
 <details open>
 <summary><strong>TypeScript</strong></summary>

@@ -344,7 +344,7 @@ skills/
     └── SKILL.md
 ```
 
-The `skillDirectories` option points to the parent directory (e.g., `./skills`). The CLI searches that directory recursively and loads the topmost `SKILL.md` on each path, so skills grouped in category folders (for example `skills/testing/coverage/SKILL.md`) are found too. It does not look inside a directory that already holds a `SKILL.md`: files nested in a skill's folder are that skill's resources, not separate skills. Directories whose names start with `.` are skipped.
+The `skillDirectories` option points to the parent directory (e.g., `./skills`). The runtime searches that directory recursively and loads the topmost `SKILL.md` on each path, so skills grouped in category folders (for example `skills/testing/coverage/SKILL.md`) are found too. It does not look inside a directory that already holds a `SKILL.md`: files nested in a skill's folder are that skill's resources, not separate skills. Directories whose names start with `.` are skipped.
 
 ### SKILL.md format
 
@@ -742,7 +742,7 @@ Your application owns the folder: where it lives, how long it exists, cleaning i
 * `directory` must be absolute in the session's path conventions; on a Windows-style session filesystem it needs a drive or UNC prefix. It's resolved the way file tools resolve paths, so `.` and `..` segments and repeated or trailing separators are removed, and it can't resolve to a filesystem root. It counts toward the catalog's 1 MiB metadata limit, and it isn't shown in skill catalogs. An invalid `directory` rejects the whole catalog, like any other invalid listed skill.
 * The related-files list follows the file-based rules: build and dependency folders, such as `node_modules`, `bin`, `obj`, and `dist`, are hidden; a folder with more than 50 entries is summarized; files nested more than 10 folders deep are not listed; `SKILL.md` is never listed; and at most 100 files are shown.
 * After the conversation is compacted, the model keeps the skill's instructions but not its folder path. Invoking the skill again shows it. File-based skills keep their path.
-* Supporting files need a Copilot CLI at least as new as the SDK release that adds them. An older CLI rejects the whole skill catalog when any listed skill has a `directory`. Providers that don't set `directory` work with older CLIs.
+* Supporting files need a Copilot runtime at least as new as the SDK release that adds them. An older runtime rejects the whole skill catalog when any listed skill has a `directory`. Providers that don't set `directory` work with older runtimes.
 
 ### Serving existing SKILL.md files
 

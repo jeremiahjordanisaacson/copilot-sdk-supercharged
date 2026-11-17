@@ -23,9 +23,9 @@ Step-by-step tutorial that takes you from zero to a working Copilot app with str
 
 How to configure and deploy the SDK for your use case.
 
-* [Default Setup (Bundled CLI)](./setup/bundled-cli.md): the SDK includes the CLI automatically
-* [Local CLI](./setup/local-cli.md): use your own CLI binary or running instance
-* [Backend Services](./setup/backend-services.md): server-side with headless CLI over TCP
+* [Default Setup (Bundled Runtime)](./setup/bundled-cli.md): the SDK provides the Copilot runtime and hosts it in process by default
+* [Use Your Own Runtime Binary](./setup/local-cli.md): run a runtime executable you supply as a child process
+* [Backend Services](./setup/backend-services.md): server-side with a standalone runtime server over TCP
 * [In-process Runtime](./setup/in-process-runtime.md): the v2 default and subprocess migration options
 * [GitHub OAuth](./setup/github-oauth.md): implement the OAuth flow
 * [Azure Managed Identity](./setup/azure-managed-identity.md): BYOK with Microsoft Foundry

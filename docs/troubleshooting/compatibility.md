@@ -4,7 +4,7 @@ This document outlines which Copilot CLI features are available through the SDK 
 
 ## Overview
 
-The Copilot SDK communicates with the CLI via JSON-RPC protocol. Features must be explicitly exposed through this protocol to be available in the SDK. Many interactive CLI features are terminal-specific and not available programmatically.
+The Copilot SDK communicates with the Copilot runtime via JSON-RPC protocol. Features must be explicitly exposed through this protocol to be available in the SDK. Many interactive CLI features are terminal-specific and not available programmatically.
 
 ## Feature comparison
 
@@ -57,8 +57,8 @@ The Copilot SDK communicates with the CLI via JSON-RPC protocol. Features must b
 | Get auth status | `getAuthStatus()` | Check login state |
 | Use token | `github.token` option | Programmatic auth |
 | **Connectivity** | | |
-| Ping | `client.ping()` | Health check with server timestamp |
-| Get server status | `client.getStatus()` | Protocol version and server info |
+| Ping | `client.ping()` | Health check with runtime timestamp |
+| Get runtime status | `client.getStatus()` | Runtime version and protocol version |
 | **MCP Servers** | | |
 | Local/stdio servers | `mcp.servers` config | Spawn processes |
 | Remote HTTP/SSE | `mcp.servers` config | Connect to services |
@@ -139,8 +139,8 @@ The Copilot SDK communicates with the CLI via JSON-RPC protocol. Features must b
 | Plugin commands | `/plugin` | Interactive management (use SDK `client.rpc.plugins.*` for installed plugins and marketplaces, or `session.rpc.plugins.*` to change plugins in a live session) |
 | MCP server management | `/mcp` | Interactive UI (use SDK `client.rpc.mcp.config.*` to edit saved MCP configuration, which does not restart running servers, or `session.rpc.mcp.*` to list, start, stop and reload servers in a live session) |
 | **Account Management** | | |
-| Login flow | `/login`, `copilot auth login` | OAuth device flow |
-| Logout | `/logout`, `copilot auth logout` | Direct CLI |
+| Login flow | `/login`, `copilot login` | OAuth device flow |
+| Logout | `/logout` | Direct CLI |
 | User info | `/user` | TUI command |
 | **Session Operations** | | |
 | Clear conversation | `/clear` | TUI-only |
@@ -282,7 +282,7 @@ await session.send({ prompt: "Next, add tests" });
 
 ## Protocol limitations
 
-The SDK can only access features exposed through the CLI's JSON-RPC protocol. If you need a CLI feature that's not available:
+The SDK can only access features exposed through the runtime's JSON-RPC protocol. If you need a CLI feature that's not available:
 
 1. **Check for alternatives** - Many features have SDK equivalents (see workarounds above)
 1. **Use the CLI directly** - For one-off operations, invoke the CLI
@@ -290,11 +290,13 @@ The SDK can only access features exposed through the CLI's JSON-RPC protocol. If
 
 ## Version compatibility
 
-| SDK | Supported CLI Protocol Versions | Earlier CLI Servers |
-|-----|---------------------------------|---------------|
+| SDK | Supported runtime protocol versions | Earlier runtimes |
+|-----|-------------------------------------|------------------|
 | Node.js, Python, Go, .NET, Rust, Java | v4 | Not supported: startup fails with a protocol version mismatch error |
 
 Grouped options require protocol v4. Old SDKs reject a v4 runtime; new SDKs reject v3 or earlier before creating or resuming sessions. Neither flat option payloads nor legacy aliases are supported. This startup compatibility boundary does not change persisted-session compatibility: existing sessions and stored event formats remain supported.
+
+If you run your own runtime server, upgrade it together with the SDK so that both use the same protocol version.
 
 Check versions at runtime:
 

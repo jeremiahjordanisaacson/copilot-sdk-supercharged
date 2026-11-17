@@ -14,7 +14,7 @@ sequenceDiagram
     participant App as Your App
     participant GH as GitHub
     participant SDK as SDK Client
-    participant CLI as Copilot CLI
+    participant Runtime as Copilot runtime
     participant API as Copilot API
 
     User->>App: Click "Sign in with GitHub"
@@ -26,10 +26,10 @@ sequenceDiagram
     GH-->>App: Access token (gho_xxx)
 
     App->>SDK: Create client with token
-    SDK->>CLI: Start with gitHubToken
-    CLI->>API: Request (as user)
-    API-->>CLI: Response
-    CLI-->>SDK: Result
+    SDK->>Runtime: Start with github.token
+    Runtime->>API: Request (as user)
+    API-->>Runtime: Response
+    Runtime-->>SDK: Result
     SDK-->>App: Display to user
 ```
 
@@ -55,7 +55,7 @@ flowchart TB
         SDK["SDK Client(s)"]
     end
 
-    subgraph CLI["Copilot CLI"]
+    subgraph Runtime["Copilot runtime"]
         RPC["JSON-RPC"]
     end
 
@@ -69,7 +69,7 @@ flowchart TB
 
     style Users fill:#161b22,stroke:#8b949e,color:#c9d1d9
     style App fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
-    style CLI fill:#0d1117,stroke:#3fb950,color:#c9d1d9
+    style Runtime fill:#0d1117,stroke:#3fb950,color:#c9d1d9
 ```
 
 ## Step 1: create a GitHub OAuth app
@@ -532,7 +532,7 @@ async function getOrRefreshToken(userId: string): Promise<string> {
 
 ### One client per user (recommended)
 
-Each user gets their own SDK client with their own token. This provides the strongest isolation.
+Each user gets their own SDK client with their own token. By default, each client hosts its runtime in your application process (see [In-process runtime](./in-process-runtime.md)); to isolate users in separate runtime processes, give each client a spawned connection such as `RuntimeConnection.forSpawnedStdio()`.
 
 ```typescript
 const clients = new Map<string, CopilotClient>();
@@ -554,9 +554,9 @@ function getClientForUser(userId: string, token: string): CopilotClient {
 }
 ```
 
-### Shared CLI with per-request tokens
+### Shared runtime with per-session tokens
 
-For a lighter resource footprint, you can run a single external CLI server and pass tokens per session. See [Backend Services](./backend-services.md) for this pattern.
+For a lighter resource footprint, you can run a single standalone runtime server and pass tokens per session. A client attached to the server with `RuntimeConnection.forTcp` can't set the client-level `github` token options shown above, so pass each user's token on the session instead (`github: { token }` in `createSession`). See [Backend Services](./backend-services.md) for this pattern.
 
 ## Limitations
 

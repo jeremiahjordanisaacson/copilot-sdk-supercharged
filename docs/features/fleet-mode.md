@@ -25,7 +25,7 @@ Fleet mode works best when the parent session can create clear units of work, as
 
 ## Starting fleet mode
 
-The SDK exposes fleet mode through the session RPC namespace in several languages. The binding is experimental in the generated RPC surface; pin both the SDK and the Copilot CLI runtime if your application depends on it.
+The SDK exposes fleet mode through the session RPC namespace in several languages. The binding is experimental in the generated RPC surface; pin both the SDK and the Copilot runtime if your application depends on it.
 
 ### From within a session
 

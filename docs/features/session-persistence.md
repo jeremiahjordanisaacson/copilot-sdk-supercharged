@@ -4,7 +4,7 @@ This guide walks you through the SDK's session persistence capabilities—how to
 
 ## How sessions work
 
-When you create a session, the Copilot CLI maintains conversation history, tool state, and planning context. The runtime saves this state to disk once the session handles its first message, so you can resume sessions across restarts, container migrations, or even different client instances.
+When you create a session, the Copilot runtime maintains conversation history, tool state, and planning context. The runtime saves this state to disk once the session handles its first message, so you can resume sessions across restarts, container migrations, or even different client instances.
 
 ```mermaid
 flowchart LR
@@ -362,7 +362,7 @@ Treat tier identifiers as extensible values, not a closed enumeration. Existing 
 
 If a persisted tier is removed or disabled, resume preserves the explicit preference rather than replacing it with the provider's default. Select an available replacement before activating Auto routing.
 
-The CLI also preserves settings-derived preferences during startup, even when a tier is unavailable or dynamic discovery is disabled. You can then select a replacement in the model picker. Explicit SDK create and resume preferences are still validated before the operation succeeds, and Auto activation always validates availability against the resolved discovery mode.
+The interactive CLI also preserves settings-derived preferences during startup, even when a tier is unavailable or dynamic discovery is disabled. You can then select a replacement in the model picker. Explicit SDK create and resume preferences are still validated before the operation succeeds, and Auto activation always validates availability against the resolved discovery mode.
 
 When a create or resume request includes `experiments.assignments`, the runtime installs those assignments before validating an explicit Auto preference. Validation, discovery, and activation use the same resolved feature decision.
 
@@ -733,7 +733,7 @@ await client.deleteSession("user-123-task-456");
 
 ## Automatic cleanup: idle timeout
 
-By default, sessions have **no idle timeout** and live indefinitely until explicitly disconnected or deleted. You can optionally configure a server-wide idle timeout via `CopilotClientOptions.sessionIdleTimeoutSeconds`:
+By default, sessions have **no idle timeout** and live indefinitely until explicitly disconnected or deleted. You can optionally configure a server-wide idle timeout with the `sessionIdleTimeoutSeconds` option of the runtime connection:
 
 ```typescript
 import { RuntimeConnection, CopilotClient } from "@microsoft/copilot-sdk";
@@ -747,7 +747,7 @@ const client = new CopilotClient({
 When a timeout is configured, sessions without activity for that duration are automatically cleaned up. Set to `0` or omit to disable.
 
 > [!NOTE]
-> This option only applies when the SDK spawns the runtime process. When connecting to an existing server via a TCP connection (`RuntimeConnection.forTcp`), the server's own timeout configuration applies.
+> This option only applies to a runtime the SDK owns, whether it runs in process (the default) or as a spawned process. When connecting to an existing runtime server via a TCP connection (`RuntimeConnection.forTcp`), the server's own timeout configuration applies, such as `copilot-runtime --server --session-idle-timeout <seconds>`.
 
 ```mermaid
 flowchart LR
@@ -766,16 +766,16 @@ session.on("session.idle", () => {
 
 ## Deployment patterns
 
-### Pattern 1: one CLI server per user (recommended)
+### Pattern 1: one runtime server per user
 
-Best for: Strong isolation, multi-tenant environments, Azure Dynamic Sessions.
+Best for: Process-level isolation, compliance requirements, Azure Dynamic Sessions.
 
 ```mermaid
 flowchart LR
     subgraph Users[" "]
-        UA[User A] --> CA[CLI A]
-        UB[User B] --> CB[CLI B]
-        UC[User C] --> CC[CLI C]
+        UA[User A] --> CA[Runtime A]
+        UB[User B] --> CB[Runtime B]
+        UC[User C] --> CC[Runtime C]
     end
     CA --> SA[(Storage A)]
     CB --> SB[(Storage B)]
@@ -784,18 +784,18 @@ flowchart LR
 
 **Benefits:** ✅ Complete isolation | ✅ Simple security | ✅ Easy scaling
 
-### Pattern 2: shared CLI server (resource efficient)
+### Pattern 2: shared multi-tenant runtime server
 
-Best for: Internal tools, trusted environments, resource-constrained setups.
+Best for: Serving many users from one runtime with per-session credentials and tool allowlists (see [Multi-tenancy and server deployments](../setup/multi-tenancy.md)), and resource-constrained setups.
 
 ```mermaid
 flowchart LR
-    UA[User A] --> CLI
-    UB[User B] --> CLI
-    UC[User C] --> CLI
-    CLI[🖥️ Shared CLI] --> SA[Session A]
-    CLI --> SB[Session B]
-    CLI --> SC[Session C]
+    UA[User A] --> Runtime
+    UB[User B] --> Runtime
+    UC[User C] --> Runtime
+    Runtime[🖥️ Shared runtime] --> SA[Session A]
+    Runtime --> SB[Session B]
+    Runtime --> SC[Session C]
 ```
 
 **Requirements:**
@@ -806,7 +806,7 @@ flowchart LR
 ```typescript
 import { CopilotClient, CopilotSession } from "@microsoft/copilot-sdk";
 
-// Application-level access control for shared CLI
+// Application-level access control for a shared runtime
 async function resumeSessionWithAuth(
   client: CopilotClient,
   sessionId: string,
@@ -850,14 +850,14 @@ volumes:
 ```mermaid
 flowchart LR
     subgraph Before["Container A"]
-        CLI1[CLI + Session X]
+        Runtime1[Runtime + Session X]
     end
     
-    CLI1 --> |persist| Azure[(☁️ Azure File Share)]
-    Azure --> |restore| CLI2
+    Runtime1 --> |persist| Azure[(☁️ Azure File Share)]
+    Azure --> |restore| Runtime2
     
     subgraph After["Container B (restart)"]
-        CLI2[CLI + Session X]
+        Runtime2[Runtime + Session X]
     end
 ```
 

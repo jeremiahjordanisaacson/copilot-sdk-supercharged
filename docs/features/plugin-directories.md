@@ -280,7 +280,7 @@ let client = Client::start(
 
 </details>
 
-> If you connect to an external runtime via TCP (`forTcp` / `ForTcp`), pass `--plugin-dir` to the long-running CLI server when you start it; the SDK does not forward `--plugin-dir` to runtimes it didn't spawn.
+> If you connect to a standalone runtime server over TCP (`forTcp` / `ForTcp`), pass `--plugin-dir` to `copilot-runtime --server` when you start it (for example, `copilot-runtime --server --port 4321 --plugin-dir ./plugins/code-reviewer`); the SDK does not forward `--plugin-dir` to runtimes it didn't spawn.
 
 ## Per-session plugin directories
 
@@ -368,7 +368,7 @@ The equivalent option in each SDK is:
 | Java                 | `.setPlugins(new ClientPluginOptions().setBuiltinDirectories(List.of(Path.of(...))))` |
 | Rust                 | `.with_plugins(                                                                       | group | group.with_builtin_directories([...]))` |
 
-This is a trust boundary for plugins bundled and controlled by the host application. It is distinct from `--plugin-dir`, which is a CLI process launch argument for explicitly loading ordinary plugin directories. The startup option also works when connecting to an existing runtime that supports built-in plugin registration, because it is sent over JSON-RPC rather than forwarded as a process argument.
+This is a trust boundary for plugins bundled and controlled by the host application. It is distinct from `--plugin-dir`, which is a runtime process launch argument for explicitly loading ordinary plugin directories. The startup option also works when connecting to an existing runtime that supports built-in plugin registration, because it is sent over JSON-RPC rather than forwarded as a process argument.
 
 The bundled opt-in plugins `computer-use` and `browser-use` are the exception: they contribute no skills, hooks or MCP servers until enabled through `enabledPlugins`, `client.rpc.plugins.enable({ names: ["browser-use"] })`, or settings. Changes apply to sessions created afterwards. Managed `enabledPlugins["browser-use"]` forces Browser Use on or off regardless of user preferences, and managed `features.browserUse=false` makes it unavailable even when `enabledPlugins` forces it on. Computer Use also accepts the legacy `enabledMcpServers` preference; its managed policy veto is `features.computerUse=false`, not `enabledPlugins["computer-use"]`.
 
@@ -395,8 +395,8 @@ Plugin agents are first-class sub-agents in [fleet mode](./fleet-mode.md): a par
 
 The runtime has two ways to install plugins, and both end up looking the same to a session:
 
-- **Marketplace / direct-repo plugins** are installed persistently through the CLI's `/plugin` slash command. They are _ambient_ and participate in the session's plugin discovery and activation rules.
-- **`--plugin-dir` plugins** are _explicit and ephemeral_ — they only apply to the CLI process you launched with that flag. They take precedence over ambient discovery and are de-duplicated against marketplace entries with the same cache path, so the same plugin won't load twice when both surfaces reference it.
+- **Marketplace / direct-repo plugins** are installed persistently, for example through the Copilot CLI's `/plugin` slash command. They are _ambient_ and participate in the session's plugin discovery and activation rules.
+- **`--plugin-dir` plugins** are _explicit and ephemeral_ — they only apply to the runtime process you launched with that flag. They take precedence over ambient discovery and are de-duplicated against marketplace entries with the same cache path, so the same plugin won't load twice when both surfaces reference it.
 
 For SDK-driven applications, use `--plugin-dir` for shared process-level plugins or `plugins.directories` for session-specific additions. Both keep explicit directories under your application's control instead of relying only on per-machine user state.
 
@@ -446,7 +446,7 @@ const session = await client.createSession({
 
 </details>
 
-Use this in CI, in headless server deployments, and anywhere you want a reproducible plugin set that doesn't depend on the host's user configuration.
+Use this in CI, in runtime server deployments, and anywhere you want a reproducible plugin set that doesn't depend on the host's user configuration.
 
 ## Inspecting which plugins loaded
 
@@ -565,7 +565,7 @@ Runtimes that do not prepare managed plugins for the session reject the call.
 - **"no plugin.json or SKILL.md found in &lt;dir&gt;"**: the directory exists but doesn't qualify as a plugin. For Agent Plugins, add root `plugin.json` with a recognized schema and a name. For legacy plugins, use one of the manifest locations listed above or a root `SKILL.md`.
 - **Plugin loaded but components not visible**: check which format the manifest selects. Agent Plugins uses `skills/*/SKILL.md`, root `mcp.json` with a matching schema, and `com.github.copilot/` for Copilot-specific components. Legacy root assets and component-path fields do not carry over when you add the spec schema. Use `session.rpc.skills.reload()` for skill changes; it is not an agent reload API.
 - **Duplicate hooks firing**: explicit directories are de-duplicated against other entries for the same directory. Separate copies can still load twice. Remove the extra directory; `COPILOT_PLUGIN_DIR_ONLY=true` suppresses ambient plugins, not duplicate explicit copies.
-- **`--plugin-dir` ignored when connecting to an external runtime**: the SDK only forwards extra args when it spawns the CLI itself. Pass `--plugin-dir` when starting the runtime server, or use session `plugins.directories` with a runtime that supports it.
+- **`--plugin-dir` ignored when connecting to an external runtime**: the SDK only forwards extra args when it spawns the runtime itself. Pass `--plugin-dir` to `copilot-runtime --server` when you start the runtime server, or use session `plugins.directories` with a runtime that supports it.
 
 ## Related
 

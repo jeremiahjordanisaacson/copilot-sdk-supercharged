@@ -50,7 +50,7 @@ Node.js and .NET include platform runtime artifacts, Python downloads them, and 
 
 ## Architecture
 
-All SDKs drive the Copilot agent runtime over protocol-4 JSON-RPC. By default, SDK v2 loads the native Rust runtime into your application through a C ABI and carries framed JSON-RPC messages over an in-memory connection. It does not embed a Node.js interpreter or start a CLI process:
+All SDKs drive the Copilot agent runtime over protocol-4 JSON-RPC. The runtime is a standalone component, separate from the Copilot CLI. By default, SDK v2 loads the native Rust runtime into your application through a C ABI and carries framed JSON-RPC messages over an in-memory connection. It does not embed a Node.js interpreter or start a separate runtime process:
 
 ```
 Your Application
@@ -60,7 +60,12 @@ Your Application
   Native Copilot runtime
 ```
 
-The SDK manages its runtime host, but the native library remains loaded for the application process lifetime. In-process hosting provides neither crash isolation nor a sandbox. Explicit stdio/TCP subprocess connections and external servers remain supported; see [Run the Copilot runtime in process](./docs/setup/in-process-runtime.md) for requirements and v2 migration options.
+The SDK manages its runtime host, but the native library remains loaded for the application process lifetime. In-process hosting provides neither crash isolation nor a sandbox. See [Run the Copilot runtime in process](./docs/setup/in-process-runtime.md) for requirements and v2 migration options.
+
+You can also run the runtime outside your application process:
+
+- **Spawned child process**: select a spawned stdio or TCP connection (`RuntimeConnection.forSpawnedStdio()` or `RuntimeConnection.forSpawnedTcp()` in TypeScript and Java; each SDK has an equivalent). The SDK starts the runtime as a child process and manages its lifecycle. Use it when you need crash isolation or per-client process configuration.
+- **Standalone runtime server**: run `copilot-runtime --server` yourself and attach to it over TCP with `RuntimeConnection.forTcp(host, port)`. One multi-tenant runtime server can serve many SDK clients and concurrent sessions. See [Connecting to a standalone runtime server](./docs/getting-started.md#connecting-to-a-standalone-runtime-server).
 
 ### Portable elicitation schemas
 
@@ -119,7 +124,7 @@ See the **[Authentication documentation](./docs/auth/README.md)** for details on
 
 No. The default needs a compatible native runtime, not a separately running CLI. Node.js, .NET, Python, and Rust provide acquisition or bundling; Go needs application-level bundling or an explicit runtime package, and Java needs the platform classifier dependency.
 
-Advanced: You can override the CLI binary or connect to an external server. See the individual SDK README for language-specific options.
+Advanced: You can run a runtime binary you supply as a child process, or connect to a standalone runtime server. See the individual SDK README for language-specific options.
 
 ### What tools are enabled by default?
 

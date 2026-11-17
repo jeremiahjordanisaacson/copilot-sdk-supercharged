@@ -24,7 +24,7 @@ Before you begin, ensure you have:
 
 * A working [Copilot SDK setup](../getting-started.md) in your language of choice
 * A GitHub Copilot subscription (Individual, Business, or Enterprise)
-* The Copilot CLI installed or available via the SDK's bundled CLI
+* The Copilot runtime, which the SDK bundles or downloads for you (see [Getting started](../getting-started.md))
 
 ## Installation
 

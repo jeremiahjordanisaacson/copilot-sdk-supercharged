@@ -6,7 +6,7 @@ This guide shows how to use Azure Identity SDK APIs to authenticate with Microso
 
 ## How it works
 
-Microsoft Foundry's OpenAI-compatible endpoint (`https://<resource-name>.openai.azure.com/openai/v1/`) accepts bearer tokens from Microsoft Entra ID in place of static API keys. This guide uses a token provider callback so the Microsoft Copilot SDK runtime can request fresh tokens on demand.
+Microsoft Foundry's OpenAI-compatible endpoint (`https://<resource-name>.openai.azure.com/openai/v1/`) accepts bearer tokens from Microsoft Entra ID in place of static API keys. This guide uses a token provider callback so the Copilot runtime can request fresh tokens on demand.
 
 Using Python as an example, the flow is:
 
@@ -114,7 +114,7 @@ npm install @microsoft/copilot-sdk @azure/identity
 
 ### Use a token provider callback
 
-Use this approach when you want the Microsoft Copilot SDK runtime to request fresh tokens on demand through a callback that you provide. The Azure Identity SDK handles token caching and refresh timing.
+Use this approach when you want the Copilot runtime to request fresh tokens on demand through a callback that you provide. The Azure Identity SDK handles token caching and refresh timing.
 
 Here are language-specific implementations:
 

@@ -19,7 +19,7 @@ flowchart TB
         P["💾 Persistence<br/>How long do sessions live?"]
     end
 
-    I --> I1["Shared CLI<br/>vs. CLI per user"]
+    I --> I1["Shared runtime<br/>vs. runtime per user"]
     C --> C1["Session pooling<br/>vs. on-demand"]
     P --> P1["Ephemeral<br/>vs. persistent"]
 
@@ -28,27 +28,27 @@ flowchart TB
 
 ## Session isolation patterns
 
-### Pattern 1: isolated CLI per user
+### Pattern 1: isolated runtime per user
 
-Each user gets their own CLI server instance. Strongest isolation—a user's sessions, memory, and processes are completely separated.
+Each user gets their own runtime server instance. Strongest isolation—a user's sessions, memory, processes and on-disk state are completely separated. You don't need this pattern just to serve many users, because one runtime is multi-tenant (see pattern 2); use it when you need process-level isolation.
 
 ```mermaid
 flowchart TB
     LB["Load Balancer"]
 
     subgraph User_A["User A"]
-        SDK_A["SDK Client"] --> CLI_A["CLI Server A<br/>:4321"]
-        CLI_A --> SA["📁 Sessions A"]
+        SDK_A["SDK Client"] --> RT_A["Runtime server A<br/>:4321"]
+        RT_A --> SA["📁 Sessions A"]
     end
 
     subgraph User_B["User B"]
-        SDK_B["SDK Client"] --> CLI_B["CLI Server B<br/>:4322"]
-        CLI_B --> SB["📁 Sessions B"]
+        SDK_B["SDK Client"] --> RT_B["Runtime server B<br/>:4322"]
+        RT_B --> SB["📁 Sessions B"]
     end
 
     subgraph User_C["User C"]
-        SDK_C["SDK Client"] --> CLI_C["CLI Server C<br/>:4323"]
-        CLI_C --> SC["📁 Sessions C"]
+        SDK_C["SDK Client"] --> RT_C["Runtime server C<br/>:4323"]
+        RT_C --> SC["📁 Sessions C"]
     end
 
     LB --> SDK_A
@@ -63,7 +63,7 @@ flowchart TB
 **When to use:**
 
 - Multi-tenant SaaS where data isolation is critical
-- Users with different auth credentials
+- Per-user process, filesystem or Copilot home separation
 - Compliance requirements (SOC 2, HIPAA)
 
 <!-- docs-validate: hidden -->
@@ -71,9 +71,9 @@ flowchart TB
 ```typescript
 import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
-declare function spawnCLI(port: number, token?: string): Promise<void>;
+declare function spawnRuntime(port: number, token?: string): Promise<void>;
 
-class CLIPool {
+class RuntimePool {
     private instances = new Map<string, { client: CopilotClient; port: number }>();
     private nextPort = 5000;
 
@@ -84,8 +84,8 @@ class CLIPool {
 
         const port = this.nextPort++;
 
-        // Spawn a dedicated CLI for this user
-        await spawnCLI(port, token);
+        // Spawn a dedicated runtime server for this user, with its own port and COPILOT_HOME
+        await spawnRuntime(port, token);
 
         const client = new CopilotClient({
             mode: "coding-agent",
@@ -111,8 +111,8 @@ class CLIPool {
 ```typescript
 import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
-// CLI pool manager — one CLI per user
-class CLIPool {
+// Runtime pool manager — one runtime server per user
+class RuntimePool {
     private instances = new Map<string, { client: CopilotClient; port: number }>();
     private nextPort = 5000;
 
@@ -123,8 +123,8 @@ class CLIPool {
 
         const port = this.nextPort++;
 
-        // Spawn a dedicated CLI for this user
-        await spawnCLI(port, token);
+        // Spawn a dedicated runtime server for this user, with its own port and COPILOT_HOME
+        await spawnRuntime(port, token);
 
         const client = new CopilotClient({
             mode: "coding-agent",
@@ -145,9 +145,9 @@ class CLIPool {
 }
 ```
 
-### Pattern 2: shared CLI with session isolation
+### Pattern 2: shared runtime with session isolation
 
-Multiple users share one CLI server but have isolated sessions via unique session IDs. Lighter on resources, but weaker isolation.
+Multiple users share one runtime server, each with their own sessions. The runtime is multi-tenant: one instance serves many SDK clients and many concurrent sessions, and each session can carry its own credentials (`github.token`) and tool allowlist when clients use `mode: "empty"` (see [Multi-Tenancy & Server Deployments](./multi-tenancy.md)). Lighter on resources, but isolation is logical: sessions share one process, its filesystem access and its Copilot home, so your app must enforce which user can access which session.
 
 ```mermaid
 flowchart TB
@@ -159,7 +159,7 @@ flowchart TB
         Router["Session Router"]
     end
 
-    subgraph CLI["Shared CLI Server :4321"]
+    subgraph Runtime["Shared runtime server :4321"]
         SA["Session: user-a-chat"]
         SB["Session: user-b-chat"]
         SC["Session: user-c-chat"]
@@ -174,14 +174,14 @@ flowchart TB
     Router --> SC
 
     style App fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
-    style CLI fill:#0d1117,stroke:#3fb950,color:#c9d1d9
+    style Runtime fill:#0d1117,stroke:#3fb950,color:#c9d1d9
 ```
 
 **When to use:**
 
-- Internal tools with trusted users
+- Most multi-user backends, including per-user credentials
 - Resource-constrained environments
-- Lower isolation requirements
+- When logical (per-session) isolation is sufficient
 
 ```typescript
 import { CopilotClient, RuntimeConnection, type CopilotSession } from "@microsoft/copilot-sdk";
@@ -221,7 +221,7 @@ flowchart TB
         Lock["Session Lock"]
     end
 
-    subgraph CLI["CLI Server"]
+    subgraph Runtime["Runtime server"]
         Session["Shared Session:<br/>team-project-review"]
     end
 
@@ -233,7 +233,7 @@ flowchart TB
     Lock --> Session
 
     style App fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
-    style CLI fill:#0d1117,stroke:#3fb950,color:#c9d1d9
+    style Runtime fill:#0d1117,stroke:#3fb950,color:#c9d1d9
 ```
 
 **When to use:**
@@ -333,45 +333,45 @@ app.post("/team-chat", authMiddleware, async (req, res) => {
 
 ## Comparison of isolation patterns
 
-|                      | Isolated CLI Per User | Shared CLI + Session Isolation | Shared Sessions         |
-| -------------------- | --------------------- | ------------------------------ | ----------------------- |
-| **Isolation**        | ✅ Complete           | ⚠️ Logical                     | ❌ Shared               |
-| **Resource usage**   | High (CLI per user)   | Low (one CLI)                  | Low (one CLI + session) |
-| **Complexity**       | Medium                | Low                            | High (locking)          |
-| **Auth flexibility** | ✅ Per-user tokens    | ⚠️ Service token               | ⚠️ Service token        |
-| **Best for**         | Multi-tenant SaaS     | Internal tools                 | Collaboration           |
+|                      | Isolated Runtime Per User             | Shared Runtime + Session Isolation | Shared Sessions             |
+| -------------------- | ------------------------------------- | ---------------------------------- | --------------------------- |
+| **Isolation**        | ✅ Process-level                      | ⚠️ Logical (per session)           | ❌ Shared                   |
+| **Resource usage**   | High (runtime per user)               | Low (one runtime)                  | Low (one runtime + session) |
+| **Complexity**       | Medium                                | Low                                | High (locking)              |
+| **Auth flexibility** | ✅ Per-user tokens                    | ✅ Per-session tokens              | ⚠️ One identity per session |
+| **Best for**         | Strict compliance / process isolation | Multi-user apps and SaaS backends  | Collaboration               |
 
 ## Horizontal scaling
 
-### Multiple CLI servers behind a load balancer
+### Multiple runtime servers behind a load balancer
 
 ```mermaid
 flowchart TB
     Users["👥 Users"] --> LB["Load Balancer"]
 
-    subgraph Pool["CLI Server Pool"]
-        CLI1["CLI Server 1<br/>:4321"]
-        CLI2["CLI Server 2<br/>:4322"]
-        CLI3["CLI Server 3<br/>:4323"]
+    subgraph Pool["Runtime server pool"]
+        RT1["Runtime server 1<br/>:4321"]
+        RT2["Runtime server 2<br/>:4322"]
+        RT3["Runtime server 3<br/>:4323"]
     end
 
     subgraph Storage["Shared Storage"]
         NFS["📁 Network File System<br/>or Cloud Storage"]
     end
 
-    LB --> CLI1
-    LB --> CLI2
-    LB --> CLI3
+    LB --> RT1
+    LB --> RT2
+    LB --> RT3
 
-    CLI1 --> NFS
-    CLI2 --> NFS
-    CLI3 --> NFS
+    RT1 --> NFS
+    RT2 --> NFS
+    RT3 --> NFS
 
     style Pool fill:#0d1117,stroke:#3fb950,color:#c9d1d9
     style Storage fill:#161b22,stroke:#f0883e,color:#c9d1d9
 ```
 
-**Key requirement:** Session state must be on **shared storage** so any CLI server can resume any session.
+**Key requirement:** Session state must be on **shared storage** so any runtime server can resume any session.
 
 <!-- docs-validate: hidden -->
 
@@ -391,7 +391,7 @@ declare const app: {
     ): void;
 };
 
-class CLILoadBalancer {
+class RuntimeLoadBalancer {
     private servers: string[];
     private currentIndex = 0;
 
@@ -422,7 +422,7 @@ class CLILoadBalancer {
     }
 }
 
-const lb = new CLILoadBalancer(["cli-1", "cli-2", "cli-3"]);
+const lb = new RuntimeLoadBalancer(["runtime-1", "runtime-2", "runtime-3"]);
 
 app.post("/chat", async (req, res) => {
     const server = lb.getServerForUser(req.user.id);
@@ -443,8 +443,8 @@ app.post("/chat", async (req, res) => {
 ```typescript
 import { CopilotClient, RuntimeConnection } from "@microsoft/copilot-sdk";
 
-// Route sessions to CLI servers
-class CLILoadBalancer {
+// Route sessions to runtime servers
+class RuntimeLoadBalancer {
     private servers: string[];
     private currentIndex = 0;
 
@@ -475,7 +475,7 @@ class CLILoadBalancer {
     }
 }
 
-const lb = new CLILoadBalancer(["cli-1", "cli-2", "cli-3"]);
+const lb = new RuntimeLoadBalancer(["runtime-1", "runtime-2", "runtime-3"]);
 
 app.post("/chat", async (req, res) => {
     const server = lb.getServerForUser(req.user.id);
@@ -497,16 +497,16 @@ app.post("/chat", async (req, res) => {
 flowchart LR
     subgraph Sticky["Sticky Sessions"]
         direction TB
-        S1["User A → always CLI 1"]
-        S2["User B → always CLI 2"]
+        S1["User A → always runtime 1"]
+        S2["User B → always runtime 2"]
         S3["✅ No shared storage needed"]
         S4["❌ Uneven load if users vary"]
     end
 
     subgraph Shared["Shared Storage"]
         direction TB
-        SH1["User A → any CLI"]
-        SH2["User B → any CLI"]
+        SH1["User A → any runtime"]
+        SH2["User B → any runtime"]
         SH3["✅ Even load distribution"]
         SH4["❌ Requires NFS / cloud storage"]
     end
@@ -515,15 +515,15 @@ flowchart LR
     style Shared fill:#0d1117,stroke:#3fb950,color:#c9d1d9
 ```
 
-**Sticky sessions** are simpler—pin users to specific CLI servers. No shared storage needed, but load distribution is uneven.
+**Sticky sessions** are simpler—pin users to specific runtime servers. No shared storage needed, but load distribution is uneven.
 
-**Shared storage** enables any CLI to handle any session. Better load distribution, but requires networked storage for `~/.copilot/session-state/`.
+**Shared storage** enables any runtime server to handle any session. Better load distribution, but requires networked storage for `~/.copilot/session-state/`.
 
 ## Vertical scaling
 
-### Tuning a single CLI server
+### Tuning a single runtime server
 
-A single CLI server can handle many concurrent sessions. Key considerations:
+A single runtime server is multi-tenant and can handle many concurrent sessions. Key considerations:
 
 ```mermaid
 flowchart TB
@@ -753,21 +753,21 @@ app.post("/api/chat/end", async (req, res) => {
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-    name: copilot-cli
+    name: copilot-runtime
 spec:
     replicas: 3
     selector:
         matchLabels:
-            app: copilot-cli
+            app: copilot-runtime
     template:
         metadata:
             labels:
-                app: copilot-cli
+                app: copilot-runtime
         spec:
             containers:
-                - name: copilot-cli
-                  image: your-registry/copilot-cli:latest # See backend-services.md for how to build and push this image
-                  args: ["--headless", "--host", "0.0.0.0", "--port", "4321"]
+                - name: copilot-runtime
+                  image: your-registry/copilot-runtime:latest # See backend-services.md for how to build and push this image
+                  args: ["--host", "0.0.0.0", "--port", "4321"] # The image entrypoint already passes --server
                   env:
                       - name: COPILOT_GITHUB_TOKEN
                         valueFrom:
@@ -795,10 +795,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-    name: copilot-cli
+    name: copilot-runtime
 spec:
     selector:
-        app: copilot-cli
+        app: copilot-runtime
     ports:
         - port: 4321
           targetPort: 4321
@@ -807,10 +807,10 @@ spec:
 ```mermaid
 flowchart TB
     subgraph K8s["Kubernetes Cluster"]
-        Svc["Service: copilot-cli:4321"]
-        Pod1["Pod 1: CLI"]
-        Pod2["Pod 2: CLI"]
-        Pod3["Pod 3: CLI"]
+        Svc["Service: copilot-runtime:4321"]
+        Pod1["Pod 1: runtime"]
+        Pod2["Pod 2: runtime"]
+        Pod3["Pod 3: runtime"]
         PVC["PersistentVolumeClaim<br/>(shared session state)"]
     end
 
@@ -830,9 +830,9 @@ flowchart TB
 
 ```yaml
 containers:
-    - name: copilot-cli
-      image: your-registry/copilot-cli:latest # See backend-services.md for how to build and push this image
-      command: ["copilot", "--headless", "--host", "0.0.0.0", "--port", "4321"]
+    - name: copilot-runtime
+      image: your-registry/copilot-runtime:latest # See backend-services.md for how to build and push this image
+      command: ["copilot-runtime", "--server", "--host", "0.0.0.0", "--port", "4321"]
       # A non-loopback bind (--host 0.0.0.0) requires COPILOT_CONNECTION_TOKEN to be
       # set to a non-empty value, or the server refuses to start. Supply it from your
       # secret store and pass the same value as `connectionToken` from the SDK client.
@@ -873,22 +873,22 @@ flowchart TB
 | Concern             | Recommendation                                                |
 | ------------------- | ------------------------------------------------------------- |
 | **Session cleanup** | Run periodic cleanup to delete sessions older than your TTL   |
-| **Health checks**   | Ping the CLI server periodically; restart if unresponsive     |
+| **Health checks**   | Ping the runtime server periodically; restart if unresponsive |
 | **Storage**         | Mount persistent volumes for `~/.copilot/session-state/`      |
 | **Secrets**         | Use your platform's secret manager (Vault, K8s Secrets, etc.) |
 | **Monitoring**      | Track active session count, response latency, error rates     |
 | **Locking**         | Use Redis or similar for shared session access                |
-| **Shutdown**        | Drain active sessions before stopping CLI servers             |
+| **Shutdown**        | Drain active sessions before stopping runtime servers         |
 
 ## Limitations
 
-| Limitation                      | Details                                                                                               |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **No built-in session locking** | Implement application-level locking for concurrent access                                             |
-| **No built-in load balancing**  | Use external LB or service mesh                                                                       |
-| **Session state is file-based** | Requires shared filesystem for multi-server setups                                                    |
-| **No idle timeout by default**  | Pass `--session-idle-timeout <seconds>` to the CLI server to automatically clean up inactive sessions |
-| **CLI is single-process**       | Scale by adding more CLI server instances, not threads                                                |
+| Limitation                            | Details                                                                                                                          |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **No built-in session locking**       | Implement application-level locking for concurrent access                                                                        |
+| **No built-in load balancing**        | Use external LB or service mesh                                                                                                  |
+| **Session state is file-based**       | Requires shared filesystem for multi-server setups                                                                               |
+| **No idle timeout by default**        | Pass `--session-idle-timeout <seconds>` to the runtime server to automatically clean up inactive sessions                        |
+| **One runtime server is one process** | It serves many sessions, but scale beyond one machine (or remove the single point of failure) by adding runtime server instances |
 
 ## Next steps
 

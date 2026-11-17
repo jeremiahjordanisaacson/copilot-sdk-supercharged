@@ -1,24 +1,24 @@
 # The agent loop
 
-How the Copilot CLI processes a user message end-to-end: from prompt to `session.idle`.
+How the Copilot runtime processes a user message end-to-end: from prompt to `session.idle`.
 
 ## Architecture
 
 ```mermaid
 graph LR
     App["Your App"] -->|send prompt| SDK["SDK Session"]
-    SDK -->|JSON-RPC| CLI["Copilot CLI"]
-    CLI -->|API calls| LLM["LLM"]
-    LLM -->|response| CLI
-    CLI -->|events| SDK
+    SDK -->|JSON-RPC| Runtime["Copilot runtime"]
+    Runtime -->|API calls| LLM["LLM"]
+    LLM -->|response| Runtime
+    Runtime -->|events| SDK
     SDK -->|events| App
 ```
 
-The **SDK** is a transport layer—it sends your prompt to the **Copilot CLI** over JSON-RPC and surfaces events back to your app. The **CLI** is the orchestrator that runs the agentic tool-use loop, making one or more LLM API calls until the task is done.
+The **SDK** is a transport layer—it sends your prompt to the **Copilot runtime** over JSON-RPC and surfaces events back to your app. The **runtime** is the orchestrator that runs the agentic tool-use loop, making one or more LLM API calls until the task is done.
 
 ## The tool-use loop
 
-When you call `session.send({ prompt })`, the CLI enters a loop:
+When you call `session.send({ prompt })`, the runtime enters a loop:
 
 ```mermaid
 flowchart TD
@@ -81,9 +81,9 @@ does not affect permission checks. Leave it unset unless it is true.
 
 A **turn** is a single LLM API call and its consequences:
 
-1. The CLI sends the conversation history to the LLM
+1. The runtime sends the conversation history to the LLM
 1. The LLM responds (possibly with tool requests)
-1. If tools were requested, the CLI executes them
+1. If tools were requested, the runtime executes them
 1. `assistant.turn_end` is emitted
 
 A single user message typically results in **multiple turns**. For example, a question like "how does X work in this codebase?" might produce:
@@ -112,7 +112,7 @@ flowchart TD
         t1s --> t1m --> t1ts --> t1tc --> t1e
     end
 
-    subgraph Turn2 ["Turn 2 — auto-triggered by CLI"]
+    subgraph Turn2 ["Turn 2 — auto-triggered by runtime"]
         t2s["assistant.turn_start"]
         t2m["assistant.message (toolRequests)"]
         t2ts["tool.execution_start (edit_file)"]
@@ -138,11 +138,11 @@ flowchart TD
 | Actor | Responsibility |
 |-------|---------------|
 | **Your app** | Sends the initial prompt via `session.send()` |
-| **Copilot CLI** | Runs the tool-use loop—executes tools and feeds results back to the LLM for the next turn |
+| **Copilot runtime** | Runs the tool-use loop—executes tools and feeds results back to the LLM for the next turn |
 | **LLM** | Decides whether to request tools (continue looping) or produce a final response (stop) |
 | **SDK** | Passes events through; does not control the loop |
 
-The CLI is purely mechanical: "model asked for tools → execute → call model again." The **model** is the decision-maker for when to stop.
+The runtime is purely mechanical: "model asked for tools → execute → call model again." The **model** is the decision-maker for when to stop.
 
 ## `session.idle` vs `session.task_complete`
 
@@ -175,9 +175,9 @@ session.on("session.task_complete", (event) => {
 });
 ```
 
-### Autopilot mode: the CLI nudges for `task_complete`
+### Autopilot mode: the runtime nudges for `task_complete`
 
-In **autopilot mode** (headless/autonomous operation), the CLI actively tracks whether the model has called `task_complete`. If the tool-use loop ends without it, the CLI injects a synthetic user message nudging the model:
+In **autopilot mode** (autonomous operation), the runtime actively tracks whether the model has called `task_complete`. If the tool-use loop ends without it, the runtime injects a synthetic user message nudging the model:
 
 > *"You have not yet marked the task as complete using the task_complete tool. If you were planning changes the user asked for, stop planning and start implementing. You aren't done until you have fully completed the task."*
 
@@ -190,20 +190,20 @@ This effectively restarts the tool-use loop—the model sees the nudge as a new 
 The one exception is a request that only asked for a review, analysis or recommendation: once that has been delivered, the nudge tells the model to call `task_complete` rather than start a follow-up it offered.
 
 This creates a **two-level completion mechanism** in autopilot:
-1. The model calls `task_complete` with a summary → CLI emits `session.task_complete` → done
-1. The model stops without calling it → CLI nudges → model continues or calls `task_complete`
+1. The model calls `task_complete` with a summary → runtime emits `session.task_complete` → done
+1. The model stops without calling it → runtime nudges → model continues or calls `task_complete`
 
 Completing or pausing an autopilot objective leaves the session in autopilot mode by default, matching the interactive CLI. The objective still completes or pauses, and the run can become idle; keeping the mode selected does not keep working on a finished objective. To opt into automatic restoration to interactive mode, call `session.rpc.autopilotObjective.setStayInAutopilot({ value: false })`. To switch mode immediately, call `session.rpc.mode.set({ mode: "interactive" })`.
 
 ### Why `task_complete` might not appear
 
-In **interactive mode** (normal chat), the CLI does not nudge for `task_complete`. The model may skip it entirely. Common reasons:
+In **interactive mode** (normal chat), the runtime does not nudge for `task_complete`. The model may skip it entirely. Common reasons:
 
 * **Conversational Q&A**: The model answers a question and simply stops—there's no discrete "task" to complete
 * **Model discretion**: The model produces a final text response without calling the task-complete signal
 * **Interrupted sessions**: The session ends before the model reaches a completion point
 
-The CLI emits `session.idle` regardless, because it's a mechanical signal (the loop ended), not a semantic one (the model thinks it's done).
+The runtime emits `session.idle` regardless, because it's a mechanical signal (the loop ended), not a semantic one (the model thinks it's done).
 
 ### Which should you use?
 
