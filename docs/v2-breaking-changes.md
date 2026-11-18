@@ -1,6 +1,6 @@
 # SDK v2 breaking changes
 
-This document collects SDK v2 breaking changes and the corresponding migrations, tracked in [github/copilot-sdk#2522](https://github.com/github/copilot-sdk/issues/2522). Planned but unimplemented changes are not included. SDK v2 is the package major version; the restructured client/session API requires SDK protocol **4**. These are separate version numbers. Upgrade the SDK and runtime together: incompatible pairs fail connection negotiation, and legacy option names and flat lifecycle payloads have no compatibility adapters.
+This document collects SDK v2 breaking changes and the corresponding migrations, tracked in [github/copilot-sdk#2522](https://github.com/github/copilot-sdk/issues/2522). Planned but unimplemented changes are not included. SDK v2 is the package major version; the restructured client/session API requires SDK protocol **4**. These are separate version numbers. Upgrade the SDK and runtime together: incompatible pairs fail connection negotiation.
 
 For an existing integration, migrate runtime ownership first, then the restructured client and session options, then provider routing. If you call JSON-RPC directly, also update the lifecycle payloads; renaming SDK imports alone is not sufficient. The option restructuring does not change the persisted session/event format or require rewriting saved sessions. Runtime-only configuration and callbacks still need to be supplied again where indicated below.
 
@@ -310,7 +310,7 @@ Re-supply nonpersisted configuration on cold resume, including provider connecti
 
 ## Restructured lifecycle RPC payloads
 
-The wire contract changes with the SDK surface. JSON continues to use camelCase in every language, and the JSON-RPC envelope still uses `"jsonrpc": "2.0"`; SDK protocol 4 is the negotiated SDK/runtime contract version. The runtime consumes restructured options; there is no legacy flat payload translation.
+The wire contract changes with the SDK surface. JSON continues to use camelCase in every language, and the JSON-RPC envelope still uses `"jsonrpc": "2.0"`; SDK protocol 4 is the negotiated SDK/runtime contract version. The runtime consumes restructured options.
 
 | RPC                      | Location of restructured options                                                                                                                                                                                 |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -341,7 +341,7 @@ For raw RPC callers, apply the session-option mappings where the JSON names matc
 | `installedPlugins`, `sandboxConfigSource`                                 | `plugins.installed`, `permissions.sandboxSource`                                                              |
 | `provider`                                                                | Split into `inference.providers` and `inference.models`; see the provider migration below                     |
 
-The runtime rejects retired wire names with diagnostics identifying their replacements; they are not aliases. Moving a field does not make it valid for every lifecycle method: keep create-only, resume-only, and mutable-update restrictions.
+Moving a field does not make it valid for every lifecycle method: keep create-only, resume-only, and mutable-update restrictions.
 
 `sessions.open` exposes additional host settings. If you use these fields, move them within `params.options`:
 

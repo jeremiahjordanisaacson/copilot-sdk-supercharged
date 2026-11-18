@@ -3,6 +3,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CopilotClient } from "./client.js";
+import { normalizeSessionOptions } from "./optionsCompatibility.js";
 import type { CopilotSession } from "./session.js";
 import {
     defaultJoinSessionPermissionHandler,
@@ -128,6 +129,7 @@ export {
  * ```
  */
 export async function joinSession(config: JoinSessionOptions = {}): Promise<JoinedSession> {
+    config = normalizeSessionOptions(config);
     const sessionId = process.env.SESSION_ID;
     if (!sessionId) {
         throw new Error(

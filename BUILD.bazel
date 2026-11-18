@@ -34,6 +34,7 @@ HAND_WRITTEN_GO_INPUTS = glob(
 genrule(
     name = "nodejs_projection",
     srcs = [
+        "//src/native/sdk-params:options-compatibility.json",
         "//src/native/schema-codegen:generated/api.schema.json",
         "//src/native/schema-codegen:generated/lifecycle-diagnostics.schema.json",
         "//src/native/schema-codegen:generated/session-events.schema.json",

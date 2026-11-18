@@ -63,6 +63,7 @@ import type {
     TaskKind,
 } from "./generated/rpc.js";
 import { CopilotDecisions } from "./decisions.js";
+import { normalizeClientOptions, normalizeSessionOptions } from "./optionsCompatibility.js";
 import { getSdkProtocolVersion } from "./sdkProtocolVersion.js";
 import { CopilotSession } from "./session.js";
 import {
@@ -1075,6 +1076,7 @@ export class CopilotClient {
      * ```
      */
     constructor(options: CopilotClientOptions) {
+        options = normalizeClientOptions(options);
         if (options?.mode !== "coding-agent" && options?.mode !== "empty") {
             throw new Error("mode is required and must be 'coding-agent' or 'empty'");
         }
@@ -2264,6 +2266,7 @@ export class CopilotClient {
     }
 
     async createSession(config: CreateSessionOptions): Promise<CopilotSession> {
+        config = normalizeSessionOptions(config);
         if (
             config.interaction?.autoModeRecovery &&
             typeof config.interaction?.onAutoModeSwitchRequest !== "function"
@@ -2874,6 +2877,7 @@ export class CopilotClient {
         contributions: ExtensionOrchestrationContributions = {},
         extensionOptions?: ExtensionJoinOptions
     ): Promise<CopilotSession> {
+        config = normalizeSessionOptions(config);
         if (
             config.interaction?.autoModeRecovery &&
             typeof config.interaction?.onAutoModeSwitchRequest !== "function"
