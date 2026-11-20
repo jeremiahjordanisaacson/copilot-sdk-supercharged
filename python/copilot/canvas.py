@@ -192,6 +192,7 @@ class CanvasHandler(ABC):
 
         The returned value is sent to the model as the ``invoke_canvas_action``
         tool result. To return text and images, as tool handlers do, return a
+        :class:`~copilot.tools.ToolResult` with ``binary_results_for_llm``, or a
         tool-result dict in wire form (``textResultForLlm``, ``resultType`` and
         ``binaryResultsForLlm``); any other value is rendered to the model as
         JSON text.

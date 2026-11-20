@@ -271,8 +271,8 @@ await using session = await client.createSession({
 When targeting MCP tools configured through `mcp.servers`, remember the runtime
 tool name is `<server-key>-<tool-name>`. For `tools.availableTools` and
 `tools.excludedTools`, prefer `new ToolSet().addMcp("<server-key>-<tool-name>")` or
-the raw `mcp:<server-key>-<tool-name>` form. For `customAgents[].tools` and
-`defaultAgent.excludedTools`, use `<server-key>-<tool-name>` directly.
+the raw `mcp:<server-key>-<tool-name>` form. For `agents.definitions[].tools` and
+`agents.default.excludedTools`, use `<server-key>-<tool-name>` directly.
 
 ## API Reference
 
@@ -327,7 +327,7 @@ new CopilotClient(options: CopilotClientOptions)
     events. Authentication, SDK `github.onTelemetry` forwarding, and user-configured
     OpenTelemetry remain unchanged. The value must be exactly `"true"`; restart
     the process to change it. With `RuntimeConnection.forInProcess()`, set the host
-    process environment. `enableSessionTelemetry: false`
+    process environment. `github.telemetryEnabled: false`
     affects only the session pipeline. The existing native-runtime-only
     `COPILOT_GITHUB_TELEMETRY_DISABLED=true` remains GitHub-only; the Node CLI host
     uses the general variable or `--disable-client-telemetry` instead.
@@ -483,8 +483,8 @@ Initial acquisition runs during session creation or resume. Cancellation, provid
 
 ##### `resumeSession(sessionId: string, config: ResumeSessionOptions): Promise<CopilotSession>`
 
-Both create and resume accept experimental `autopilot: AutopilotOptions`, and
-`session.rpc.options.update({ autopilot: ... })` patches the same policy.
+Both create and resume accept experimental `execution.autopilot: AutopilotOptions`, and
+`session.rpc.options.update({ execution: { autopilot: ... } })` patches the same policy.
 `continuationEnabled` controls runtime-owned continuation, not the session mode;
 it defaults to `true`. `maxContinues` limits continuations outside an active
 objective: a non-negative integer, default five, with zero allowing none.
@@ -680,7 +680,7 @@ declare const session: CopilotSession;
 
 import { z } from "zod";
 
-const answerSchema = z.object({ answer: z.number().int() });
+const answerSchema = z.object({ answer: z.number() });
 const message = await session.sendAndWait({
     prompt: "What is 19 + 23?",
     responseSchema: answerSchema,
@@ -693,7 +693,7 @@ console.log(message?.data.content); // JSON text
 ```typescript
 import { z } from "zod";
 
-const answerSchema = z.object({ answer: z.number().int() });
+const answerSchema = z.object({ answer: z.number() });
 const message = await session.sendAndWait({
     prompt: "What is 19 + 23?",
     responseSchema: answerSchema,
@@ -712,7 +712,7 @@ import type { CopilotSession } from "@microsoft/copilot-sdk";
 declare const session: CopilotSession;
 import { z } from "zod";
 
-const answerSchema = z.object({ answer: z.number().int() });
+const answerSchema = z.object({ answer: z.number() });
 
 const answer = await session.sendAndWait("What is 19 + 23?", answerSchema);
 console.log(answer.answer); // number; TResult is inferred from answerSchema
@@ -1186,7 +1186,7 @@ await session.send({ prompt: "Tell me a short story" });
 await done; // Wait for streaming to complete
 ```
 
-When `streaming: true`:
+When `events.streaming: true`:
 
 - `assistant.message_delta` events are sent with `deltaContent` containing incremental text
 - `assistant.reasoning_delta` events are sent with `deltaContent` for reasoning/chain-of-thought (model-dependent)
@@ -1273,6 +1273,57 @@ const session = await client.createSession({
 ```
 
 When Copilot invokes `lookup_issue`, the client automatically runs your handler and responds to the CLI. Handlers can return any JSON-serializable value (automatically wrapped), a simple string, or a `ToolResultObject` for full control over result metadata. Raw JSON schemas are also supported if Zod isn't desired.
+
+#### Reporting tool failures
+
+If a handler throws, the call fails and the model sees only the generic message `Tool execution failed`. The thrown message is logged by the runtime but never sent to the model, since exceptions can contain secrets, connection strings, or other internal details. When the model should know why a call failed (for example, to fix its arguments or report an error code), return a failure result with the text you want it to read:
+
+<!-- docs-validate: strict -->
+<!-- docs-validate: hidden -->
+
+```ts
+import { z } from "zod";
+import { defineTool } from "@microsoft/copilot-sdk";
+
+declare function findIssue(id: string): Promise<string | undefined>;
+
+const lookupIssue = defineTool("lookup_issue", {
+    description: "Fetch issue details from our tracker",
+    parameters: z.object({ id: z.string() }),
+    handler: async ({ id }) => {
+        const issue = await findIssue(id);
+        if (!issue) {
+            return {
+                textResultForLlm: `Issue ${id} was not found. Check the identifier and try again.`,
+                resultType: "failure",
+            };
+        }
+        return issue;
+    },
+});
+```
+
+<!-- /docs-validate: hidden -->
+
+```ts
+import { z } from "zod";
+import { defineTool } from "@microsoft/copilot-sdk";
+
+const lookupIssue = defineTool("lookup_issue", {
+    description: "Fetch issue details from our tracker",
+    parameters: z.object({ id: z.string() }),
+    handler: async ({ id }) => {
+        const issue = await findIssue(id);
+        if (!issue) {
+            return {
+                textResultForLlm: `Issue ${id} was not found. Check the identifier and try again.`,
+                resultType: "failure",
+            };
+        }
+        return issue;
+    },
+});
+```
 
 #### Overriding Built-in Tools
 
@@ -1713,6 +1764,14 @@ When enabled, sessions emit compaction events:
 - `session.compaction_start` - Background compaction started
 - `session.compaction_complete` - Compaction finished (includes token counts)
 
+Models that use context-management tools (for example `mai-code-2`) replace compaction with
+Session Memory rollover: the agent checkpoints its work and the context window is cleared
+(`session.context_cleared`) instead of summarized. For these models,
+`backgroundCompactionThreshold` (or `COPILOT_BACKGROUND_COMPACTION_THRESHOLD`) sets the usage at
+which the agent is told to roll over, clamped so the fresh window can still hold the recovered
+checkpoint. `bufferExhaustionThreshold` does not apply. Without a configured threshold, rollover
+starts when about 10% of the window remains.
+
 ### Memory
 
 Sessions can opt in to the memory feature, which lets the agent persist and recall
@@ -1831,8 +1890,8 @@ const session = await client.createSession({
   connection closes or the client is force-stopped; a running call then continues until it returns.
 - The provider is never persisted. Pass it again to `resumeSession`; resuming without it unbinds
   the provider.
-- A provider enables skills unless you set `enableSkills: false`, which keeps it bound but unused.
-  In `mode: "empty"`, skills stay disabled until you set `enableSkills: true`.
+- A provider enables skills unless you set `skills.enabled: false`, which keeps it bound but unused.
+  In `mode: "empty"`, skills stay disabled until you set `skills.enabled: true`.
 - Errors thrown by the provider are reported to the model as a generic load failure; their
   messages are not forwarded.
 - The runtime may call the provider concurrently, so both methods must be safe for concurrent use.
@@ -2329,9 +2388,15 @@ const session = await client.createSession({
     model: "gpt-5",
     interaction: {
         onUserInputRequest: async (request) =>
-            createAttributedResult({ answer: "Only src/app.ts", wasFreeform: true }, personAnswered),
+            createAttributedResult(
+                { answer: "Only src/app.ts", wasFreeform: true },
+                personAnswered
+            ),
         onExitPlanModeRequest: async () =>
-            createAttributedResult({ approved: true, selectedAction: "interactive" }, personAnswered),
+            createAttributedResult(
+                { approved: true, selectedAction: "interactive" },
+                personAnswered
+            ),
     },
 });
 ```
@@ -2376,7 +2441,7 @@ const session = await client.createSession({
 console.log(session.capabilities.ui?.elicitation); // true
 ```
 
-Set `askUserVariant: "elicitation"` to expose the structured form as the model's
+Set `interaction.askUserVariant: "elicitation"` to expose the structured form as the model's
 `ask_user` tool. Omit it to retain the legacy SDK behavior.
 
 When `interaction.onElicitationRequest` is provided, the SDK sends `requestElicitation: true` during session create/resume, which enables `session.capabilities.ui.elicitation` on the session.

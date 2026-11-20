@@ -122,7 +122,6 @@ The Copilot SDK communicates with the Copilot runtime via JSON-RPC protocol. Fea
 | Color output | `--no-color` | Terminal-specific |
 | Screen reader mode | `--screen-reader` | Accessibility |
 | Startup banner | `--banner` | Visual element |
-| Alternate screen buffer | `--alt-screen`, `--no-alt-screen` | Terminal rendering |
 | Mouse support | `--mouse`, `--no-mouse` | Terminal input |
 | **Path/Permission Shortcuts** | | |
 | Allow all paths | `--allow-all-paths` | Use permission handler |
@@ -165,7 +164,6 @@ The Copilot SDK communicates with the Copilot runtime via JSON-RPC protocol. Fea
 | Diagnose session | `/diagnose` | TUI command |
 | View/manage instructions | `/instructions` | TUI command (use SDK `session.rpc.instructions.getSources()` instead) |
 | Collect debug logs | `/collect-debug-logs` | Diagnostic tool (use SDK `session.rpc.debug.collectLogs()` instead) |
-| Reindex workspace | `/reindex` | TUI command |
 | IDE integration | `/ide` | IDE-specific workflow |
 | **Non-interactive Mode** | | |
 | Prompt mode | `-p`, `--prompt` | Single-shot execution |

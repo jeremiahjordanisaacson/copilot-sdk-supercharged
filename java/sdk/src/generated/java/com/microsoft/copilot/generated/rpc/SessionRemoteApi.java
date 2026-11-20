@@ -31,6 +31,70 @@ public final class SessionRemoteApi {
     }
 
     /**
+     * Replaces an owned session subscription in release and restore phases. Release returns a generation so the caller can check cancellation before restore. Restore requires the same lease and generation and waits for the authoritative snapshot to apply.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<AhpSessionLeaseResult> reattach(SessionRemoteReattachParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.remote.reattach", _p, AhpSessionLeaseResult.class);
+    }
+
+    /**
+     * Reads this caller's read-only AHP collaboration and pending-request projection, waiting after an unchanged revision.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<AhpSessionProjectionResult> readProjection(SessionRemoteReadProjectionParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.remote.readProjection", _p, AhpSessionProjectionResult.class);
+    }
+
+    /**
+     * Submits one message through its originating trusted CLI host's request-owned admission callback. The runtime owns preparation, routing, and the admitted write.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SendResult> sendWithAdmission(SessionRemoteSendWithAdmissionParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.remote.sendWithAdmission", _p, SendResult.class);
+    }
+
+    /**
+     * Publishes composer or view state through an owned AHP session. The runtime coalesces updates and owns retries.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<Void> publishState(SessionRemotePublishStateParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.remote.publishState", _p, Void.class);
+    }
+
+    /**
      * Enables remote session export or steering.
      * <p>
      * Note: the {@code sessionId} field in the params record is overridden

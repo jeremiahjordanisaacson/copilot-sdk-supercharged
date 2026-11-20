@@ -12,6 +12,102 @@ use copilot_sdk::rpc::{
 use copilot_sdk::session_events::RecommendedAutoTier;
 
 #[test]
+fn mcp_discovery_debug_redacts_configuration_without_changing_wire() {
+    use copilot_sdk::rpc::{McpDiscoverOptions, McpDiscoverResult};
+
+    let configuration = serde_json::json!({
+        "type": "http",
+        "url": "https://example.com/mcp",
+        "env": {"TOKEN": "fake-discovery-token"},
+        "headers": {"Authorization": "Bearer fake-discovery-authorization"}
+    });
+    let request_wire = serde_json::json!({
+        "includeConfiguration": true,
+        "options": {
+            "additionalConfig": [serde_json::json!({
+                "mcpServers": {"configured": configuration}
+            }).to_string()],
+            "disabledServers": ["disabled"]
+        }
+    });
+    let result_wire = serde_json::json!({
+        "servers": [{
+            "name": "configured",
+            "source": "user",
+            "enabled": true,
+            "configuration": configuration
+        }],
+        "diagnostics": []
+    });
+    let request = McpDiscoverOptions::new()
+        .include_configuration(true)
+        .options(serde_json::from_value(request_wire["options"].clone()).unwrap());
+    let result: McpDiscoverResult = serde_json::from_value(result_wire.clone()).unwrap();
+
+    for diagnostic in [format!("{request:?}"), format!("{result:?}")] {
+        assert!(!diagnostic.contains("fake-discovery-token"), "{diagnostic}");
+        assert!(
+            !diagnostic.contains("fake-discovery-authorization"),
+            "{diagnostic}"
+        );
+    }
+    assert!(format!("{request:?}").contains("disabled"));
+    assert!(format!("{result:?}").contains("configured"));
+    assert_eq!(serde_json::to_value(request).unwrap(), request_wire);
+    assert_eq!(serde_json::to_value(result).unwrap(), result_wire);
+}
+
+#[test]
+fn git_diff_result_preserves_workspace_fallback_details() {
+    use copilot_sdk::rpc::{GitDiffResult, WorkspaceDiffFileChange, WorkspaceDiffMode};
+
+    let result: GitDiffResult = serde_json::from_value(serde_json::json!({
+        "changes": [{
+            "path": "file.txt",
+            "diff": "@@ -1 +1 @@\n-before\n+after\n",
+            "changeType": "modified"
+        }],
+        "isFallback": true,
+        "mode": "unstaged",
+        "requestedMode": "session",
+        "unavailableReason": "session-busy"
+    }))
+    .unwrap();
+
+    assert!(result.is_fallback);
+    assert_eq!(result.mode, WorkspaceDiffMode::Unstaged);
+    assert_eq!(result.requested_mode, WorkspaceDiffMode::Session);
+    assert!(result.base_branch.is_none());
+    assert_eq!(
+        serde_json::to_value(result.unavailable_reason).unwrap(),
+        serde_json::json!("session-busy")
+    );
+    let changes: Vec<WorkspaceDiffFileChange> = result.changes;
+    assert_eq!(changes[0].path, "file.txt");
+}
+
+#[test]
+fn forge_manifest_retains_nullable_metadata() {
+    use copilot_sdk::rpc::ForgeProposalManifestEntry;
+
+    for metadata in [
+        serde_json::json!({}),
+        serde_json::json!({"after_hash": null, "before_content": null, "before_hash": null}),
+        serde_json::json!({"after_hash": "after", "before_content": "before", "before_hash": "hash"}),
+    ] {
+        let mut wire = serde_json::json!({
+            "path": ".github/skills/demo/SKILL.md",
+            "change_type": "added",
+        });
+        wire.as_object_mut()
+            .unwrap()
+            .extend(metadata.as_object().unwrap().clone());
+        let entry: ForgeProposalManifestEntry = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(entry).unwrap(), wire);
+    }
+}
+
+#[test]
 fn shell_environment_debug_redacts_values_without_changing_wire() {
     use copilot_sdk::rpc::{
         ShellBuildInteractiveEnvironmentRequest, ShellBuildInteractiveEnvironmentResult,

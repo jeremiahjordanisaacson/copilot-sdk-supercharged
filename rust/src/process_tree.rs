@@ -1,25 +1,99 @@
-//! Windows crash-safe ownership of an SDK-spawned CLI process.
+//! Descendant ownership of an SDK-spawned CLI process.
 //!
 //! A Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` lets Windows
 //! terminate the CLI when the SDK-hosting process exits abruptly, even when
-//! Rust cleanup code never runs. Other platforms retain Tokio's direct-child
-//! ownership because no equivalent product failure has been demonstrated.
+//! Rust cleanup code never runs. Unix uses a private process group, terminated
+//! before reaping the root so its PGID cannot be recycled during teardown.
+//! Unix cleanup requires Rust destructors to run and covers descendants that
+//! remain in the group, not processes that deliberately detach via setsid.
+//! Darwin drains concurrent forks synchronously before retiring the group;
+//! failure to establish quiescence is an error, not deferred cleanup.
+//! Terminal signals to the host's foreground group do not reach this group;
+//! the host must arrange cleanup when handling shutdown signals.
 //! When Windows denies reopening the initial thread, a logged ordinary-spawn
 //! retry uses best-effort Job assignment, without pre-assignment containment.
 
 use std::io;
 
+use tokio::process::Child;
 #[cfg(feature = "runtime")]
-use tokio::process::{Child, Command};
+use tokio::process::Command;
+
+/// Keeps the containment guard alive until it has been terminated, before any
+/// Child drop can reap the leader. All explicit waits follow terminate_tree.
+pub(crate) struct OwnedProcess {
+    pub(crate) child: Child,
+    tree: Option<ProcessTree>,
+}
+
+impl OwnedProcess {
+    #[cfg(feature = "runtime")]
+    pub(crate) fn new(child: Child, tree: Option<ProcessTree>) -> Self {
+        Self { child, tree }
+    }
+
+    pub(crate) fn terminate_tree(&mut self) -> io::Result<()> {
+        match self.tree.take() {
+            Some(tree) => tree.terminate(),
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) fn has_exited(&mut self) -> io::Result<bool> {
+        #[cfg(all(unix, feature = "runtime"))]
+        {
+            let Some(pid) = self.child.id() else {
+                return Ok(true);
+            };
+            // SAFETY: siginfo_t is a plain output buffer; WNOWAIT leaves our
+            // child's PID allocated until terminate_tree has retired its group.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let result = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    pid,
+                    &mut info,
+                    libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                )
+            };
+            if result == 0 {
+                return Ok(info.si_signo == libc::SIGCHLD);
+            }
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                return Ok(false);
+            }
+            if error.raw_os_error() == Some(libc::ECHILD)
+                && let Some(mut tree) = self.tree.take()
+            {
+                // A foreign reaper has released the PID; never signal it again.
+                tree.0.take();
+            }
+            Err(error)
+        }
+        #[cfg(not(all(unix, feature = "runtime")))]
+        {
+            self.child.try_wait().map(|status| status.is_some())
+        }
+    }
+}
+
+impl Drop for OwnedProcess {
+    fn drop(&mut self) {
+        if let Err(error) = self.terminate_tree() {
+            tracing::warn!(%error, "failed to terminate CLI process tree on drop");
+        }
+    }
+}
 
 #[cfg(feature = "runtime")]
 pub(crate) fn spawn(command: &mut Command) -> io::Result<(Child, Option<ProcessTree>)> {
-    #[cfg(windows)]
+    #[cfg(any(unix, windows))]
     {
         platform::spawn(command)
             .map(|(child, tree)| (child, tree.map(|tree| ProcessTree(Some(tree)))))
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(unix, windows)))]
     {
         command.spawn().map(|child| (child, None))
     }
@@ -41,27 +115,454 @@ impl Drop for ProcessTree {
     }
 }
 
-#[cfg(not(all(windows, feature = "runtime")))]
+#[cfg(not(all(any(unix, windows), feature = "runtime")))]
 mod platform {
     pub(super) struct Tree;
 
     impl Tree {
         pub(super) fn terminate(&self) -> std::io::Result<()> {
-            unreachable!("process-tree ownership is Windows-only")
+            unreachable!("process-tree ownership requires Unix or Windows and runtime")
         }
+    }
+}
+
+#[cfg(all(unix, feature = "runtime"))]
+mod platform {
+    use std::io;
+    #[cfg(target_os = "macos")]
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::process::CommandExt;
+    #[cfg(target_os = "macos")]
+    use std::time::{Duration, Instant};
+
+    use tokio::process::{Child, Command};
+
+    pub(super) struct Tree {
+        pgid: i32,
+    }
+
+    #[cfg(target_os = "macos")]
+    type Identity = (u32, u64, u64);
+    #[cfg(target_os = "macos")]
+    const PROC_FLAG_TRACED: u32 = 2;
+    #[cfg(target_os = "macos")]
+    const PROC_FLAG_INEXIT: u32 = 4;
+
+    pub(super) fn spawn(command: &mut Command) -> io::Result<(Child, Option<Tree>)> {
+        command.as_std_mut().process_group(0);
+        let mut child = command.spawn()?;
+        let pgid = child
+            .id()
+            .and_then(|pid| i32::try_from(pid).ok())
+            .filter(|&pid| pid > 1);
+        let Some(pgid) = pgid else {
+            child.start_kill()?;
+            return Err(io::Error::other(
+                "CLI process has no valid process group ID",
+            ));
+        };
+        Ok((child, Some(Tree { pgid })))
+    }
+
+    impl Tree {
+        #[cfg(not(target_os = "macos"))]
+        pub(super) fn terminate(&self) -> io::Result<()> {
+            // SAFETY: process_group(0) creates a private PGID equal to the
+            // owned root's PID, which remains unreaped until after this signal.
+            if unsafe { libc::kill(-self.pgid, libc::SIGKILL) } == 0 {
+                return Ok(());
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                return Ok(());
+            }
+            Err(error)
+        }
+
+        #[cfg(target_os = "macos")]
+        pub(super) fn terminate(&self) -> io::Result<()> {
+            self.drain().inspect_err(|_| {
+                // Observation can fail before the first signal. Still attempt
+                // group cleanup while the leader pins the PGID, preserving the
+                // original error rather than claiming confirmed quiescence.
+                unsafe { libc::kill(-self.pgid, libc::SIGKILL) };
+            })
+        }
+
+        #[cfg(target_os = "macos")]
+        fn drain(&self) -> io::Result<()> {
+            // SAFETY: the owned, unreaped leader pins this private PGID.
+            if unsafe { libc::kill(-self.pgid, 0) } != 0 {
+                let error = io::Error::last_os_error();
+                match error.raw_os_error() {
+                    Some(libc::ESRCH) => return Ok(()),
+                    Some(libc::EPERM) => {}
+                    _ => return Err(error),
+                }
+            }
+            let queue = ExitQueue::new()?;
+            let mut exited = Vec::new();
+            // XNU snapshots group PIDs before signalling. Watch each generation
+            // before killing it, then discover children published during exit.
+            for _ in 0..64 {
+                let mut watched = Vec::new();
+                let mut unattachable = Vec::new();
+                for pid in self.members()? {
+                    let Some(info) = process_info(pid)? else {
+                        continue;
+                    };
+                    let identity = (info.pbi_pid, info.pbi_start_tvsec, info.pbi_start_tvusec);
+                    if info.pbi_pgid != self.pgid as u32 || exited.contains(&identity) {
+                        continue;
+                    }
+                    if info.pbi_status == libc::SZOMB {
+                        exited.push(identity);
+                        continue;
+                    }
+                    if info.pbi_flags & PROC_FLAG_TRACED != 0 {
+                        unattachable.push(identity);
+                        continue;
+                    }
+                    match queue.change(identity.0, libc::EV_ADD | libc::EV_ONESHOT) {
+                        Ok(()) => {
+                            if self.matches_live(identity)? {
+                                watched.push(identity);
+                            } else {
+                                queue.change(identity.0, libc::EV_DELETE)?;
+                                exited.push(identity);
+                            }
+                        }
+                        // proc_find rejects INEXIT processes before their last
+                        // thread has finished; ESRCH alone is not exit proof.
+                        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {
+                            if let Some(info) = process_info(pid)?
+                                && info.pbi_pgid == self.pgid as u32
+                                && (info.pbi_pid, info.pbi_start_tvsec, info.pbi_start_tvusec)
+                                    == identity
+                                && info.pbi_status != libc::SZOMB
+                            {
+                                if info.pbi_flags & (PROC_FLAG_INEXIT | PROC_FLAG_TRACED) == 0 {
+                                    return Err(error);
+                                }
+                                unattachable.push(identity);
+                                continue;
+                            }
+                            exited.push(identity);
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+                if watched.is_empty() && unattachable.is_empty() {
+                    if self.all_members_exited(&exited)? {
+                        return Ok(());
+                    }
+                    continue;
+                }
+                // SAFETY: the owned, unreaped leader pins this private PGID.
+                if unsafe { libc::kill(-self.pgid, libc::SIGKILL) } != 0 {
+                    let error = io::Error::last_os_error();
+                    match error.raw_os_error() {
+                        Some(libc::ESRCH) => return Ok(()),
+                        Some(libc::EPERM) => {
+                            for identity in &watched {
+                                if let Some(info) = process_info(identity.0 as i32)?
+                                    && info.pbi_pgid == self.pgid as u32
+                                    && (info.pbi_pid, info.pbi_start_tvsec, info.pbi_start_tvusec)
+                                        == *identity
+                                    && info.pbi_status != libc::SZOMB
+                                    && info.pbi_flags & PROC_FLAG_INEXIT == 0
+                                {
+                                    return Err(error);
+                                }
+                            }
+                        }
+                        _ => return Err(error),
+                    }
+                }
+                let mut backoff = Duration::from_millis(1);
+                while !watched.is_empty() || !unattachable.is_empty() {
+                    self.refresh_pending(&mut watched, &mut exited, Some(&queue))?;
+                    self.refresh_pending(&mut unattachable, &mut exited, None)?;
+                    if watched.is_empty() && unattachable.is_empty() {
+                        break;
+                    }
+                    let event = match queue.wait((!unattachable.is_empty()).then_some(backoff)) {
+                        Ok(event) => event,
+                        Err(error) if error.kind() == io::ErrorKind::TimedOut => {
+                            // A debugger attached after registration can
+                            // suppress NOTE_EXIT. Recheck before reporting
+                            // failure; the queue is no longer used on timeout.
+                            self.refresh_pending(&mut watched, &mut exited, None)?;
+                            self.refresh_pending(&mut unattachable, &mut exited, None)?;
+                            if !watched.is_empty() || !unattachable.is_empty() {
+                                return Err(error);
+                            }
+                            break;
+                        }
+                        Err(error) => return Err(error),
+                    };
+                    if let Some(event) = event {
+                        let notified_pid = event.ident;
+                        if event.filter == libc::EVFILT_PROC
+                            && event.fflags & libc::NOTE_EXIT != 0
+                            && let Some(index) = watched
+                                .iter()
+                                .position(|identity| identity.0 as usize == notified_pid)
+                        {
+                            // NOTE_EXIT is posted after the last thread exits,
+                            // just before SZOMB becomes visible to proc_pidinfo.
+                            exited.push(watched.swap_remove(index));
+                        }
+                    }
+                    backoff = (backoff * 2).min(Duration::from_millis(16));
+                }
+                if self.all_members_exited(&exited)? {
+                    return Ok(());
+                }
+            }
+            Err(io::Error::other(
+                "CLI process group kept creating members for 64 generations",
+            ))
+        }
+
+        #[cfg(target_os = "macos")]
+        fn matches_live(&self, identity: Identity) -> io::Result<bool> {
+            Ok(process_info(identity.0 as i32)?.is_some_and(|info| {
+                info.pbi_pgid == self.pgid as u32
+                    && (info.pbi_pid, info.pbi_start_tvsec, info.pbi_start_tvusec) == identity
+                    && info.pbi_status != libc::SZOMB
+            }))
+        }
+
+        #[cfg(target_os = "macos")]
+        fn refresh_pending(
+            &self,
+            pending: &mut Vec<Identity>,
+            exited: &mut Vec<Identity>,
+            queue: Option<&ExitQueue>,
+        ) -> io::Result<()> {
+            let mut index = 0;
+            while index < pending.len() {
+                let identity = pending[index];
+                if self.matches_live(identity)? {
+                    index += 1;
+                    continue;
+                }
+                if let Some(queue) = queue {
+                    queue.change(identity.0, libc::EV_DELETE)?;
+                }
+                exited.push(pending.swap_remove(index));
+            }
+            Ok(())
+        }
+
+        #[cfg(target_os = "macos")]
+        fn all_members_exited(&self, exited: &[Identity]) -> io::Result<bool> {
+            // Every identity must have been proved threadless before this
+            // listing, so no remaining creator can publish another child.
+            for pid in self.members()? {
+                if let Some(info) = process_info(pid)?
+                    && info.pbi_pgid == self.pgid as u32
+                    && !exited.contains(&(
+                        info.pbi_pid,
+                        info.pbi_start_tvsec,
+                        info.pbi_start_tvusec,
+                    ))
+                {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+
+        #[cfg(target_os = "macos")]
+        fn members(&self) -> io::Result<Vec<i32>> {
+            const PROC_PGRP_ONLY: u32 = 2;
+            // SAFETY: null requests the required buffer size for this group.
+            let size = unsafe {
+                libc::proc_listpids(PROC_PGRP_ONLY, self.pgid as u32, std::ptr::null_mut(), 0)
+            };
+            if size <= 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let mut pids = vec![0i32; size as usize / std::mem::size_of::<i32>()];
+            // SAFETY: pids is initialized and writable for exactly size bytes.
+            let written = unsafe {
+                libc::proc_listpids(
+                    PROC_PGRP_ONLY,
+                    self.pgid as u32,
+                    pids.as_mut_ptr().cast(),
+                    size,
+                )
+            };
+            if written <= 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if written == size {
+                return Err(io::Error::other("CLI process group snapshot was truncated"));
+            }
+            pids.truncate(written as usize / std::mem::size_of::<i32>());
+            Ok(pids)
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    struct ExitQueue {
+        fd: OwnedFd,
+        deadline: Instant,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl ExitQueue {
+        fn new() -> io::Result<Self> {
+            // SAFETY: kqueue creates a fresh descriptor, not inherited by fork.
+            let fd = unsafe { libc::kqueue() };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self {
+                // SAFETY: this is the unique owner of the valid descriptor.
+                fd: unsafe { OwnedFd::from_raw_fd(fd) },
+                deadline: Instant::now() + Duration::from_secs(2),
+            })
+        }
+
+        fn remaining(&self) -> io::Result<Duration> {
+            self.deadline
+                .checked_duration_since(Instant::now())
+                .ok_or_else(Self::timeout)
+        }
+
+        fn timeout() -> io::Error {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                "CLI process group exit wait timed out",
+            )
+        }
+
+        fn change(&self, pid: u32, flags: u16) -> io::Result<()> {
+            let change = libc::kevent {
+                ident: pid as usize,
+                filter: libc::EVFILT_PROC,
+                flags: flags | libc::EV_RECEIPT,
+                fflags: libc::NOTE_EXIT,
+                data: 0,
+                udata: std::ptr::null_mut(),
+            };
+            let timeout = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            loop {
+                self.remaining()?;
+                // SAFETY: kevent is a plain output buffer with a valid zero value.
+                let mut receipt: libc::kevent = unsafe { std::mem::zeroed() };
+                let result = unsafe {
+                    libc::kevent(self.fd.as_raw_fd(), &change, 1, &mut receipt, 1, &timeout)
+                };
+                let error = if result < 0 {
+                    io::Error::last_os_error()
+                } else if result == 1 && receipt.flags & libc::EV_ERROR != 0 {
+                    if receipt.data == 0 {
+                        return Ok(());
+                    }
+                    io::Error::from_raw_os_error(
+                        i32::try_from(receipt.data).map_err(io::Error::other)?,
+                    )
+                } else {
+                    return Err(io::Error::other(
+                        "missing CLI process exit registration receipt",
+                    ));
+                };
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                if flags & libc::EV_DELETE != 0 && error.raw_os_error() == Some(libc::ENOENT) {
+                    return Ok(());
+                }
+                return Err(error);
+            }
+        }
+
+        fn wait(&self, recheck: Option<Duration>) -> io::Result<Option<libc::kevent>> {
+            loop {
+                let remaining = self.remaining()?;
+                let duration = recheck.map_or(remaining, |interval| interval.min(remaining));
+                let timeout = libc::timespec {
+                    tv_sec: i64::try_from(duration.as_secs()).map_err(io::Error::other)?,
+                    tv_nsec: duration.subsec_nanos().into(),
+                };
+                // SAFETY: event is a writable output buffer; timeout is initialized.
+                let mut event: libc::kevent = unsafe { std::mem::zeroed() };
+                let result = unsafe {
+                    libc::kevent(
+                        self.fd.as_raw_fd(),
+                        std::ptr::null(),
+                        0,
+                        &mut event,
+                        1,
+                        &timeout,
+                    )
+                };
+                if result < 0 {
+                    let error = io::Error::last_os_error();
+                    if error.kind() == io::ErrorKind::Interrupted {
+                        continue;
+                    }
+                    return Err(error);
+                }
+                if result == 0 {
+                    return if recheck.is_some() {
+                        Ok(None)
+                    } else {
+                        Err(Self::timeout())
+                    };
+                }
+                if event.flags & libc::EV_ERROR != 0 && event.data != 0 {
+                    return Err(io::Error::from_raw_os_error(
+                        i32::try_from(event.data).map_err(io::Error::other)?,
+                    ));
+                }
+                return Ok(Some(event));
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn process_info(pid: i32) -> io::Result<Option<libc::proc_bsdinfo>> {
+        // SAFETY: proc_bsdinfo is a plain output buffer with a valid zero value.
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = i32::try_from(std::mem::size_of_val(&info)).map_err(io::Error::other)?;
+        // SAFETY: info is writable for size bytes; argument 1 includes zombies.
+        let read = unsafe {
+            libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 1, (&raw mut info).cast(), size)
+        };
+        if read <= 0 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                return Ok(None);
+            }
+            return Err(error);
+        }
+        if read != size {
+            return Err(io::Error::other(
+                "incomplete CLI process group member information",
+            ));
+        }
+        Ok(Some(info))
     }
 }
 
 #[cfg(all(windows, feature = "runtime"))]
 mod platform {
     use std::mem::size_of;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use std::os::windows::process::CommandExt;
     use std::{io, ptr};
 
     use tokio::process::{Child, Command};
     use windows_sys::Win32::Foundation::{
-        CloseHandle, ERROR_ACCESS_DENIED, ERROR_NO_MORE_FILES, ERROR_NO_MORE_ITEMS, HANDLE,
-        INVALID_HANDLE_VALUE,
+        ERROR_ACCESS_DENIED, ERROR_NO_MORE_FILES, ERROR_NO_MORE_ITEMS, HANDLE, INVALID_HANDLE_VALUE,
     };
     use windows_sys::Win32::System::Diagnostics::ProcessSnapshotting::{
         HPSS, HPSSWALK, PSS_CAPTURE_THREADS, PSS_THREAD_ENTRY, PSS_WALK_THREADS,
@@ -115,21 +616,6 @@ mod platform {
             #[cfg(test)]
             if status == 0 {
                 MARKERS.set((MARKERS.get().0, MARKERS.get().1 + 1));
-            }
-        }
-    }
-
-    struct OwnedHandle(HANDLE);
-
-    // SAFETY: Win32 handles may be used and closed from any thread.
-    unsafe impl Send for OwnedHandle {}
-    unsafe impl Sync for OwnedHandle {}
-
-    impl Drop for OwnedHandle {
-        fn drop(&mut self) {
-            // SAFETY: this value uniquely owns a valid handle.
-            unsafe {
-                CloseHandle(self.0);
             }
         }
     }
@@ -248,14 +734,15 @@ mod platform {
         if raw_job.is_null() {
             return Err(io::Error::last_os_error());
         }
-        let job = OwnedHandle(raw_job);
+        // SAFETY: CreateJobObjectW succeeded and transfers ownership of this handle.
+        let job = unsafe { OwnedHandle::from_raw_handle(raw_job) };
 
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         // SAFETY: `limits` has the layout required by the selected info class.
         if unsafe {
             SetInformationJobObject(
-                job.0,
+                job.as_raw_handle(),
                 JobObjectExtendedLimitInformation,
                 ptr::from_ref(&limits).cast(),
                 size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
@@ -273,7 +760,7 @@ mod platform {
     fn resume(child: &Child, _tree: &Tree) -> io::Result<()> {
         #[cfg(test)]
         if let Some(hook) = BEFORE_RESUME.with_borrow_mut(Option::take) {
-            hook(child, _tree.job.0)?;
+            hook(child, _tree.job.as_raw_handle())?;
         }
         let process = child.raw_handle().ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "CLI exited before thread resume")
@@ -314,7 +801,7 @@ mod platform {
         };
         let thread = open_initial_thread(thread_id)
             .map_err(|error| io::Error::new(error.kind(), ThreadOpenError(error)))?;
-        resume_owned_thread(thread.0, pid)
+        resume_owned_thread(thread.as_raw_handle(), pid)
     }
 
     fn open_initial_thread(thread_id: u32) -> io::Result<OwnedHandle> {
@@ -332,7 +819,8 @@ mod platform {
         if raw_thread.is_null() {
             return Err(io::Error::last_os_error());
         }
-        Ok(OwnedHandle(raw_thread))
+        // SAFETY: OpenThread succeeded and transfers ownership of this handle.
+        Ok(unsafe { OwnedHandle::from_raw_handle(raw_thread) })
     }
 
     pub(super) fn find_initial_thread_toolhelp(pid: u32) -> io::Result<u32> {
@@ -343,20 +831,21 @@ mod platform {
         if raw == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error());
         }
-        let snapshot = OwnedHandle(raw);
+        // SAFETY: CreateToolhelp32Snapshot succeeded and transfers ownership of this handle.
+        let snapshot = unsafe { OwnedHandle::from_raw_handle(raw) };
         let mut entry = THREADENTRY32 {
             dwSize: size_of::<THREADENTRY32>() as u32,
             ..Default::default()
         };
         // SAFETY: entry has the required layout and the snapshot remains owned.
-        let mut found = unsafe { Thread32First(snapshot.0, &mut entry) };
+        let mut found = unsafe { Thread32First(snapshot.as_raw_handle(), &mut entry) };
         while found != 0 {
             if entry.th32OwnerProcessID == pid {
                 return Ok(entry.th32ThreadID);
             }
             entry.dwSize = size_of::<THREADENTRY32>() as u32;
             // SAFETY: entry and snapshot remain valid throughout the walk.
-            found = unsafe { Thread32Next(snapshot.0, &mut entry) };
+            found = unsafe { Thread32Next(snapshot.as_raw_handle(), &mut entry) };
         }
         let error = io::Error::last_os_error();
         if error.raw_os_error() == Some(ERROR_NO_MORE_FILES as i32) {
@@ -455,7 +944,7 @@ mod platform {
             })?;
             // SAFETY: the Job and child handles remain valid. Normal startup
             // assigns before resume; compatibility startup is best-effort.
-            if unsafe { AssignProcessToJobObject(self.job.0, process.cast()) } == 0 {
+            if unsafe { AssignProcessToJobObject(self.job.as_raw_handle(), process.cast()) } == 0 {
                 Err(io::Error::last_os_error())
             } else {
                 Ok(())
@@ -464,7 +953,7 @@ mod platform {
 
         pub(super) fn terminate(&self) -> io::Result<()> {
             // SAFETY: the handle is a live Job Object owned by this value.
-            if unsafe { TerminateJobObject(self.job.0, 1) } != 0 {
+            if unsafe { TerminateJobObject(self.job.as_raw_handle(), 1) } != 0 {
                 Ok(())
             } else {
                 Err(io::Error::last_os_error())
@@ -475,3 +964,6 @@ mod platform {
 
 #[cfg(all(test, windows, feature = "runtime"))]
 mod tests;
+
+#[cfg(all(test, unix, feature = "runtime"))]
+mod unix_tests;

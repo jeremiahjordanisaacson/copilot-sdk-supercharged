@@ -58,6 +58,22 @@ public final class SessionModelApi {
     }
 
     /**
+     * Classifies a serialized model-catalog error and returns request identifiers, authorization details, and the bound account's Copilot settings URL. Hosts use these facts to present catalog failures without parsing provider errors or deriving enterprise URLs themselves. Does not resolve credentials or fetch models.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<ModelLoadErrorDetails> describeLoadError(SessionModelDescribeLoadErrorParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.model.describeLoadError", _p, ModelLoadErrorDetails.class);
+    }
+
+    /**
      * Switches the session to a model and optional reasoning configuration.
      * <p>
      * Note: the {@code sessionId} field in the params record is overridden

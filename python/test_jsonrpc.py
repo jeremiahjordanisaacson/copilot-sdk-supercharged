@@ -347,7 +347,14 @@ async def test_unreadable_error_fails_request_and_keeps_reading(error, monkeypat
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["during-write", "after-write", "blocked-cancellation"])
 @pytest.mark.parametrize(
-    "method", ["session.sendAndWait", "localModels.watch", "taskAnalytics.classifyTrajectory"]
+    "method",
+    [
+        "session.sendAndWait",
+        "localModels.watch",
+        "feedback.upload.read",
+        "taskAnalytics.classifyTrajectory",
+        "session.resume",
+    ],
 )
 async def test_completion_cancellation_preserves_frame_order_without_blocking_caller(
     phase, method, monkeypatch
@@ -1152,3 +1159,401 @@ class TestOnClose:
                 release.set()
                 writer.close()
                 await client.stop()
+
+
+class _HandlerGaveUp(BaseException):
+    """A ``BaseException`` that is not an ``Exception``, as ``pytest.fail()`` raises."""
+
+
+class _AnswerRecorder:
+    def __init__(self) -> None:
+        self.answers: list[tuple] = []
+        self.answered = asyncio.Event()
+
+    async def response(self, request_id, result) -> None:
+        self.answers.append(("result", request_id, result))
+        self.answered.set()
+
+    async def error(self, request_id, code, message, data) -> None:
+        self.answers.append(("error", request_id, code, message))
+        self.answered.set()
+
+
+def _recording_client() -> tuple[JsonRpcClient, _AnswerRecorder]:
+    client = JsonRpcClient(MockProcess())
+    client._loop = asyncio.get_running_loop()
+    recorder = _AnswerRecorder()
+    client._send_response = recorder.response
+    client._send_error_response = recorder.error
+    return client, recorder
+
+
+async def _await_future_its_owner_cancels() -> None:
+    # A handler's own CancelledError, not a cancellation of the dispatch running it.
+    future = asyncio.get_running_loop().create_future()
+    asyncio.get_running_loop().call_soon(future.cancel)
+    await future
+
+
+async def _fail_with(failure: str):
+    if failure == "cancelled":
+        await _await_future_its_owner_cancels()
+    if failure == "base_exception":
+        raise _HandlerGaveUp("handler gave up")
+    if failure == "exception":
+        raise RuntimeError("lookup failed")
+    if failure == "json_rpc_error":
+        raise copilot.JsonRpcError(-32001, "denied")
+    return {"ok": True}
+
+
+@pytest.mark.parametrize(
+    "failure,expected",
+    [
+        ("none", ("result", 1, {"ok": True})),
+        ("exception", ("error", 1, -32603, "lookup failed")),
+        ("json_rpc_error", ("error", 1, -32001, "denied")),
+        ("cancelled", ("error", 1, -32603, "CancelledError")),
+        ("base_exception", ("error", 1, -32603, "handler gave up")),
+    ],
+)
+async def test_incoming_request_handler_failure_is_answered(failure, expected):
+    client, recorder = _recording_client()
+
+    await asyncio.wait_for(
+        client._dispatch_request(
+            {"jsonrpc": "2.0", "id": 1, "method": "probe", "params": {}},
+            lambda _params: _fail_with(failure),
+            None,
+        ),
+        5,
+    )
+
+    assert recorder.answers == [expected]
+
+
+async def test_cancelling_the_dispatch_leaves_its_request_unanswered():
+    client, recorder = _recording_client()
+    started = asyncio.Event()
+
+    async def handler(_params):
+        started.set()
+        await asyncio.Event().wait()
+
+    dispatch = asyncio.create_task(
+        client._dispatch_request(
+            {"jsonrpc": "2.0", "id": 1, "method": "probe", "params": {}}, handler, None
+        )
+    )
+    await asyncio.wait_for(started.wait(), 5)
+    dispatch.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await dispatch
+
+    assert recorder.answers == []
+
+
+@pytest.mark.parametrize("error", [KeyboardInterrupt, SystemExit])
+async def test_exit_or_interrupt_from_a_handler_propagates_unanswered(error):
+    client, recorder = _recording_client()
+
+    async def handler(_params):
+        raise error()
+
+    with pytest.raises(error):
+        await client._dispatch_request(
+            {"jsonrpc": "2.0", "id": 1, "method": "probe", "params": {}}, handler, None
+        )
+
+    assert recorder.answers == []
+
+
+@pytest.mark.parametrize(
+    "error,expected",
+    [
+        (RuntimeError("lookup failed"), ("error", 1, -32603, "lookup failed")),
+        (_HandlerGaveUp("handler gave up"), ("error", 1, -32603, "handler gave up")),
+    ],
+)
+async def test_ordered_request_handler_that_raises_synchronously_is_answered(error, expected):
+    client, recorder = _recording_client()
+
+    def handler(_params):
+        raise error
+
+    client._dispatch_ordered_request(
+        {"jsonrpc": "2.0", "id": 1, "method": "probe", "params": {}}, handler, None
+    )
+    await asyncio.wait_for(recorder.answered.wait(), 5)
+
+    assert recorder.answers == [expected]
+
+
+async def test_ordered_request_handler_interrupt_propagates_unanswered():
+    client, recorder = _recording_client()
+
+    def handler(_params):
+        raise KeyboardInterrupt()
+
+    with pytest.raises(KeyboardInterrupt):
+        client._dispatch_ordered_request(
+            {"jsonrpc": "2.0", "id": 1, "method": "probe", "params": {}}, handler, None
+        )
+
+    assert recorder.answers == []
+
+
+@pytest.mark.parametrize(
+    "failure,expected",
+    [
+        # The hook's own failure handling: an ordinary exception is logged and the hook
+        # answers with no output, so the tool still runs.
+        ("none", ("result", 7, {})),
+        ("exception", ("result", 7, {})),
+        ("cancelled", ("error", 7, -32603, "CancelledError")),
+        ("base_exception", ("error", 7, -32603, "handler gave up")),
+    ],
+)
+async def test_hooks_invoke_answers_every_pre_tool_use_failure(failure, expected):
+    from copilot._generated.rpc import ClientGlobalApiHandlers, register_client_global_api_handlers
+    from copilot.client import _HooksAdapter
+    from copilot.session import CopilotSession
+
+    session = CopilotSession("s1", None)
+
+    async def on_pre_tool_use(_input, _invocation):
+        await _fail_with(failure)
+        return None
+
+    session._register_hooks({"on_pre_tool_use": on_pre_tool_use})
+    client, recorder = _recording_client()
+    register_client_global_api_handlers(
+        client, ClientGlobalApiHandlers(hooks=_HooksAdapter(lambda _id: session))
+    )
+
+    client._handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "hooks.invoke",
+            "params": {
+                "sessionId": "s1",
+                "hookType": "preToolUse",
+                "input": {
+                    "sessionId": "s1",
+                    "timestamp": 0,
+                    "cwd": "/",
+                    "toolName": "probe_tool",
+                    "toolArgs": {},
+                },
+            },
+        }
+    )
+    await asyncio.wait_for(recorder.answered.wait(), 5)
+
+    assert recorder.answers == [expected]
+
+
+async def _cancel_its_own_task() -> None:
+    # The handler cancels the task it runs in, which is not a cancellation of the dispatch.
+    task = asyncio.current_task()
+    assert task is not None
+    task.cancel()
+    await asyncio.sleep(0)
+
+
+def _session_callback_dispatch(method, callback):
+    from copilot._generated.rpc import register_client_session_api_handlers
+    from copilot.session import CopilotSession
+
+    session = CopilotSession("s1", None)
+    session._register_bearer_token_providers({"provider": callback})
+    session._register_transform_callbacks({"identity": callback})
+    client, recorder = _recording_client()
+    register_client_session_api_handlers(client, lambda _id: session._client_session_apis)
+    client.set_request_handler(
+        "systemMessage.transform",
+        lambda params: session._handle_system_message_transform(params["sections"]),
+    )
+    params = (
+        {"sessionId": "s1", "providerName": "provider"}
+        if method == "providerToken.getToken"
+        else {"sessionId": "s1", "sections": {"identity": {"content": "original"}}}
+    )
+    return (
+        client._dispatch_request(
+            {"jsonrpc": "2.0", "id": 9, "method": method, "params": params},
+            client.request_handlers[method],
+            None,
+        ),
+        recorder,
+    )
+
+
+@pytest.mark.parametrize("method", ["providerToken.getToken", "systemMessage.transform"])
+@pytest.mark.parametrize("outcome", ["self_cancel", "sync", "async", "exception"])
+async def test_session_callback_request_answers_handler_outcome(method, outcome):
+    def callback(_input):
+        if outcome == "self_cancel":
+            return _cancel_its_own_task()
+        if outcome == "exception":
+            raise RuntimeError("lookup failed")
+        if outcome == "async":
+            return asyncio.sleep(0, result="updated")
+        return "updated"
+
+    dispatch, recorder = _session_callback_dispatch(method, callback)
+    await asyncio.wait_for(dispatch, 5)
+
+    if outcome == "self_cancel":
+        expected = ("error", 9, -32603, "CancelledError")
+    elif outcome == "exception" and method == "providerToken.getToken":
+        expected = ("error", 9, -32603, "lookup failed")
+    elif method == "providerToken.getToken":
+        expected = ("result", 9, {"token": "updated"})
+    else:
+        content = "original" if outcome == "exception" else "updated"
+        expected = ("result", 9, {"sections": {"identity": {"content": content}}})
+    assert recorder.answers == [expected]
+
+
+@pytest.mark.parametrize("method", ["providerToken.getToken", "systemMessage.transform"])
+async def test_session_callback_request_dispatch_cancellation_propagates(method):
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def callback(_input):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    pending, recorder = _session_callback_dispatch(method, callback)
+    dispatch = asyncio.create_task(pending)
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        dispatch.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await dispatch
+        assert stopped.is_set()
+        assert recorder.answers == []
+    finally:
+        dispatch.cancel()
+        await asyncio.gather(dispatch, return_exceptions=True)
+
+
+async def test_hooks_invoke_answers_a_hook_that_cancels_its_own_task():
+    from copilot.session import CopilotSession
+
+    session = CopilotSession("s1", None)
+
+    async def on_pre_tool_use(_input, _invocation):
+        await _cancel_its_own_task()
+
+    session._register_hooks({"on_pre_tool_use": on_pre_tool_use})
+    client, recorder = _recording_client()
+
+    await asyncio.wait_for(
+        client._dispatch_request(
+            {"jsonrpc": "2.0", "id": 7, "method": "probe", "params": {}},
+            lambda _params: session._handle_hooks_invoke("preToolUse", {"timestamp": 0}),
+            None,
+        ),
+        5,
+    )
+
+    assert recorder.answers == [("error", 7, -32603, "CancelledError")]
+
+
+async def test_user_input_answers_a_handler_that_cancels_its_own_task():
+    from copilot.session import CopilotSession
+
+    session = CopilotSession("s1", None)
+
+    async def on_user_input(_request, _invocation):
+        await _cancel_its_own_task()
+
+    session._register_user_input_handler(on_user_input)
+    client, recorder = _recording_client()
+
+    await asyncio.wait_for(
+        client._dispatch_request(
+            {"jsonrpc": "2.0", "id": 8, "method": "probe", "params": {}},
+            lambda _params: session._handle_user_input_request({"question": "Proceed?"}),
+            None,
+        ),
+        5,
+    )
+
+    assert recorder.answers == [("error", 8, -32603, "CancelledError")]
+
+
+async def test_cancelling_the_dispatch_cancels_a_hook_and_leaves_its_request_unanswered():
+    from copilot.session import CopilotSession
+
+    session = CopilotSession("s1", None)
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def on_pre_tool_use(_input, _invocation):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    session._register_hooks({"on_pre_tool_use": on_pre_tool_use})
+    client, recorder = _recording_client()
+    dispatch = asyncio.create_task(
+        client._dispatch_request(
+            {"jsonrpc": "2.0", "id": 7, "method": "probe", "params": {}},
+            lambda _params: session._handle_hooks_invoke("preToolUse", {"timestamp": 0}),
+            None,
+        )
+    )
+    await asyncio.wait_for(started.wait(), 5)
+    dispatch.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await dispatch
+    await asyncio.wait_for(stopped.wait(), 5)
+
+    assert recorder.answers == []
+
+
+@pytest.mark.parametrize("failure", ["cancelled", "base_exception"])
+async def test_raw_request_handler_failure_is_answered(failure):
+    client, recorder = _recording_client()
+
+    async def handler(_message):
+        await _fail_with(failure)
+
+    await asyncio.wait_for(
+        client._dispatch_raw_request(
+            {"jsonrpc": "2.0", "id": 3, "method": "probe", "params": {}}, handler, None
+        ),
+        5,
+    )
+
+    assert recorder.answers == [("error", 3, -32603, "Internal error")]
+
+
+async def test_cancelling_the_dispatch_leaves_a_raw_request_unanswered():
+    client, recorder = _recording_client()
+    started = asyncio.Event()
+
+    async def handler(_message):
+        started.set()
+        await asyncio.Event().wait()
+
+    dispatch = asyncio.create_task(
+        client._dispatch_raw_request(
+            {"jsonrpc": "2.0", "id": 3, "method": "probe", "params": {}}, handler, None
+        )
+    )
+    await asyncio.wait_for(started.wait(), 5)
+    dispatch.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await dispatch
+
+    assert recorder.answers == []

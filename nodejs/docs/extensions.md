@@ -17,7 +17,7 @@ Extensions add custom tools, hooks, and behaviors to the Copilot CLI. They run a
 ```
 
 1. **Discovery**: The CLI scans `.github/extensions/` (project) and the user's copilot config extensions directory for subdirectories containing an `extension.mjs`, `extension.cjs` or `extension.js` entry file.
-2. **Launch**: Legacy extensions start eagerly. Extensions with a valid opt-in `extension.json` advertise native tools/canvases without starting, and launch on first admitted demand. Each launched extension is a child process with `@microsoft/copilot-sdk` available via an automatic module resolver.
+2. **Launch**: Legacy extensions start eagerly. Extensions with a valid opt-in `extension.json` advertise native tools, canvases, and slash commands without starting, and launch on first admitted demand. Each launched extension is a child process with `@microsoft/copilot-sdk` available via an automatic module resolver.
 3. **Connection**: The extension calls `joinSession()` which establishes a JSON-RPC connection over stdio to the CLI and attaches to the user's current foreground session.
 4. **Registration**: Tools and hooks declared in the session options are registered with the CLI and become available to the agent.
 5. **Lifecycle**: Extensions reload on `/clear` or foreground-session replacement and stop on CLI exit. On macOS and Linux, ordinary stop/reload sends SIGTERM, then SIGKILL after 5s if still running. CLI exit and session/service teardown use a shared 1s grace period, including disabling extensions on SDK resume; Windows kills immediately without a grace period.
@@ -53,16 +53,20 @@ no-follow directory handles so directory replacement cannot redirect a write.
 ## Opting Into Request-Driven Activation
 
 Place a version 1 `extension.json` beside `extension.mjs`, with
-`"initialization": "module"` and nonempty `tools` and/or `canvases` arrays using
-the existing native-tool/canvas wire definitions. Import those same declarations
-in the entrypoint and add handlers so the advertised schemas cannot drift.
+`"initialization": "module"` and nonempty `tools`, `canvases`, and/or `commands`
+arrays using the existing native-tool, canvas, and command definitions. Command
+declarations contain `name` and optional `description`; handlers remain in the
+live `joinSession()` registration. Import the same declarations in the entrypoint
+and add handlers so the advertised metadata cannot drift.
 Omit absent optional fields rather than writing null. Missing metadata preserves
 eager startup; invalid metadata also produces a diagnostic.
 
-Only native-tool and canvas entry demand is supported. Background event observers,
-hooks, MCP-only entrypoints, commands, workflows, skills, agents, and system-message
-changes must not depend on this activation mechanism. Postactivation MCP
-registration continues to work normally.
+Only native-tool, canvas, and declared slash-command demand is supported.
+Background event observers, hooks, MCP-only entrypoints, workflows, skills,
+agents, and system-message changes must not depend on this activation mechanism.
+An activated extension can register additional contributions during
+`joinSession()`, including MCP servers and Dynamic Workflows. Do not declare
+workflows in `extension.json`.
 
 Finish `joinSession()` and required listener setup before awaited module import
 completes. The bootstrap explicitly signals that boundary; the first operation and

@@ -2,6 +2,27 @@
 
 use crate::{Client, ClientOptions, Error, ErrorKind, RuntimeConnection};
 
+/// Install an owner-scoped timing consumer during the native CLI's connection setup.
+///
+/// The consumer performs only in-memory initialization; release admission and endpoint
+/// resolution remain asynchronous. Ordinary SDK builds do not compile this entry point.
+pub fn initialize_session_timing(
+    client: &Client,
+    config: &serde_json::Value,
+) -> Result<bool, Error> {
+    let _span = tracing::debug_span!("session.timing.cli_timing_initialize").entered();
+    let config = serde_json::to_vec(config)
+        .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+    let host = client.inner.ffi_host.lock();
+    let host = host.as_ref().ok_or_else(|| {
+        Error::with_message(
+            ErrorKind::InvalidConfig,
+            "CLI timing initialization requires an active in-process connection",
+        )
+    })?;
+    host.initialize_session_timing(&config)
+}
+
 /// Start the native CLI's connection after normal SDK setup.
 ///
 /// The caller checks image identity before the SDK captures CLI authority.

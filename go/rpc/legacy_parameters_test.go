@@ -61,9 +61,9 @@ func TestExternalToolDefinitionPreservesMetadata(t *testing.T) {
 }
 
 func TestLoginBeginKeepsPositionalLiterals(t *testing.T) {
-	request := AuthLoginBeginRequest{Kind: LoginProviderKindGitHubDotCom}
+	request := AuthLoginBeginRequest{Kind: LoginProviderKindGitHub}
 	wire := encodeRequest(t, request)
-	if len(wire) != 1 || wire["kind"] != "githubDotCom" {
+	if len(wire) != 1 || wire["kind"] != "gitHub" {
 		t.Fatalf("legacy login request changed: %v", wire)
 	}
 }
@@ -258,18 +258,18 @@ func TestLoginBeginOptionsOnWire(t *testing.T) {
 				mode := AuthLoginModeDefault
 				_, err = api.Begin(ctx, &AuthLoginBeginRequest{
 					AccountID: &accountID,
-					Kind:      LoginProviderKindGitHubDotCom,
+					Kind:      LoginProviderKindGitHub,
 					Mode:      &mode,
 				})
 				expected["accountId"] = accountID
-				expected["kind"] = "githubDotCom"
+				expected["kind"] = "gitHub"
 				expected["mode"] = "default"
 			case "device-code":
 				method := AuthLoginMethodDeviceCode
 				_, err = api.Begin(ctx, &AuthLoginBeginRequest{
-					Kind: LoginProviderKindGitHubDotCom, Method: &method,
+					Kind: LoginProviderKindGitHub, Method: &method,
 				})
-				expected["kind"] = "githubDotCom"
+				expected["kind"] = "gitHub"
 				expected["method"] = "device-code"
 			case "nil":
 				_, err = api.Begin(ctx, nil)
@@ -285,6 +285,70 @@ func TestLoginBeginOptionsOnWire(t *testing.T) {
 				}
 				if !reflect.DeepEqual(actual, expected) {
 					t.Fatalf("login request = %v, want %v", actual, expected)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		})
+	}
+}
+
+func TestPluginsListOnWire(t *testing.T) {
+	var _ interface {
+		List(context.Context, *PluginsListRequest) (*PluginListResult, error)
+	} = (*ServerPluginsAPI)(nil)
+
+	for _, name := range []string{"method-value", "nil-options", "context"} {
+		t.Run(name, func(t *testing.T) {
+			clientConn, serverConn := net.Pipe()
+			defer clientConn.Close()
+			defer serverConn.Close()
+			client := jsonrpc2.NewClient(clientConn, clientConn)
+			server := jsonrpc2.NewClient(serverConn, serverConn)
+			requests := make(chan json.RawMessage, 1)
+			server.SetRequestHandler("plugins.list", func(params json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
+				requests <- params
+				return json.RawMessage(`{"plugins":[]}`), nil
+			})
+			client.Start()
+			server.Start()
+			defer client.Stop()
+			defer server.Stop()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			api := NewServerRPC(client).Plugins
+			expected := map[string]any{}
+			var result *PluginListResult
+			var err error
+			switch name {
+			case "context":
+				directory := t.TempDir()
+				result, err = api.List(ctx, &PluginsListRequest{
+					WorkingDirectory:  &directory,
+					PluginDirectories: []string{directory},
+				})
+				expected["workingDirectory"] = directory
+				expected["pluginDirectories"] = []any{directory}
+			case "nil-options":
+				result, err = api.List(ctx, nil)
+			default:
+				list := api.List
+				result, err = list(ctx, nil)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result == nil || result.Plugins == nil || len(result.Plugins) != 0 {
+				t.Fatalf("plugin listing result = %#v", result)
+			}
+			select {
+			case raw := <-requests:
+				var actual map[string]any
+				if err := json.Unmarshal(raw, &actual); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(actual, expected) {
+					t.Fatalf("plugin listing params = %s, want %v", raw, expected)
 				}
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())

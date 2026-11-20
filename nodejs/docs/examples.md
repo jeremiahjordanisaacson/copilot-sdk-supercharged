@@ -461,7 +461,7 @@ session.on("assistant.message", (event) => {
 | --------------------------- | ------------------------------------------------ | ------------------------------------------------------ |
 | `assistant.message`         | Agent's final response                           | `content`, `messageId`, `toolRequests`                 |
 | `assistant.message_delta`   | Message content chunks (ephemeral)               | `deltaContent`                                         |
-| `tool.execution_start`      | A tool is about to run                           | `toolCallId`, `toolName`, `arguments`                  |
+| `tool.execution_start`      | A tool call was requested (may await permission) | `toolCallId`, `toolName`, `arguments`                  |
 | `tool.execution_complete`   | A tool finished running                          | `toolCallId`, `success`, `result`, `error`             |
 | `user.message`              | User sent a message                              | `content`, `attachments`, `source`                     |
 | `session.idle`              | Session finished processing a turn               | `aborted`                                              |

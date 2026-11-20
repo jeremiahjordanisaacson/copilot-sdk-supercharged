@@ -25,6 +25,8 @@ public final class SessionMcpApi {
     private final RpcCaller caller;
     private final String sessionId;
 
+    /** API methods for the {@code mcp.externalClient} sub-namespace. */
+    final SessionMcpExternalClientApi externalClient;
     /** API methods for the {@code mcp.ide} sub-namespace. */
     public final SessionMcpIdeApi ide;
     /** API methods for the {@code mcp.oauth} sub-namespace. */
@@ -42,6 +44,7 @@ public final class SessionMcpApi {
     SessionMcpApi(RpcCaller caller, String sessionId) {
         this.caller = caller;
         this.sessionId = sessionId;
+        this.externalClient = new SessionMcpExternalClientApi(caller, sessionId);
         this.ide = new SessionMcpIdeApi(caller, sessionId);
         this.oauth = new SessionMcpOauthApi(caller, sessionId);
         this.headers = new SessionMcpHeadersApi(caller, sessionId);

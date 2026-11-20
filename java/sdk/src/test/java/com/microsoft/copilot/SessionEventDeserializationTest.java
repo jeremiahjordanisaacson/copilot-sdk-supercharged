@@ -50,6 +50,16 @@ public class SessionEventDeserializationTest {
                 """.formatted(type, payload);
     }
 
+    @Test
+    void testSandboxStatePreservesRequiredNulls() throws Exception {
+        var wire = eventEnvelope("session.sandbox_state_changed", """
+                {"incarnation":1,"revision":2,"config":null,"configSource":"settings",
+                 "disabledForSession":false,"autoApproveBypass":false,"sessionOverride":null}
+                """);
+        var event = assertInstanceOf(SessionSandboxStateChangedEvent.class, parseJson(wire));
+        assertEquals(MAPPER.readTree(wire), MAPPER.readTree(MAPPER.writeValueAsString(event)));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"{\"newModel\":\"auto\"}", "{\"newModel\":\"auto\",\"contextTier\":null}",
             "{\"newModel\":\"auto\",\"contextTier\":\"long_context\"}"})

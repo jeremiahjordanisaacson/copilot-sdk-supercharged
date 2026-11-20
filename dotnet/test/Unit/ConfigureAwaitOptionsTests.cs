@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Microsoft.Copilot.Test.Unit;
 
-// Exercises .NET 8's ConfigureAwaitOptions on net8.0 and the SDK's downlevel polyfill, which the test project compiles
+// Exercises ConfigureAwaitOptions on net10.0 and the SDK's downlevel polyfill, which the test project compiles
 // in, on net472.
 public class ConfigureAwaitOptionsTests
 {

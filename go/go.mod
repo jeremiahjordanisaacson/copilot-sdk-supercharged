@@ -3,8 +3,9 @@ module github.com/microsoft/copilot-sdk/go/v2
 go 1.26.0
 
 require (
+	github.com/go-json-experiment/json v1.27.2
 	github.com/google/jsonschema-go v0.4.3
-	github.com/klauspost/compress v1.20.3
+	github.com/klauspost/compress v1.20.4
 )
 
 require (

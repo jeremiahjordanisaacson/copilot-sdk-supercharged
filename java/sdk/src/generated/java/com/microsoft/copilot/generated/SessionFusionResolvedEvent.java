@@ -15,7 +15,7 @@ import java.util.List;
 import javax.annotation.processing.Generated;
 
 /**
- * Session event "session.fusion_resolved". Experimental durable validated HydraFusion route and turn policy.
+ * Session event "session.fusion_resolved". Experimental durable validated HydraFusion route and turn policy. An empty phase plan with pattern single runs an ordinary streaming turn, without phase or commit events.
  *
  * @apiNote This event type is experimental and may change in a future version.
  * @since 1.0.0
@@ -74,7 +74,7 @@ public final class SessionFusionResolvedEvent extends SessionEvent {
         /** Short human-readable summary of the selected workflow, suitable for immediate client display after routing. May be absent in older durable events; omit the explanation or derive one from pattern and phasePlan. Display text, not a stable machine-readable value. */
         @CopilotExperimental
         @JsonProperty("hint") String hint,
-        /** Presentation-neutral phase plan for clients that render workflow progress. */
+        /** Presentation-neutral phase plan for workflow progress. An empty plan with pattern single runs an ordinary streaming turn, without phase or commit events. */
         @CopilotExperimental
         @JsonProperty("phasePlan") List<FusionPhasePlanStep> phasePlan,
         /** Concrete model selected for the primary solver phase. */

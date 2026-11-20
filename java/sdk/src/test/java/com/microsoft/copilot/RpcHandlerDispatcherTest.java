@@ -11,13 +11,19 @@ import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -27,10 +33,13 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.microsoft.copilot.rpc.BearerTokenProvider;
 import com.microsoft.copilot.rpc.ExitPlanModeRequest;
 import com.microsoft.copilot.rpc.ExitPlanModeResult;
 import com.microsoft.copilot.rpc.PermissionRequestResult;
@@ -91,7 +100,8 @@ class RpcHandlerDispatcherTest {
         sessions = new ConcurrentHashMap<>();
         lifecycleEvents = new CopyOnWriteArrayList<>();
         gitHubTokenProviders = new GitHubTokenProviderRegistry();
-        dispatcher = new RpcHandlerDispatcher(sessions, lifecycleEvents::add, null, gitHubTokenProviders);
+        dispatcher = new RpcHandlerDispatcher(sessions, lifecycleEvents::add, null, gitHubTokenProviders,
+                sessions.values());
         dispatcher.registerHandlers(rpc);
 
         // Extract the registered handlers via reflection so we can invoke them directly
@@ -135,6 +145,63 @@ class RpcHandlerDispatcherTest {
         int contentLength = Integer.parseInt(headerStr.substring(idx + 1).trim());
         byte[] body = responseStream.readNBytes(contentLength);
         return MAPPER.readTree(body);
+    }
+
+    /** Write a JSON-RPC message to the client, as the server would. */
+    private void sendToClient(JsonNode message) throws Exception {
+        byte[] content = MAPPER.writeValueAsBytes(message);
+        var out = serverSideSocket.getOutputStream();
+        out.write(("Content-Length: " + content.length + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+        out.write(content);
+        out.flush();
+    }
+
+    /**
+     * Send a session.idle event for the session over the connection and return its
+     * id.
+     */
+    private String sendSessionEvent(String sessionId) throws Exception {
+        String id = UUID.randomUUID().toString();
+        ObjectNode notification = MAPPER.createObjectNode();
+        notification.put("jsonrpc", "2.0");
+        notification.put("method", "session.event");
+        ObjectNode params = notification.putObject("params");
+        params.put("sessionId", sessionId);
+        ObjectNode event = params.putObject("event");
+        event.put("type", "session.idle");
+        event.put("id", id);
+        event.put("timestamp", "2026-01-01T00:00:00Z");
+        event.putObject("data");
+        sendToClient(notification);
+        return id;
+    }
+
+    /** Answer the next request the client sends with a null result. */
+    private void answerNextRequest() throws Exception {
+        JsonNode request = readResponse();
+        ObjectNode response = MAPPER.createObjectNode();
+        response.put("jsonrpc", "2.0");
+        response.set("id", request.get("id"));
+        response.putNull("result");
+        sendToClient(response);
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            latch.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void waitUntil(Supplier<Boolean> condition, String message) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!condition.get()) {
+            if (System.nanoTime() > deadline) {
+                fail(message);
+            }
+            Thread.sleep(10);
+        }
     }
 
     /** Create and register a CopilotSession in the sessions map. */
@@ -195,6 +262,89 @@ class RpcHandlerDispatcherTest {
         assertTrue(unknown.at("/error/message").asText().contains("Unknown GitHub token provider registration"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"throws-error", "throws-exception", "fails-with-error"})
+    void gitHubTokenCallbackAnswersAFailedProvider(String failure) throws Exception {
+        var registration = gitHubTokenProviders.register(args -> failedTokenProvider(failure, "gh-token-boom"));
+        ObjectNode params = MAPPER.createObjectNode();
+        params.put("registrationId", registration.id());
+        params.put("host", "github.com");
+        params.put("reason", "initial");
+
+        invokeHandler("gitHubToken.getToken", "84", params);
+
+        JsonNode error = readResponse();
+        assertEquals(-32603, error.at("/error/code").asInt(), error.toString());
+        assertTrue(error.at("/error/message").asText().contains("gh-token-boom"), error.toString());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"returns-token", "throws-error", "throws-exception", "fails-with-error"})
+    void providerTokenCallbackAnswersEveryProviderOutcome(String outcome) throws Exception {
+        BearerTokenProvider provider = args -> "returns-token".equals(outcome)
+                ? CompletableFuture.completedFuture("tok-ok")
+                : failedTokenProvider(outcome, "bearer-boom");
+        createSession("s1").registerBearerTokenProviders(Map.of("mi", provider));
+        ObjectNode params = MAPPER.createObjectNode();
+        params.put("sessionId", "s1");
+        params.put("providerName", "mi");
+
+        invokeHandler("providerToken.getToken", "85", params);
+
+        JsonNode response = readResponse();
+        if ("returns-token".equals(outcome)) {
+            assertEquals("tok-ok", response.at("/result/token").asText(), response.toString());
+        } else {
+            assertEquals(-32603, response.at("/error/code").asInt(), response.toString());
+            assertTrue(response.at("/error/message").asText().contains("bearer-boom"), response.toString());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"gitHubToken.getToken", "providerToken.getToken"})
+    void tokenCallbacksRethrowAFatalProviderError(String method) throws Exception {
+        // A fatal error is rethrown, as on every other callback path, not answered.
+        var called = new CountDownLatch(1);
+        ObjectNode params = MAPPER.createObjectNode();
+        if (method.equals("gitHubToken.getToken")) {
+            var registration = gitHubTokenProviders.register(args -> {
+                called.countDown();
+                return failedTokenProvider("throws-fatal-error", "gh-token-fatal");
+            });
+            params.put("registrationId", registration.id());
+            params.put("host", "github.com");
+            params.put("reason", "initial");
+        } else {
+            BearerTokenProvider provider = args -> {
+                called.countDown();
+                return failedTokenProvider("throws-fatal-error", "bearer-fatal");
+            };
+            createSession("s1").registerBearerTokenProviders(Map.of("mi", provider));
+            params.put("sessionId", "s1");
+            params.put("providerName", "mi");
+        }
+
+        invokeHandler(method, "86", params);
+
+        assertTrue(called.await(SOCKET_TIMEOUT_MS, TimeUnit.MILLISECONDS), "The provider must be called");
+        serverSideSocket.setSoTimeout(500);
+        assertThrows(java.net.SocketTimeoutException.class, this::readResponse);
+    }
+
+    /**
+     * A token provider that fails before returning its future, or returns a failed
+     * one.
+     */
+    private static <T> CompletableFuture<T> failedTokenProvider(String failure, String message) {
+        return switch (failure) {
+            case "throws-error" -> throw new AssertionError(message);
+            case "throws-fatal-error" -> throw new LinkageError(message);
+            case "throws-exception" -> throw new IllegalStateException(message);
+            case "fails-with-error" -> CompletableFuture.failedFuture(new AssertionError(message));
+            default -> throw new IllegalArgumentException(failure);
+        };
+    }
+
     // ===== session.event tests =====
 
     @Test
@@ -209,7 +359,7 @@ class RpcHandlerDispatcherTest {
 
         invokeHandler("session.event", null, params);
 
-        // Give a moment for async processing (though this handler is synchronous)
+        // Give queued event delivery a moment to run
         Thread.sleep(50);
         assertTrue(dispatched.isEmpty(), "No events should be dispatched when eventNode is null");
     }
@@ -224,6 +374,172 @@ class RpcHandlerDispatcherTest {
 
         // Should not throw — silently skips when session is not found
         assertDoesNotThrow(() -> invokeHandler("session.event", null, params));
+    }
+
+    @Test
+    void busySessionEventHandlerLeavesTheConnectionAndOtherSessionsWorking() throws Exception {
+        CopilotSession busy = createSession("s1");
+        CopilotSession other = createSession("s2");
+        // Client sessions always deliver on the client's executor. Without one,
+        // delivery falls back to the common pool, which can be one worker wide.
+        ExecutorService deliveries = Executors.newCachedThreadPool();
+        busy.setExecutor(deliveries);
+        other.setExecutor(deliveries);
+        var handlerRunning = new CountDownLatch(1);
+        var releaseHandler = new CountDownLatch(1);
+        busy.on(event -> {
+            handlerRunning.countDown();
+            awaitQuietly(releaseHandler);
+        });
+        var otherReceived = new CountDownLatch(1);
+        other.on(event -> otherReceived.countDown());
+        try {
+            sendSessionEvent("s1");
+            assertTrue(handlerRunning.await(5, TimeUnit.SECONDS), "s1 handler should receive its event");
+
+            CompletableFuture<JsonNode> call = rpc.invoke("session.abort", Map.of("sessionId", "s2"), JsonNode.class);
+            answerNextRequest();
+            assertDoesNotThrow(() -> call.get(5, TimeUnit.SECONDS),
+                    "A response must be read while another session's handler is busy");
+
+            sendSessionEvent("s2");
+            assertTrue(otherReceived.await(5, TimeUnit.SECONDS),
+                    "Another session's events must be delivered while s1's handler is busy");
+        } finally {
+            releaseHandler.countDown();
+            deliveries.shutdown();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "inline", "rejected"})
+    void sessionEventHandlerCanWaitForAnRpcResponse(String executorKind) throws Exception {
+        CopilotSession session = createSession("s1");
+        if (executorKind.equals("inline")) {
+            session.setExecutor(Runnable::run);
+        } else if (executorKind.equals("rejected")) {
+            session.setExecutor(task -> {
+                throw new java.util.concurrent.RejectedExecutionException("Controlled executor rejection");
+            });
+        }
+        var outcome = new CompletableFuture<JsonNode>();
+        session.on(event -> {
+            try {
+                outcome.complete(rpc.invoke("session.abort", Map.of("sessionId", "s1"), JsonNode.class).get(5,
+                        TimeUnit.SECONDS));
+            } catch (Exception e) {
+                outcome.completeExceptionally(e);
+            }
+        });
+
+        sendSessionEvent("s1");
+        answerNextRequest();
+
+        assertDoesNotThrow(() -> outcome.get(10, TimeUnit.SECONDS),
+                "A handler waiting for an RPC response must receive it");
+    }
+
+    @Test
+    void queuedSessionEventsStayOnTheConfiguredExecutor() throws Exception {
+        CopilotSession session = createSession("s1");
+        var executorThread = new AtomicReference<Thread>();
+        ExecutorService deliveries = Executors.newSingleThreadExecutor(task -> {
+            Thread thread = new Thread(task, "session-event-test");
+            executorThread.set(thread);
+            return thread;
+        });
+        session.setExecutor(deliveries);
+        var firstRunning = new CountDownLatch(1);
+        var releaseFirst = new CountDownLatch(1);
+        var received = new CopyOnWriteArrayList<Thread>();
+        var secondDelivered = new CompletableFuture<Void>();
+        session.on(event -> {
+            received.add(Thread.currentThread());
+            if (received.size() == 1) {
+                firstRunning.countDown();
+                try {
+                    releaseFirst.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    secondDelivered.completeExceptionally(e);
+                }
+            } else {
+                secondDelivered.complete(null);
+            }
+        });
+        ObjectNode params = MAPPER.createObjectNode();
+        params.put("sessionId", "s1");
+        ObjectNode event = params.putObject("event");
+        event.put("type", "session.idle");
+        event.put("id", UUID.randomUUID().toString());
+        event.put("timestamp", "2026-01-01T00:00:00Z");
+        event.putObject("data");
+        try {
+            invokeHandler("session.event", null, params);
+            assertTrue(firstRunning.await(5, TimeUnit.SECONDS), "The first handler must be running");
+            invokeHandler("session.event", null, params);
+            releaseFirst.countDown();
+            secondDelivered.get(5, TimeUnit.SECONDS);
+            assertEquals(List.of(executorThread.get(), executorThread.get()), received,
+                    "Queued handlers must retain the configured executor's thread");
+        } finally {
+            releaseFirst.countDown();
+            deliveries.shutdown();
+            assertTrue(deliveries.awaitTermination(5, TimeUnit.SECONDS), "The event executor must stop");
+        }
+    }
+
+    @Test
+    void eventsQueuedBehindABusyHandlerArriveInOrderOneAtATime() throws Exception {
+        CopilotSession session = createSession("s1");
+        var received = new CopyOnWriteArrayList<String>();
+        var active = new AtomicInteger();
+        var overlapped = new AtomicBoolean();
+        var firstRunning = new CountDownLatch(1);
+        var releaseFirst = new CountDownLatch(1);
+        session.on(event -> {
+            if (active.incrementAndGet() > 1) {
+                overlapped.set(true);
+            }
+            try {
+                received.add(event.getId().toString());
+                if (received.size() == 1) {
+                    firstRunning.countDown();
+                    awaitQuietly(releaseFirst);
+                }
+            } finally {
+                active.decrementAndGet();
+            }
+        });
+
+        var sent = new ArrayList<String>();
+        sent.add(sendSessionEvent("s1"));
+        assertTrue(firstRunning.await(5, TimeUnit.SECONDS), "handler should receive the first event");
+        for (int i = 1; i < 50; i++) {
+            sent.add(sendSessionEvent("s1"));
+        }
+        releaseFirst.countDown();
+
+        waitUntil(() -> received.size() == sent.size(), "all events should be delivered");
+        assertEquals(sent, received, "events must reach the handler in arrival order");
+        assertFalse(overlapped.get(), "a session's handler must receive one event at a time");
+    }
+
+    @Test
+    void handlerErrorDoesNotStopLaterEvents() throws Exception {
+        CopilotSession session = createSession("s1");
+        var received = new CopyOnWriteArrayList<String>();
+        session.on(event -> {
+            received.add(event.getId().toString());
+            if (received.size() == 1) {
+                throw new AssertionError("handler failure");
+            }
+        });
+
+        sendSessionEvent("s1");
+        String second = sendSessionEvent("s1");
+
+        waitUntil(() -> received.contains(second), "an event after a handler error should still be delivered");
     }
 
     // ===== session.lifecycle tests =====
@@ -346,6 +662,30 @@ class RpcHandlerDispatcherTest {
         assertEquals("success", result.get("resultType").asText());
         // The map should be serialized to JSON string
         assertNotNull(result.get("textResultForLlm").asText());
+    }
+
+    record TaggedResult(String title, java.util.Optional<String> tag) {
+    }
+
+    @Test
+    void toolCallWithOptionalComponentInResult() throws Exception {
+        CopilotSession session = createSession("s1");
+        var tool = ToolDefinition.create("optional_tool", "Returns a record with Optional components",
+                Map.of("type", "object"),
+                invocation -> CompletableFuture.completedFuture(new TaggedResult("a", java.util.Optional.of("b"))));
+        session.registerTools(List.of(tool));
+
+        ObjectNode params = MAPPER.createObjectNode();
+        params.put("sessionId", "s1");
+        params.put("toolCallId", "tc1");
+        params.put("toolName", "optional_tool");
+        params.putObject("arguments");
+
+        invokeHandler("tool.call", "6", params);
+
+        JsonNode result = readResponse().get("result").get("result");
+        assertEquals("success", result.get("resultType").asText());
+        assertEquals("{\"title\":\"a\",\"tag\":\"b\"}", result.get("textResultForLlm").asText());
     }
 
     @Test
@@ -998,7 +1338,7 @@ class RpcHandlerDispatcherTest {
         }, name -> CompletableFuture.completedFuture(null)));
         var blockedExecutor = new CompletableFuture<Void>();
         var cancellingDispatcher = new RpcHandlerDispatcher(sessions, lifecycleEvents::add,
-                task -> blockedExecutor.thenRun(task), gitHubTokenProviders);
+                task -> blockedExecutor.thenRun(task), gitHubTokenProviders, sessions.values());
         cancellingDispatcher.registerHandlers(rpc);
 
         ObjectNode params = MAPPER.createObjectNode();
@@ -1129,6 +1469,72 @@ class RpcHandlerDispatcherTest {
         assertTrue(response.get("error").get("message").asText().contains("Hooks handler error"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"preToolUse", "userPromptSubmitted"})
+    void hooksInvokeHandlerThatThrowsAnErrorIsAnswered(String hookType) throws Exception {
+        CopilotSession session = createSession("s1");
+        session.registerHooks(new SessionHooks().setOnPreToolUse((input, invocation) -> {
+            throw new AssertionError("policy invariant broken");
+        }).setOnUserPromptSubmitted((input, invocation) -> {
+            throw new AssertionError("policy invariant broken");
+        }));
+
+        invokeHandler("hooks.invoke", "35", hookParams("s1", hookType));
+
+        JsonNode response = readResponse();
+        assertEquals(35, response.path("id").asInt());
+        assertEquals(-32603, response.at("/error/code").asInt());
+        String message = response.at("/error/message").asText();
+        assertTrue(message.startsWith("Hooks handler error: "), message);
+        assertTrue(message.contains("policy invariant broken"), message);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"preToolUse", "userPromptSubmitted"})
+    void hooksInvokeHandlerThatThrowsAnExceptionIsAnswered(String hookType) throws Exception {
+        CopilotSession session = createSession("s1");
+        session.registerHooks(new SessionHooks().setOnPreToolUse((input, invocation) -> {
+            throw new IllegalStateException("policy service failed");
+        }).setOnUserPromptSubmitted((input, invocation) -> {
+            throw new IllegalStateException("policy service failed");
+        }));
+
+        invokeHandler("hooks.invoke", "36", hookParams("s1", hookType));
+
+        JsonNode response = readResponse();
+        assertEquals(36, response.path("id").asInt());
+        assertEquals(-32603, response.at("/error/code").asInt());
+        String message = response.at("/error/message").asText();
+        assertTrue(message.startsWith("Hooks handler error: "), message);
+        assertTrue(message.contains("policy service failed"), message);
+    }
+
+    @Test
+    void hooksInvokeRethrowsAFatalErrorFromTheHook() {
+        CopilotSession session = createSession("s1");
+        session.registerHooks(new SessionHooks().setOnPreToolUse((input, invocation) -> {
+            throw new LinkageError("class failed to load");
+        }));
+
+        var error = assertThrows(LinkageError.class,
+                () -> session.handleHooksInvoke("preToolUse", hookParams("s1", "preToolUse").get("input")));
+        assertEquals("class failed to load", error.getMessage());
+    }
+
+    private static ObjectNode hookParams(String sessionId, String hookType) {
+        ObjectNode params = MAPPER.createObjectNode();
+        params.put("sessionId", sessionId);
+        params.put("hookType", hookType);
+        ObjectNode input = params.putObject("input");
+        if (hookType.equals("preToolUse")) {
+            input.put("toolName", "some_tool");
+            input.put("toolCallId", "tc1");
+        } else {
+            input.put("prompt", "hello");
+        }
+        return params;
+    }
+
     @Test
     void hooksInvokeWithNoHooksRegistered() throws Exception {
         // Session exists but no hooks registered at all → returns null output
@@ -1196,6 +1602,56 @@ class RpcHandlerDispatcherTest {
         assertEquals("Original identity", resultSections.get("identity").get("content").asText());
         assertEquals("Original tone", resultSections.get("tone").get("content").asText());
         assertEquals("Original safety (transformed)", resultSections.get("safety").get("content").asText());
+    }
+
+    @Test
+    void systemMessageTransformKeepsSectionWhenCallbackThrowsAnError() throws Exception {
+        // A callback that throws a non-fatal Error keeps its section, as one that
+        // throws an exception does, and the request is still answered
+        CopilotSession session = createSession("s1");
+        Map<String, Function<String, CompletableFuture<String>>> callbacks = Map.of("identity", content -> {
+            throw new AssertionError("transform assertion");
+        }, "tone", content -> {
+            throw new IllegalStateException("transform failed");
+        }, "safety", content -> CompletableFuture.completedFuture(content + " (transformed)"));
+        session.registerTransformCallbacks(callbacks);
+
+        ObjectNode params = MAPPER.createObjectNode();
+        params.put("sessionId", "s1");
+        ObjectNode sections = params.putObject("sections");
+        sections.putObject("identity").put("content", "Original identity");
+        sections.putObject("tone").put("content", "Original tone");
+        sections.putObject("safety").put("content", "Original safety");
+
+        invokeHandler("systemMessage.transform", "45", params);
+
+        JsonNode response = readResponse();
+        assertEquals(45, response.path("id").asInt());
+        JsonNode resultSections = response.get("result").get("sections");
+        assertEquals("Original identity", resultSections.get("identity").get("content").asText());
+        assertEquals("Original tone", resultSections.get("tone").get("content").asText());
+        assertEquals("Original safety (transformed)", resultSections.get("safety").get("content").asText());
+    }
+
+    @Test
+    void systemMessageTransformRethrowsAFatalErrorFromTheCallback() throws Exception {
+        // A fatal error is rethrown, as on every other callback path, not answered.
+        var called = new CountDownLatch(1);
+        CopilotSession session = createSession("s1");
+        session.registerTransformCallbacks(Map.of("identity", content -> {
+            called.countDown();
+            throw new LinkageError("class failed to load");
+        }));
+
+        ObjectNode params = MAPPER.createObjectNode();
+        params.put("sessionId", "s1");
+        params.putObject("sections").putObject("identity").put("content", "Original identity");
+
+        invokeHandler("systemMessage.transform", "46", params);
+
+        assertTrue(called.await(SOCKET_TIMEOUT_MS, TimeUnit.MILLISECONDS), "The callback must be called");
+        serverSideSocket.setSoTimeout(500);
+        assertThrows(java.net.SocketTimeoutException.class, this::readResponse);
     }
 
     @Test

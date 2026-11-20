@@ -20,6 +20,7 @@ import javax.annotation.processing.Generated;
 @javax.annotation.processing.Generated("copilot-sdk-codegen")
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
+@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using = DiscoveredMcpServer.$NullableDeserializer.class)
 public record DiscoveredMcpServer(
     /** Server name (config key) */
     @JsonProperty("name") String name,
@@ -33,15 +34,18 @@ public record DiscoveredMcpServer(
     @JsonProperty("sourcePluginVersion") String sourcePluginVersion,
     /** Canonical identity and location of the effective server declaration. */
     @JsonProperty("effectiveSource") McpSourceRef effectiveSource,
+    /** Effective serializable configuration, present only when includeConfiguration is true. Authentication remains owned by the runtime; callers must not log secret configuration values. */
+    @JsonProperty("configuration") Object configuration,
     /** Whether the server is enabled (not in the disabled list) */
-    @JsonProperty("enabled") Boolean enabled
+    @JsonProperty("enabled") Boolean enabled,
+    @com.fasterxml.jackson.annotation.JsonIgnore java.util.Set<String> $explicitNulls
 ) {
 
     /**
      * Creates a record positionally.
      * Use {@link #builder()} for named construction.
      */
-    public DiscoveredMcpServer {}
+    public DiscoveredMcpServer { $explicitNulls = $explicitNulls == null ? java.util.Set.of() : java.util.Set.copyOf($explicitNulls); }
 
     /**
      * Returns a named builder.
@@ -62,6 +66,8 @@ public record DiscoveredMcpServer(
         private String sourcePlugin;
         private String sourcePluginVersion;
         private McpSourceRef effectiveSource;
+        private Object configuration;
+        private boolean $presence6;
         private Boolean enabled;
 
         /**
@@ -131,6 +137,18 @@ public record DiscoveredMcpServer(
         }
 
         /**
+         * Sets the {@code configuration} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder configuration(Object value) {
+            this.configuration = value;
+            this.$presence6 = true;
+            return this;
+        }
+
+        /**
          * Sets the {@code enabled} property.
          * @param value the property value
          * @return this builder
@@ -151,7 +169,41 @@ public record DiscoveredMcpServer(
             if (name == null) throw new IllegalStateException("Missing required property: name");
             if (source == null) throw new IllegalStateException("Missing required property: source");
             if (enabled == null) throw new IllegalStateException("Missing required property: enabled");
-            return new DiscoveredMcpServer(name, type, source, sourcePlugin, sourcePluginVersion, effectiveSource, enabled);
+            java.util.Set<String> $explicitNulls = new java.util.LinkedHashSet<>();
+            if ($presence6 && configuration == null) $explicitNulls.add("configuration");
+            return new DiscoveredMcpServer(name, type, source, sourcePlugin, sourcePluginVersion, effectiveSource, configuration, enabled, $explicitNulls);
         }
+    }
+
+    @com.fasterxml.jackson.annotation.JsonAnyGetter
+    @JsonInclude(value = JsonInclude.Include.ALWAYS, content = JsonInclude.Include.ALWAYS)
+    public java.util.Map<String, Object> $nullableProperties() {
+        java.util.Map<String, Object> values = new java.util.LinkedHashMap<>();
+        if ($explicitNulls.contains("configuration") && configuration == null) values.put("configuration", null);
+        return values;
+    }
+
+    public static final class $NullableDeserializer extends com.fasterxml.jackson.databind.JsonDeserializer<DiscoveredMcpServer> {
+        @Override
+        public DiscoveredMcpServer deserialize(com.fasterxml.jackson.core.JsonParser parser,
+                com.fasterxml.jackson.databind.DeserializationContext context) throws java.io.IOException {
+            com.fasterxml.jackson.databind.JsonNode tree = context.readTree(parser);
+            if (!tree.isObject()) return context.reportInputMismatch(DiscoveredMcpServer.class, "Expected a JSON object");
+            java.util.Set<String> $explicitNulls = new java.util.LinkedHashSet<>();
+            if (tree.has("configuration") && tree.get("configuration").isNull()) $explicitNulls.add("configuration");
+            return new DiscoveredMcpServer(readProperty(context, tree, "name", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "type", new com.fasterxml.jackson.core.type.TypeReference<DiscoveredMcpServerType>() {}), readProperty(context, tree, "source", new com.fasterxml.jackson.core.type.TypeReference<McpServerSource>() {}), readProperty(context, tree, "sourcePlugin", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "sourcePluginVersion", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "effectiveSource", new com.fasterxml.jackson.core.type.TypeReference<McpSourceRef>() {}), readProperty(context, tree, "configuration", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), readProperty(context, tree, "enabled", new com.fasterxml.jackson.core.type.TypeReference<Boolean>() {}), $explicitNulls);
+        }
+
+        private static <T> T readProperty(com.fasterxml.jackson.databind.DeserializationContext context,
+                com.fasterxml.jackson.databind.JsonNode tree, String name,
+                com.fasterxml.jackson.core.type.TypeReference<T> type) throws java.io.IOException {
+            if (!tree.has(name)) return null;
+            return context.readTreeAsValue(tree.get(name), context.getTypeFactory().constructType(type));
+        }
+    }
+
+    @Override
+    public String toString() {
+        return "DiscoveredMcpServer[name=" + name + ", type=" + type + ", source=" + source + ", sourcePlugin=" + sourcePlugin + ", sourcePluginVersion=" + sourcePluginVersion + ", effectiveSource=" + effectiveSource + ", configuration=" + (configuration == null ? null : "<redacted>") + ", enabled=" + enabled + ", $explicitNulls=" + $explicitNulls + "]";
     }
 }

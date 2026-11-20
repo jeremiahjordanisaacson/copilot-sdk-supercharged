@@ -383,4 +383,4 @@ Every SDK can set a shell authentication handler:
 | Go | `OnShellAuthenticationRequest` |
 | .NET | `OnShellAuthenticationRequest` |
 | Java | `setOnShellAuthenticationRequest` |
-| Rust | `with_shell_authentication_handler` |
+| Rust | `with_on_shell_authentication_request` |

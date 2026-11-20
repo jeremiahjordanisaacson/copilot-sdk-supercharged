@@ -242,6 +242,66 @@ class CopilotToolProcessorTest {
                 "Expected a processor error naming the private class restriction, got: " + errors);
     }
 
+    @Test
+    void generatedTools_decodeRfc3339OffsetsOnLocalDateTimeAndLocalTime() throws Exception {
+        String source = """
+                package test;
+                import com.microsoft.copilot.tool.CopilotTool;
+                import com.microsoft.copilot.tool.CopilotToolParam;
+                import java.time.LocalDateTime;
+                import java.time.LocalTime;
+                import java.util.List;
+                public class AgendaTools {
+                    @CopilotTool("Books a meeting")
+                    public String scheduleMeeting(@CopilotToolParam("Meeting start") LocalDateTime start) {
+                        return "meeting " + start;
+                    }
+                    @CopilotTool("Sets an alarm")
+                    public String setAlarm(@CopilotToolParam("Alarm time") LocalTime at) {
+                        return "alarm " + at;
+                    }
+                    @CopilotTool("Books meetings")
+                    public String scheduleMeetings(@CopilotToolParam("Meeting starts") List<LocalDateTime> starts) {
+                        return "meetings " + starts;
+                    }
+                }
+                """;
+
+        CompilationResult result = compileWithProcessor(List.of(inMemorySource("test.AgendaTools", source)));
+
+        assertNoErrors(result);
+        try (URLClassLoader loader = new URLClassLoader(new java.net.URL[]{result.outputDir.toUri().toURL()},
+                getClass().getClassLoader())) {
+            Object tools = loader.loadClass("test.AgendaTools").getConstructor().newInstance();
+            Map<String, ToolDefinition> byName = new LinkedHashMap<>();
+            ToolDefinition.fromObject(tools).forEach(t -> byName.put(t.name(), t));
+            String[][] rows = {{"schedule_meeting", "start", "\"2026-11-15T10:20:30\"", "meeting 2026-11-15T10:20:30"},
+                    {"schedule_meeting", "start", "\"2026-11-15T10:20:30Z\"", "meeting 2026-11-15T10:20:30"},
+                    {"schedule_meeting", "start", "\"2026-11-15T10:20:30+01:00\"", "meeting 2026-11-15T10:20:30"},
+                    {"schedule_meeting", "start", "\"2026-11-15T10:20:30-05:00\"", "meeting 2026-11-15T10:20:30"},
+                    {"schedule_meeting", "start", "\"2026-11-15T10:20:30+0100\"", null},
+                    {"set_alarm", "at", "\"10:20:30\"", "alarm 10:20:30"},
+                    {"set_alarm", "at", "\"10:20:30Z\"", "alarm 10:20:30"},
+                    {"set_alarm", "at", "\"10:20:30+01:00\"", "alarm 10:20:30"}, {"set_alarm", "at", "\"noon\"", null},
+                    {"schedule_meetings", "starts", "[\"2026-11-15T10:20:30\",\"2026-11-15T11:20:30+01:00\"]",
+                            "meetings [2026-11-15T10:20:30, 2026-11-15T11:20:30]"}};
+            var json = new com.fasterxml.jackson.databind.ObjectMapper();
+            for (String[] row : rows) {
+                var arguments = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+                arguments.set(row[1], json.readTree(row[2]));
+                ToolDefinition tool = byName.get(row[0]);
+                if (row[3] == null) {
+                    assertThrows(IllegalArgumentException.class,
+                            () -> tool.handler().invoke(new ToolInvocation().setArguments(arguments)),
+                            row[0] + " " + row[2]);
+                } else {
+                    assertEquals(row[3], tool.handler().invoke(new ToolInvocation().setArguments(arguments)).get(),
+                            row[0] + " " + row[2]);
+                }
+            }
+        }
+    }
+
     private static Object invokeWithStringArgument(ToolDefinition tool, String name, String value) throws Exception {
         var arguments = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode().put(name, value);
         return tool.handler().invoke(new ToolInvocation().setArguments(arguments)).get();
@@ -1032,6 +1092,176 @@ class CopilotToolProcessorTest {
                 "Single-record schema should be flattened, not nested under wrapper param, got:\n" + generated);
         assertTrue(generated.contains("\"query\""),
                 "Expected flattened record component in schema, got:\n" + generated);
+    }
+
+    @Test
+    void generatedTools_decodeOptionalComponentsAndEncodeOptionalResults() throws Exception {
+        String source = """
+                package test;
+                import com.microsoft.copilot.tool.CopilotTool;
+                import com.microsoft.copilot.tool.CopilotToolParam;
+                import java.util.Optional;
+                import java.util.OptionalInt;
+                public class OptionalRecordTools {
+                    public record NoteArgs(String title, Optional<String> tag, OptionalInt priority) {}
+                    public record PlainArgs(String title, String tag) {}
+                    public record Note(String title, Optional<String> tag) {}
+                    public static class NoteBean {
+                        public String title;
+                        public Optional<String> tag;
+                        public Optional<String> label = Optional.empty();
+                    }
+                    @CopilotTool("Save a note")
+                    public String saveNote(NoteArgs args) {
+                        return args.title() + " tag=" + args.tag() + " priority=" + args.priority();
+                    }
+                    @CopilotTool("Save a note with flat parameters")
+                    public String saveFlat(@CopilotToolParam("Title") String title,
+                            @CopilotToolParam("Tag") Optional<String> tag) {
+                        return title + " tag=" + tag;
+                    }
+                    @CopilotTool("Save a plain note")
+                    public String savePlain(PlainArgs args) {
+                        return args.title() + " tag=" + args.tag();
+                    }
+                    @CopilotTool("Save a note bean")
+                    public String saveBean(@CopilotToolParam("Note") NoteBean note) {
+                        return note.title + " tag=" + note.tag + " label=" + note.label;
+                    }
+                    @CopilotTool("Return a note")
+                    public Note getNote(@CopilotToolParam("Title") String title,
+                            @CopilotToolParam("Tag") Optional<String> tag) {
+                        return new Note(title, tag);
+                    }
+                }
+                """;
+        // {tool, arguments, expected handler result}
+        String[][] rows = {
+                {"save_note", "{\"title\":\"a\",\"tag\":\"b\",\"priority\":2}",
+                        "a tag=Optional[b] priority=OptionalInt[2]"},
+                {"save_note", "{\"title\":\"a\"}", "a tag=Optional.empty priority=OptionalInt.empty"},
+                {"save_note", "{\"title\":\"a\",\"tag\":null,\"priority\":null}",
+                        "a tag=Optional.empty priority=OptionalInt.empty"},
+                {"save_bean", "{\"note\":{\"title\":\"a\",\"tag\":\"b\"}}", "a tag=Optional[b] label=Optional.empty"},
+                {"save_bean", "{\"note\":{\"title\":\"a\",\"tag\":null,\"label\":null}}",
+                        "a tag=Optional.empty label=Optional.empty"},
+                // A bean field the arguments omit keeps its initial value.
+                {"save_bean", "{\"note\":{\"title\":\"a\"}}", "a tag=null label=Optional.empty"},
+                {"save_flat", "{\"title\":\"a\",\"tag\":\"b\"}", "a tag=Optional[b]"},
+                {"save_flat", "{\"title\":\"a\"}", "a tag=Optional.empty"},
+                {"save_plain", "{\"title\":\"a\",\"tag\":\"b\"}", "a tag=b"},
+                {"save_plain", "{\"title\":\"a\",\"extra\":1}", "a tag=null"},
+                {"get_note", "{\"title\":\"a\",\"tag\":\"b\"}", "{\"title\":\"a\",\"tag\":\"b\"}"},
+                {"get_note", "{\"title\":\"a\"}", "{\"title\":\"a\",\"tag\":null}"}};
+
+        CompilationResult result = compileWithProcessor(List.of(inMemorySource("test.OptionalRecordTools", source)));
+        assertNoErrors(result);
+        try (URLClassLoader loader = new URLClassLoader(new java.net.URL[]{result.outputDir.toUri().toURL()},
+                getClass().getClassLoader())) {
+            Object tools = loader.loadClass("test.OptionalRecordTools").getConstructor().newInstance();
+            Map<String, ToolDefinition> byName = new LinkedHashMap<>();
+            for (ToolDefinition tool : ToolDefinition.fromObject(tools)) {
+                byName.put(tool.name(), tool);
+            }
+            var json = new com.fasterxml.jackson.databind.ObjectMapper();
+            List<String> mismatches = new ArrayList<>();
+            for (String[] row : rows) {
+                String actual;
+                try {
+                    actual = String.valueOf(byName.get(row[0]).handler()
+                            .invoke(new ToolInvocation().setArguments(json.readTree(row[1]))).get());
+                } catch (Exception e) {
+                    actual = "threw " + e;
+                }
+                if (!row[2].equals(actual)) {
+                    mismatches.add(row[0] + " " + row[1] + ": expected <" + row[2] + "> but was <" + actual + ">");
+                }
+            }
+            assertEquals(List.of(), mismatches);
+        }
+    }
+
+    @Test
+    void generatedTools_passNullForOmittedOptionalBoxedNumbers() throws Exception {
+        String source = """
+                package test;
+                import com.microsoft.copilot.tool.CopilotTool;
+                import com.microsoft.copilot.tool.CopilotToolParam;
+                public class OptionalNumberTools {
+                    @CopilotTool("Optional numbers")
+                    public String optional(@CopilotToolParam(value = "I", required = false) Integer i,
+                            @CopilotToolParam(value = "L", required = false) Long l,
+                            @CopilotToolParam(value = "D", required = false) Double d,
+                            @CopilotToolParam(value = "F", required = false) Float f,
+                            @CopilotToolParam(value = "S", required = false) Short s,
+                            @CopilotToolParam(value = "B", required = false) Byte b) {
+                        return i + " " + l + " " + d + " " + f + " " + s + " " + b;
+                    }
+                    @CopilotTool("Required number")
+                    public String required(@CopilotToolParam("I") Integer i) {
+                        return "i=" + i;
+                    }
+                    @CopilotTool("Unannotated number")
+                    public String unannotated(Integer i) {
+                        return "i=" + i;
+                    }
+                    @CopilotTool("Defaulted number")
+                    public String defaulted(@CopilotToolParam(value = "I", required = false, defaultValue = "7") Integer i) {
+                        return "i=" + i;
+                    }
+                    @CopilotTool("Optional flag")
+                    public String flag(@CopilotToolParam(value = "B", required = false) Boolean b) {
+                        return "b=" + b;
+                    }
+                }
+                """;
+        String npe = "threw java.lang.NullPointerException";
+        // {tool, arguments, expected handler result (a "threw" value matches as a
+        // prefix)}
+        String[][] rows = {{"optional", "{\"i\":1,\"l\":2,\"d\":0.5,\"f\":0.25,\"s\":3,\"b\":4}", "1 2 0.5 0.25 3 4"},
+                {"optional", "{}", "null null null null null null"},
+                {"optional", "{\"i\":null,\"l\":null,\"d\":null,\"f\":null,\"s\":null,\"b\":null}",
+                        "null null null null null null"},
+                {"optional", "{\"l\":2,\"d\":0.5,\"f\":0.25,\"s\":3,\"b\":4}", "null 2 0.5 0.25 3 4"},
+                {"optional", "{\"i\":1,\"d\":0.5,\"f\":0.25,\"s\":3,\"b\":4}", "1 null 0.5 0.25 3 4"},
+                {"optional", "{\"i\":1,\"l\":2,\"f\":0.25,\"s\":3,\"b\":4}", "1 2 null 0.25 3 4"},
+                {"optional", "{\"i\":1,\"l\":2,\"d\":0.5,\"s\":3,\"b\":4}", "1 2 0.5 null 3 4"},
+                {"optional", "{\"i\":1,\"l\":2,\"d\":0.5,\"f\":0.25,\"b\":4}", "1 2 0.5 0.25 null 4"},
+                {"optional", "{\"i\":1,\"l\":2,\"d\":0.5,\"f\":0.25,\"s\":3}", "1 2 0.5 0.25 3 null"},
+                // Required and unannotated parameters are not optional, so a null still fails
+                // the call.
+                {"required", "{\"i\":5}", "i=5"}, {"required", "{\"i\":null}", npe},
+                {"unannotated", "{\"i\":5}", "i=5"}, {"unannotated", "{\"i\":null}", npe},
+                // A declared default still applies when the argument is left out.
+                {"defaulted", "{}", "i=7"}, {"defaulted", "{\"i\":5}", "i=5"}, {"flag", "{}", "b=null"},
+                {"flag", "{\"b\":true}", "b=true"}};
+
+        CompilationResult result = compileWithProcessor(List.of(inMemorySource("test.OptionalNumberTools", source)));
+        assertNoErrors(result);
+        try (URLClassLoader loader = new URLClassLoader(new java.net.URL[]{result.outputDir.toUri().toURL()},
+                getClass().getClassLoader())) {
+            Object tools = loader.loadClass("test.OptionalNumberTools").getConstructor().newInstance();
+            Map<String, ToolDefinition> byName = new LinkedHashMap<>();
+            for (ToolDefinition tool : ToolDefinition.fromObject(tools)) {
+                byName.put(tool.name(), tool);
+            }
+            var json = new com.fasterxml.jackson.databind.ObjectMapper();
+            List<String> mismatches = new ArrayList<>();
+            for (String[] row : rows) {
+                String actual;
+                try {
+                    actual = String.valueOf(byName.get(row[0]).handler()
+                            .invoke(new ToolInvocation().setArguments(json.readTree(row[1]))).get());
+                } catch (Exception e) {
+                    actual = "threw " + e;
+                }
+                boolean matches = row[2].startsWith("threw ") ? actual.startsWith(row[2]) : row[2].equals(actual);
+                if (!matches) {
+                    mismatches.add(row[0] + " " + row[1] + ": expected <" + row[2] + "> but was <" + actual + ">");
+                }
+            }
+            assertEquals(List.of(), mismatches);
+        }
     }
 
     @Test

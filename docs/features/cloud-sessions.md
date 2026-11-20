@@ -137,6 +137,7 @@ _ = session
 ### .NET
 
 ```csharp
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
 await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
 var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
@@ -227,7 +228,7 @@ const session: CopilotSession = await client.createSession({
 await session.send({ prompt: "Summarize the README" });
 ```
 
-Set `streaming: true` on `createSession` so the runtime emits `assistant.message_delta` events. Without it, the only assistant signal you get is the final `assistant.message` — fine for batch use, but the chat will look frozen if you're rendering a live UI. See [Streaming Events](./streaming-events.md).
+Set `events.streaming: true` on `createSession` so the runtime emits `assistant.message_delta` events. Without it, the only assistant signal you get is the final `assistant.message` — fine for batch use, but the chat will look frozen if you're rendering a live UI. See [Streaming Events](./streaming-events.md).
 
 ## Accessing the Mission Control URL
 
@@ -369,7 +370,7 @@ Use remote sessions when the session should execute where the SDK runtime is alr
 | Resume ignores a new `cloud` option | `cloud` only applies to new sessions | Resume the existing session normally |
 | Confusion with sandbox settings | Windows sandbox and cloud sessions are separate | Do not use `SANDBOX=true` for cloud execution |
 | `createSession` fails with `Timed out waiting for the remote sandbox to start` | The remote worker did not connect within 60 seconds | Create the session again. See [Sending the first prompt](#sending-the-first-prompt) |
-| Live UI never updates even though the cloud worker is processing | `streaming` was not set on `createSession`, so only the final `assistant.message` is emitted | Set `streaming: true` on `createSession` and re-launch |
+| Live UI never updates even though the cloud worker is processing | `events.streaming` was not set on `createSession`, so only the final `assistant.message` is emitted | Set `events.streaming: true` on `createSession` and re-launch |
 | Cloud session works but no shareable URL appears in your UI | App never subscribed to `session.info` for the URL | Subscribe to `session.info` and filter `infoType === "remote"`. See [Accessing the Mission Control URL](#accessing-the-mission-control-url) |
 
 ## See also

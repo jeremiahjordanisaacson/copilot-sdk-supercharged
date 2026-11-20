@@ -74,6 +74,21 @@ public final class SessionGitHubAuthApi {
     }
 
     /**
+     * Resolves authentication through the session's existing credential owner and applies it before returning a credential-free identity, or null when no account is available. Internal hosts use this before a model request when background sign-in has not finished. Preserves the session's provider and configuration; does not create another auth manager.
+     *
+     * @return a future that completes with the {@code AuthIdentity} value,
+     *     or {@code null} when the result is absent. Callers must handle the
+     *     {@code null} completion value.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<AuthIdentity> resolveCurrentAuthInfo() {
+        return caller.invoke("session.gitHubAuth.resolveCurrentAuthInfo", java.util.Map.of("sessionId", this.sessionId), AuthIdentity.class);
+    }
+
+    /**
      * Gets all authentication accounts available to the internal session host.
      *
      * @apiNote This method is experimental and may change in a future version.

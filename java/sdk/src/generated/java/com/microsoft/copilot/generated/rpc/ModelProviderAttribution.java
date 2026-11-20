@@ -27,7 +27,7 @@ import javax.annotation.processing.Generated;
 public record ModelProviderAttribution(
     /** Kind of component that supplied the adapter. Attribution does not confer authority. */
     @JsonProperty("source") ModelProviderProvenanceSource source,
-    /** Stable contributor identifier. Required and nonblank for extension and custom sources; optional for built-in and configured sources. Does not grant authority. */
+    /** Stable contributor identifier. Required and nonblank for extension, plugin, and custom sources; optional for built-in and configured sources. Does not grant authority. */
     @JsonProperty("ownerId") String ownerId,
     /** Human-readable contributor name, not the adapter display name. */
     @JsonProperty("ownerDisplayName") String ownerDisplayName

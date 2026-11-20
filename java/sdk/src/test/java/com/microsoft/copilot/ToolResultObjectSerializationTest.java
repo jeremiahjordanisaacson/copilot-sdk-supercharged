@@ -12,18 +12,42 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.microsoft.copilot.rpc.ToolResultObject;
 
 /**
- * Verifies JSON (de)serialization of the {@code toolReferences} field on
- * {@link ToolResultObject}, including that it is omitted when {@code null} (via
- * {@code @JsonInclude(NON_NULL)}) and preserved by the backward-compatible
- * six-argument constructor.
+ * Verifies optional tool result metadata on {@link ToolResultObject}, including
+ * null omission, explicit false values, and backward-compatible constructors.
  */
 class ToolResultObjectSerializationTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(booleans = {false, true})
+    void preservesLargeOutputPolicy(Boolean skip) throws Exception {
+        var result = new ToolResultObject("success", "large output", null, null, null, null, null, skip);
+        JsonNode node = MAPPER.readTree(MAPPER.writeValueAsString(result));
+        if (skip == null) {
+            assertFalse(node.has("skipLargeOutputProcessing"));
+        } else {
+            assertEquals(skip, node.get("skipLargeOutputProcessing").booleanValue());
+        }
+        assertEquals(skip, MAPPER.treeToValue(node, ToolResultObject.class).skipLargeOutputProcessing());
+    }
+
+    @Test
+    void legacyConstructorsLeaveLargeOutputPolicyUnset() {
+        for (var result : List.of(new ToolResultObject("success", "ok", null, null, null, null),
+                new ToolResultObject("success", "ok", null, null, null, null, List.of("view")),
+                ToolResultObject.success("ok"))) {
+            assertFalse(MAPPER.valueToTree(result).has("skipLargeOutputProcessing"));
+        }
+    }
 
     @Test
     void serializesToolReferences() {

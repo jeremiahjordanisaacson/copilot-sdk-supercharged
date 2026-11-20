@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use futures_util::FutureExt;
@@ -16,7 +16,7 @@ use crate::generated::api_types::{
     GitHubTokenAcquireReason, GitHubTokenAcquireRequest, GitHubTokenAcquireResult,
     GitHubTokenAcquireResultCancelled, GitHubTokenAcquireResultToken,
 };
-use crate::{Client, ClientInner, JsonRpcError, JsonRpcRequest, JsonRpcResponse, error_codes};
+use crate::{Client, JsonRpcError, JsonRpcRequest, JsonRpcResponse, WeakClientInner, error_codes};
 
 /// Why the runtime is requesting a GitHub token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,7 +153,7 @@ struct RegistryState {
 
 pub(crate) struct GitHubTokenRegistry {
     state: Mutex<RegistryState>,
-    client: OnceLock<Weak<ClientInner>>,
+    client: OnceLock<WeakClientInner>,
 }
 
 impl GitHubTokenRegistry {
@@ -164,7 +164,7 @@ impl GitHubTokenRegistry {
         }
     }
 
-    pub(crate) fn set_client(&self, client: Weak<ClientInner>) {
+    pub(crate) fn set_client(&self, client: WeakClientInner) {
         let _ = self.client.set(client);
     }
 
@@ -245,7 +245,7 @@ impl GitHubTokenRegistry {
     }
 
     async fn handle_request(
-        client: &Weak<ClientInner>,
+        client: &WeakClientInner,
         provider: Option<&dyn GitHubTokenProvider>,
         request: JsonRpcRequest,
     ) {
@@ -373,7 +373,7 @@ impl Drop for GitHubTokenRegistration {
     }
 }
 
-async fn respond(client: &Weak<ClientInner>, request_id: u64, result: GitHubTokenAcquireResult) {
+async fn respond(client: &WeakClientInner, request_id: u64, result: GitHubTokenAcquireResult) {
     match serde_json::to_value(result) {
         Ok(result) => {
             let Some(inner) = client.upgrade() else {
@@ -400,7 +400,7 @@ async fn respond(client: &Weak<ClientInner>, request_id: u64, result: GitHubToke
     }
 }
 
-async fn send_error(client: &Weak<ClientInner>, request_id: u64, code: i32, message: &str) {
+async fn send_error(client: &WeakClientInner, request_id: u64, code: i32, message: &str) {
     let Some(inner) = client.upgrade() else {
         return;
     };

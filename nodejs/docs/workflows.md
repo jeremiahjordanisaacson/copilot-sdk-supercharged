@@ -94,7 +94,7 @@ await ctx.parallel(
 );
 ```
 
-**An ordinary failure resolves to `null` — it does not throw.** A subagent that errors, returns nothing, or (with a schema) produces output that still fails to parse or match after its one retry resolves `null`. Always guard the result before using it, including a bare `await ctx.agent(...)`:
+**An ordinary failure resolves to `null` — it does not throw.** A subagent that errors, returns nothing, or (with a schema) produces output that still fails to parse or match after up to two correction turns resolves `null`. Always guard the result before using it, including a bare `await ctx.agent(...)`:
 
 ```js
 const finding = await ctx.agent(prompt, { label: "inspector" });

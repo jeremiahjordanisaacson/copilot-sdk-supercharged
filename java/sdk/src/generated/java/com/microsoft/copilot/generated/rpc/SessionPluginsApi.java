@@ -137,6 +137,22 @@ public final class SessionPluginsApi {
     }
 
     /**
+     * Compares an installed plugin version with its cached marketplace catalog. Never fetches or refreshes the checkout.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SessionPluginsCheckUpdateResult> checkUpdate(SessionPluginsCheckUpdateParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.plugins.checkUpdate", _p, SessionPluginsCheckUpdateResult.class);
+    }
+
+    /**
      * Reloads the session's plugin set, refreshing MCP servers, custom agents, hooks, and skills cache so SDK-driven changes via `server.plugins.*` take effect immediately.
      * <p>
      * Invokes the method with no params, applying the runtime defaults.

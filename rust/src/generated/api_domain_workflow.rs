@@ -16,9 +16,9 @@ pub use session_events::{
     ManagedSettingsResolvedSource, McpOauthHttpResponse, McpOauthWWWAuthenticateParams,
     McpServerMetadata, McpServerSource, McpServerStatus, McpSkillOrigin, ModelChangeSource,
     ModelProviderKind, ModelProviderRef, OmittedBinaryOmittedReason, PermissionDecisionSource,
-    PermissionMode, PermissionPromptRequest, PermissionRule, PolicyHelperCapabilities,
-    PolicyHelperFailure, ProviderQuotaState, ReasoningSummary, RemediationAction,
-    SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskBlocker,
+    PermissionMode, PermissionPromptRequest, PermissionRule, PermissionSandboxPathGrant,
+    PolicyHelperCapabilities, PolicyHelperFailure, ProviderQuotaState, ReasoningSummary,
+    RemediationAction, SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskBlocker,
     TaskCompletionOutcome, UsageGetMetricsResult, UserToolSessionApproval, Verbosity,
 };
 
@@ -34,8 +34,7 @@ use crate::types::{RequestId, SessionEvent, SessionId};
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowAbortRequest {
     /// Target session identifier
     pub session_id: SessionId,
@@ -44,6 +43,11 @@ pub struct WorkflowAbortRequest {
     /// Opaque token identifying the execution attempt to abort.
     pub execution_token: String,
 }
+crate::record_serde::wire_record!(WorkflowAbortRequest {
+    session_id: "sessionId",
+    run_id: "runId",
+    execution_token: "executionToken"
+});
 
 /// Acknowledgement that a workflow request was accepted.
 ///
@@ -65,28 +69,22 @@ pub struct WorkflowAckResult {}
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowAgentOptions {
     /// Optional built-in or custom agent name whose definition configures the subagent.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     /// Optional context tier override for the subagent.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub context_tier: Option<ContextTier>,
     /// Optional label distinguishing otherwise identical memoized agent calls.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     /// Optional model identifier for the subagent.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// Optional reasoning effort override for the subagent.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
     /// Optional JSON Schema for structured agent output.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(WorkflowAgentOptions { agent: "agent" if is_none, context_tier: "contextTier" if is_none, label: "label" if is_none, model: "model" if is_none, reasoning_effort: "reasoningEffort" if is_none, schema: "schema" if is_none });
 
 /// Parameters for one workflow-scoped subagent call.
 ///
@@ -96,8 +94,7 @@ pub struct WorkflowAgentOptions {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowAgentRequest {
     /// Opaque token identifying the current workflow execution attempt.
     pub execution_token: String,
@@ -108,6 +105,12 @@ pub struct WorkflowAgentRequest {
     /// Workflow run identifier that owns the subagent.
     pub workflow_run_id: String,
 }
+crate::record_serde::wire_record!(WorkflowAgentRequest {
+    execution_token: "executionToken",
+    opts: "opts",
+    prompt: "prompt",
+    workflow_run_id: "workflowRunId"
+});
 
 /// Result of one workflow-scoped subagent call.
 ///
@@ -117,13 +120,12 @@ pub struct WorkflowAgentRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowAgentResult {
     /// Agent result, omitted when the agent produced no result.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(WorkflowAgentResult { result: "result" if is_none });
 
 /// Parameters for cancelling a workflow run.
 ///
@@ -133,12 +135,12 @@ pub struct WorkflowAgentResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowCancelRequest {
     /// Workflow run identifier.
     pub run_id: String,
 }
+crate::record_serde::wire_record!(WorkflowCancelRequest { run_id: "runId" });
 
 /// Parameters sent to the owning extension to execute a workflow closure.
 ///
@@ -148,8 +150,7 @@ pub struct WorkflowCancelRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowExecuteRequest {
     /// Target session identifier
     pub session_id: SessionId,
@@ -162,6 +163,13 @@ pub struct WorkflowExecuteRequest {
     /// Workflow input value.
     pub args: serde_json::Value,
 }
+crate::record_serde::wire_record!(WorkflowExecuteRequest {
+    session_id: "sessionId",
+    name: "name",
+    run_id: "runId",
+    execution_token: "executionToken",
+    args: "args"
+});
 
 /// Result returned by an extension workflow closure.
 ///
@@ -171,13 +179,12 @@ pub struct WorkflowExecuteRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowExecuteResult {
     /// Workflow result value.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(WorkflowExecuteResult { result: "result" if is_none });
 
 /// Parameters for paging workflow progress.
 ///
@@ -187,24 +194,20 @@ pub struct WorkflowExecuteResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowGetRunProgressRequest {
     /// Exclusive forward cursor.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub after_seq: Option<i64>,
     /// Exclusive backward cursor.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub before_seq: Option<i64>,
     /// Maximum records to return. Defaults to 200 and is capped at 500.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<i32>,
     /// Optional phase identifier used to scope records and cursors.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub phase_id: Option<String>,
     /// Workflow run identifier.
     pub run_id: String,
 }
+crate::record_serde::wire_record!(WorkflowGetRunProgressRequest { after_seq: "afterSeq" if is_none, before_seq: "beforeSeq" if is_none, limit: "limit" if is_none, phase_id: "phaseId" if is_none, run_id: "runId" });
 
 /// Parameters for retrieving a workflow run.
 ///
@@ -214,12 +217,12 @@ pub struct WorkflowGetRunProgressRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowGetRunRequest {
     /// Workflow run identifier.
     pub run_id: String,
 }
+crate::record_serde::wire_record!(WorkflowGetRunRequest { run_id: "runId" });
 
 /// Parameters for reading a workflow journal entry.
 ///
@@ -229,8 +232,7 @@ pub struct WorkflowGetRunRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowJournalGetRequest {
     /// Opaque token identifying the current workflow execution attempt.
     pub execution_token: String,
@@ -239,6 +241,11 @@ pub struct WorkflowJournalGetRequest {
     /// Workflow run identifier.
     pub run_id: String,
 }
+crate::record_serde::wire_record!(WorkflowJournalGetRequest {
+    execution_token: "executionToken",
+    key: "key",
+    run_id: "runId"
+});
 
 /// Result of reading a workflow journal entry.
 ///
@@ -248,15 +255,14 @@ pub struct WorkflowJournalGetRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowJournalGetResult {
     /// Whether the journal contained the requested key.
     pub hit: bool,
     /// Cached JSON result. The hit field distinguishes a cached JSON null from a miss.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub result_json: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(WorkflowJournalGetResult { hit: "hit", result_json: "resultJson" if is_none });
 
 /// Parameters for storing a workflow journal entry.
 ///
@@ -266,8 +272,7 @@ pub struct WorkflowJournalGetResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowJournalPutRequest {
     /// Opaque token identifying the current workflow execution attempt.
     pub execution_token: String,
@@ -278,6 +283,12 @@ pub struct WorkflowJournalPutRequest {
     /// Workflow run identifier.
     pub run_id: String,
 }
+crate::record_serde::wire_record!(WorkflowJournalPutRequest {
+    execution_token: "executionToken",
+    key: "key",
+    result_json: "resultJson",
+    run_id: "runId"
+});
 
 /// Parameters for paging workflow runs.
 ///
@@ -287,19 +298,16 @@ pub struct WorkflowJournalPutRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowListRunsRequest {
     /// Exclusive forward cursor.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub after_seq: Option<i64>,
     /// Exclusive backward cursor.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub before_seq: Option<i64>,
     /// Maximum terminal runs to return. Defaults to 200 and is capped at 500.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<i32>,
 }
+crate::record_serde::wire_record!(WorkflowListRunsRequest { after_seq: "afterSeq" if is_none, before_seq: "beforeSeq" if is_none, limit: "limit" if is_none });
 
 /// A page of workflow runs in durable creation order.
 ///
@@ -309,24 +317,20 @@ pub struct WorkflowListRunsRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowListRunsResult {
     /// Whether terminal runs newer than this page exist.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub has_more_newer: Option<bool>,
     /// Newest terminal-run cursor in this page, or null when the terminal window is empty.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub newest_seq: Option<i64>,
     /// Oldest terminal-run cursor in this page, or null when the terminal window is empty.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub oldest_seq: Option<i64>,
     /// Number of terminal runs older than this page.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub omitted_older: Option<i64>,
     /// Workflow run summaries in durable creation order.
     pub runs: Vec<WorkflowRunSummary>,
 }
+crate::record_serde::wire_record!(WorkflowListRunsResult { has_more_newer: "hasMoreNewer" if is_none, newest_seq: "newestSeq" if is_none, oldest_seq: "oldestSeq" if is_none, omitted_older: "omittedOlder" if is_none, runs: "runs" });
 
 /// One ordered workflow progress line.
 ///
@@ -336,8 +340,7 @@ pub struct WorkflowListRunsResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowLogLine {
     /// Progress line kind.
     pub kind: WorkflowLogLineKind,
@@ -346,6 +349,11 @@ pub struct WorkflowLogLine {
     /// Progress text.
     pub text: String,
 }
+crate::record_serde::wire_record!(WorkflowLogLine {
+    kind: "kind",
+    seq: "seq",
+    text: "text"
+});
 
 /// Parameters for recording workflow progress.
 ///
@@ -355,8 +363,7 @@ pub struct WorkflowLogLine {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowLogRequest {
     /// Opaque token identifying the current workflow execution attempt.
     pub execution_token: String,
@@ -365,6 +372,11 @@ pub struct WorkflowLogRequest {
     /// Workflow run identifier.
     pub run_id: String,
 }
+crate::record_serde::wire_record!(WorkflowLogRequest {
+    execution_token: "executionToken",
+    lines: "lines",
+    run_id: "runId"
+});
 
 /// Parameters for an owned durable pause checkpoint.
 ///
@@ -374,8 +386,7 @@ pub struct WorkflowLogRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowPauseCheckpointRequest {
     /// Opaque token identifying the execution attempt that reached the checkpoint.
     pub execution_token: String,
@@ -384,6 +395,11 @@ pub struct WorkflowPauseCheckpointRequest {
     /// Workflow run identifier.
     pub run_id: String,
 }
+crate::record_serde::wire_record!(WorkflowPauseCheckpointRequest {
+    execution_token: "executionToken",
+    key: "key",
+    run_id: "runId"
+});
 
 ///
 /// <div class="warning">
@@ -392,12 +408,12 @@ pub struct WorkflowPauseCheckpointRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowPauseCheckpointResult {
     /// Whether this execution attempt must pause or may continue.
     pub action: WorkflowPauseCheckpointAction,
 }
+crate::record_serde::wire_record!(WorkflowPauseCheckpointResult { action: "action" });
 
 /// Parameters for pausing a running workflow.
 ///
@@ -407,12 +423,12 @@ pub struct WorkflowPauseCheckpointResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowPauseRequest {
     /// Workflow run identifier.
     pub run_id: String,
 }
+crate::record_serde::wire_record!(WorkflowPauseRequest { run_id: "runId" });
 
 /// Wire-only per-invocation workflow resource ceiling overrides.
 ///
@@ -422,22 +438,18 @@ pub struct WorkflowPauseRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowRunLimits {
     /// Maximum AI credits consumed by workflow subagents and their descendants. The post-paid ceiling is soft: parallel turns can settle beyond it before the run stops.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_ai_credits: Option<f64>,
     /// Maximum number of workflow subagents that may run concurrently.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_concurrent_subagents: Option<i64>,
     /// Maximum total number of workflow subagents that may be admitted.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_total_subagents: Option<i64>,
     /// Maximum accumulated active-execution time in seconds. Active execution includes the entire extension body, subprocess waits, queued-agent waits, and sleeps; time between resumed attempts is not counted.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<f64>,
 }
+crate::record_serde::wire_record!(WorkflowRunLimits { max_ai_credits: "maxAiCredits" if is_none, max_concurrent_subagents: "maxConcurrentSubagents" if is_none, max_total_subagents: "maxTotalSubagents" if is_none, timeout_seconds: "timeoutSeconds" if is_none });
 
 /// Parameters for resuming a workflow run from its persisted identity.
 ///
@@ -447,21 +459,18 @@ pub struct WorkflowRunLimits {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowResumeRequest {
     /// Optional per-invocation resource ceiling overrides.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub limits: Option<WorkflowRunLimits>,
     /// Whether to emit workflow phase names to the session transcript.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub log_phase_names: Option<bool>,
     /// Whether to notify the originating session when the workflow completes.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub notify_on_complete: Option<bool>,
     /// Workflow run identifier.
     pub run_id: String,
 }
+crate::record_serde::wire_record!(WorkflowResumeRequest { limits: "limits" if is_none, log_phase_names: "logPhaseNames" if is_none, notify_on_complete: "notifyOnComplete" if is_none, run_id: "runId" });
 
 /// Resolved persisted workflow identity and resumed run envelope.
 ///
@@ -471,14 +480,17 @@ pub struct WorkflowResumeRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowResumeResult {
     /// Terminal resumed run envelope.
     pub run: WorkflowRunResult,
     /// Persisted workflow name resolved for the resumed run.
     pub workflow_name: String,
 }
+crate::record_serde::wire_record!(WorkflowResumeResult {
+    run: "run",
+    workflow_name: "workflowName"
+});
 
 /// Full workflow run observability detail.
 ///
@@ -488,8 +500,7 @@ pub struct WorkflowResumeResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowRunDetail {
     /// Epoch milliseconds when the current active segment started, or null while inactive.
     pub active_segment_started_at: Option<i64>,
@@ -538,6 +549,31 @@ pub struct WorkflowRunDetail {
     /// Registered workflow name.
     pub workflow_name: String,
 }
+crate::record_serde::wire_record!(WorkflowRunDetail {
+    active_segment_started_at: "activeSegmentStartedAt",
+    agents: "agents",
+    approved: "approved",
+    can_resume: "canResume",
+    completed_at: "completedAt",
+    consumed: "consumed",
+    created_at: "createdAt",
+    current_phase: "currentPhase",
+    declared_limits: "declaredLimits",
+    declared_phase_count: "declaredPhaseCount",
+    description: "description",
+    live_agent_count: "liveAgentCount",
+    observed_at: "observedAt",
+    phases: "phases",
+    progress: "progress",
+    revision: "revision",
+    run_id: "runId",
+    started_at: "startedAt",
+    status: "status",
+    terminal: "terminal",
+    total_spawned_agent_count: "totalSpawnedAgentCount",
+    updated_at: "updatedAt",
+    workflow_name: "workflowName"
+});
 
 /// Options controlling workflow invocation.
 ///
@@ -547,22 +583,18 @@ pub struct WorkflowRunDetail {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowRunOptions {
     /// Per-invocation resource ceiling overrides.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub limits: Option<WorkflowRunLimits>,
     /// Whether to emit workflow phase names to the session transcript.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub log_phase_names: Option<bool>,
     /// Whether to notify the originating session when the workflow completes.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub notify_on_complete: Option<bool>,
     /// Run identifier whose journal and progress should seed this resumed run.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_from_run_id: Option<String>,
 }
+crate::record_serde::wire_record!(WorkflowRunOptions { limits: "limits" if is_none, log_phase_names: "logPhaseNames" if is_none, notify_on_complete: "notifyOnComplete" if is_none, resume_from_run_id: "resumeFromRunId" if is_none });
 
 /// Parameters for invoking a registered workflow.
 ///
@@ -572,17 +604,16 @@ pub struct WorkflowRunOptions {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowRunRequest {
     /// Workflow input value.
     pub args: serde_json::Value,
     /// Registered workflow name.
     pub name: String,
     /// Workflow invocation options.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<WorkflowRunOptions>,
 }
+crate::record_serde::wire_record!(WorkflowRunRequest { args: "args", name: "name", options: "options" if is_none });
 
 /// Internal parameters for resuming a workflow run from a tool.
 ///
@@ -592,18 +623,16 @@ pub struct WorkflowRunRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct WorkflowToolResumeRequest {
     /// Optional per-invocation resource ceiling overrides.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub limits: Option<WorkflowRunLimits>,
     /// Workflow run identifier.
     pub run_id: String,
     /// Opaque identifier of the originating tool call.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
 }
+crate::record_serde::wire_record!(WorkflowToolResumeRequest { limits: "limits" if is_none, run_id: "runId", tool_call_id: "toolCallId" if is_none });
 
 /// Options for an internal tool-originated workflow invocation.
 ///
@@ -613,16 +642,14 @@ pub(crate) struct WorkflowToolResumeRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct WorkflowToolRunOptions {
     /// Per-invocation resource ceiling overrides.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub limits: Option<WorkflowRunLimits>,
     /// Run identifier whose journal and progress should seed this resumed run.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_from_run_id: Option<String>,
 }
+crate::record_serde::wire_record!(WorkflowToolRunOptions { limits: "limits" if is_none, resume_from_run_id: "resumeFromRunId" if is_none });
 
 /// Internal parameters for invoking a registered workflow from a tool.
 ///
@@ -632,8 +659,7 @@ pub(crate) struct WorkflowToolRunOptions {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct WorkflowToolRunRequest {
     /// Workflow input value.
     pub args: serde_json::Value,
@@ -641,12 +667,11 @@ pub(crate) struct WorkflowToolRunRequest {
     pub name: String,
     /// Tool-originated workflow invocation options.
     #[doc(hidden)]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) options: Option<WorkflowToolRunOptions>,
     /// Opaque identifier of the originating tool call.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
 }
+crate::record_serde::wire_record!(WorkflowToolRunRequest { args: "args", name: "name", options: "options" if is_none, tool_call_id: "toolCallId" if is_none });
 
 /// Acknowledgement that a workflow request was accepted.
 ///
@@ -668,7 +693,7 @@ pub struct WorkflowAbortResult {}
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub enum WorkflowDurableOperation {
     /// Creating the durable run and declared phases.
     #[serde(rename = "createRun")]
@@ -708,6 +733,43 @@ pub enum WorkflowDurableOperation {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for WorkflowDurableOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "WorkflowDurableOperation",
+            &[
+                "createRun",
+                "markRunStarted",
+                "finishRun",
+                "reserveAgent",
+                "releaseAgent",
+                "chargeCredit",
+                "addElapsed",
+                "reconcileCreditTotal",
+                "journalGet",
+                "journalPut",
+                "refreshLease",
+                "Unknown",
+            ],
+            Some(11),
+        )?;
+        Ok(match index {
+            0 => Self::CreateRun,
+            1 => Self::MarkRunStarted,
+            2 => Self::FinishRun,
+            3 => Self::ReserveAgent,
+            4 => Self::ReleaseAgent,
+            5 => Self::ChargeCredit,
+            6 => Self::AddElapsed,
+            7 => Self::ReconcileCreditTotal,
+            8 => Self::JournalGet,
+            9 => Self::JournalPut,
+            10 => Self::RefreshLease,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// Cumulative resource ceiling that stopped a workflow run.
 ///
@@ -717,7 +779,7 @@ pub enum WorkflowDurableOperation {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub enum WorkflowRunFailureKind {
     /// The run admitted the approved maximum total number of subagents.
     #[serde(rename = "maxTotalSubagents")]
@@ -732,4 +794,25 @@ pub enum WorkflowRunFailureKind {
     #[default]
     #[serde(other)]
     Unknown,
+}
+impl<'de> Deserialize<'de> for WorkflowRunFailureKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "WorkflowRunFailureKind",
+            &[
+                "maxTotalSubagents",
+                "timeoutSeconds",
+                "maxAiCredits",
+                "Unknown",
+            ],
+            Some(3),
+        )?;
+        Ok(match index {
+            0 => Self::MaxTotalSubagents,
+            1 => Self::TimeoutSeconds,
+            2 => Self::MaxAiCredits,
+            _ => Self::Unknown,
+        })
+    }
 }

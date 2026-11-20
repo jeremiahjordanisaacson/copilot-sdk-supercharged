@@ -145,6 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             result: PermissionDecision::ApproveOnce(PermissionDecisionApproveOnce {
                 approved_interactively: None,
                 kind: PermissionDecisionApproveOnceKind::ApproveOnce,
+                selected_option_id: None,
             }),
         })
         .await?;

@@ -36,16 +36,18 @@ import com.microsoft.copilot.rpc.ToolDefinition;
 import com.microsoft.copilot.rpc.UserInputResponse;
 
 /**
- * Tests verifying that when an {@link Executor} is provided via
- * {@link CopilotClientOptions#setExecutor(Executor)}, all internal
- * {@code CompletableFuture.*Async} calls are routed through that executor
- * instead of {@code ForkJoinPool.commonPool()}.
+ * Tests verifying that client startup and application callback dispatch use the
+ * {@link Executor} provided via
+ * {@link CopilotClientOptions#setExecutor(Executor)}.
  *
  * <p>
  * Uses a {@link TrackingExecutor} decorator that delegates to a real executor
  * while counting task submissions. After SDK operations complete, the tests
  * assert the decorator was invoked.
  * </p>
+ *
+ * @see ForceStopSessionTest for shutdown coverage independent of the supplied
+ *      executor
  */
 @Tag("e2e")
 public class ExecutorWiringTest {
@@ -313,57 +315,5 @@ public class ExecutorWiringTest {
 
             session.close();
         }
-    }
-
-    /**
-     * Verifies that {@code CopilotClient.stop()} routes session closure through the
-     * provided executor.
-     *
-     * <p>
-     * {@code CopilotClient.stop()} uses {@code CompletableFuture.runAsync(...)} to
-     * close each active session. This test asserts that those closures go through
-     * the caller-supplied executor.
-     * </p>
-     *
-     * @see Snapshot: tools/invokes_custom_tool
-     */
-    @Test
-    void testClientStopUsesProvidedExecutor() throws Exception {
-        ctx.configureForTest("tools", "invokes_custom_tool");
-
-        TrackingExecutor trackingExecutor = new TrackingExecutor(ForkJoinPool.commonPool());
-
-        var parameters = new HashMap<String, Object>();
-        var properties = new HashMap<String, Object>();
-        var inputProp = new HashMap<String, Object>();
-        inputProp.put("type", "string");
-        inputProp.put("description", "String to encrypt");
-        properties.put("input", inputProp);
-        parameters.put("type", "object");
-        parameters.put("properties", properties);
-        parameters.put("required", List.of("input"));
-
-        ToolDefinition encryptTool = ToolDefinition.create("encrypt_string", "Encrypts a string", parameters,
-                (invocation) -> {
-                    Map<String, Object> args = invocation.getArguments();
-                    String input = (String) args.get("input");
-                    return CompletableFuture.completedFuture(input.toUpperCase());
-                });
-
-        CopilotClient client = ctx.createClient(createOptionsWithExecutor(trackingExecutor));
-        client.createSession(ctx.newSessionConfig()
-                .setTools(ctx.newSessionConfig().getTools().setDefinitions(List.of(encryptTool)))
-                .setPermissions(ctx.newSessionConfig().getPermissions().setOnRequest(PermissionHandler.APPROVE_ALL)))
-                .get();
-
-        int beforeStop = trackingExecutor.getTaskCount();
-
-        // stop() should use the provided executor for async session closure
-        client.stop().get(30, TimeUnit.SECONDS);
-
-        assertTrue(trackingExecutor.getTaskCount() > beforeStop,
-                "Expected the tracking executor to have been invoked during client stop, "
-                        + "but task count did not increase. CopilotClient.stop() is not "
-                        + "routing session closure runAsync through the provided executor.");
     }
 }

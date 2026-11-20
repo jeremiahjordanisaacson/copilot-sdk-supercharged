@@ -39,6 +39,8 @@ public record Plugin(
     @JsonProperty("installedFrom") String installedFrom,
     /** Runtime plugin provenance, such as "builtin". */
     @JsonProperty("source") String source,
+    /** The GitHub repository and full commit SHA from a pinned direct installation. Absent for marketplace, local and unpinned installations. */
+    @JsonProperty("verifiedSource") InstalledPluginVerifiedSource verifiedSource,
     /** Whether enterprise managed settings control this plugin. */
     @JsonProperty("managed") Boolean managed,
     /** True when the signed-in account's GitHub Team assigns this plugin, whatever default enabled state the assignment carries. This reports provenance only: it does not mean the Team installed the plugin or controls whether it is enabled, and the user's own choices still apply. When `managed` is also true, enterprise managed settings decide the plugin's state. */
@@ -79,6 +81,7 @@ public record Plugin(
         private String rootPath;
         private String installedFrom;
         private String source;
+        private InstalledPluginVerifiedSource verifiedSource;
         private Boolean managed;
         private Boolean team;
         private Boolean managedDesiredEnabled;
@@ -185,6 +188,17 @@ public record Plugin(
         }
 
         /**
+         * Sets the {@code verifiedSource} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder verifiedSource(InstalledPluginVerifiedSource value) {
+            this.verifiedSource = value;
+            return this;
+        }
+
+        /**
          * Sets the {@code managed} property.
          * @param value the property value
          * @return this builder
@@ -249,7 +263,7 @@ public record Plugin(
             if (name == null) throw new IllegalStateException("Missing required property: name");
             if (marketplace == null) throw new IllegalStateException("Missing required property: marketplace");
             if (enabled == null) throw new IllegalStateException("Missing required property: enabled");
-            return new Plugin(assignment, name, marketplace, version, enabled, directSourceId, rootPath, installedFrom, source, managed, team, managedDesiredEnabled, installed, id);
+            return new Plugin(assignment, name, marketplace, version, enabled, directSourceId, rootPath, installedFrom, source, verifiedSource, managed, team, managedDesiredEnabled, installed, id);
         }
     }
 }

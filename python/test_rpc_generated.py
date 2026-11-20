@@ -1,7 +1,12 @@
 """Tests for generated RPC method behavior."""
 
 import json
+import subprocess
+import sys
+import typing
+from copy import deepcopy
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -13,23 +18,43 @@ from copilot._generated.rpc import (
     CustomizationReloadSubsystem,
     FetchResponseMode,
     FetchSendResult,
+    PlanSQLTodosRow,
+    ToolsApi,
+    ToolsExecuteRequest,
     UsageGetMetricsResult,
+    UserSettingsApplyTopKeyRequest,
+    UserSettingsNormalizeRequest,
+    UserSettingsProblemsRequest,
+    UserSettingsSetRequest,
+    UserSettingsValidateRequest,
+    UserSettingsWriteAllRequest,
     UserSettingsWriteKeyRequest,
     _InternalServerRpc,
     _SettingsRedactValueForDisplayRequest,
+    _UserSettingsBuildRuntimeRequest,
+    _UserSettingsEditRequest,
+    _UserSettingsLoadAndMergeRepoRequest,
+    _UserSettingsMergeManagedAndUserParams,
+    _UserSettingsMergeRepoValueParams,
+    _UserSettingsUpdateRequest,
     register_client_global_api_handlers,
 )
 from copilot._jsonrpc import JsonRpcClient
 from copilot.rpc import (
+    AccountsGetActiveResult,
     BuiltinToolInputSchemaType,
     CatalogInvalidRequestError,
     CommandsApi,
     CommandsInvokeRequest,
     CommandsRespondToQueuedCommandRequest,
+    ExternalToolTextResultForLlm,
+    HandlePendingToolCallRequest,
     HostDisposeRequest,
     HostEmptyResult,
     LocalSessionMetadataValue,
     LogResult,
+    MCPDiscoverRequest,
+    MCPDiscoverResult,
     MCPGrantType,
     MCPSerializableServerConfig,
     MCPServerConfigHTTP,
@@ -43,10 +68,12 @@ from copilot.rpc import (
     RemoteControlStatusResult,
     RemoteSessionMetadataValue,
     SandboxConfig,
+    SandboxConfigSource,
     ServerRpc,
     SessionList,
     SessionModelList,
     SessionRpc,
+    SessionSandboxResetSessionChoicesRequest,
     ShellBuildInteractiveEnvironmentRequest,
     ShellBuildInteractiveEnvironmentResult,
     SlashCommandTextResult,
@@ -54,6 +81,272 @@ from copilot.rpc import (
     UIElicitationSchemaType,
     UpdateSubagentSettingsRequest,
 )
+
+
+@pytest.mark.asyncio
+async def test_pending_tool_result_preserves_existing_positional_arguments():
+    client = Mock(request=AsyncMock(return_value={"success": True}))
+    result = ExternalToolTextResultForLlm(
+        "large output", None, None, None, "success", "log", ["view"], {"source": "test"}
+    )
+    expected = {
+        "textResultForLlm": "large output",
+        "resultType": "success",
+        "sessionLog": "log",
+        "toolReferences": ["view"],
+        "toolTelemetry": {"source": "test"},
+    }
+
+    await SessionRpc(client, "tools-session").tools.handle_pending_tool_call(
+        HandlePendingToolCallRequest(request_id="request-1", result=result)
+    )
+
+    client.request.assert_awaited_once_with(
+        "session.tools.handlePendingToolCall",
+        {"sessionId": "tools-session", "requestId": "request-1", "result": expected},
+    )
+    expected["skipLargeOutputProcessing"] = True
+    decoded = ExternalToolTextResultForLlm.from_dict(expected)
+    assert decoded.tool_references == ["view"]
+    assert decoded.tool_telemetry == {"source": "test"}
+    assert decoded.skip_large_output_processing is True
+    assert decoded.to_dict() == expected
+
+
+@pytest.mark.parametrize("model", [MCPDiscoverRequest, MCPDiscoverResult])
+def test_mcp_discovery_repr_redacts_configuration_without_changing_wire(model):
+    configuration = {
+        "type": "http",
+        "url": "https://example.com/mcp",
+        "env": {"TOKEN": "fake-discovery-token"},
+        "headers": {"Authorization": "Bearer fake-discovery-authorization"},
+    }
+    if model is MCPDiscoverRequest:
+        wire = {
+            "includeConfiguration": True,
+            "options": {
+                "additionalConfig": [json.dumps({"mcpServers": {"configured": configuration}})],
+                "disabledServers": ["disabled"],
+            },
+        }
+    else:
+        wire = {
+            "servers": [
+                {
+                    "name": "configured",
+                    "source": "user",
+                    "enabled": True,
+                    "configuration": configuration,
+                }
+            ],
+            "diagnostics": [],
+        }
+    value = model.from_dict(wire)
+
+    diagnostic = repr(value)
+    assert "fake-discovery-token" not in diagnostic
+    assert "fake-discovery-authorization" not in diagnostic
+    assert ("disabled" if model is MCPDiscoverRequest else "configured") in diagnostic
+    assert value.to_dict() == wire
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("integer", [-(2**63) - 1, 2**64 + 1])
+@pytest.mark.parametrize(
+    "method,request_type,arguments,field",
+    [
+        ("set", UserSettingsSetRequest, {}, "settings"),
+        ("_update", _UserSettingsUpdateRequest, {"key": "statusLine"}, "value"),
+        ("_write_all", UserSettingsWriteAllRequest, {}, "settings"),
+        ("_write_key", UserSettingsWriteKeyRequest, {"key": "statusLine"}, "value"),
+        (
+            "_apply_top_key",
+            UserSettingsApplyTopKeyRequest,
+            {"canonicalPath": ["statusLine"], "topKey": "statusLine"},
+            "value",
+        ),
+        (
+            "_edit",
+            _UserSettingsEditRequest,
+            {"canonicalPath": ["statusLine", "padding"], "operation": "set"},
+            "value",
+        ),
+        ("_normalize", UserSettingsNormalizeRequest, {}, "settings"),
+        ("_validate", UserSettingsValidateRequest, {"topKey": "statusLine"}, "value"),
+        (
+            "_build_runtime",
+            _UserSettingsBuildRuntimeRequest,
+            {"environment": {}, "platform": "linux", "workingDirectory": "/workspace"},
+            "overrides",
+        ),
+        (
+            "_load_and_merge_repo",
+            _UserSettingsLoadAndMergeRepoRequest,
+            {"repoRoot": "/workspace"},
+            "userSettings",
+        ),
+        (
+            "_merge_managed_and_user",
+            _UserSettingsMergeManagedAndUserParams,
+            {"managed": {}},
+            "user",
+        ),
+        (
+            "_merge_repo_value",
+            _UserSettingsMergeRepoValueParams,
+            {"repoSettings": {}},
+            "userSettings",
+        ),
+        ("_diagnose_problems", UserSettingsProblemsRequest, {}, "sources"),
+        (
+            "_redact_value_for_display",
+            _SettingsRedactValueForDisplayRequest,
+            {"basePath": []},
+            "value",
+        ),
+    ],
+)
+async def test_settings_inputs_reject_oversized_integers(
+    method, request_type, arguments, field, integer
+):
+    client = Mock(
+        request=AsyncMock(side_effect=AssertionError("An oversized integer reached the transport"))
+    )
+    value = integer if method == "_edit" else {"nested": [integer]}
+    if method == "_diagnose_problems":
+        value = [{"filePath": "/settings.json", "kind": "user", "label": "User", "config": value}]
+    payload = {**arguments, field: value}
+    params = request_type.from_dict(payload)
+    if method == "set":
+        api = ServerRpc(client).user.settings
+    elif method == "_redact_value_for_display":
+        api = _InternalServerRpc(client).settings
+    else:
+        api = _InternalServerRpc(client).user.settings
+
+    with pytest.raises(ValueError, match="integer.*range"):
+        await getattr(api, method)(params)
+
+    client.request.assert_not_awaited()
+    assert params.to_dict() == payload
+
+
+@pytest.mark.asyncio
+async def test_settings_set_preserves_supported_values_and_caller_objects():
+    client = Mock(request=AsyncMock())
+    shared = [-(2**63), 2**64 - 1, 1e20, "-9223372036854775809", None, True]
+    value = {"first": shared, "second": shared, "tuple": (1e20,)}
+    params = UserSettingsSetRequest(settings=value)
+
+    await ServerRpc(client).user.settings.set(params)
+
+    client.request.assert_awaited_once_with("user.settings.set", {"settings": value})
+    assert params.settings is value
+    assert value["first"] is shared
+    assert value["second"] is shared
+    assert value["tuple"] == (1e20,)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("integer", [-(2**63) - 1, 2**64])
+async def test_settings_update_rejects_oversized_condition_integers(integer):
+    client = Mock(request=AsyncMock(return_value={"value": {}}))
+    conditions = {"nested": [{"padding": integer}]}
+    params = _UserSettingsUpdateRequest(
+        key="statusLine", value={"command": "echo after"}, if_fields_match=conditions
+    )
+
+    with pytest.raises(ValueError, match="integer.*range"):
+        await _InternalServerRpc(client).user.settings._update(params)
+
+    client.request.assert_not_awaited()
+    assert params.if_fields_match == {"nested": [{"padding": integer}]}
+
+
+@pytest.mark.asyncio
+async def test_settings_update_preserves_supported_condition_values():
+    client = Mock(request=AsyncMock(return_value={"value": {}}))
+    shared = [-(2**63), 2**64 - 1, 1e20, "-9223372036854775809", None, True]
+    conditions = {"first": shared, "second": shared, "tuple": (1e20,)}
+    params = _UserSettingsUpdateRequest(
+        key="statusLine", value={"command": "echo after"}, if_fields_match=conditions
+    )
+
+    await _InternalServerRpc(client).user.settings._update(params)
+
+    client.request.assert_awaited_once_with(
+        "user.settings.update",
+        {"key": "statusLine", "value": {"command": "echo after"}, "ifFieldsMatch": conditions},
+    )
+    assert conditions["first"] is shared
+    assert conditions["second"] is shared
+    assert conditions["tuple"] == (1e20,)
+
+
+@pytest.mark.asyncio
+async def test_settings_update_preserves_circular_reference_error():
+    client = Mock(request=AsyncMock())
+    conditions = {"nested": []}
+    conditions["nested"].append(conditions)
+
+    with pytest.raises(ValueError, match="Circular reference detected"):
+        await _InternalServerRpc(client).user.settings._update(
+            _UserSettingsUpdateRequest(key="statusLine", value={}, if_fields_match=conditions)
+        )
+
+    client.request.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "config,source,expected",
+    [
+        (
+            SandboxConfig(enabled=True, add_current_working_directory=False),
+            "user_enabled",
+            {"enabled": True, "addCurrentWorkingDirectory": False},
+        ),
+        (
+            {"enabled": True, "futurePreference": {"value": "kept"}},
+            SandboxConfigSource.USER_ENABLED,
+            {"enabled": True, "futurePreference": {"value": "kept"}},
+        ),
+        (None, SandboxConfigSource.USER_ENABLED, None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_sandbox_reset_accepts_typed_config_and_source_without_changing_raw_json(
+    config, source, expected
+):
+    original = deepcopy(config)
+    client = Mock(
+        request=AsyncMock(
+            return_value={
+                "config": expected,
+                "configSource": "user_enabled",
+                "autoApproveBypass": False,
+                "disabledForSession": False,
+                "incarnation": 1,
+                "revision": 1,
+                "sessionOverride": None,
+            }
+        )
+    )
+    api = SessionRpc(client, "sandbox-session").sandbox
+    request = SessionSandboxResetSessionChoicesRequest(config=config, config_source=source)
+
+    result = await api.reset_session_choices(request)
+
+    client.request.assert_awaited_once()
+    assert client.request.call_args.args[0] == "session.sandbox.resetSessionChoices"
+    assert json.loads(json.dumps(client.request.call_args.args[1])) == {
+        "sessionId": "sandbox-session",
+        "config": expected,
+        "configSource": "user_enabled",
+    }
+    assert result.config == expected
+    assert request.config is config
+    assert config == original
+    assert request.config_source is source
 
 
 @pytest.mark.parametrize(
@@ -395,6 +688,33 @@ def test_sandbox_config_round_trips_allow_bypass_and_omits_when_absent():
     assert SandboxConfig(enabled=True).to_dict() == {"enabled": True}
 
 
+def test_sandbox_config_rejects_null_allow_temp_storage_but_accepts_omission():
+    assert SandboxConfig.from_dict({"enabled": True}).allow_temp_storage is None
+
+    with pytest.raises(ValueError, match="null is not allowed"):
+        SandboxConfig.from_dict({"enabled": True, "allowTempStorage": None})
+
+
+def test_sandbox_config_rejects_null_allow_temp_storage_with_optimized_python():
+    script = """
+from copilot._generated.rpc import SandboxConfig
+
+try:
+    SandboxConfig.from_dict({"enabled": True, "allowTempStorage": None})
+except ValueError:
+    pass
+else:
+    raise SystemExit("null allowTempStorage was accepted")
+"""
+    subprocess.run([sys.executable, "-O", "-c", script], check=True, cwd=Path(__file__).parent)
+
+
+def test_optional_rpc_fields_without_non_null_contract_accept_null():
+    row = PlanSQLTodosRow.from_dict({"id": "todo", "description": None})
+
+    assert row.description is None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "model,payload",
@@ -468,6 +788,21 @@ async def test_mcp_start_request_preserves_header_values(config):
     )
 
 
+def test_active_account_result_preserves_null_and_identity_metadata():
+    payload = {
+        "account": None,
+        "authInfo": {"type": "user", "host": "https://github.com", "login": "octocat"},
+        "authSelectionId": "active-credential",
+    }
+    result = AccountsGetActiveResult.from_dict(payload)
+    assert result.auth_info is not None
+    assert result.auth_info.login == "octocat"
+    assert result.auth_selection_id == "active-credential"
+    assert result.account is None
+    assert result.to_dict() == payload
+    assert AccountsGetActiveResult().to_dict() == {"account": None}
+
+
 def test_model_list_round_trips_metadata_without_remapping_existing_fields():
     payload = {
         "list": [{"id": "fixture-model"}],
@@ -510,6 +845,34 @@ async def test_commands_invoke_deserializes_slash_command_result():
     assert isinstance(result, SlashCommandTextResult)
     assert result.text == "hello"
     assert result.markdown is True
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "plain tool output",
+        {
+            "textResultForLlm": "Tool 'missing' is not available.",
+            "resultType": "failure",
+            "error": "tool not available",
+        },
+    ],
+)
+async def test_tools_execute_returns_a_value_of_its_annotated_type(payload):
+    client = Mock(request=AsyncMock(return_value=payload))
+
+    result = await SessionRpc(client, "tools-session").tools.execute(
+        ToolsExecuteRequest(name="missing", arguments={})
+    )
+
+    assert result == payload
+    annotation = typing.get_type_hints(ToolsApi.execute)["return"]
+    allowed = tuple(typing.get_origin(t) or t for t in typing.get_args(annotation) or (annotation,))
+    assert isinstance(result, allowed), f"{type(result).__name__} is not {annotation}"
+    client.request.assert_awaited_once_with(
+        "session.tools.execute",
+        {"name": "missing", "arguments": {}, "sessionId": "tools-session"},
+    )
 
 
 def test_remote_control_status_deserializes_string_discriminated_union():

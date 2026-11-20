@@ -104,6 +104,31 @@ unsafe impl Sync for FfiShared {}
 
 impl FfiShared {
     #[cfg(copilot_cli_host)]
+    pub(crate) fn initialize_session_timing(&self, config: &[u8]) -> Result<bool, Error> {
+        let _operation = self.operation_lock.lock();
+        let connection = self.connection_id().ok_or_else(|| {
+            Error::with_message(
+                ErrorKind::InvalidConfig,
+                "the SDK's in-process connection is no longer active",
+            )
+        })?;
+        let initialize = bind::<unsafe extern "C" fn(u32, *const u8, usize) -> i32>(
+            self.library,
+            b"copilot_runtime_cli_host_timing_initialize\0",
+            &self.library_path,
+        )?;
+        // SAFETY: this SDK owns the live connection and retains both the image and input buffer.
+        match unsafe { initialize(connection, config.as_ptr(), config.len()) } {
+            1 => Ok(true),
+            0 => Ok(false),
+            _ => Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "the runtime rejected CLI timing initialization",
+            )),
+        }
+    }
+
+    #[cfg(copilot_cli_host)]
     pub(crate) fn admit_cli_host(&self) -> Result<(), Error> {
         let _operation = self.operation_lock.lock();
         let connection = self.connection_id().ok_or_else(|| {

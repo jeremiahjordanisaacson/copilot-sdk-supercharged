@@ -43,9 +43,9 @@ Repository hooks and settings require workspace trust. Ambient user hooks requir
 
 Repository filesystem hooks are separate from the SDK callbacks described in
 this guide. To load them from additional directories during local session
-creation or cold resume, supply `additionalDirectories`; `--add-dir` launch arguments (for the runtime or the interactive CLI) also participate by default.
+creation or cold resume, supply `filesystem.additionalDirectories`; `--add-dir` launch arguments (for the runtime or the interactive CLI) also participate by default.
 `DISABLE_ADDITIONAL_DIRECTORY_HOOKS=true` restores primary-only scope;
-`enableFileHooks` can enable or disable repository hooks through `session.rpc.options.update`; explicit SDK hook directories and callbacks are independent.
+`hooks.enableRepositoryHooks` can enable or disable repository hooks through `session.rpc.options.update`; explicit SDK hook directories and callbacks are independent.
 
 Discovery uses each accepted directory's containing Git root, or the directory
 itself when it is outside a Git repository. For example, supplying
@@ -65,7 +65,7 @@ authorization.
 
 ## Registering hooks
 
-Callback `hooks` remain separate from file-backed `hookDirectories`. For packaged hook configurations and adjacent resources, see [customization discovery locations](./customization-locations.md).
+Callback `hooks.handlers` remain separate from file-backed `hooks.directories`. For packaged hook configurations and adjacent resources, see [customization discovery locations](./customization-locations.md).
 
 ### Agent-scoped declarative hooks
 
@@ -268,6 +268,7 @@ session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
 <!-- docs-validate: hidden -->
 
 ```csharp
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
 using Microsoft.Copilot;
 using Microsoft.Copilot.Rpc;
 
@@ -302,6 +303,7 @@ public static class HooksExample
 <!-- /docs-validate: hidden -->
 
 ```csharp
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
 var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
 var session = await client.CreateSessionAsync(new CreateSessionOptions
 {

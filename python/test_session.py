@@ -1342,6 +1342,18 @@ async def test_tool_result_with_encodable_telemetry_is_sent():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("skip", [None, False, True])
+async def test_tool_result_preserves_large_output_policy(skip):
+    result = {"textResultForLlm": "large output", "resultType": "success"}
+    if skip is not None:
+        result["skipLargeOutputProcessing"] = skip
+
+    assert await _answer_tool_call(
+        ToolResult(text_result_for_llm="large output", skip_large_output_processing=skip)
+    ) == [{"sessionId": "session-1", "requestId": "request-1", "result": result}]
+
+
+@pytest.mark.asyncio
 async def test_tool_result_that_fails_to_send_is_reported_and_answered_with_the_error(caplog):
     caplog.set_level(logging.ERROR, logger="copilot.session")
 

@@ -31,7 +31,7 @@ async def test_timeout_report_identifies_pending_rpc_without_payloads(
     sent = asyncio.Event()
     release_write = asyncio.Event()
 
-    async def send_message(message):
+    async def send_message(message, **_kwargs):
         sent.set()
         if blocked_write:
             await release_write.wait()

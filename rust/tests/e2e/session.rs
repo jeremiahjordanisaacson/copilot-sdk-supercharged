@@ -7,6 +7,7 @@ use copilot_sdk::handler::{
     PermissionResult,
 };
 use copilot_sdk::rpc::ModelSetAllowedModelsRequest;
+use copilot_sdk::session::Session;
 use copilot_sdk::session_events::{
     SessionErrorData, SessionEventType, SessionInfoData, SessionModelChangeData, SessionResumeData,
     SessionStartData, SessionWarningData, UserMessageAgentMode, UserMessageData,
@@ -20,10 +21,10 @@ use copilot_sdk::{
     SessionId, SetModelOptions, SystemMessageConfig, Tool, ToolInvocation, ToolResult,
 };
 use futures_util::FutureExt;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::support::{
-    assert_uuid_like, assistant_message_content, collect_until_idle, event_types,
+    E2eContext, assert_uuid_like, assistant_message_content, collect_until_idle, event_types,
     get_system_message, get_tool_names, wait_for_condition, wait_for_event,
 };
 
@@ -98,12 +99,7 @@ async fn should_create_a_session_with_appended_systemmessage_config() {
                     .await
                     .expect("create session");
 
-                let answer = session
-                    .send_and_wait("What is your full name?")
-                    .await
-                    .expect("send")
-                    .expect("assistant message");
-                let content = assistant_message_content(&answer);
+                let content = ask(&session, "What is your full name?").await;
                 assert!(content.contains("GitHub"));
                 assert!(content.contains("Have a nice day!"));
 
@@ -144,12 +140,7 @@ async fn should_create_a_session_with_replaced_systemmessage_config() {
                     .await
                     .expect("create session");
 
-                let answer = session
-                    .send_and_wait("What is your full name?")
-                    .await
-                    .expect("send")
-                    .expect("assistant message");
-                let content = assistant_message_content(&answer);
+                let content = ask(&session, "What is your full name?").await;
                 assert!(!content.contains("GitHub"));
                 assert!(content.contains("Testy"));
 
@@ -237,13 +228,7 @@ async fn should_create_a_session_with_availabletools() {
                     .await
                     .expect("create session");
 
-                session.send("What is 1+1?").await.expect("send");
-                wait_for_condition("captured CAPI exchange", || async {
-                    !ctx.exchanges().is_empty()
-                })
-                .await;
-                let exchanges = ctx.exchanges();
-                let tool_names = get_tool_names(&exchanges[0]);
+                let tool_names = first_request_tool_names(ctx, &session).await;
                 assert_eq!(tool_names.len(), 2);
                 assert!(tool_names.contains(&"view".to_string()));
                 assert!(tool_names.contains(&"edit".to_string()));
@@ -274,13 +259,7 @@ async fn should_create_a_session_with_excludedtools() {
                     .await
                     .expect("create session");
 
-                session.send("What is 1+1?").await.expect("send");
-                wait_for_condition("captured CAPI exchange", || async {
-                    !ctx.exchanges().is_empty()
-                })
-                .await;
-                let exchanges = ctx.exchanges();
-                let tool_names = get_tool_names(&exchanges[0]);
+                let tool_names = first_request_tool_names(ctx, &session).await;
                 assert!(!tool_names.contains(&"view".to_string()));
                 assert!(tool_names.contains(&"edit".to_string()));
                 assert!(tool_names.contains(&"grep".to_string()));
@@ -322,13 +301,7 @@ async fn should_create_a_session_with_defaultagent_excludedtools() {
                     .await
                     .expect("create session");
 
-                session.send("What is 1+1?").await.expect("send");
-                wait_for_condition("captured CAPI exchange", || async {
-                    !ctx.exchanges().is_empty()
-                })
-                .await;
-                let exchanges = ctx.exchanges();
-                let tool_names = get_tool_names(&exchanges[0]);
+                let tool_names = first_request_tool_names(ctx, &session).await;
                 assert!(!tool_names.contains(&"secret_tool".to_string()));
 
                 session.disconnect().await.expect("disconnect session");
@@ -349,11 +322,7 @@ async fn should_throw_error_when_resuming_non_existent_session() {
             Box::pin(async move {
                 ctx.set_default_copilot_user();
                 let client = ctx.start_client().await;
-                let config = ResumeSessionOptions::new(copilot_sdk::SessionId::new(
-                    "non-existent-session-id",
-                ))
-                .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
-                .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN));
+                let config = approve_all_resume_options(SessionId::new("non-existent-session-id"));
 
                 assert!(client.resume_session(config).await.is_err());
 
@@ -433,39 +402,23 @@ async fn should_resume_a_session_using_the_same_client() {
                     .expect("create session");
                 let session_id = session.id().clone();
 
-                let first = session
-                    .send_and_wait("What is 1+1?")
-                    .await
-                    .expect("send")
-                    .expect("assistant message");
-                assert!(assistant_message_content(&first).contains('2'));
+                assert!(ask(&session, "What is 1+1?").await.contains('2'));
 
                 session
                     .disconnect()
                     .await
                     .expect("disconnect first session");
                 let resumed = client
-                    .resume_session(
-                        ResumeSessionOptions::new(session_id.clone())
-                            .with_permissions(|group| {
-                                group.with_on_request(Arc::new(
-                                    copilot_sdk::handler::ApproveAllHandler,
-                                ))
-                            })
-                            .with_github(|group| {
-                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
-                            }),
-                    )
+                    .resume_session(approve_all_resume_options(session_id.clone()))
                     .await
                     .expect("resume session");
                 assert_eq!(resumed.id(), &session_id);
 
-                let second = resumed
-                    .send_and_wait("Now if you double that, what do you get?")
-                    .await
-                    .expect("send after resume")
-                    .expect("assistant message");
-                assert!(assistant_message_content(&second).contains('4'));
+                assert!(
+                    ask(&resumed, "Now if you double that, what do you get?")
+                        .await
+                        .contains('4')
+                );
 
                 resumed
                     .disconnect()
@@ -493,12 +446,7 @@ async fn should_resume_a_session_using_a_new_client() {
                     .expect("create session");
                 let session_id = session.id().clone();
 
-                let first = session
-                    .send_and_wait("What is 1+1?")
-                    .await
-                    .expect("send")
-                    .expect("assistant message");
-                assert!(assistant_message_content(&first).contains('2'));
+                assert!(ask(&session, "What is 1+1?").await.contains('2'));
                 session
                     .disconnect()
                     .await
@@ -508,16 +456,8 @@ async fn should_resume_a_session_using_a_new_client() {
                 let new_client = ctx.start_client().await;
                 let resumed = new_client
                     .resume_session(
-                        ResumeSessionOptions::new(session_id.clone())
-                            .with_continue_pending_work(true)
-                            .with_permissions(|group| {
-                                group.with_on_request(Arc::new(
-                                    copilot_sdk::handler::ApproveAllHandler,
-                                ))
-                            })
-                            .with_github(|group| {
-                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
-                            }),
+                        approve_all_resume_options(session_id.clone())
+                            .with_continue_pending_work(true),
                     )
                     .await
                     .expect("resume session");
@@ -536,12 +476,11 @@ async fn should_resume_a_session_using_a_new_client() {
                     .expect("session.resume event");
                 assert_eq!(resume.continue_pending_work, Some(true));
 
-                let second = resumed
-                    .send_and_wait("Now if you double that, what do you get?")
-                    .await
-                    .expect("send after resume")
-                    .expect("assistant message");
-                assert!(assistant_message_content(&second).contains('4'));
+                assert!(
+                    ask(&resumed, "Now if you double that, what do you get?")
+                        .await
+                        .contains('4')
+                );
 
                 resumed
                     .disconnect()
@@ -578,14 +517,12 @@ async fn should_recover_marker_after_cold_resume_with_explicit_session_id() {
                     .expect("create session");
                 assert_eq!(session1.id(), &session_id);
 
-                let first = session1
-                    .send_and_wait(
-                        "Please remember this exact secret marker for later - MARKER-7f3ac21e. Reply with only the single word \"Acknowledged\".",
-                    )
-                    .await
-                    .expect("send")
-                    .expect("assistant message");
-                assert!(assistant_message_content(&first).contains("Acknowledged"));
+                let answer = ask(
+                    &session1,
+                    "Please remember this exact secret marker for later - MARKER-7f3ac21e. Reply with only the single word \"Acknowledged\".",
+                )
+                .await;
+                assert!(answer.contains("Acknowledged"));
 
                 session1
                     .disconnect()
@@ -596,22 +533,18 @@ async fn should_recover_marker_after_cold_resume_with_explicit_session_id() {
                 let new_client = ctx.start_client().await;
                 let resumed = new_client
                     .resume_session(
-                        ResumeSessionOptions::new(session_id.clone())
-                            .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
-                            .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN)),
+                        approve_all_resume_options(session_id.clone()),
                     )
                     .await
                     .expect("resume session");
                 assert_eq!(resumed.id(), &session_id);
 
-                let second = resumed
-                    .send_and_wait(
-                        "What was the exact secret marker I asked you to remember earlier? Reply with only that marker value and nothing else.",
-                    )
-                    .await
-                    .expect("send after resume")
-                    .expect("assistant message");
-                assert!(assistant_message_content(&second).contains("MARKER-7f3ac21e"));
+                let answer = ask(
+                    &resumed,
+                    "What was the exact secret marker I asked you to remember earlier? Reply with only that marker value and nothing else.",
+                )
+                .await;
+                assert!(answer.contains("MARKER-7f3ac21e"));
 
                 resumed
                     .disconnect()
@@ -641,12 +574,7 @@ async fn resumes_a_persisted_session_from_a_new_client_when_an_mcp_oauth_handler
                     .expect("create session");
                 let session_id = session.id().clone();
 
-                let first = session
-                    .send_and_wait("What is 1+1?")
-                    .await
-                    .expect("send")
-                    .expect("assistant message");
-                assert!(assistant_message_content(&first).contains('2'));
+                assert!(ask(&session, "What is 1+1?").await.contains('2'));
 
                 session
                     .disconnect()
@@ -656,18 +584,9 @@ async fn resumes_a_persisted_session_from_a_new_client_when_an_mcp_oauth_handler
 
                 let new_client = ctx.start_client().await;
                 let resumed = new_client
-                    .resume_session(
-                        ResumeSessionOptions::new(session_id.clone())
-                            .with_permissions(|group| {
-                                group.with_on_request(Arc::new(ApproveAllHandler))
-                            })
-                            .with_mcp(|group| {
-                                group.with_on_auth_request(Arc::new(CancelMcpAuthHandler))
-                            })
-                            .with_github(|group| {
-                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
-                            }),
-                    )
+                    .resume_session(approve_all_resume_options(session_id.clone()).with_mcp(
+                        |group| group.with_on_auth_request(Arc::new(CancelMcpAuthHandler)),
+                    ))
                     .await
                     .expect("resume session");
                 assert_eq!(resumed.id(), &session_id);
@@ -933,12 +852,7 @@ async fn should_create_session_with_custom_config_dir() {
                     .expect("create session");
                 assert_uuid_like(session.id());
 
-                let answer = session
-                    .send_and_wait("What is 1+1?")
-                    .await
-                    .expect("send")
-                    .expect("assistant message");
-                assert!(assistant_message_content(&answer).contains('2'));
+                assert!(ask(&session, "What is 1+1?").await.contains('2'));
                 // The CLI keeps this session's state under the configured
                 // directory instead of its default location.
                 let events_log = custom_config_dir
@@ -1270,23 +1184,14 @@ async fn should_send_with_file_attachment() {
                     .await
                     .expect("send");
 
-                let user = latest_user_message(&session).await;
-                let attachments = user
-                    .typed_data::<UserMessageData>()
-                    .expect("user message data")
-                    .attachments
-                    .expect("attachments");
+                let attachments = latest_user_attachments(&session).await;
                 assert_eq!(attachments.len(), 1);
                 assert_eq!(
-                    attachments[0]
-                        .get("displayName")
-                        .and_then(serde_json::Value::as_str),
+                    attachments[0].get("displayName").and_then(Value::as_str),
                     Some("attached-file.txt")
                 );
                 assert_eq!(
-                    attachments[0]
-                        .get("path")
-                        .and_then(serde_json::Value::as_str),
+                    attachments[0].get("path").and_then(Value::as_str),
                     Some(file_path.to_string_lossy().as_ref())
                 );
                 assert_eq!(
@@ -1339,23 +1244,14 @@ async fn should_send_with_directory_attachment() {
                     .await
                     .expect("send");
 
-                let user = latest_user_message(&session).await;
-                let attachments = user
-                    .typed_data::<UserMessageData>()
-                    .expect("user message data")
-                    .attachments
-                    .expect("attachments");
+                let attachments = latest_user_attachments(&session).await;
                 assert_eq!(attachments.len(), 1);
                 assert_eq!(
-                    attachments[0]
-                        .get("displayName")
-                        .and_then(serde_json::Value::as_str),
+                    attachments[0].get("displayName").and_then(Value::as_str),
                     Some("attached-directory")
                 );
                 assert_eq!(
-                    attachments[0]
-                        .get("path")
-                        .and_then(serde_json::Value::as_str),
+                    attachments[0].get("path").and_then(Value::as_str),
                     Some(directory_path.to_string_lossy().as_ref())
                 );
 
@@ -1412,29 +1308,21 @@ async fn should_send_with_selection_attachment() {
                     .await
                     .expect("send");
 
-                let user = latest_user_message(&session).await;
-                let attachment = user
-                    .typed_data::<UserMessageData>()
-                    .expect("user message data")
-                    .attachments
-                    .expect("attachments")
+                let attachment = latest_user_attachments(&session)
+                    .await
                     .into_iter()
                     .next()
                     .expect("attachment");
                 assert_eq!(
-                    attachment
-                        .get("displayName")
-                        .and_then(serde_json::Value::as_str),
+                    attachment.get("displayName").and_then(Value::as_str),
                     Some("selected-file.cs")
                 );
                 assert_eq!(
-                    attachment
-                        .get("filePath")
-                        .and_then(serde_json::Value::as_str),
+                    attachment.get("filePath").and_then(Value::as_str),
                     Some(file_path.to_string_lossy().as_ref())
                 );
                 assert_eq!(
-                    attachment.get("text").and_then(serde_json::Value::as_str),
+                    attachment.get("text").and_then(Value::as_str),
                     Some("string Value = \"SELECTION_SENTINEL\";")
                 );
 
@@ -1473,15 +1361,7 @@ async fn should_send_with_github_reference_attachment() {
                     .await
                     .expect("send");
 
-                let user = latest_user_message(&session).await;
-                let attachment = user
-                    .typed_data::<UserMessageData>()
-                    .expect("user message data")
-                    .attachments
-                    .expect("attachments")
-                    .into_iter()
-                    .next()
-                    .expect("attachment");
+                let attachment = latest_user_attachments(&session).await.into_iter().next().expect("attachment");
                 assert_eq!(
                     attachment
                         .get("number")
@@ -1490,16 +1370,15 @@ async fn should_send_with_github_reference_attachment() {
                 );
                 assert_eq!(
                     attachment
-                        .get("referenceType")
-                        .and_then(serde_json::Value::as_str),
+                        .get("referenceType").and_then(Value::as_str),
                     Some("issue")
                 );
                 assert_eq!(
-                    attachment.get("state").and_then(serde_json::Value::as_str),
+                    attachment.get("state").and_then(Value::as_str),
                     Some("open")
                 );
                 assert_eq!(
-                    attachment.get("title").and_then(serde_json::Value::as_str),
+                    attachment.get("title").and_then(Value::as_str),
                     Some("Add E2E attachment coverage")
                 );
 
@@ -1593,14 +1472,7 @@ async fn should_send_with_mode_property() {
                 })
                 .await;
 
-                let user_message = session
-                    .get_events()
-                    .await
-                    .expect("get messages")
-                    .into_iter()
-                    .rev()
-                    .find(|event| event.parsed_type() == SessionEventType::UserMessage)
-                    .expect("user.message");
+                let user_message = latest_user_message(&session).await;
                 let data = user_message
                     .typed_data::<UserMessageData>()
                     .expect("user.message data");
@@ -1615,7 +1487,32 @@ async fn should_send_with_mode_property() {
     .await;
 }
 
-async fn latest_user_message(session: &copilot_sdk::session::Session) -> copilot_sdk::SessionEvent {
+async fn ask(session: &Session, prompt: &str) -> String {
+    let answer = session
+        .send_and_wait(prompt)
+        .await
+        .expect("send")
+        .expect("assistant message");
+    assistant_message_content(&answer)
+}
+
+fn approve_all_resume_options(session_id: SessionId) -> ResumeSessionOptions {
+    ResumeSessionOptions::new(session_id)
+        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
+        .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+}
+
+/// Sends a prompt and returns the tool names from the first captured CAPI request.
+async fn first_request_tool_names(ctx: &E2eContext, session: &Session) -> Vec<String> {
+    session.send("What is 1+1?").await.expect("send");
+    wait_for_condition("captured CAPI exchange", || async {
+        !ctx.exchanges().is_empty()
+    })
+    .await;
+    get_tool_names(&ctx.exchanges()[0])
+}
+
+async fn latest_user_message(session: &Session) -> copilot_sdk::SessionEvent {
     session
         .get_events()
         .await
@@ -1624,6 +1521,15 @@ async fn latest_user_message(session: &copilot_sdk::session::Session) -> copilot
         .rev()
         .find(|event| event.parsed_type() == SessionEventType::UserMessage)
         .expect("user.message")
+}
+
+async fn latest_user_attachments(session: &Session) -> Vec<Value> {
+    latest_user_message(session)
+        .await
+        .typed_data::<UserMessageData>()
+        .expect("user message data")
+        .attachments
+        .expect("attachments")
 }
 
 struct CancelMcpAuthHandler;

@@ -936,6 +936,36 @@ fn skip_modes_need_no_snapshots_and_local_runtime_preserves_bundled_precedence()
 }
 
 #[test]
+fn source_checkout_dev_placeholder_skips_acquisition_with_actionable_warning() {
+    for bundled in [false, true] {
+        let fixture = Fixture::new(false, false);
+        fs::remove_file(fixture.path("cli-version.txt")).unwrap();
+        fs::remove_file(fixture.path("cli-version-in-process.txt")).unwrap();
+        fs::remove_dir_all(fixture.path("cache")).unwrap();
+        fs::create_dir_all(fixture.path("nodejs")).unwrap();
+        fs::create_dir_all(fixture.path("rust")).unwrap();
+        fs::write(
+            fixture.path("nodejs/package.json"),
+            r#"{"copilotCliVersion":"0.0.0-dev"}"#,
+        )
+        .unwrap();
+        let mut command = fixture.command(bundled, true);
+        command.env("CARGO_MANIFEST_DIR", fixture.path("rust"));
+        let stdout = succeeded(command.output().unwrap());
+        assert!(
+            stdout.contains("development placeholder '0.0.0-dev'"),
+            "{stdout}"
+        );
+        assert!(stdout.contains("COPILOT_CLI_PATH"), "{stdout}");
+        assert!(!stdout.contains("cargo:rustc-cfg=has_"), "{stdout}");
+        assert!(
+            !stdout.contains("cargo:rustc-env=COPILOT_SDK_CLI_VERSION"),
+            "{stdout}"
+        );
+    }
+}
+
+#[test]
 fn runtime_loaded_targets_require_the_exact_common_api_profile() {
     let fixture = Fixture::new(true, false);
     for (version, accepted) in [

@@ -116,7 +116,7 @@ rust_library(
         "@sdk_vendor__futures-util-0.3.34//:futures_util",
         "@sdk_vendor__h2-0.4.20//:h2",
         "@sdk_vendor__http-1.5.0//:http",
-        "@sdk_vendor__rustls-pki-types-1.15.1//:rustls_pki_types",
+        "@sdk_vendor__rustls-pki-types-1.16.0//:rustls_pki_types",
         "@sdk_vendor__sync_wrapper-1.0.2//:sync_wrapper",
         "@sdk_vendor__tokio-util-0.7.20//:tokio_util",
         "@sdk_vendor__url-2.5.8//:url",

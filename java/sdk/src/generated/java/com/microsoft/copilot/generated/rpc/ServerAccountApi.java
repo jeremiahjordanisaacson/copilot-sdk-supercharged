@@ -118,7 +118,7 @@ public final class ServerAccountApi {
     }
 
     /**
-     * Resolves a path on the identity's GitHub host into an absolute URL, so a host can link to settings or documentation on the enterprise instance the user is signed in to rather than to github.com. Falls back to the public host when no identity is supplied.
+     * Resolves a path on the identity's GitHub host into an absolute URL. A bound host can instead select its live credential owner with authOwnerId; this form rejects extensions, foreign owners, and a simultaneous identity. Falls back to the public host only when neither identity nor authOwnerId is supplied.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0

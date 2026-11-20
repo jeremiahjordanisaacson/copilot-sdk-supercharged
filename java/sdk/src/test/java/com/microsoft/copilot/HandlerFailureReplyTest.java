@@ -11,9 +11,11 @@ import static org.mockito.Mockito.*;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Handler;
@@ -29,9 +31,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.microsoft.copilot.generated.CommandExecuteEvent;
 import com.microsoft.copilot.generated.ExternalToolRequestedEvent;
+import com.microsoft.copilot.generated.PermissionRequestedEvent;
 import com.microsoft.copilot.generated.SessionEvent;
 import com.microsoft.copilot.rpc.CommandDefinition;
 import com.microsoft.copilot.rpc.CommandHandler;
+import com.microsoft.copilot.rpc.PermissionHandler;
+import com.microsoft.copilot.rpc.PermissionRequestResult;
+import com.microsoft.copilot.rpc.PermissionRequestResultKind;
 import com.microsoft.copilot.rpc.ToolDefinition;
 import com.microsoft.copilot.rpc.ToolHandler;
 import com.microsoft.copilot.rpc.ToolResultObject;
@@ -39,7 +45,8 @@ import com.microsoft.copilot.rpc.ToolResultObject;
 /**
  * Verifies the error text sent back to the runtime when a slash-command or tool
  * handler fails: it is the handler's own exception message, whether the handler
- * throws before returning its future or the future fails later.
+ * throws before returning its future or the future fails later. A failed
+ * permission handler is answered with a denial.
  */
 class HandlerFailureReplyTest {
 
@@ -47,6 +54,7 @@ class HandlerFailureReplyTest {
 
     private final BlockingQueue<ObjectNode> commandReplies = new LinkedBlockingQueue<>();
     private final BlockingQueue<ObjectNode> toolReplies = new LinkedBlockingQueue<>();
+    private final BlockingQueue<ObjectNode> permissionReplies = new LinkedBlockingQueue<>();
     private CopilotSession session;
 
     @BeforeEach
@@ -60,6 +68,11 @@ class HandlerFailureReplyTest {
             toolReplies.add(invocation.getArgument(1));
             return CompletableFuture.completedFuture(null);
         });
+        when(rpc.invoke(eq("session.permissions.handlePendingPermissionRequest"), any(), any()))
+                .thenAnswer(invocation -> {
+                    permissionReplies.add(invocation.getArgument(1));
+                    return CompletableFuture.completedFuture(null);
+                });
         session = new CopilotSession(SESSION_ID, rpc);
     }
 
@@ -105,6 +118,53 @@ class HandlerFailureReplyTest {
         session.registerCommands(List.of(command("throws-error", throwing)));
 
         assertEquals("boom", commandError("throws-error"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"throws-error", "throws-exception", "fails-with-error"})
+    void failedPermissionHandlerIsDenied(String failure) throws Exception {
+        PermissionHandler handler = (request, invocation) -> switch (failure) {
+            case "throws-error" -> throw new AssertionError("boom");
+            case "throws-exception" -> throw new IllegalStateException("boom");
+            default -> CompletableFuture.failedFuture(new AssertionError("boom"));
+        };
+        session.registerPermissionHandler(handler);
+
+        dispatch(permissionRequested(failure));
+
+        ObjectNode reply = permissionReplies.poll(5, TimeUnit.SECONDS);
+        assertNotNull(reply, "No reply for " + failure);
+        assertEquals("request-" + failure, reply.path("requestId").asText());
+        assertEquals(PermissionRequestResultKind.USER_NOT_AVAILABLE.getValue(),
+                reply.path("result").path("kind").asText());
+    }
+
+    @Test
+    void permissionHandlerThatApprovesIsAnsweredWithItsResult() throws Exception {
+        session.registerPermissionHandler(
+                (request, invocation) -> CompletableFuture.completedFuture(PermissionRequestResult.approveOnce()));
+
+        dispatch(permissionRequested("approves"));
+
+        ObjectNode reply = permissionReplies.poll(5, TimeUnit.SECONDS);
+        assertNotNull(reply, "No reply for approves");
+        assertEquals(PermissionRequestResultKind.APPROVED.getValue(), reply.path("result").path("kind").asText());
+    }
+
+    @Test
+    void permissionHandlerFatalErrorIsRethrownWithoutADenial() {
+        session.setExecutor(task -> {
+            throw new RejectedExecutionException("Controlled executor rejection");
+        });
+        var fatal = new NoClassDefFoundError("boom");
+        session.registerPermissionHandler((request, invocation) -> {
+            throw fatal;
+        });
+
+        assertSame(fatal,
+                assertThrows(NoClassDefFoundError.class, () -> session.dispatchEvent(permissionRequested("fatal"))));
+
+        assertNull(permissionReplies.poll(), "A fatal handler error must not send a permission reply");
     }
 
     @Test
@@ -157,6 +217,19 @@ class HandlerFailureReplyTest {
                 telemetryError);
         String resultError = toolError("unencodable-result");
         assertTrue(resultError.startsWith("No serializer found for class java.lang.Object"), resultError);
+    }
+
+    record Tagged(String title, Optional<String> tag) {
+    }
+
+    @Test
+    void directToolHandlerResultWithOptionalComponentsIsEncoded() throws Exception {
+        ToolHandler withTag = invocation -> CompletableFuture.completedFuture(new Tagged("a", Optional.of("b")));
+        ToolHandler withoutTag = invocation -> CompletableFuture.completedFuture(new Tagged("a", Optional.empty()));
+        session.registerTools(List.of(tool("with-tag", withTag), tool("without-tag", withoutTag)));
+
+        assertEquals("{\"title\":\"a\",\"tag\":\"b\"}", toolResultText("with-tag"));
+        assertEquals("{\"title\":\"a\",\"tag\":null}", toolResultText("without-tag"));
     }
 
     @Test
@@ -325,11 +398,29 @@ class HandlerFailureReplyTest {
         return replyError(toolReplies, name);
     }
 
+    private String toolResultText(String name) throws Exception {
+        var event = new ExternalToolRequestedEvent();
+        event.setData(ExternalToolRequestedEvent.ExternalToolRequestedEventData.builder().requestId("request-" + name)
+                .sessionId(SESSION_ID).toolCallId("tool-call-" + name).toolName(name).arguments(Map.of()).build());
+        dispatch(event);
+        ObjectNode reply = toolReplies.poll(5, TimeUnit.SECONDS);
+        assertNotNull(reply, "No reply for " + name);
+        assertTrue(reply.path("error").isMissingNode() || reply.path("error").isNull(), reply.toString());
+        return reply.path("result").path("textResultForLlm").asText(null);
+    }
+
     private static String replyError(BlockingQueue<ObjectNode> replies, String name) throws Exception {
         ObjectNode reply = replies.poll(5, TimeUnit.SECONDS);
         assertNotNull(reply, "No reply for " + name);
         assertEquals("request-" + name, reply.path("requestId").asText());
         return reply.path("error").asText(null);
+    }
+
+    private static PermissionRequestedEvent permissionRequested(String name) {
+        var event = new PermissionRequestedEvent();
+        event.setData(PermissionRequestedEvent.PermissionRequestedEventData.builder().requestId("request-" + name)
+                .permissionRequest(Map.of("kind", "custom-tool", "toolName", "lookup")).build());
+        return event;
     }
 
     private void dispatch(SessionEvent event) throws Exception {

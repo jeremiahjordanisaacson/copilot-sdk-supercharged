@@ -6,6 +6,24 @@ use super::*;
 use crate::ffi::initiation_tests::Peer;
 
 #[tokio::test]
+async fn timing_initialization_failure_keeps_the_existing_connection_usable() {
+    let borrowed = Peer::with_ownership(false);
+    let client = borrowed.client();
+    let error = initialize_session_timing(client, &json!({ "appVersion": "test" })).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("is missing an expected export (copilot_runtime_cli_host_timing_initialize)"),
+        "{error}",
+    );
+    assert_eq!(
+        client.call("ping", None).await.unwrap(),
+        json!({"method": "ping"}),
+    );
+    assert_eq!(borrowed.shutdowns(), 0);
+}
+
+#[tokio::test]
 async fn missing_private_export_closes_only_the_new_non_owning_connection() {
     let original = Peer::with_ownership(true);
     let borrowed = Peer::with_ownership(false);

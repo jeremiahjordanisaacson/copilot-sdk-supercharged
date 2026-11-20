@@ -166,6 +166,73 @@ public sealed partial class ClientSessionLifetimeTests
         }
     }
 
+    [Fact]
+    public async Task Ahp_Stop_Marks_Cancellation_Before_Queued_Work_Runs()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        var authenticating = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var creating = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new AhpHostOptions();
+        // Init-only setters reference different IsExternalInit types in the two SDK assets.
+        typeof(AhpHostOptions).GetProperty(nameof(AhpHostOptions.LocalServer))!.SetValue(options, new HostLocalServerOptions());
+        typeof(AhpHostOptions).GetProperty(nameof(AhpHostOptions.Authentication))!.SetValue(options,
+            new AhpHostAuthentication.Custom("owner", async (_, token) =>
+            {
+                authenticating.TrySetResult(token);
+                await Task.Delay(Timeout.Infinite, token);
+                return null;
+            }));
+        Func<AhpSessionCreateRequest, Task<CopilotSession>> createSession = async request =>
+        {
+            creating.TrySetResult(request.CancellationToken);
+            await Task.Delay(Timeout.Infinite, request.CancellationToken);
+            return await client.CreateSessionAsync(request.Config);
+        };
+        typeof(AhpHostOptions).GetProperty(nameof(AhpHostOptions.CreateSession))!.SetValue(options, createSession);
+        var host = await client.StartAhpHostAsync(options);
+        _ = await server.SendRequestWithoutWaitingAsync("host.validateAuthentication", AuthenticationRequest(host, "pending"));
+        _ = await server.SendRequestWithoutWaitingAsync("host.materializeSession", new()
+        {
+            ["hostId"] = host.HostId,
+            ["handoffId"] = "pending",
+            ["authentication"] = new Dictionary<string, object?> { ["mode"] = "custom", ["identity"] = "owner" },
+            ["config"] = new Dictionary<string, object?> { ["sessionId"] = "pending" }
+        });
+        var authenticationToken = await authenticating.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var sessionToken = await creating.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var releaseCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stoppingThreadId = Environment.CurrentManagedThreadId;
+        // Hold queued work, but not inline context restoration on the thread calling stop.
+        var cancellationContext = new AsyncLocal<bool>(change =>
+        {
+            if (change.ThreadContextChanged && change.CurrentValue && Environment.CurrentManagedThreadId != stoppingThreadId)
+            {
+                releaseCancellation.Task.GetAwaiter().GetResult();
+            }
+        });
+        Task stopping;
+        try
+        {
+            cancellationContext.Value = true;
+            stopping = client.StopAsync();
+        }
+        finally
+        {
+            cancellationContext.Value = false;
+        }
+        try
+        {
+            Assert.True(authenticationToken.IsCancellationRequested && sessionToken.IsCancellationRequested,
+                $"AHP cancellation must be observable before queued callbacks run. Authentication: {authenticationToken.IsCancellationRequested}; session: {sessionToken.IsCancellationRequested}.");
+        }
+        finally
+        {
+            releaseCancellation.TrySetResult();
+            await stopping.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

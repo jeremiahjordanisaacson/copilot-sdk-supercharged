@@ -31,7 +31,7 @@ public record SessionProvidersModelsPrepareConfigurationResult(
     @JsonProperty("model") ProviderModelConfig model,
     /** Provider-qualified selection id (`provider/id`) to pass to `switchTo` once the plan is applied. */
     @JsonProperty("selectionId") String selectionId,
-    /** Whether `provider` still needs to be registered. When `alreadyConfigured`, a provider with the same endpoint is already registered and `provider` restates it under its existing name; adding it again is rejected as a duplicate. */
+    /** Whether `provider` still needs to be registered. When `alreadyConfigured`, a provider with the same endpoint is already registered and `provider` restates it under its existing name; omit it when applying the plan. */
     @JsonProperty("providerDisposition") ModelProviderConfigurationDisposition providerDisposition,
     /** Whether `model` still needs to be registered. When `alreadyConfigured`, `selectionId` is already registered and the caller can select it without adding anything. */
     @JsonProperty("modelDisposition") ModelProviderConfigurationDisposition modelDisposition,

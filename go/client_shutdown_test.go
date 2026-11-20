@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -87,15 +88,12 @@ func TestSpawnedJavaScriptUsesChildPath(t *testing.T) {
 		})
 	}
 	if runtime.GOOS == "windows" {
+		// Keep the relative PATH fixture under TempDir's Windows-aware cleanup.
+		t.Chdir(directory)
 		relativeBin, err := os.MkdirTemp(".", ".sdk-node-path-")
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() {
-			if err := os.RemoveAll(relativeBin); err != nil {
-				t.Error(err)
-			}
-		})
 		nodeBytes, err := os.ReadFile(node)
 		if err != nil {
 			t.Fatal(err)
@@ -243,6 +241,116 @@ func TestOwnedStdioShutdown(t *testing.T) {
 				t.Fatalf("Stop returned without EOF cleanup: %q (error: %v)", contents, err)
 			}
 			runShutdownWithWatchdog(t, client.Stop)
+		})
+	}
+}
+
+// A TCP runtime gets no stdin EOF, so Stop has to signal the process it started.
+// Each row runs the shared fixture as that runtime, directly or behind a launcher
+// that runs it as a child sharing its output, as the installed copilot command does.
+func TestOwnedTCPShutdown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no SIGTERM; Stop kills the owned process there")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal("shutdown fixture requires Node.js:", err)
+	}
+	fixture, err := filepath.Abs("../test/harness/stdio-shutdown-runtime.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scripts := t.TempDir()
+	writeScript := func(name, body string) string {
+		path := filepath.Join(scripts, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	const launch = `const child = require("node:child_process").spawn(process.execPath, process.argv.slice(2), { stdio: "inherit" });
+child.on("exit", (code) => process.exit(code ?? 1));
+`
+	// The installed copilot command's shape: it passes termination signals on to the runtime.
+	passesSIGTERM := writeScript("passes-sigterm.cjs", `process.on("SIGTERM", () => child.kill("SIGTERM"));
+`+launch)
+	keepsSIGTERM := writeScript("keeps-sigterm.cjs", launch)
+	ignoresSIGTERM := writeScript("ignores-sigterm.cjs", `process.on("SIGTERM", () => {});
+`)
+
+	rows := []struct {
+		name    string
+		before  []string // node arguments ahead of the fixture
+		mode    string   // fixture mode
+		wantErr string   // "" when Stop succeeds
+		exited  bool     // whether the fixture process is gone after Stop
+	}{
+		{name: "launcher passes SIGTERM on", before: []string{passesSIGTERM}, mode: "stop", exited: true},
+		{name: "runtime is the direct child", mode: "stop", exited: true},
+		{name: "runtime ignores SIGTERM", before: []string{"--require", ignoresSIGTERM}, mode: "stop", exited: true},
+		{name: "launcher keeps SIGTERM", before: []string{keepsSIGTERM}, mode: "stop",
+			wantErr: "timed out waiting for CLI process to exit after kill"},
+		{name: "runtime shutdown unanswered", before: []string{"--require", ignoresSIGTERM}, mode: "shutdown-gated",
+			wantErr: "timed out gracefully shutting down runtime", exited: true},
+		{name: "runtime shutdown unanswered, launcher passes SIGTERM on", before: []string{passesSIGTERM}, mode: "shutdown-gated",
+			wantErr: "timed out gracefully shutting down runtime", exited: true},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			directory := t.TempDir()
+			pidFile := filepath.Join(directory, "runtime.pid")
+			args := append(append([]string{}, row.before...), fixture, filepath.Join(directory, "telemetry.jsonl"), row.mode, pidFile, "--fixture-tcp")
+			client := copilot.NewClient(&copilot.ClientOptions{
+				Mode:    copilot.ModeCodingAgent,
+				Runtime: copilot.SpawnedTCPConnection{Path: node, Args: args},
+				GitHub:  copilot.ClientGitHubOptions{UseLoggedInUser: copilot.Bool(false)},
+			})
+			t.Cleanup(func() {
+				client.ForceStop()
+				// A runtime left behind its launcher is no longer the client's to kill.
+				if row.exited && !t.Failed() {
+					return
+				}
+				if data, err := os.ReadFile(pidFile); err == nil {
+					if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+						if process, err := os.FindProcess(pid); err == nil {
+							_ = process.Kill()
+						}
+					}
+				}
+			})
+
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			if err := client.Start(ctx); err != nil {
+				t.Fatal("Start failed:", err)
+			}
+			started := time.Now()
+			done := make(chan error, 1)
+			go func() { done <- client.Stop() }()
+			var err error
+			select {
+			case err = <-done:
+			case <-time.After(40 * time.Second):
+				t.Fatal("Stop exceeded all cleanup budgets")
+			}
+			elapsed := time.Since(started)
+
+			if row.wantErr == "" && err != nil {
+				t.Fatalf("Stop failed after %s: %v", elapsed, err)
+			}
+			if row.wantErr != "" && (err == nil || !strings.Contains(err.Error(), row.wantErr)) {
+				t.Fatalf("Stop error after %s = %v, want %q", elapsed, err, row.wantErr)
+			}
+			// A failed Stop waits for the runtime.shutdown timeout, then at most the short SIGTERM wait
+			// or the kill wait, never a full SIGTERM wait on top of either.
+			if row.wantErr != "" && elapsed >= 15*time.Second {
+				t.Fatalf("Stop took %s to fail", elapsed)
+			}
+			if row.exited {
+				assertShutdownChildExited(t, node, pidFile, "5000")
+			}
 		})
 	}
 }

@@ -74,7 +74,7 @@ rust_library(
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
             "@sdk_vendor__rustls-native-certs-0.8.5//:rustls_native_certs",  # cfg(all(unix, not(target_os = "android"), not(target_vendor = "apple"), not(target_arch = "wasm32")))
-            "@sdk_vendor__rustls-webpki-0.103.16//:webpki",  # cfg(all(unix, not(target_os = "android"), not(target_vendor = "apple"), not(target_arch = "wasm32")))
+            "@sdk_vendor__rustls-webpki-0.103.17//:webpki",  # cfg(all(unix, not(target_os = "android"), not(target_vendor = "apple"), not(target_arch = "wasm32")))
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
             "@sdk_vendor__core-foundation-0.10.1//:core_foundation",  # cfg(any(target_vendor = "apple"))
@@ -87,7 +87,7 @@ rust_library(
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
             "@sdk_vendor__rustls-native-certs-0.8.5//:rustls_native_certs",  # cfg(all(unix, not(target_os = "android"), not(target_vendor = "apple"), not(target_arch = "wasm32")))
-            "@sdk_vendor__rustls-webpki-0.103.16//:webpki",  # cfg(all(unix, not(target_os = "android"), not(target_vendor = "apple"), not(target_arch = "wasm32")))
+            "@sdk_vendor__rustls-webpki-0.103.17//:webpki",  # cfg(all(unix, not(target_os = "android"), not(target_vendor = "apple"), not(target_arch = "wasm32")))
         ],
         "//conditions:default": [],
     }),

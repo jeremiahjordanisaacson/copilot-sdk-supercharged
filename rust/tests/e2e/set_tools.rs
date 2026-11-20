@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::rpc::{ToolResult as RpcToolResult, ToolResultType, ToolsExecuteRequest};
 use copilot_sdk::tool::ToolHandler;
 use copilot_sdk::{Error, ResumeSessionOptions, Tool, ToolInvocation, ToolResult};
 use serde_json::json;
@@ -12,6 +14,13 @@ use super::support::assistant_message_content;
 const FRUIT_PROMPT: &str = "Use lookup_fruit to find the fruit for code 42.";
 const FRUIT_AND_VEGETABLE_PROMPT: &str = "Use lookup_fruit to find the fruit for code 42 again, and use lookup_vegetable to find the vegetable for code 7.";
 const VEGETABLE_PROMPT: &str = "Use lookup_vegetable to find the vegetable for code 7.";
+
+/// The replacement cases run in the control arm, the default for every SDK. The stable
+/// prompt-prefix treatment of previously sent definitions is shared runtime behavior,
+/// covered by the Node.js SDK's explicit treatment cases.
+fn control_arm() -> HashMap<String, bool> {
+    HashMap::from([("STABLE_PROMPT_PREFIX".to_string(), false)])
+}
 
 /// Answers with a fixed result and records the codes it was called with.
 struct LookupTool {
@@ -145,6 +154,7 @@ async fn replaces_tools_on_a_created_session() {
                 let session = client
                     .create_session(
                         ctx.approve_all_session_config()
+                            .with_experiments(|group| group.with_flags(control_arm()))
                             .with_tools(|group| group.with_definitions(vec![original, retired])),
                     )
                     .await
@@ -218,6 +228,7 @@ async fn replaces_tools_on_a_resumed_session() {
                 let created = client
                     .create_session(
                         ctx.approve_all_session_config()
+                            .with_experiments(|group| group.with_flags(control_arm()))
                             .with_tools(|group| group.with_definitions(vec![created_tool])),
                     )
                     .await
@@ -236,6 +247,7 @@ async fn replaces_tools_on_a_resumed_session() {
                 let resumed = client
                     .resume_session(
                         ResumeSessionOptions::new(session_id)
+                            .with_experiments(|group| group.with_flags(control_arm()))
                             .with_permissions(|group| {
                                 group.with_on_request(Arc::new(ApproveAllHandler))
                             })
@@ -267,6 +279,32 @@ async fn replaces_tools_on_a_resumed_session() {
                 );
                 let (_, after) = exchanges.split_at(replaced_from);
                 assert_offered(after, &["lookup_vegetable"], &["lookup_fruit"]);
+                let removed = resumed
+                    .rpc()
+                    .tools()
+                    .execute(ToolsExecuteRequest {
+                        arguments: json!({ "code": 42 }),
+                        name: "lookup_fruit".to_string(),
+                        tool_call_id: None,
+                    })
+                    .await
+                    .expect("execute the removed tool");
+                match removed {
+                    RpcToolResult::ToolResultExpanded(result) => {
+                        assert_eq!(result.result_type, ToolResultType::Failure);
+                        let failure_text = "does not exist";
+                        assert!(
+                            result.text_result_for_llm.contains(failure_text),
+                            "{}",
+                            result.text_result_for_llm
+                        );
+                    }
+                    RpcToolResult::String(text) => {
+                        panic!("expected a failure result, got {text:?}")
+                    }
+                }
+                assert_eq!(calls(&created_calls), [42]);
+                assert!(calls(&fruit_calls).is_empty());
 
                 resumed.disconnect().await.expect("disconnect session");
                 client.stop().await.expect("stop client");

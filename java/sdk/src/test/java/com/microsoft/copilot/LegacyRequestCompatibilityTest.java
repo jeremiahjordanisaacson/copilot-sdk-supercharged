@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.copilot.generated.rpc.CatalogClientContract;
-import com.microsoft.copilot.generated.rpc.AuthWriteLogout;
 import com.microsoft.copilot.generated.rpc.CatalogSearchParams;
 import com.microsoft.copilot.generated.rpc.McpPlanInstallParams;
 import com.microsoft.copilot.generated.rpc.McpPlanScope;
@@ -30,7 +29,6 @@ import com.microsoft.copilot.generated.rpc.SessionFeatureFlagsReadParams;
 import com.microsoft.copilot.generated.rpc.SessionFeatureFlagsReadResult;
 import com.microsoft.copilot.generated.rpc.SessionOpenOptions;
 import com.microsoft.copilot.generated.rpc.SessionUpdateAgentOptions;
-import com.microsoft.copilot.generated.rpc.SessionAccountsSetParams;
 import com.microsoft.copilot.generated.rpc.SessionPermissionsSetRequiredParams;
 import com.microsoft.copilot.generated.rpc.SessionRpc;
 
@@ -160,27 +158,6 @@ class LegacyRequestCompatibilityTest {
                 assertTrue(wire.get(nullableField).isNull());
             }
         }
-    }
-
-    @Test
-    void accountCommandsDeserializeJsonAndPreserveTypedBuilderValues() throws Exception {
-        var command = Map.of("kind", "logout", "accountId", "account");
-        for (Object legacy : List.<Object>of(command, MAPPER.valueToTree(command))) {
-            var params = MAPPER.treeToValue(MAPPER.valueToTree(Map.of("sessionId", "session", "command", legacy)),
-                    SessionAccountsSetParams.class);
-
-            assertEquals("account", assertInstanceOf(AuthWriteLogout.class, params.command()).getAccountId());
-            assertEquals(MAPPER.valueToTree(Map.of("sessionId", "session", "command", command)),
-                    MAPPER.valueToTree(params));
-        }
-
-        var typed = AuthWriteLogout.builder().accountId("account").build();
-        assertSame(typed, SessionAccountsSetParams.builder().sessionId("session").command(typed).build().command());
-        assertNull(MAPPER.readValue("{\"sessionId\":\"session\",\"command\":null}", SessionAccountsSetParams.class)
-                .command());
-        assertThrows(com.fasterxml.jackson.databind.JsonMappingException.class,
-                () -> MAPPER.readValue("{\"sessionId\":\"session\",\"command\":{\"kind\":\"unknown\"}}",
-                        SessionAccountsSetParams.class));
     }
 
     @Test

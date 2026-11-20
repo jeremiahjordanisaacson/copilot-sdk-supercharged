@@ -25,6 +25,20 @@ namespace System
         }
     }
 
+    internal static class DownlevelArgumentOutOfRangeExceptionExtensions
+    {
+        extension(ArgumentOutOfRangeException)
+        {
+            public static void ThrowIfNegative(int value, [CallerArgumentExpression(nameof(value))] string? paramName = null)
+            {
+                if (value < 0)
+                {
+                    throw new ArgumentOutOfRangeException(paramName, value, "The value must be non-negative.");
+                }
+            }
+        }
+    }
+
     internal static class DownlevelObjectDisposedExceptionExtensions
     {
         extension(ObjectDisposedException)
@@ -184,6 +198,13 @@ namespace System.Diagnostics
         {
             public void Kill(bool entireProcessTree)
             {
+                if (typeof(Process).GetMethod(nameof(Process.Kill), [typeof(bool)]) is { } kill)
+                {
+                    var killProcess = (Action<bool>)kill.CreateDelegate(typeof(Action<bool>), process);
+                    killProcess(entireProcessTree);
+                    return;
+                }
+
                 if (entireProcessTree)
                 {
                     if (OperatingSystem.IsWindows())
@@ -340,10 +361,20 @@ namespace System.IO
 {
     internal static class DownlevelStreamExtensions
     {
+        private static readonly Func<Stream, Memory<byte>, Threading.CancellationToken, ValueTask<int>>? s_readAsync =
+            (Func<Stream, Memory<byte>, Threading.CancellationToken, ValueTask<int>>?)typeof(Stream)
+                .GetMethod(nameof(Stream.ReadAsync), [typeof(Memory<byte>), typeof(Threading.CancellationToken)])?
+                .CreateDelegate(typeof(Func<Stream, Memory<byte>, Threading.CancellationToken, ValueTask<int>>));
+
         extension(Stream stream)
         {
             public ValueTask<int> ReadAsync(Memory<byte> buffer, Threading.CancellationToken cancellationToken = default)
             {
+                if (s_readAsync is not null)
+                {
+                    return s_readAsync(stream, buffer, cancellationToken);
+                }
+
                 if (MemoryMarshal.TryGetArray(buffer, out ArraySegment<byte> segment))
                 {
                     return new ValueTask<int>(stream.ReadAsync(segment.Array!, segment.Offset, segment.Count, cancellationToken));
@@ -588,6 +619,11 @@ namespace System.Runtime.InteropServices
             {
                 get
                 {
+                    if (AppContext.GetData("RUNTIME_IDENTIFIER") is string runtimeIdentifier)
+                    {
+                        return runtimeIdentifier;
+                    }
+
                     var os = OperatingSystem.IsWindows() ? "win" :
                         OperatingSystem.IsLinux() ? "linux" :
                         OperatingSystem.IsMacOS() ? "osx" :
@@ -611,6 +647,22 @@ namespace System.Runtime.InteropServices
 
 namespace System.Threading
 {
+    internal static class DownlevelCancellationTokenSourceExtensions
+    {
+        extension(CancellationTokenSource source)
+        {
+            public Task CancelAsync()
+            {
+                if (typeof(CancellationTokenSource).GetMethod("CancelAsync", Type.EmptyTypes) is { } cancelAsync)
+                {
+                    return ((Func<Task>)cancelAsync.CreateDelegate(typeof(Func<Task>), source))();
+                }
+
+                return Task.Run(() => source.Cancel());
+            }
+        }
+    }
+
     internal static class DownlevelCancellationTokenRegistrationExtensions
     {
         extension(CancellationTokenRegistration registration)
@@ -714,6 +766,13 @@ namespace System.Net.Http
         {
             public Task<IO.Stream> ReadAsStreamAsync(Threading.CancellationToken cancellationToken)
             {
+                if (typeof(HttpContent).GetMethod(nameof(HttpContent.ReadAsStreamAsync), [typeof(Threading.CancellationToken)]) is { } readAsStreamAsync)
+                {
+                    var readStream = (Func<Threading.CancellationToken, Task<IO.Stream>>)readAsStreamAsync.CreateDelegate(
+                        typeof(Func<Threading.CancellationToken, Task<IO.Stream>>), content);
+                    return readStream(cancellationToken);
+                }
+
                 // The underlying netstandard2.0 ReadAsStreamAsync() can't be cancelled,
                 // but honour an already-cancelled token to match the BCL overload.
                 cancellationToken.ThrowIfCancellationRequested();

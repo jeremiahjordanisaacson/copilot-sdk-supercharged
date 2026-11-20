@@ -2166,7 +2166,8 @@ type sessionOptions struct {
 	// stderr, so hosts must not upload or export them automatically.
 	Diagnostics *rpc.DiagnosticsConfiguration
 	// MCPOAuthTokenStorage controls how MCP OAuth tokens are stored for this session.
-	// When empty, the runtime default ("in-memory") is used.
+	// When empty, the client sends "in-memory" in [ModeEmpty]; in other modes nothing
+	// is sent and tokens are stored persistently.
 	MCPOAuthTokenStorage string
 	// AuthClientIDMetadataURL identifies the host for MCP OAuth authorization.
 	// When empty, no host identity is supplied.
@@ -2208,6 +2209,8 @@ type sessionOptions struct {
 	// Relative paths resolve against WorkingDirectory (or the runtime cwd if unset).
 	// Treated as an explicit opt-in: plugin agents and rules load even when
 	// EnableConfigDiscovery is false.
+	// Nil and omission are equivalent; an empty non-nil list unloads plugins
+	// mounted from these directories on resume.
 	PluginDirectories []string
 	// InstructionDirectories contains explicit discovery-only instruction roots using existing SDK formats.
 	// No filesystem grant. Available without EnableConfigDiscovery, subject to instruction/managed
@@ -2557,6 +2560,14 @@ type ToolInvocation struct {
 	//
 	// Experimental: this field may change or be removed.
 	RequestID string
+
+	// rawArguments is the JSON the runtime sent as Arguments, which keeps
+	// integers that a float64 cannot hold exactly.
+	rawArguments json.RawMessage
+
+	// deliveredContainers holds every object and array of Arguments as the
+	// SDK delivered it, so a caller's replacement is not mistaken for it.
+	deliveredContainers []any
 }
 
 // ToolHandler executes a tool invocation.
@@ -2573,6 +2584,9 @@ type ToolResult struct {
 	Error               string             `json:"error,omitempty"`
 	SessionLog          string             `json:"sessionLog,omitempty"`
 	ToolTelemetry       map[string]any     `json:"toolTelemetry,omitempty"`
+	// SkipLargeOutputProcessing bypasses spill-to-file processing for this result
+	// when true. False or nil uses the session's normal large-output policy.
+	SkipLargeOutputProcessing *bool `json:"skipLargeOutputProcessing,omitempty"`
 	// ToolReferences lists names of tools returned by a tool-search tool.
 	ToolReferences []string `json:"toolReferences,omitempty"`
 }
@@ -2761,12 +2775,14 @@ type resumeOptions struct {
 	AvailableTools []string
 	// ExcludedTools is a list of tool names to disable. All other tools remain available.
 	// Takes precedence over AvailableTools: a tool listed here is disabled even if it
-	// also matches AvailableTools.
+	// also matches AvailableTools. On warm resume, nil keeps the current exclusions
+	// and an empty non-nil list clears them.
 	ExcludedTools []string
 	// ExcludedBuiltInAgents is a list of built-in agent names to exclude from
 	// the session. Excluded built-in agents are hidden from discovery and cannot
 	// be selected or invoked unless a custom agent with the same name is
-	// configured.
+	// configured. On warm resume, nil keeps the current exclusions and an empty
+	// non-nil list clears them.
 	ExcludedBuiltInAgents []string
 	// IncludedBuiltInAgents allows only the named built-in subagents, subject to
 	// availability and ExcludedBuiltInAgents. A non-nil []string{} disables all
@@ -2937,7 +2953,9 @@ type resumeOptions struct {
 	// resident resume to preserve the current settings.
 	Diagnostics *rpc.DiagnosticsConfiguration
 	// MCPOAuthTokenStorage controls how MCP OAuth tokens are stored for this session.
-	// When empty, the runtime default ("in-memory") is used.
+	// When empty, the client sends "in-memory" in [ModeEmpty]; in other modes nothing
+	// is sent, so a resident session keeps its current storage and any other session
+	// stores tokens persistently.
 	MCPOAuthTokenStorage string
 	// AuthClientIDMetadataURL identifies the host for MCP OAuth authorization.
 	// When empty, no host identity is supplied.
@@ -2979,6 +2997,8 @@ type resumeOptions struct {
 	// Relative paths resolve against WorkingDirectory (or the runtime cwd if unset).
 	// Treated as an explicit opt-in: plugin agents and rules load even when
 	// EnableConfigDiscovery is false.
+	// Nil and omission keep the existing plugins; an empty non-nil list unloads
+	// plugins mounted from these directories.
 	PluginDirectories []string
 	// InstructionDirectories contains explicit discovery-only instruction roots using existing SDK formats.
 	// No filesystem grant. Available without EnableConfigDiscovery, subject to instruction/managed
@@ -2986,7 +3006,8 @@ type resumeOptions struct {
 	// WorkingDirectory; retained roots do not move. Nil and omission are equivalent;
 	// an empty non-nil list clears only the explicit SDK contribution.
 	InstructionDirectories []string
-	// DisabledSkills is a list of skill names to disable
+	// DisabledSkills is a list of skill names to disable. On warm resume, nil keeps
+	// the skills disabled before and an empty non-nil list re-enables them.
 	DisabledSkills []string
 	// DisabledMCPServers is a list of exact MCP server names to disable for this session.
 	// Disabled servers are not started or authenticated on create or cold resume.
@@ -3695,7 +3716,7 @@ type createSessionRequest struct {
 	SkillDirectories                   []string                       `json:"skillDirectories,omitzero"`
 	AgentDirectories                   []string                       `json:"agentDirectories,omitzero"`
 	HookDirectories                    []string                       `json:"hookDirectories,omitzero"`
-	PluginDirectories                  []string                       `json:"pluginDirectories,omitempty"`
+	PluginDirectories                  []string                       `json:"pluginDirectories,omitzero"`
 	InstructionDirectories             []string                       `json:"instructionDirectories,omitzero"`
 	DisabledSkills                     []string                       `json:"disabledSkills,omitempty"`
 	DisabledMCPServers                 *[]string                      `json:"disabledMcpServers,omitempty"`
@@ -3757,8 +3778,8 @@ type resumeSessionRequest struct {
 	Tools                              []sdkToolDefinition            `json:"tools,omitzero"`
 	SystemMessage                      *SystemMessageConfig           `json:"systemMessage,omitempty"`
 	AvailableTools                     []string                       `json:"availableTools"`
-	ExcludedTools                      []string                       `json:"excludedTools,omitempty"`
-	ExcludedBuiltInAgents              []string                       `json:"excludedBuiltinAgents,omitempty"`
+	ExcludedTools                      []string                       `json:"excludedTools,omitzero"`
+	ExcludedBuiltInAgents              []string                       `json:"excludedBuiltinAgents,omitzero"`
 	IncludedBuiltInAgents              []string                       `json:"includedBuiltinAgents,omitzero"`
 	DefaultProvider                    **string                       `json:"defaultProvider,omitempty"`
 	Capi                               *CapiSessionOptions            `json:"capi,omitempty"`
@@ -3814,9 +3835,9 @@ type resumeSessionRequest struct {
 	SkillDirectories                   []string                       `json:"skillDirectories,omitzero"`
 	AgentDirectories                   []string                       `json:"agentDirectories,omitzero"`
 	HookDirectories                    []string                       `json:"hookDirectories,omitzero"`
-	PluginDirectories                  []string                       `json:"pluginDirectories,omitempty"`
+	PluginDirectories                  []string                       `json:"pluginDirectories,omitzero"`
 	InstructionDirectories             []string                       `json:"instructionDirectories,omitzero"`
-	DisabledSkills                     []string                       `json:"disabledSkills,omitempty"`
+	DisabledSkills                     []string                       `json:"disabledSkills,omitzero"`
 	DisabledMCPServers                 *[]string                      `json:"disabledMcpServers,omitempty"`
 	SandboxConfig                      *rpc.SandboxConfig             `json:"sandboxConfig,omitempty"`
 	InfiniteSessions                   *InfiniteSessionConfig         `json:"infiniteSessions,omitempty"`
@@ -4020,6 +4041,7 @@ type sessionEventRequest struct {
 
 	permissionEnvelope *PermissionRequestEnvelope
 	sdkHasHandler      *bool
+	sdkToolArguments   json.RawMessage
 }
 
 // userInputRequest represents a request for user input from the agent

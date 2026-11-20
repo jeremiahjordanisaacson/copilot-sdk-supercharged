@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use copilot_sdk::canvas::CanvasDeclaration;
-use copilot_sdk::rpc::{ConnectRemoteSessionParams, OpenCanvasInstance};
+use copilot_sdk::rpc::{ConnectRemoteSessionParams, OpenCanvasInstance, RemoteSessionMode};
 use copilot_sdk::session_events::{
     ReasoningSummary, SessionEventType, SessionLimitsConfig, SessionStartData,
 };
@@ -18,6 +18,9 @@ use copilot_sdk::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tempfile::TempDir;
+
+#[path = "../support/node_fixture.rs"]
+mod node_fixture;
 
 #[cfg(windows)]
 #[path = "client_options/windows_process_tree.rs"]
@@ -110,6 +113,13 @@ async fn spawned_connections_consume_process_cwd_environment_and_arguments() {
             std::env::var_os("PATH").as_deref()
         );
         let create = fake.captured_request("session.create");
+        assert!(
+            !create
+                .params
+                .as_object()
+                .unwrap()
+                .contains_key("remoteSession")
+        );
         assert_eq!(
             PathBuf::from(
                 create.params["workingDirectory"]
@@ -247,6 +257,7 @@ async fn spawned_process_empty_cwd_uses_host_directory() {
 }
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn should_forward_advanced_session_creation_options_to_the_cli() {
     let fake = FakeCli::new();
     let client = Client::start(fake.client_options("advanced-create-client-token"))
@@ -277,6 +288,7 @@ async fn should_forward_advanced_session_creation_options_to_the_cli() {
                 .with_state(|group| group.with_enable_cross_session_store(false))
                 .with_skills(|group| group.with_enabled(false))
                 .with_working_directory(working_dir.clone())
+                .with_remote_session(RemoteSessionMode::Export)
                 .with_events(|group| group.with_streaming(true))
                 .with_events(|group| group.with_include_sub_agent_streaming_events(false))
                 .with_tools(|group| group.with_available_tools(["read_file"]))
@@ -351,6 +363,7 @@ async fn should_forward_advanced_session_creation_options_to_the_cli() {
             ("state.enableCrossSessionStore", json!(false)),
             ("skills.enabled", json!(false)),
             ("workingDirectory", json!(path_string(&working_dir))),
+            ("remoteSession", json!("export")),
             ("events.streaming", json!(true)),
             ("events.includeSubAgentStreamingEvents", json!(false)),
             ("github.telemetryEnabled", json!(false)),
@@ -366,7 +379,6 @@ async fn should_forward_advanced_session_creation_options_to_the_cli() {
             ("mcp.envValueMode", json!("direct")),
         ],
     );
-    assert!(!params.contains_key("remoteSession"));
     assert_eq!(params["tools"]["availableTools"], json!(["read_file"]));
     assert_eq!(params["tools"]["excludedTools"], json!(["bash"]));
     assert_eq!(
@@ -449,6 +461,13 @@ async fn resume_transcript_recovery_defaults_overrides_and_projection() {
 
             let request = fake.captured_request("session.resume");
             let expected = choice.map(Value::Bool);
+            assert!(
+                !request
+                    .params
+                    .as_object()
+                    .unwrap()
+                    .contains_key("remoteSession")
+            );
             assert_eq!(
                 request.params.get("allowTranscriptRecovery"),
                 expected.as_ref(),
@@ -465,6 +484,7 @@ async fn resume_transcript_recovery_defaults_overrides_and_projection() {
 }
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn should_forward_advanced_session_resume_options_to_the_cli() {
     let fake = FakeCli::new();
     let client = Client::start(fake.client_options("advanced-resume-client-token"))
@@ -482,6 +502,7 @@ async fn should_forward_advanced_session_resume_options_to_the_cli() {
                 .with_inference(|group| group.with_reasoning_summary(ReasoningSummary::None))
                 .with_inference(|group| group.with_context_tier("long_context"))
                 .with_working_directory(working_dir.clone())
+                .with_remote_session(RemoteSessionMode::Export)
                 .with_config_directory(config_dir.clone())
                 .with_enable_config_discovery(false)
                 .with_hooks(|group| group.with_enable_repository_hooks(true))
@@ -547,6 +568,7 @@ async fn should_forward_advanced_session_resume_options_to_the_cli() {
             ("inference.reasoningSummary", json!("none")),
             ("inference.contextTier", json!("long_context")),
             ("workingDirectory", json!(path_string(&working_dir))),
+            ("remoteSession", json!("export")),
             ("configDirectory", json!(path_string(&config_dir))),
             ("enableConfigDiscovery", json!(false)),
             ("hooks.enableRepositoryHooks", json!(true)),
@@ -852,6 +874,90 @@ async fn remote_connect_runtime_id_is_used_for_resume() {
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn node_fixture_paths_preserve_drive_and_unc_roots() {
+    for (input, expected) in [
+        (
+            r"\\?\D:\sdk fixtures\runtime.cjs",
+            r"D:\sdk fixtures\runtime.cjs",
+        ),
+        (
+            r"\\?\UNC\server\share\sdk fixtures\runtime.cjs",
+            r"\\server\share\sdk fixtures\runtime.cjs",
+        ),
+        (
+            r"D:\sdk fixtures\runtime.cjs",
+            r"D:\sdk fixtures\runtime.cjs",
+        ),
+        (
+            r"\\server\share\sdk fixtures\runtime.cjs",
+            r"\\server\share\sdk fixtures\runtime.cjs",
+        ),
+    ] {
+        assert_eq!(
+            node_fixture::path_for_node(PathBuf::from(input)),
+            PathBuf::from(expected)
+        );
+    }
+}
+
+#[tokio::test]
+async fn canonical_node_fixture_launches_over_stdio_and_tcp() {
+    for tcp in [false, true] {
+        let fake = ShutdownCli::new("stop");
+        let mut options = fake.options().with_mode(ClientMode::Empty);
+        let Some(RuntimeConnection::SpawnedStdio(mut process)) = options.runtime.take() else {
+            panic!("shutdown fixture must configure a spawned process");
+        };
+        assert!(PathBuf::from(&process.args[0]).is_absolute());
+        process =
+            process.with_owned(|owned| owned.with_base_directory(fake.dir.path().join("state")));
+        if tcp {
+            process.args.push("--fixture-tcp".into());
+        }
+        options.runtime = Some(if tcp {
+            RuntimeConnection::SpawnedTcp(SpawnedTcpRuntimeOptions {
+                process,
+                port: 0,
+                connection_token: None,
+            })
+        } else {
+            RuntimeConnection::SpawnedStdio(process)
+        });
+        let client = Client::start(options).await.expect("fixture handshake");
+        let pid = client.pid().expect("owned fixture child");
+        assert_eq!(
+            std::fs::read_to_string(&fake.pid_file).expect("fixture executed"),
+            pid.to_string()
+        );
+        assert_eq!(
+            client
+                .ping(Some("fixture-path"))
+                .await
+                .expect("fixture ping")
+                .message,
+            "fixture-path"
+        );
+        if tcp {
+            client
+                .rpc()
+                .runtime()
+                .shutdown()
+                .await
+                .expect("fixture shutdown");
+            client.force_stop();
+        } else {
+            client.stop().await.expect("fixture shutdown and EOF");
+        }
+        wait_for_process_exit(pid).await;
+        assert_eq!(
+            std::fs::read_to_string(&fake.marker).expect("fixture cleanup"),
+            "{\"type\":\"span\"}\n"
+        );
+    }
+}
+
 #[tokio::test]
 async fn stdio_stop_waits_for_eof_cleanup() {
     let fake = ShutdownCli::new("stop");
@@ -1052,10 +1158,7 @@ impl ShutdownCli {
     }
 
     fn options(&self) -> ClientOptions {
-        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../test/harness/stdio-shutdown-runtime.cjs")
-            .canonicalize()
-            .unwrap();
+        let script = node_fixture::shutdown_script();
         ClientOptions::new(copilot_sdk::ClientMode::CodingAgent)
             .with_runtime(RuntimeConnection::for_spawned_stdio(
                 SpawnedProcessOptions::new()

@@ -13,7 +13,7 @@ Use a plugin directory when you want to:
 - **Develop a plugin locally** before publishing it to a marketplace.
 - **Override or extend** a marketplace-installed plugin with a local checkout for testing.
 
-If you only need to add a single MCP server, a single hook, or a single custom agent, you can register it inline via the SDK config (`mcpServers`, `hooks`, `customAgents`). Plugin directories are most useful once you have three or more related extensions that ship together.
+If you only need to add a single MCP server, a single hook, or a single custom agent, you can register it inline via the SDK config (`mcp.servers`, `hooks.handlers`, `agents.definitions`). Plugin directories are most useful once you have three or more related extensions that ship together.
 
 ## Plugin folder layout
 
@@ -325,13 +325,13 @@ Relative paths resolve against `workingDirectory`, or the runtime working direct
 The equivalent option in each SDK is:
 
 | SDK                  | Session option                                                         |
-| -------------------- | ---------------------------------------------------------------------- | ----- | ------------------------------- |
+| -------------------- | ---------------------------------------------------------------------- |
 | Node.js / TypeScript | `plugins: { directories: [...] }`                                      |
 | Python               | `plugins={"directories": [...]}`                                       |
 | Go                   | `Plugins: copilot.SessionPluginOptions{Directories: []string{...}}`    |
 | .NET                 | `Plugins = new SessionPluginOptions { Directories = [...] }`           |
 | Java                 | `.setPlugins(new SessionPluginOptions().setDirectories(List.of(...)))` |
-| Rust                 | `.with_plugins(                                                        | group | group.with_directories([...]))` |
+| Rust                 | `.with_plugins(\|group\| group.with_directories([...]))`               |
 
 ## Trusted host-bundled plugin directories
 
@@ -360,13 +360,13 @@ main();
 The equivalent option in each SDK is:
 
 | SDK                  | Startup option                                                                        |
-| -------------------- | ------------------------------------------------------------------------------------- | ----- | --------------------------------------- |
+| -------------------- | ------------------------------------------------------------------------------------- |
 | Node.js / TypeScript | `plugins: { builtinDirectories: [...] }`                                              |
 | Python               | `plugins={"builtin_directories": [...]}`                                              |
 | Go                   | `Plugins: copilot.ClientPluginOptions{BuiltinDirectories: []string{...}}`             |
 | .NET                 | `Plugins = new ClientPluginOptions { BuiltinDirectories = [...] }`                    |
 | Java                 | `.setPlugins(new ClientPluginOptions().setBuiltinDirectories(List.of(Path.of(...))))` |
-| Rust                 | `.with_plugins(                                                                       | group | group.with_builtin_directories([...]))` |
+| Rust                 | `.with_plugins(\|group\| group.with_builtin_directories([...]))`                      |
 
 This is a trust boundary for plugins bundled and controlled by the host application. It is distinct from `--plugin-dir`, which is a runtime process launch argument for explicitly loading ordinary plugin directories. The startup option also works when connecting to an existing runtime that supports built-in plugin registration, because it is sent over JSON-RPC rather than forwarded as a process argument.
 

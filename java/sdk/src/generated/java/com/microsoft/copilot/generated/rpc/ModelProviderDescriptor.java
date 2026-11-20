@@ -14,7 +14,7 @@ import com.microsoft.copilot.CopilotExperimental;
 import javax.annotation.processing.Generated;
 
 /**
- * One model provider available to the session — the model analog of the account `ProviderDescriptor`. Opaque id/label/kind plus a stable ordering; central code never branches on kind.
+ * One model provider available to the session. Opaque id/label/kind plus a stable ordering; central code never branches on kind.
  *
  * @apiNote This type is experimental and may change in a future version.
  *

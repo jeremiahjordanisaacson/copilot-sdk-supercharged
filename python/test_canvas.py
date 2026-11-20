@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
@@ -31,6 +32,7 @@ from copilot.session_events import (
     SessionEvent,
     SessionEventType,
 )
+from copilot.tools import ToolBinaryResult, ToolResult
 
 
 def test_canvas_declaration_serializes_camelcase_and_drops_optional():
@@ -181,6 +183,40 @@ async def test_register_canvas_handler_wires_generated_canvas_adapter():
     action_result = await adapter.invoke(action_request)
     assert action_result == {"echo": {"value": 1}}
     assert handler.action_calls == [action_request]
+
+
+async def test_canvas_adapter_sends_a_tool_result_action_result_in_wire_form():
+    class Handler(CanvasHandler):
+        async def on_open(self, ctx: CanvasProviderOpenRequest) -> CanvasProviderOpenResult:
+            return CanvasProviderOpenResult(url="https://canvas.example")
+
+        async def on_action(self, ctx: CanvasProviderInvokeActionRequest) -> Any:
+            return ToolResult(
+                text_result_for_llm="chart",
+                binary_results_for_llm=[ToolBinaryResult(data="aGk=", mime_type="image/png")],
+            )
+
+    session = CopilotSession("sess-1", client=None)
+    session._register_canvas_handler(Handler())
+    adapter = session._client_session_apis.canvas
+    assert adapter is not None
+
+    action_result = await adapter.invoke(
+        CanvasProviderInvokeActionRequest(
+            action_name="render",
+            canvas_id="c",
+            extension_id="ext",
+            instance_id="i",
+            session_id="sess-1",
+        )
+    )
+
+    # The JSON-RPC writer encodes the action result with json.dumps.
+    assert json.loads(json.dumps(action_result)) == {
+        "textResultForLlm": "chart",
+        "resultType": "success",
+        "binaryResultsForLlm": [{"data": "aGk=", "mimeType": "image/png", "type": "image"}],
+    }
 
 
 async def test_canvas_adapter_translates_canvas_error_to_jsonrpc_error():

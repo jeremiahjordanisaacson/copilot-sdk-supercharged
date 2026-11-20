@@ -74,9 +74,14 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             Assert.Contains("SDK_PROVIDER_IMAGE_DONE", msg?.Data.Content ?? string.Empty);
             Assert.Equal(imagePath, provider?.LastBinaryReadPath);
             var events = await session.GetEventsAsync();
-            Assert.Contains(events.OfType<SessionBinaryAssetEvent>(), asset =>
-                asset.Data.MimeType == "image/png" &&
-                asset.Data.Data == Convert.ToBase64String(imageBytes));
+            Assert.DoesNotContain(events, evt => evt is SessionBinaryAssetEvent);
+            Assert.Contains(events.OfType<ToolExecutionCompleteEvent>(), complete =>
+                complete.Data.Success &&
+                complete.Data.Result?.BinaryResultsForLlm?.Any(result =>
+                    result.PersistedBinaryImage is { } image &&
+                    image.Type == PersistedBinaryImageType.Image &&
+                    image.MimeType == "image/png" &&
+                    image.Data == Convert.ToBase64String(imageBytes)) == true);
             await session.DisposeAsync();
         }
         finally

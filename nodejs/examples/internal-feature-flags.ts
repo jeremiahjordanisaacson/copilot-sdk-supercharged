@@ -13,6 +13,7 @@ import {
     createInternalServerRpc,
     createInternalSessionRpc,
     createSessionRpc,
+    type SessionOpenOptions,
 } from "../src/generated/rpc.js";
 
 async function showFeatureFlags(
@@ -51,21 +52,21 @@ async function showFeatureFlags(
     assert.deepEqual(explicit, { DYNAMIC_INSTRUCTIONS_RETRIEVAL_MCP: true });
 
     const { sessionId } = await connection.sendRequest<{ sessionId: string }>("session.create", {
-        featureFlagConfiguration: {
-            initOptions: {
-                isStaff: false,
-                isExperimental: true,
-                isTeam: false,
-                environment: {},
-                config: { enabledFeatureFlags: { GITHUB_IQ_ENABLED: true } },
-            },
-            mode: "local",
-            streamerMode: false,
-        },
         experiments: {
+            configuration: {
+                initOptions: {
+                    isStaff: false,
+                    isExperimental: true,
+                    isTeam: false,
+                    environment: {},
+                    config: { enabledFeatureFlags: { GITHUB_IQ_ENABLED: true } },
+                },
+                mode: "local",
+                streamerMode: false,
+            },
             assignments: { Features: [], Flights: {}, Configs: [], AssignmentContext: "example" },
         },
-    });
+    } satisfies SessionOpenOptions);
     const session = createInternalSessionRpc(connection, sessionId);
     const initial = await session.settings.evaluatePredicate({ name: "githubIqEnabled" });
     await createSessionRpc(connection, sessionId).options.update({

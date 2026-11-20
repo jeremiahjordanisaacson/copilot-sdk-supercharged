@@ -21,7 +21,7 @@ import javax.annotation.processing.Generated;
 @javax.annotation.processing.Generated("copilot-sdk-codegen")
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
-record UserSettingsHostContext(
+public record UserSettingsHostContext(
     /** The Copilot configuration directory, when the host set one. Takes precedence over `COPILOT_HOME` and the home directory. */
     @JsonProperty("configDir") String configDir,
     /** The user's home directory, used when neither a configuration directory nor `COPILOT_HOME` is set. */
@@ -34,7 +34,7 @@ record UserSettingsHostContext(
      * Creates a record positionally.
      * Use {@link #builder()} for named construction.
      */
-    UserSettingsHostContext {}
+    public UserSettingsHostContext {}
 
     /**
      * Returns a named builder.

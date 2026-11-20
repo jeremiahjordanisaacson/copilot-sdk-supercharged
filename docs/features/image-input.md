@@ -173,6 +173,7 @@ session.Send(ctx, copilot.MessageOptions{
 <summary><strong>.NET</strong></summary>
 
 ```csharp
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
 using Microsoft.Copilot;
 using Microsoft.Copilot.Rpc;
 
@@ -368,6 +369,7 @@ session.Send(ctx, copilot.MessageOptions{
 
 <!-- docs-validate: hidden -->
 ```csharp
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
 using Microsoft.Copilot;
 using Microsoft.Copilot.Rpc;
 

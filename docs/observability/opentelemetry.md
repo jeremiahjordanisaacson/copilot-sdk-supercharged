@@ -248,7 +248,7 @@ For **Python**, **Go**, and **.NET**, trace context injection is automatic when 
 
 #### Runtime → SDK (inbound)
 
-When the runtime invokes a tool handler, the `traceparent` and `tracestate` from the runtime's span are available in all languages:
+When the runtime invokes a tool handler, the `traceparent` and `tracestate` from the runtime's span are available in every language except Java:
 
 * **Go**: The `ToolInvocation.TraceContext` field is a `context.Context` with the trace already restored—use it directly as the parent for your spans.
 * **Python**: Trace context is automatically restored around the handler via `trace_context()`—child spans are parented to the runtime's span automatically.
@@ -341,7 +341,7 @@ const session = await client.createSession({
 | Python | `opentelemetry-api` | Install with `pip install "microsoft-copilot-sdk[telemetry]"` |
 | Go | `go.opentelemetry.io/otel` | Required dependency |
 | .NET |—| Uses built-in `System.Diagnostics.Activity` |
-| Java | `io.opentelemetry:opentelemetry-api` | Add this dependency for SDK-based setup; trace context injection is automatic when the OpenTelemetry Java agent or SDK is configured |
+| Java |—| No dependency; the SDK does not inject trace context on outbound calls or pass it to tool handlers |
 
 ## References
 

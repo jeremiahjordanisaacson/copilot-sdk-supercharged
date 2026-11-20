@@ -64,6 +64,16 @@ public final class AssistantUsageEvent extends SessionEvent {
         @JsonProperty("thinkingDroppedBlocks") Long thinkingDroppedBlocks,
         /** Recognized provider-reported reasons for dropped thinking blocks, in response order */
         @JsonProperty("thinkingDroppedReasons") List<String> thinkingDroppedReasons,
+        /** Identifier of the logical request this call answered, shared by the request's attempts and its `prompt_request_usage` telemetry */
+        @JsonProperty("logicalRequestId") String logicalRequestId,
+        /** Identifier of the `session.resume` event whose resume last prepared the session history in this process. Absent when no resume prepared it; random when that resume recorded no event */
+        @JsonProperty("resumeGeneration") String resumeGeneration,
+        /** Whether the logical request was the first the session sent after a resume prepared its history */
+        @JsonProperty("afterResume") Boolean afterResume,
+        /** Zero-based index of the dispatched attempt of the logical request that produced this usage */
+        @JsonProperty("attemptIndex") Long attemptIndex,
+        /** Zero-based index of the retry the attempt that produced this usage belongs to */
+        @JsonProperty("retryIndex") Long retryIndex,
         /** Model multiplier cost for billing purposes */
         @CopilotExperimental
         @JsonProperty("cost") Double cost,
@@ -75,7 +85,7 @@ public final class AssistantUsageEvent extends SessionEvent {
         @JsonProperty("outputTtftMs") Double outputTtftMs,
         /** Average inter-token latency in milliseconds. Only available for streaming requests */
         @JsonProperty("interTokenLatencyMs") Double interTokenLatencyMs,
-        /** What initiated this API call (e.g., "sub-agent", "mcp-sampling"); absent for user-initiated calls */
+        /** What initiated this API call: "user" for a request that carries a user prompt, "agent" for an agent-driven request such as the follow-up after a tool result, or the delegating caller (e.g., "sub-agent", "mcp-sampling") */
         @JsonProperty("initiator") String initiator,
         /** Coarse classification of the interaction that produced this call, mirroring the session's per-request agent context (e.g. `conversation-agent`, `conversation-subagent`, `conversation-sampling`, `conversation-background`, `conversation-compaction`, `conversation-user`). Non-billing; lets consumers attribute a model call to a call class (e.g. sub-agent/sidekick) independently of the billing initiator. Absent when the runtime did not classify the request. */
         @JsonProperty("interactionType") String interactionType,
@@ -218,6 +228,11 @@ public final class AssistantUsageEvent extends SessionEvent {
             private Long reasoningTokens;
             private Long thinkingDroppedBlocks;
             private List<String> thinkingDroppedReasons;
+            private String logicalRequestId;
+            private String resumeGeneration;
+            private Boolean afterResume;
+            private Long attemptIndex;
+            private Long retryIndex;
             private Double cost;
             private Long duration;
             private Double timeToFirstTokenMs;
@@ -418,6 +433,61 @@ public final class AssistantUsageEvent extends SessionEvent {
              */
             public Builder thinkingDroppedReasons(List<String> value) {
                 this.thinkingDroppedReasons = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code logicalRequestId} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder logicalRequestId(String value) {
+                this.logicalRequestId = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code resumeGeneration} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder resumeGeneration(String value) {
+                this.resumeGeneration = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code afterResume} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder afterResume(Boolean value) {
+                this.afterResume = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code attemptIndex} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder attemptIndex(Long value) {
+                this.attemptIndex = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code retryIndex} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder retryIndex(Long value) {
+                this.retryIndex = value;
                 return this;
             }
 
@@ -1080,7 +1150,7 @@ public final class AssistantUsageEvent extends SessionEvent {
              */
             public AssistantUsageEventData build() {
                 if (model == null) throw new IllegalStateException("Missing required property: model");
-                return new AssistantUsageEventData(aiCreditsStatus, model, provider, modelDisplayName, accounting, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cacheExpiresAt, reasoningTokens, thinkingDroppedBlocks, thinkingDroppedReasons, cost, duration, timeToFirstTokenMs, outputTtftMs, interTokenLatencyMs, initiator, interactionType, isByok, byokKind, modelProvider, providerType, isAuto, maxPromptTokens, maxOutputTokens, acceptedPredictionTokens, rejectedPredictionTokens, transport, inferenceGateway, requestBodyBytes, requestBodyWireBytes, requestBodyEncoding, requestBodyCompressionFallback, requestBodyCompressionFallbackFrom, requestBodyCompressionRejectedStatus, websocketFallbackReason, websocketFallbackAfterMs, websocketFallbackErrorKind, websocketFallbackStatusCode, websocketFallbackCloseCode, websocketFallbackReconnectAttempted, websocketFallbackStartedThisCall, apiCallId, providerCallId, serviceRequestId, instructionUpdateDeliveryId, instructionUpdateLatestEventId, rte, apiEndpoint, quotaSnapshots, copilotUsage, reasoningEffort, reasoningSummary, availableToolCount, toolTokenCount, customToolCallCount, unmatchedToolResultCount, orphanToolCallCount, frontierSource, cacheTtlSeconds, cachePolicyTtlSeconds, promptCacheTtlReason, promptCacheCreditsBucket, cacheDetailsReported, numToolCalls, toolCounts, finishReason, contentFilterTriggered, fusion, responseModel);
+                return new AssistantUsageEventData(aiCreditsStatus, model, provider, modelDisplayName, accounting, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cacheExpiresAt, reasoningTokens, thinkingDroppedBlocks, thinkingDroppedReasons, logicalRequestId, resumeGeneration, afterResume, attemptIndex, retryIndex, cost, duration, timeToFirstTokenMs, outputTtftMs, interTokenLatencyMs, initiator, interactionType, isByok, byokKind, modelProvider, providerType, isAuto, maxPromptTokens, maxOutputTokens, acceptedPredictionTokens, rejectedPredictionTokens, transport, inferenceGateway, requestBodyBytes, requestBodyWireBytes, requestBodyEncoding, requestBodyCompressionFallback, requestBodyCompressionFallbackFrom, requestBodyCompressionRejectedStatus, websocketFallbackReason, websocketFallbackAfterMs, websocketFallbackErrorKind, websocketFallbackStatusCode, websocketFallbackCloseCode, websocketFallbackReconnectAttempted, websocketFallbackStartedThisCall, apiCallId, providerCallId, serviceRequestId, instructionUpdateDeliveryId, instructionUpdateLatestEventId, rte, apiEndpoint, quotaSnapshots, copilotUsage, reasoningEffort, reasoningSummary, availableToolCount, toolTokenCount, customToolCallCount, unmatchedToolResultCount, orphanToolCallCount, frontierSource, cacheTtlSeconds, cachePolicyTtlSeconds, promptCacheTtlReason, promptCacheCreditsBucket, cacheDetailsReported, numToolCalls, toolCounts, finishReason, contentFilterTriggered, fusion, responseModel);
             }
         }
     }

@@ -21,6 +21,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.microsoft.copilot.CopilotExperimental;
 import com.microsoft.copilot.tool.Param;
@@ -1065,7 +1066,10 @@ public record ToolDefinition(@JsonProperty("name") String name, @JsonProperty("d
     /**
      * Returns the SDK-configured ObjectMapper for tool argument/result
      * serialization. Configuration mirrors
-     * {@code JsonRpcClient.createObjectMapper()}.
+     * {@code JsonRpcClient.createObjectMapper()}, plus {@link Jdk8Module} so tool
+     * argument and result types can use {@code Optional}, and
+     * {@link LocalTimeOffsetModule} so {@code LocalDateTime} and {@code LocalTime}
+     * arguments accept the RFC 3339 offsets their schemas ask for.
      */
     private static ObjectMapper getConfiguredMapper() {
         return ConfiguredMapperHolder.INSTANCE;
@@ -1079,9 +1083,13 @@ public record ToolDefinition(@JsonProperty("name") String name, @JsonProperty("d
         static final ObjectMapper INSTANCE = createMapper();
 
         private static ObjectMapper createMapper() {
-            // Configuration must match JsonRpcClient.createObjectMapper()
+            // Configuration must match JsonRpcClient.createObjectMapper(), plus
+            // Jdk8Module for Optional tool argument and result types and
+            // LocalTimeOffsetModule for offsets on LocalDateTime/LocalTime arguments
             var mapper = new ObjectMapper();
             mapper.registerModule(new JavaTimeModule());
+            mapper.registerModule(new Jdk8Module());
+            mapper.registerModule(new LocalTimeOffsetModule());
             mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
             mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
             mapper.setDefaultPropertyInclusion(

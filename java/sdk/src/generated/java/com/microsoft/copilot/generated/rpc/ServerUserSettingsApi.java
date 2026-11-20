@@ -292,7 +292,7 @@ public final class ServerUserSettingsApi {
     }
 
     /**
-     * Merges a partial object into one top-level user setting, re-reading the stored value inside this runtime process's settings.json write lock so that concurrent writers in this process to different sub-fields of the same key do not clobber each other. Unlike `user.settings.set`, which replaces a key's whole value with what the caller last read, this keeps sub-fields the caller did not name when both the stored value and supplied value are objects; otherwise the supplied value replaces the stored value. Use it whenever two independent surfaces own different sub-fields of one setting. Returns the key's stored value after the write, in `value`.
+     * Merges a partial object into one top-level user setting under its cross-process transaction and local file lock. Unlike `user.settings.set`, this preserves unnamed sub-fields when the stored and supplied values are objects; otherwise the supplied value replaces the stored value. Optional `ifFieldsMatch` checks shallow fields of the stored object under those same locks, with missing fields equivalent to JSON null. A mismatch leaves the file unchanged and returns `applied: false`. A match returns `applied: true`. Without a precondition, the update remains unconditional and omits `applied`. Returns the current stored value in `value`.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0
@@ -303,14 +303,27 @@ public final class ServerUserSettingsApi {
     }
 
     /**
-     * Reads settings.json as stored for a caller that is about to edit it. Unlike `user.settings.get`, this returns file values rather than per-key metadata and defaults. Reports `missing` for an absent file and `invalid` when the existing file will not parse. Retired config.json and extensionless files are not read.
+     * Reads settings.json as stored for a caller that is about to edit it. Unlike `user.settings.get`, this returns file values rather than per-key metadata and defaults. Reports `missing` for an absent file and `invalid` when the existing file will not parse. Retired config.json and extensionless files are not read. An optional configDir overrides the configured host directory.
+     * <p>
+     * Invokes the method with no params, applying the runtime defaults.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0
      */
     @CopilotExperimental
     CompletableFuture<UserSettingsLoadForEditResult> loadForEdit() {
-        return caller.invoke("user.settings.loadForEdit", java.util.Map.of(), UserSettingsLoadForEditResult.class);
+        return loadForEdit(null);
+    }
+
+    /**
+     * Reads settings.json as stored for a caller that is about to edit it. Unlike `user.settings.get`, this returns file values rather than per-key metadata and defaults. Reports `missing` for an absent file and `invalid` when the existing file will not parse. Retired config.json and extensionless files are not read. An optional configDir overrides the configured host directory.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<UserSettingsLoadForEditResult> loadForEdit(UserSettingsLoadForEditParams params) {
+        return caller.invoke("user.settings.loadForEdit", params == null ? java.util.Map.of() : params, UserSettingsLoadForEditResult.class);
     }
 
     /**

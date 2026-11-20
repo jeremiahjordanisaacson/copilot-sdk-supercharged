@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use futures_util::FutureExt;
+use futures_util::future::BoxFuture;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1439,22 +1440,25 @@ impl JsonRpcClient {
         Ok(async move { pending.await?.into_response() })
     }
 
-    pub(crate) async fn send_raw_request(
-        &self,
-        method: &str,
+    pub(crate) fn send_raw_request<'a>(
+        &'a self,
+        method: &'a str,
         params: Option<Value>,
-    ) -> Result<Response, Error> {
-        let id = self.request_id.fetch_add(1, Ordering::SeqCst);
-        let pending = Self::begin_owned_request(
-            self.pending_requests.clone(),
-            &self.write_tx,
-            self.connection_closed.clone(),
-            JsonRpcRequest::new(id, method, params),
-            ResponseMode::Raw {
-                _request: RawRequest::new(self.raw_requests.clone()),
-            },
-        )?;
-        pending.await
+    ) -> BoxFuture<'a, Result<Response, Error>> {
+        // Share the transport poll/drop machinery across generated typed RPC futures.
+        Box::pin(async move {
+            let id = self.request_id.fetch_add(1, Ordering::SeqCst);
+            let pending = Self::begin_owned_request(
+                self.pending_requests.clone(),
+                &self.write_tx,
+                self.connection_closed.clone(),
+                JsonRpcRequest::new(id, method, params),
+                ResponseMode::Raw {
+                    _request: RawRequest::new(self.raw_requests.clone()),
+                },
+            )?;
+            pending.await
+        })
     }
 
     // Own the request bookkeeping, not the connection. A pending response may
@@ -1492,10 +1496,16 @@ impl JsonRpcClient {
         }
         let cancel_on_drop = matches!(
             method,
-            "session.sendAndWait"
+            "ahp.connections.attachSession"
+                | "session.sendAndWait"
                 | "session.featureFlags.read"
-                | "taskAnalytics.classifyTrajectory"
+                | "session.remote.reattach"
+                | "session.remote.readProjection"
+                | "session.remote.sendWithAdmission"
                 | "localModels.watch"
+                | "feedback.upload.read"
+                | "taskAnalytics.classifyTrajectory"
+                | "session.resume"
         );
         let frame = encode_frame(&request)?;
         let method = request.method;

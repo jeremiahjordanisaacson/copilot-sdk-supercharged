@@ -45,6 +45,12 @@ public record CompactionCompleteAttemptMetrics(
     @JsonProperty("triggerThreshold") Double triggerThreshold,
     /** Output token limit of the latest summarizer request. Absent when no request was sent. */
     @JsonProperty("maxOutputTokens") Double maxOutputTokens,
+    /** How the summarizer's context capacity was established: "authoritative" or "threshold_inferred". */
+    @JsonProperty("capacitySource") String capacitySource,
+    /** Bounded outcome of the capacity catalog refresh: "not_applicable", "not_needed", "succeeded", "failed" or "capacity_unavailable". */
+    @JsonProperty("capacityRefreshOutcome") String capacityRefreshOutcome,
+    /** Conservative context limit inferred from current history and the automatic compaction threshold. Absent unless capacitySource is "threshold_inferred". */
+    @JsonProperty("inferredContextLimitTokens") Double inferredContextLimitTokens,
     /** Summarizer requests that failed with a provider or transport error. Absent when none failed. */
     @JsonProperty("failedRequestCount") Long failedRequestCount,
     /** Sum of the sampled input token estimates of the summarizer requests that failed, whose usage the provider never reported. Absent when none failed. */
@@ -94,6 +100,9 @@ public record CompactionCompleteAttemptMetrics(
         private Long deadlineOvershootMs;
         private Double triggerThreshold;
         private Double maxOutputTokens;
+        private String capacitySource;
+        private String capacityRefreshOutcome;
+        private Double inferredContextLimitTokens;
         private Long failedRequestCount;
         private Long failedRequestInputTokensEstimate;
         private Long cancelledRequestCount;
@@ -236,6 +245,39 @@ public record CompactionCompleteAttemptMetrics(
         }
 
         /**
+         * Sets the {@code capacitySource} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder capacitySource(String value) {
+            this.capacitySource = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code capacityRefreshOutcome} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder capacityRefreshOutcome(String value) {
+            this.capacityRefreshOutcome = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code inferredContextLimitTokens} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder inferredContextLimitTokens(Double value) {
+            this.inferredContextLimitTokens = value;
+            return this;
+        }
+
+        /**
          * Sets the {@code failedRequestCount} property.
          * @param value the property value
          * @return this builder
@@ -331,7 +373,7 @@ public record CompactionCompleteAttemptMetrics(
          */
         public CompactionCompleteAttemptMetrics build() {
             if (durationMs == null) throw new IllegalStateException("Missing required property: durationMs");
-            return new CompactionCompleteAttemptMetrics(durationMs, blockingWaitMs, dispatchWaitMs, applyDelayMs, suspendedMs, summarizerReasoningEffort, requestedReasoningEffort, deadlinePolicy, deadlineLimitMs, deadlineOvershootMs, triggerThreshold, maxOutputTokens, failedRequestCount, failedRequestInputTokensEstimate, cancelledRequestCount, retryWaitMs, lastRetryAfterMs, shrinkRemovedAttachments, shrinkStrippedReasoning, failureOperation);
+            return new CompactionCompleteAttemptMetrics(durationMs, blockingWaitMs, dispatchWaitMs, applyDelayMs, suspendedMs, summarizerReasoningEffort, requestedReasoningEffort, deadlinePolicy, deadlineLimitMs, deadlineOvershootMs, triggerThreshold, maxOutputTokens, capacitySource, capacityRefreshOutcome, inferredContextLimitTokens, failedRequestCount, failedRequestInputTokensEstimate, cancelledRequestCount, retryWaitMs, lastRetryAfterMs, shrinkRemovedAttachments, shrinkStrippedReasoning, failureOperation);
         }
     }
 }

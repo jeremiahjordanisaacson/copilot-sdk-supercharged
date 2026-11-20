@@ -50,6 +50,22 @@ copilot-sdk = "=1.0.0-unstable.123456.gabcdef0"
 This is an illustrative version; select an available version from crates.io.
 Stable requirements do not automatically select prereleases.
 
+## Source compatibility
+
+New fields break exhaustive Rust struct literals. Set `capabilities: None` on
+`SandboxConfigUserPolicy` and `extra_mach_lookups: None` on
+`SandboxConfigUserPolicySeatbelt`, or use `..Default::default()` when other
+fields have suitable defaults. `None` omits each field from serialized settings.
+
+For example:
+
+```rust
+SandboxConfigUserPolicySeatbelt {
+    keychain_access: Some(false),
+    ..Default::default()
+}
+```
+
 ## Yanked versions
 
 A crate version with a critical defect can be yanked. Yanking does not delete

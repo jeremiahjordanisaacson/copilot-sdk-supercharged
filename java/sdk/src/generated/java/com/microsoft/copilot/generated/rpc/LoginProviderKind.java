@@ -20,10 +20,10 @@ import javax.annotation.processing.Generated;
 @CopilotExperimental
 @javax.annotation.processing.Generated("copilot-sdk-codegen")
 public enum LoginProviderKind {
-    /** The {@code githubDotCom} variant. */
-    GITHUBDOTCOM("githubDotCom"),
-    /** The {@code proxima} variant. */
-    PROXIMA("proxima"),
+    /** The {@code gitHub} variant. */
+    GITHUB("gitHub"),
+    /** The {@code gitHubEnterpriseCloud} variant. */
+    GITHUBENTERPRISECLOUD("gitHubEnterpriseCloud"),
     /** The {@code entra} variant. */
     ENTRA("entra");
 

@@ -420,6 +420,57 @@ public sealed partial class ClientSessionLifetimeTests
     }
 
     [Fact]
+    public async Task ShellAuthentication_Stop_Marks_Cancellation_Before_Queued_Work_Runs()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        var started = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        {
+            SessionId = "secret-synchronous-cancellation",
+            Interaction = new SessionInteractionOptions
+            {
+                OnShellAuthenticationRequest = async (_, token) =>
+                {
+                    started.TrySetResult(token);
+                    await Task.Delay(Timeout.Infinite, token);
+                    return ShellAuthenticationResponse.Cancel();
+                }
+            }
+        });
+        _ = await server.SendRequestWithoutWaitingAsync("shellAuthentication.request", ShellAuthenticationRequestParams(session.SessionId, "secret-1"));
+        var token = await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var releaseCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Pause all work queued by stop, so cancellation cannot win a thread-pool race.
+        var cancellationContext = new AsyncLocal<bool>(change =>
+        {
+            if (change.ThreadContextChanged && change.CurrentValue)
+            {
+                releaseCancellation.Task.GetAwaiter().GetResult();
+            }
+        });
+        Task stopping;
+        try
+        {
+            cancellationContext.Value = true;
+            stopping = client.StopAsync();
+        }
+        finally
+        {
+            cancellationContext.Value = false;
+        }
+        try
+        {
+            Assert.True(token.IsCancellationRequested, "Prompt cancellation must be observable before queued callbacks run.");
+        }
+        finally
+        {
+            releaseCancellation.TrySetResult();
+            await stopping.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
     public async Task ShellAuthentication_A_Blocking_Cancellation_Callback_Does_Not_Block_The_Reader_Or_Teardown()
     {
         await using var server = await FakeCopilotServer.StartAsync();

@@ -40,9 +40,12 @@ The model sees the **full conversation history** on each call—system prompt, u
 
 ## Multiple tool calls
 
-Session creation and resume accept `allowMultipleToolCalls` in TypeScript and Java,
-`AllowMultipleToolCalls` in Go and .NET, and `allow_multiple_tool_calls` in Python
-and Rust. Omitted or `true` preserves the default: the model can request multiple
+Session creation and resume accept it in their inference options:
+`inference.allowMultipleToolCalls` in TypeScript, `Inference.AllowMultipleToolCalls`
+in Go and .NET, `inference={"allow_multiple_tool_calls": ...}` in Python,
+`SessionInferenceOptions.setAllowMultipleToolCalls` through `setInference` in Java,
+and `SessionInferenceOptions::with_allow_multiple_tool_calls` through `with_inference`
+in Rust. Omitted or `true` preserves the default: the model can request multiple
 tools in one response and the runtime can execute their handlers concurrently.
 
 Set it to `false` to ask the provider for at most one tool call per response.
@@ -85,6 +88,18 @@ A **turn** is a single LLM API call and its consequences:
 1. The LLM responds (possibly with tool requests)
 1. If tools were requested, the runtime executes them
 1. `assistant.turn_end` is emitted
+
+On a cold resume with `continuePendingWork: true`, unresumable tools receive
+interrupted results without replay. Their original turn closes once all its
+tool calls settle. Only interrupted `ask_user`, journaled elicitation and
+existing resumable work continue the model. Recorded input requests are
+completed to dismiss old prompts; older sessions lack IDs for correlated
+completion. Other uncertain tool effects keep their no-replay behavior.
+`continuePendingWork: false` does not start this recovery loop.
+Input correlations belong to a particular tool execution, even when a provider
+reuses tool-call IDs. The runtime persists that execution's start before
+publishing its correlated input request. Recovery reads only unresolved
+executions' correlations; settled executions do not add filesystem reads to resume.
 
 A single user message typically results in **multiple turns**. For example, a question like "how does X work in this codebase?" might produce:
 

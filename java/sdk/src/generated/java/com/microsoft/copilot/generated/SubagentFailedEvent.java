@@ -63,7 +63,9 @@ public final class SubagentFailedEvent extends SessionEvent {
         /** Total tokens (input + output) consumed before the sub-agent failed */
         @JsonProperty("totalTokens") Long totalTokens,
         /** Wall-clock duration of the sub-agent execution in milliseconds */
-        @JsonProperty("durationMs") Long durationMs
+        @JsonProperty("durationMs") Long durationMs,
+        /** Interaction ID of the user action that produced this sub-agent turn */
+        @JsonProperty("interactionId") String interactionId
     ) {
 
         /**
@@ -100,6 +102,7 @@ public final class SubagentFailedEvent extends SessionEvent {
             private Long totalToolCalls;
             private Long totalTokens;
             private Long durationMs;
+            private String interactionId;
 
             /**
              * Sets the {@code toolCallId} property.
@@ -267,6 +270,17 @@ public final class SubagentFailedEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code interactionId} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder interactionId(String value) {
+                this.interactionId = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
@@ -277,7 +291,7 @@ public final class SubagentFailedEvent extends SessionEvent {
                 if (agentName == null) throw new IllegalStateException("Missing required property: agentName");
                 if (agentDisplayName == null) throw new IllegalStateException("Missing required property: agentDisplayName");
                 if (error == null) throw new IllegalStateException("Missing required property: error");
-                return new SubagentFailedEventData(toolCallId, agentName, agentDisplayName, error, model, firstDispatchedModel, configuredModelPreference, explicitModelOverride, explicitModelMatchesPreference, modelOverrideReason, modelSelectionSource, configuredModelMatchesActual, totalToolCalls, totalTokens, durationMs);
+                return new SubagentFailedEventData(toolCallId, agentName, agentDisplayName, error, model, firstDispatchedModel, configuredModelPreference, explicitModelOverride, explicitModelMatchesPreference, modelOverrideReason, modelSelectionSource, configuredModelMatchesActual, totalToolCalls, totalTokens, durationMs, interactionId);
             }
         }
     }

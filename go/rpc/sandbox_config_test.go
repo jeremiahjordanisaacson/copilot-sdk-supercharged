@@ -1,9 +1,36 @@
 package rpc
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
+
+func TestSandboxProxyCaTrustCertificateHostLists(t *testing.T) {
+	for _, hosts := range [][]string{nil, {}, {"example.test"}} {
+		request := SandboxProxyCaTrustCertificateRequest{AllowHosts: hosts}
+		data, err := json.Marshal(request)
+		if err != nil {
+			t.Fatalf("marshal certificate trust request: %v", err)
+		}
+		var wire struct {
+			AllowHosts json.RawMessage `json:"allowHosts"`
+		}
+		if err := json.Unmarshal(data, &wire); err != nil {
+			t.Fatalf("decode certificate trust request: %v", err)
+		}
+		expected := []byte(`[]`)
+		if len(hosts) > 0 {
+			expected = []byte(`["example.test"]`)
+		}
+		if !bytes.Equal(wire.AllowHosts, expected) {
+			t.Fatalf("allowHosts = %s, want %s", wire.AllowHosts, expected)
+		}
+		if hosts == nil && request.AllowHosts != nil {
+			t.Fatal("serialization changed the caller's nil host list")
+		}
+	}
+}
 
 func TestSandboxConfigAllowBypassJSON(t *testing.T) {
 	allowBypass := true

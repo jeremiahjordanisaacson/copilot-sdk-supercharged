@@ -10,6 +10,7 @@ package com.microsoft.copilot.generated;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.microsoft.copilot.CopilotExperimental;
 import javax.annotation.processing.Generated;
 
 /**
@@ -47,7 +48,10 @@ public final class AssistantReasoningEvent extends SessionEvent {
         /** Model that produced this reasoning, if known */
         @JsonProperty("model") String model,
         /** Whether the model call that produced this reasoning used a user-managed provider or an on-device model */
-        @JsonProperty("isByok") Boolean isByok
+        @JsonProperty("isByok") Boolean isByok,
+        /** Experimental HydraFusion phase attribution. Present without a `commitId` while a staged root phase streams provisional output that the orchestrator may still discard. */
+        @CopilotExperimental
+        @JsonProperty("fusion") FusionAttribution fusion
     ) {
 
         /**
@@ -76,6 +80,7 @@ public final class AssistantReasoningEvent extends SessionEvent {
             private String apiCallId;
             private String model;
             private Boolean isByok;
+            private FusionAttribution fusion;
 
             /**
              * Sets the {@code reasoningId} property.
@@ -155,6 +160,18 @@ public final class AssistantReasoningEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code fusion} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            @com.microsoft.copilot.CopilotExperimental
+            public Builder fusion(FusionAttribution value) {
+                this.fusion = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
@@ -163,7 +180,7 @@ public final class AssistantReasoningEvent extends SessionEvent {
             public AssistantReasoningEventData build() {
                 if (reasoningId == null) throw new IllegalStateException("Missing required property: reasoningId");
                 if (content == null) throw new IllegalStateException("Missing required property: content");
-                return new AssistantReasoningEventData(reasoningId, content, rte, turnId, apiCallId, model, isByok);
+                return new AssistantReasoningEventData(reasoningId, content, rte, turnId, apiCallId, model, isByok, fusion);
             }
         }
     }

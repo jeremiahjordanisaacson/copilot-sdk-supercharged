@@ -224,7 +224,9 @@ func TestClientE2E(t *testing.T) {
 	})
 
 	t.Run("should list models when authenticated", func(t *testing.T) {
-		client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedStdioConnection{Path: cliPath}})
+		ctx := testharness.NewTestContext(t)
+		ctx.ConfigureWithoutSnapshot(t)
+		client := ctx.NewClient()
 		t.Cleanup(func() { client.ForceStop() })
 
 		if err := client.Start(t.Context()); err != nil {
@@ -237,9 +239,7 @@ func TestClientE2E(t *testing.T) {
 		}
 
 		if !authStatus.IsAuthenticated {
-			// Skip if not authenticated - models.list requires auth
-			client.Stop()
-			return
+			t.Fatalf("Expected authenticated status, got %+v", authStatus)
 		}
 
 		models, err := client.ListModels(t.Context())
@@ -247,17 +247,20 @@ func TestClientE2E(t *testing.T) {
 			t.Fatalf("Failed to list models: %v", err)
 		}
 
-		if len(models) > 0 {
-			model := models[0]
-			if model.ID == "" {
-				t.Error("Expected model.ID to be non-empty")
-			}
-			if model.Name == "" {
-				t.Error("Expected model.Name to be non-empty")
-			}
+		if len(models) == 0 {
+			t.Fatal("Expected at least one model from the replay proxy")
+		}
+		model := models[0]
+		if model.ID == "" {
+			t.Error("Expected model.ID to be non-empty")
+		}
+		if model.Name == "" {
+			t.Error("Expected model.Name to be non-empty")
 		}
 
-		client.Stop()
+		if err := client.Stop(); err != nil {
+			t.Errorf("Expected no errors on stop, got %v", err)
+		}
 	})
 
 	t.Run("should report error when CLI fails to start", func(t *testing.T) {

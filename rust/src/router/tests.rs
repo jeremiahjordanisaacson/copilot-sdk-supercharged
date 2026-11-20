@@ -21,6 +21,12 @@ use super::*;
 
 const DEADLINE: Duration = Duration::from_secs(5);
 
+impl SessionRouter {
+    pub(crate) fn initialization_count(&self) -> usize {
+        self.initializations.lock().len()
+    }
+}
+
 #[test]
 fn rpc_callback_tracking_is_counted_and_scoped_to_the_session_and_router() {
     let router = SessionRouter::new();
@@ -666,6 +672,104 @@ fn held_events_past_the_bound_drop_the_oldest_unregistered_ids() {
     let mut late = router.register(&SessionId::new("late"));
     assert!(drain(&mut never.channels.notifications).is_empty());
     assert_eq!(drain(&mut late.channels.notifications), ["l0"]);
+}
+
+fn sized_event(session_id: &str, id: &str, payload_bytes: usize) -> Value {
+    json!({
+        "sessionId": session_id,
+        "event": {
+            "id": id,
+            "timestamp": "2025-01-01T00:00:00Z",
+            "type": "assistant.message",
+            "data": {"content": "x".repeat(payload_bytes)},
+        },
+    })
+}
+
+/// What an ID that is not registered yet keeps held, by size. Each row runs
+/// its steps in order against a fresh router.
+#[test]
+fn held_events_stay_within_the_byte_budget() {
+    const MIB: usize = 1024 * 1024;
+    enum Step {
+        /// Route this many events of this many payload bytes to the session.
+        Route(&'static str, usize, usize),
+        /// Register the session and expect every event routed to it.
+        Whole(&'static str, usize),
+        /// Register the session and expect only its newest events, within the budget.
+        Trimmed(&'static str, usize, usize),
+    }
+    use Step::{Route, Trimmed, Whole};
+    let rows: [(&str, &[Step]); 4] = [
+        (
+            "under the budget nothing is dropped",
+            &[
+                Route("held", 15, MIB),
+                Route("late", 1, 16),
+                Whole("held", 15),
+                Whole("late", 1),
+            ],
+        ),
+        (
+            "one event over the budget is still held",
+            &[Route("held", 1, 20 * MIB), Whole("held", 1)],
+        ),
+        (
+            "a registration releases the budget its events used",
+            &[
+                Route("first", 15, MIB),
+                Whole("first", 15),
+                Route("second", 15, MIB),
+                Whole("second", 15),
+            ],
+        ),
+        (
+            "past the budget the oldest held events are dropped",
+            &[
+                Route("held", 40, MIB),
+                Route("late", 1, 16),
+                Whole("late", 1),
+                Trimmed("held", 40, MIB),
+            ],
+        ),
+    ];
+    for (name, steps) in rows {
+        let router = SessionRouter::new();
+        let sink = router.event_sink();
+        for step in steps {
+            match *step {
+                Route(session, count, payload) => {
+                    for n in 0..count {
+                        sink.route(sized_event(session, &format!("{session}{n}"), payload));
+                    }
+                }
+                Whole(session, count) => {
+                    let mut registration = router.register(&SessionId::new(session));
+                    let expected: Vec<String> =
+                        (0..count).map(|n| format!("{session}{n}")).collect();
+                    assert_eq!(
+                        drain(&mut registration.channels.notifications),
+                        expected,
+                        "{name}: {session}"
+                    );
+                }
+                Trimmed(session, count, payload) => {
+                    let mut registration = router.register(&SessionId::new(session));
+                    let delivered = drain(&mut registration.channels.notifications);
+                    assert_eq!(
+                        delivered.last(),
+                        Some(&format!("{session}{}", count - 1)),
+                        "{name}: newest event kept"
+                    );
+                    assert!(
+                        delivered.len() * payload <= MAX_UNCLAIMED_BYTES,
+                        "{name}: {} of {count} events held",
+                        delivered.len()
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Events trailing a registration that ended are dropped, not held for a

@@ -16,6 +16,7 @@ import {
     ResponseError,
 } from "vscode-jsonrpc/node";
 import { createInternalSessionRpc, createSessionRpc } from "./generated/rpc.js";
+import { assertStrictJson } from "./jsonValue.js";
 import type {
     ClientSessionApiHandlers,
     CanvasActionInvokeResult,
@@ -173,6 +174,85 @@ type WorkflowExecutionContext = {
 };
 
 const workflowExecutionStore = new AsyncLocalStorage<WorkflowExecutionContext>();
+
+/** @internal */
+export type AutoImproveEvaluatorExit =
+    | { readonly kind: "exited"; readonly code: number }
+    | { readonly kind: "failedToStart"; readonly message: string }
+    | { readonly kind: "timedOut" }
+    | { readonly kind: "cancelled" }
+    | { readonly kind: "outputLimit" };
+
+/** @internal */
+export interface AutoImproveEvaluatorRequest {
+    readonly runRoot: string;
+    readonly executable: string;
+    readonly args: readonly string[];
+    readonly cwd: string;
+    readonly writableRoots: readonly string[];
+    readonly timeoutMs: number;
+    readonly maxStdoutBytes: number;
+    readonly maxStderrBytes: number;
+    readonly signal: AbortSignal;
+}
+
+/** @internal */
+export interface AutoImproveEvaluatorResult {
+    readonly exit: AutoImproveEvaluatorExit;
+    readonly stdout: Uint8Array;
+    readonly stderr: string;
+}
+
+type AutoImproveEvaluatorWireResult = {
+    readonly exit: AutoImproveEvaluatorExit;
+    readonly stdoutBase64: string;
+    readonly stderr: string;
+};
+
+const AUTOIMPROVE_EXECUTION_TOKEN_ENV = "COPILOT_AUTOIMPROVE_EXECUTION_TOKEN";
+
+function decodeAutoImproveEvaluatorStdout(value: unknown): Uint8Array {
+    if (
+        typeof value !== "string" ||
+        value.length % 4 !== 0 ||
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
+    ) {
+        throw new Error("The AutoImprove evaluator returned malformed base64 stdout");
+    }
+    const decoded = Buffer.from(value, "base64");
+    if (decoded.toString("base64") !== value) {
+        throw new Error("The AutoImprove evaluator returned non-canonical base64 stdout");
+    }
+    return new Uint8Array(decoded);
+}
+
+function validateAutoImproveEvaluatorExit(value: unknown): AutoImproveEvaluatorExit {
+    if (!value || typeof value !== "object") {
+        throw new Error("The AutoImprove evaluator returned a malformed exit outcome");
+    }
+    const exit = value as {
+        readonly kind?: unknown;
+        readonly code?: unknown;
+        readonly message?: unknown;
+    };
+    switch (exit.kind) {
+        case "exited":
+            if (Number.isSafeInteger(exit.code)) {
+                return { kind: "exited", code: exit.code as number };
+            }
+            break;
+        case "failedToStart":
+            if (typeof exit.message === "string") {
+                return { kind: "failedToStart", message: exit.message };
+            }
+            break;
+        case "timedOut":
+        case "cancelled":
+        case "outputLimit":
+            return { kind: exit.kind };
+    }
+    throw new Error("The AutoImprove evaluator returned a malformed exit outcome");
+}
 
 function throwIfWorkflowExecutionIsActive(): void {
     if (workflowExecutionStore.getStore()?.active) {
@@ -797,6 +877,65 @@ export class CopilotSession {
             this._internalRpc = createInternalSessionRpc(this.connection, this.sessionId);
         }
         return this._internalRpc;
+    }
+
+    /**
+     * Runs one AutoImprove evaluator through the runtime-owned private execution route.
+     * @internal
+     */
+    async _executeAutoImproveEvaluator(
+        request: AutoImproveEvaluatorRequest
+    ): Promise<AutoImproveEvaluatorResult> {
+        const hostCapability = process.env[AUTOIMPROVE_EXECUTION_TOKEN_ENV];
+        if (!hostCapability || !/^[0-9a-f]{32}$/.test(hostCapability)) {
+            throw new Error("AutoImprove evaluator execution is not authorized by this host");
+        }
+        if (!(request.signal instanceof AbortSignal)) {
+            throw new TypeError("AutoImprove evaluator execution requires an AbortSignal");
+        }
+
+        const cancellation = new CancellationTokenSource();
+        const onAbort = () => cancellation.cancel();
+        request.signal.addEventListener("abort", onAbort, { once: true });
+        if (request.signal.aborted) {
+            cancellation.cancel();
+        }
+        try {
+            const wire = await this.connection.sendRequest<AutoImproveEvaluatorWireResult>(
+                "session.autoImprove.executeEvaluator",
+                {
+                    sessionId: this.sessionId,
+                    hostCapability,
+                    runRoot: request.runRoot,
+                    executable: request.executable,
+                    args: [...request.args],
+                    cwd: request.cwd,
+                    writableRoots: [...request.writableRoots],
+                    timeoutMs: request.timeoutMs,
+                    maxStdoutBytes: request.maxStdoutBytes,
+                    maxStderrBytes: request.maxStderrBytes,
+                },
+                cancellation.token
+            );
+            const stdout = decodeAutoImproveEvaluatorStdout(wire?.stdoutBase64);
+            if (
+                stdout.byteLength > request.maxStdoutBytes ||
+                typeof wire?.stderr !== "string" ||
+                Buffer.byteLength(wire.stderr) > request.maxStderrBytes
+            ) {
+                throw new Error(
+                    "The AutoImprove evaluator returned output beyond the requested bounds"
+                );
+            }
+            return {
+                exit: validateAutoImproveEvaluatorExit(wire.exit),
+                stdout,
+                stderr: wire.stderr,
+            };
+        } finally {
+            request.signal.removeEventListener("abort", onAbort);
+            cancellation.dispose();
+        }
     }
 
     /**
@@ -1571,9 +1710,13 @@ export class CopilotSession {
      * @param event - The session event to dispatch
      * @internal This method is for internal use by the SDK.
      */
-    _dispatchEvent(event: SessionEvent): void {
-        // Handle broadcast request events internally (fire-and-forget)
-        this._handleBroadcastEvent(event);
+    _dispatchEvent(event: SessionEvent, settled = false): void {
+        // Handle broadcast request events internally (fire-and-forget). A
+        // settled request was already answered by another client before this
+        // session registered, so only observers see it.
+        if (!settled) {
+            this._handleBroadcastEvent(event);
+        }
 
         // Dispatch to typed handlers for this specific event type
         const typedHandlers = this.typedEventHandlers.get(event.type);
@@ -3457,188 +3600,6 @@ function errorTypeName(error: unknown): string {
         // A getter or proxy trap can throw, and logging must not.
         return typeof error;
     }
-}
-
-type WorkflowResultValidationCategory =
-    | "unsupported_type"
-    | "non_finite_number"
-    | "negative_zero"
-    | "cyclic_value"
-    | "nested_undefined"
-    | "unsupported_object";
-
-interface StrictJsonValidationContext {
-    code: "workflow_result_not_json" | "workflow_step_not_json";
-    label: string;
-    allowTopLevelUndefined: boolean;
-}
-
-function strictJsonValidationError(
-    context: StrictJsonValidationContext,
-    category: WorkflowResultValidationCategory,
-    message: string,
-    path: string
-): ResponseError<{ code: string; category: WorkflowResultValidationCategory; path: string }> {
-    return new ResponseError(ErrorCodes.InternalError, message, {
-        code: context.code,
-        category,
-        path,
-    });
-}
-
-function assertStrictJson(
-    value: unknown,
-    context: StrictJsonValidationContext
-): asserts value is JsonValue | undefined {
-    const ancestors = new Set<object>();
-
-    const visit = (current: unknown, path: string, allowUndefined: boolean): void => {
-        if (current === undefined) {
-            if (allowUndefined) {
-                return;
-            }
-            throw strictJsonValidationError(
-                context,
-                "nested_undefined",
-                `${context.label} contains nested undefined at ${path}`,
-                path
-            );
-        }
-        if (current === null || typeof current === "boolean" || typeof current === "string") {
-            return;
-        }
-        if (typeof current === "number") {
-            if (!Number.isFinite(current)) {
-                throw strictJsonValidationError(
-                    context,
-                    "non_finite_number",
-                    `${context.label} contains a non-finite number at ${path}`,
-                    path
-                );
-            }
-            // JSON serializes -0 as "0", so a journaled -0 would come back as 0
-            // after a resume and break the lossless replay guarantee.
-            if (Object.is(current, -0)) {
-                throw strictJsonValidationError(
-                    context,
-                    "negative_zero",
-                    `${context.label} contains negative zero at ${path}; normalize it to 0`,
-                    path
-                );
-            }
-            return;
-        }
-        if (
-            typeof current === "function" ||
-            typeof current === "symbol" ||
-            typeof current === "bigint"
-        ) {
-            throw strictJsonValidationError(
-                context,
-                "unsupported_type",
-                `${context.label} contains a function, symbol, or BigInt at ${path}`,
-                path
-            );
-        }
-        if (typeof current !== "object") {
-            throw strictJsonValidationError(
-                context,
-                "unsupported_type",
-                `${context.label} contains a function, symbol, or BigInt at ${path}`,
-                path
-            );
-        }
-        if (ancestors.has(current)) {
-            throw strictJsonValidationError(
-                context,
-                "cyclic_value",
-                `${context.label} contains a cyclic reference at ${path}`,
-                path
-            );
-        }
-
-        ancestors.add(current);
-        try {
-            if (Array.isArray(current)) {
-                const keys = Reflect.ownKeys(current);
-                if (
-                    keys.length !== current.length + 1 ||
-                    keys.some(
-                        (key) =>
-                            key !== "length" &&
-                            (typeof key !== "string" ||
-                                !/^(0|[1-9]\d*)$/.test(key) ||
-                                Number(key) >= current.length)
-                    )
-                ) {
-                    throw strictJsonValidationError(
-                        context,
-                        "unsupported_object",
-                        `${context.label} contains a non-JSON array property at ${path}`,
-                        path
-                    );
-                }
-                for (let index = 0; index < current.length; index++) {
-                    const descriptor = Object.getOwnPropertyDescriptor(current, String(index));
-                    if (
-                        descriptor === undefined ||
-                        !descriptor.enumerable ||
-                        !("value" in descriptor)
-                    ) {
-                        throw strictJsonValidationError(
-                            context,
-                            "unsupported_object",
-                            `${context.label} contains a non-JSON array property at ${path}[${index}]`,
-                            `${path}[${index}]`
-                        );
-                    }
-                    visit(descriptor.value, `${path}[${index}]`, false);
-                }
-                return;
-            }
-
-            const prototype = Object.getPrototypeOf(current);
-            if (prototype !== Object.prototype && prototype !== null) {
-                throw strictJsonValidationError(
-                    context,
-                    "unsupported_object",
-                    `${context.label} contains a non-JSON object at ${path}`,
-                    path
-                );
-            }
-            for (const key of Reflect.ownKeys(current)) {
-                if (typeof key === "symbol") {
-                    throw strictJsonValidationError(
-                        context,
-                        "unsupported_type",
-                        `${context.label} contains a function, symbol, or BigInt at ${path}`,
-                        path
-                    );
-                }
-                const propertyPath = /^[A-Za-z_$][\w$]*$/.test(key)
-                    ? `${path}.${key}`
-                    : `${path}[${JSON.stringify(key)}]`;
-                const descriptor = Object.getOwnPropertyDescriptor(current, key);
-                if (
-                    descriptor === undefined ||
-                    !descriptor.enumerable ||
-                    !("value" in descriptor)
-                ) {
-                    throw strictJsonValidationError(
-                        context,
-                        "unsupported_object",
-                        `${context.label} contains a non-JSON property at ${propertyPath}`,
-                        propertyPath
-                    );
-                }
-                visit(descriptor.value, propertyPath, false);
-            }
-        } finally {
-            ancestors.delete(current);
-        }
-    };
-
-    visit(value, "$", context.allowTopLevelUndefined);
 }
 
 function assertWorkflowResult(value: unknown): asserts value is JsonValue | undefined {

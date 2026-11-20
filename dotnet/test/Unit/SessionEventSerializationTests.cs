@@ -35,6 +35,7 @@ public class SessionEventSerializationTests
 
     [Theory]
     [InlineData("session.idle", "{}")]
+    [InlineData("session.sandbox_state_changed", """{"incarnation":1,"revision":2,"config":null,"configSource":"settings","disabledForSession":false,"autoApproveBypass":false,"sessionOverride":null}""")]
     [InlineData("user.message", """{"content":"hello"}""")]
     [InlineData("external_tool.requested", """{"requestId":"request-1","sessionId":"session-1","toolCallId":"call-1","toolName":"lookup","hasHandler":true}""")]
     [InlineData("external_tool.requested", """{"requestId":"request-1","sessionId":"session-1","toolCallId":"call-1","toolName":"approval","hasHandler":false}""")]

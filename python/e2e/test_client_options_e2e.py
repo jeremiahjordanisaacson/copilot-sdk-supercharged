@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 
 import pytest
@@ -32,7 +33,6 @@ from copilot import (
     OpenCanvasInstance,
     RuntimeConnection,
 )
-from copilot.rpc import PingRequest
 from copilot.session import PermissionHandler
 from e2e.testharness.provider_options import byok_inference
 
@@ -78,12 +78,6 @@ def _make_options(
     }
     base.update(overrides)
     return base
-
-
-def _get_available_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 # ------------------- A scriptable fake CLI to capture process options -------------------
@@ -235,17 +229,22 @@ def _get_captured_request(capture_path: str, method: str) -> dict:
 
 
 class TestClientOptions:
-    async def test_should_listen_on_configured_tcp_port(self, ctx: E2ETestContext):
-        port = _get_available_port()
-        client = CopilotClient(mode="coding-agent", **_make_options(ctx, use_tcp=True, port=port))
-        try:
-            await client.start()
-            assert client.runtime_port == port
-
-            response = await client.rpc.ping(PingRequest(message="fixed-port"))
-            assert "pong" in response.message
-        finally:
-            await client.stop()
+    async def test_should_fail_when_configured_tcp_port_is_in_use(self, ctx: E2ETestContext):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            client = CopilotClient(
+                mode="coding-agent", **_make_options(ctx, use_tcp=True, port=port)
+            )
+            try:
+                message = f"failed to bind TCP server at 127.0.0.1:{port}:"
+                with pytest.raises(RuntimeError, match=re.escape(message)):
+                    await client.start()
+            finally:
+                await client.force_stop()
 
     async def test_should_use_client_cwd_for_default_workingdirectory(self, ctx: E2ETestContext):
         client_cwd = os.path.join(ctx.work_dir, "client-cwd")

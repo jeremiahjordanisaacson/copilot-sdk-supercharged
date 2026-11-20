@@ -26,7 +26,7 @@ import javax.annotation.processing.Generated;
 public record SessionModelStartupAdmissionResult(
     /** The selected model, when the session has one. */
     @JsonProperty("selectedModel") String selectedModel,
-    /** Whether the session already has a resolved Copilot catalog. */
+    /** Whether the session has a resolved catalog, including a catalog-free provider. */
     @JsonProperty("catalogReady") Boolean catalogReady,
     /** Whether the cached selected model currently requires enablement. */
     @JsonProperty("requiresEnablement") Boolean requiresEnablement,

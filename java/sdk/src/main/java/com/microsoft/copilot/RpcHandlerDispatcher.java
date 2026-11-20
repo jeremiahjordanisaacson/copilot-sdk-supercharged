@@ -22,6 +22,7 @@ import java.util.logging.Logger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.microsoft.copilot.generated.ExternalToolCompletedEvent;
 import com.microsoft.copilot.generated.SessionEvent;
 import com.microsoft.copilot.rpc.AutoModeSwitchRequest;
 import com.microsoft.copilot.rpc.AutoModeRecoveryContext;
@@ -35,11 +36,11 @@ import com.microsoft.copilot.generated.rpc.GitHubTokenAcquireResultCancelled;
 import com.microsoft.copilot.generated.rpc.GitHubTokenAcquireResultToken;
 import com.microsoft.copilot.rpc.PermissionRequestResult;
 import com.microsoft.copilot.rpc.PermissionRequestResultKind;
+import com.microsoft.copilot.rpc.ShellAuthenticationRequest;
+import com.microsoft.copilot.rpc.ShellAuthenticationResponse;
 import com.microsoft.copilot.rpc.SessionLifecycleEvent;
 import com.microsoft.copilot.rpc.SessionLifecycleEventMetadata;
 import com.microsoft.copilot.rpc.StoredMemory;
-import com.microsoft.copilot.rpc.ShellAuthenticationRequest;
-import com.microsoft.copilot.rpc.ShellAuthenticationResponse;
 import com.microsoft.copilot.rpc.ToolDefinition;
 import com.microsoft.copilot.rpc.ToolInvocation;
 import com.microsoft.copilot.rpc.ToolResultObject;
@@ -68,6 +69,7 @@ final class RpcHandlerDispatcher {
     private final LifecycleEventDispatcher lifecycleDispatcher;
     private final Executor executor;
     private final GitHubTokenProviderRegistry gitHubTokenProviders;
+    private final java.util.Collection<CopilotSession> unretiredSessions;
     private final Map<Long, CompletableFuture<Void>> callbackCancellations = new ConcurrentHashMap<>();
     // Open secret prompts by session and request ID. Tracked here rather than on a
     // session, which a resume can replace while a prompt is open.
@@ -82,13 +84,19 @@ final class RpcHandlerDispatcher {
      *            callback for dispatching lifecycle events
      * @param executor
      *            the executor for async dispatch, or {@code null} for default
+     * @param gitHubTokenProviders
+     *            the client-owned token provider registry
+     * @param unretiredSessions
+     *            sessions retaining callbacks or admitted tool responses
      */
     RpcHandlerDispatcher(Map<String, CopilotSession> sessions, LifecycleEventDispatcher lifecycleDispatcher,
-            Executor executor, GitHubTokenProviderRegistry gitHubTokenProviders) {
+            Executor executor, GitHubTokenProviderRegistry gitHubTokenProviders,
+            java.util.Collection<CopilotSession> unretiredSessions) {
         this.sessions = sessions;
         this.lifecycleDispatcher = lifecycleDispatcher;
         this.executor = executor;
         this.gitHubTokenProviders = gitHubTokenProviders;
+        this.unretiredSessions = unretiredSessions;
     }
 
     /**
@@ -98,7 +106,7 @@ final class RpcHandlerDispatcher {
      *            the JSON-RPC client to register handlers with
      */
     void registerHandlers(JsonRpcClient rpc) {
-        rpc.registerMethodHandler("session.event", (requestId, params) -> handleSessionEvent(params));
+        rpc.registerMethodHandler("session.event", (requestId, params) -> handleSessionEvent(rpc, params));
         rpc.registerMethodHandler("session.lifecycle", (requestId, params) -> handleLifecycleEvent(params));
         rpc.registerMethodHandler("tool.call", (requestId, params) -> handleToolCall(rpc, requestId, params));
         rpc.registerMethodHandler("permission.request",
@@ -468,7 +476,10 @@ final class RpcHandlerDispatcher {
                             }
                             return null;
                         });
-            } catch (Exception error) {
+            } catch (Throwable error) {
+                // A provider that throws an Error (an AssertionError, say) is answered too, so
+                // session creation does not wait forever; only a fatal error is rethrown.
+                CopilotRequestHandler.rethrowFatalError(error);
                 try {
                     rpc.sendErrorResponse(requestIdLong, -32603,
                             "GitHub token provider handler failed: " + error.getMessage());
@@ -497,17 +508,27 @@ final class RpcHandlerDispatcher {
         }
     }
 
-    private void handleSessionEvent(JsonNode params) {
+    private void handleSessionEvent(JsonRpcClient rpc, JsonNode params) {
         try {
             String sessionId = params.get("sessionId").asText();
             JsonNode eventNode = params.get("event");
             LOG.fine("Received session.event: " + eventNode);
 
             CopilotSession session = sessions.get(sessionId);
-            if (session != null && eventNode != null) {
+            if (eventNode != null) {
                 SessionEvent event = MAPPER.treeToValue(eventNode, SessionEvent.class);
-                if (event != null) {
-                    session.dispatchEvent(event);
+                if (event instanceof ExternalToolCompletedEvent completed && completed.getData() != null
+                        && completed.getData().requestId() != null) {
+                    // Admitted tools retain their original owner across same-connection resume.
+                    for (var candidate : unretiredSessions) {
+                        if (candidate != session && sessionId.equals(candidate.getSessionId())
+                                && candidate.usesConnection(rpc)) {
+                            candidate.cancelPendingExternalTool(completed.getData().requestId());
+                        }
+                    }
+                }
+                if (session != null && event != null) {
+                    session.enqueueEvent(event);
                 }
             }
         } catch (Exception e) {
@@ -573,8 +594,9 @@ final class RpcHandlerDispatcher {
                         if (result instanceof ToolResultObject tr) {
                             toolResult = tr;
                         } else {
-                            toolResult = ToolResultObject
-                                    .success(result instanceof String s ? s : MAPPER.writeValueAsString(result));
+                            toolResult = ToolResultObject.success(result instanceof String s
+                                    ? s
+                                    : JsonRpcClient.getToolResultMapper().writeValueAsString(result));
                         }
                         rpc.sendResponse(requestIdLong, Map.of("result", toolResult));
                     } catch (Exception e) {
@@ -769,7 +791,10 @@ final class RpcHandlerDispatcher {
                     }
                     return null;
                 });
-            } catch (Exception e) {
+            } catch (Throwable e) {
+                // A provider that throws an Error (an AssertionError, say) is answered too, so
+                // the model request does not wait forever; only a fatal error is rethrown.
+                CopilotRequestHandler.rethrowFatalError(e);
                 LOG.log(Level.SEVERE, "Error handling providerToken.getToken", e);
                 try {
                     rpc.sendErrorResponse(requestIdLong, -32603, "Provider token handler error: " + e.getMessage());

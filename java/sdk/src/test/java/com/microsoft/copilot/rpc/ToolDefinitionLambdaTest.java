@@ -11,9 +11,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 import org.junit.jupiter.api.Test;
@@ -53,6 +55,9 @@ class ToolDefinitionLambdaTest {
     }
 
     private record Reading(String sensor, Double value) {
+    }
+
+    record Tagged(String title, Optional<String> tag) {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -663,6 +668,42 @@ class ToolDefinitionLambdaTest {
         args.set("filter", filter);
         Object result = tool.handler().invoke(new ToolInvocation().setArguments(args)).get();
         assertEquals("true:null:2", result);
+    }
+
+    @Test
+    void coercion_recordArgWithOptionalComponent() throws Exception {
+        Param<Tagged> p = Param.of(Tagged.class, "note", "A note");
+        ToolDefinition tool = ToolDefinition.from("save", "Saves a note", p, n -> n.title() + " tag=" + n.tag());
+        // {note argument, expected handler result}
+        String[][] rows = {{"{\"title\":\"a\",\"tag\":\"b\"}", "a tag=Optional[b]"},
+                {"{\"title\":\"a\"}", "a tag=Optional.empty"},
+                {"{\"title\":\"a\",\"tag\":null}", "a tag=Optional.empty"}};
+        ObjectMapper json = new ObjectMapper();
+        List<String> mismatches = new ArrayList<>();
+        for (String[] row : rows) {
+            ObjectNode args = JsonNodeFactory.instance.objectNode();
+            args.set("note", json.readTree(row[0]));
+            String actual;
+            try {
+                actual = String.valueOf(tool.handler().invoke(new ToolInvocation().setArguments(args)).get());
+            } catch (Exception e) {
+                actual = "threw " + e;
+            }
+            if (!row[1].equals(actual)) {
+                mismatches.add(row[0] + ": expected <" + row[1] + "> but was <" + actual + ">");
+            }
+        }
+        assertEquals(List.of(), mismatches);
+    }
+
+    @Test
+    void resultFormatting_recordWithOptionalComponent() throws Exception {
+        ToolDefinition present = ToolDefinition.from("present", "Returns a tagged note",
+                () -> new Tagged("a", Optional.of("b")));
+        ToolDefinition empty = ToolDefinition.from("empty", "Returns an untagged note",
+                () -> new Tagged("a", Optional.empty()));
+        assertEquals("{\"title\":\"a\",\"tag\":\"b\"}", present.handler().invoke(invocationOf(Map.of())).get());
+        assertEquals("{\"title\":\"a\",\"tag\":null}", empty.handler().invoke(invocationOf(Map.of())).get());
     }
 
     // ── Inner types for test helpers

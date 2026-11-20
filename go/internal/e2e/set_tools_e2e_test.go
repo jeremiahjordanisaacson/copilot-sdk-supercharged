@@ -9,7 +9,13 @@ import (
 
 	copilot "github.com/microsoft/copilot-sdk/go/v2"
 	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
+
+// The replacement cases run in the control arm, the default for every SDK. The stable
+// prompt-prefix treatment of previously sent definitions is shared runtime behavior,
+// covered by the Node.js SDK's explicit treatment cases.
+var controlArm = map[string]bool{"STABLE_PROMPT_PREFIX": false}
 
 const (
 	fruitPrompt             = "Use lookup_fruit to find the fruit for code 42."
@@ -26,7 +32,7 @@ func TestSetToolsE2E(t *testing.T) {
 	t.Run("replaces_tools_on_a_created_session", func(t *testing.T) {
 		ctx.ConfigureSnapshot(t, "set_tools/replaces_tools_on_a_created_session")
 		var originalLookups, replacementLookups, vegetableLookups toolCallRecorder
-		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Experiments: copilot.SessionExperimentOptions{Flags: controlArm}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{
 			lookupFruitTool("apple", &originalLookups),
 			retiredLookupTool(),
 		}},
@@ -75,7 +81,7 @@ func TestSetToolsE2E(t *testing.T) {
 	t.Run("replaces_tools_on_a_resumed_session", func(t *testing.T) {
 		ctx.ConfigureSnapshot(t, "set_tools/replaces_tools_on_a_resumed_session")
 		var createdLookups toolCallRecorder
-		created, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{lookupFruitTool("apple", &createdLookups)}}})
+		created, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Experiments: copilot.SessionExperimentOptions{Flags: controlArm}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{lookupFruitTool("apple", &createdLookups)}}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -91,7 +97,7 @@ func TestSetToolsE2E(t *testing.T) {
 		}
 
 		var fruitLookups, vegetableLookups toolCallRecorder
-		resumed, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{lookupFruitTool("apple", &fruitLookups)}}})
+		resumed, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Experiments: copilot.SessionExperimentOptions{Flags: controlArm}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{lookupFruitTool("apple", &fruitLookups)}}})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
 		}
@@ -117,6 +123,21 @@ func TestSetToolsE2E(t *testing.T) {
 			t.Fatalf("replacement prompt first sent in exchange %d, want an earlier exchange before it", replacedFrom)
 		}
 		assertOffered(t, exchanges[replacedFrom:], []string{"lookup_vegetable"}, []string{"lookup_fruit"})
+
+		result, err := resumed.RPC.Tools.Execute(t.Context(), &rpc.ToolsExecuteRequest{
+			Name:      "lookup_fruit",
+			Arguments: map[string]any{"code": 42},
+		})
+		if err != nil {
+			t.Fatalf("Tools.Execute failed: %v", err)
+		}
+		unavailable, ok := result.(*rpc.ToolResultExpanded)
+		const failureText = "does not exist"
+		if !ok || unavailable.ResultType != rpc.ToolResultTypeFailure || !strings.Contains(unavailable.TextResultForLlm, failureText) {
+			t.Fatalf("removed tool result = %#v, want failure containing %q", result, failureText)
+		}
+		assertCalls(t, "created fruit lookups", createdLookups.calls(), []int{42})
+		assertCalls(t, "fruit lookups", fruitLookups.calls(), nil)
 	})
 
 	t.Run("keeps_the_previous_tools_when_a_replacement_is_rejected", func(t *testing.T) {

@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use futures_util::FutureExt;
+use futures_util::future::BoxFuture;
 use parking_lot::Mutex as ParkingLotMutex;
 use serde::Deserialize;
 use serde_json::Value;
@@ -46,12 +47,15 @@ use crate::types::{
     CreateSessionOptions, CreateSessionResult, ElicitationRequest, ElicitationResult,
     ExitPlanModeData, FusionTier, GetMessagesResponse, MessageOptions, PermissionRequestData,
     PermissionsSetModeResult, RequestId, ResumeSessionOptions, ResumeSessionResult,
-    SectionOverride, SessionCapabilities, SessionEvent, SessionId, SetModelOptions,
-    SystemMessageConfig, Tool, ToolHandlerMap, ToolInvocation, TraceContext, TranscriptRecovery,
-    UiInputOptions, collect_tool_handlers, ensure_attachment_display_names,
+    SectionOverride, SessionAgentOptions, SessionCapabilities, SessionEvent,
+    SessionExperimentOptions, SessionGitHubOptions, SessionGitOptions, SessionHookOptions,
+    SessionId, SessionMcpOptions, SessionOptionsRuntime, SessionSkillOptions, SessionStateOptions,
+    SessionToolOptions, SetModelOptions, SystemMessageConfig, Tool, ToolHandlerMap, ToolInvocation,
+    TraceContext, TranscriptRecovery, UiInputOptions, collect_tool_handlers,
+    ensure_attachment_display_names,
 };
 use crate::{
-    Client, Error, ErrorKind, JsonRpcResponse, ProtocolErrorKind, SessionErrorKind,
+    Client, ClientMode, Error, ErrorKind, JsonRpcResponse, ProtocolErrorKind, SessionErrorKind,
     SessionEventNotification, error_codes,
 };
 
@@ -118,6 +122,32 @@ pub(crate) struct SessionHandlers {
     /// Shared with the owning [`Session`], which replaces the map when the
     /// runtime accepts a [`Session::set_tools`] call.
     pub tools: Arc<parking_lot::RwLock<ToolHandlerMap>>,
+}
+
+impl SessionHandlers {
+    fn take_from(runtime: &mut SessionOptionsRuntime, managed_settings_enabled: bool) -> Self {
+        let permission = crate::permission::resolve_handler(
+            runtime.permission_handler.take(),
+            runtime.permission_policy.take(),
+        );
+        let tools = Arc::new(parking_lot::RwLock::new(std::mem::take(
+            &mut runtime.tool_handlers,
+        )));
+        Self {
+            permission,
+            managed_settings_enabled,
+            elicitation: runtime.elicitation_handler.take(),
+            mcp_auth: runtime.mcp_auth_handler.take(),
+            user_input: runtime.user_input_handler.take(),
+            exit_plan_mode: runtime.exit_plan_mode_handler.take(),
+            auto_mode_switch: runtime.auto_mode_switch_handler.take(),
+            shell_authentication: runtime.shell_authentication_handler.take(),
+            skill_provider: runtime.skill_provider.take(),
+            memory_store: runtime.memory_store.take(),
+            session_creation: Arc::default(),
+            tools,
+        }
+    }
 }
 
 struct ToolHandlerRetirement {
@@ -512,23 +542,32 @@ type DeferredSessionRegistration = Arc<
     >,
 >;
 
-enum SessionInitialization {
+struct SessionInitialization {
+    // Rust drops fields in declaration order: release the guard before pruning
+    // its entry, including when a waiting acquisition is cancelled.
+    guard: SessionInitializationGuard,
+    _entry: crate::router::SessionInitializationEntry,
+}
+
+enum SessionInitializationGuard {
     Ordinary(tokio::sync::OwnedRwLockReadGuard<bool>),
     Recovery(tokio::sync::OwnedRwLockWriteGuard<bool>),
 }
 
 impl SessionInitialization {
     fn cleanup_fenced(&self) -> bool {
-        match self {
-            Self::Ordinary(guard) => **guard,
-            Self::Recovery(guard) => **guard,
+        match &self.guard {
+            SessionInitializationGuard::Ordinary(guard) => **guard,
+            SessionInitializationGuard::Recovery(guard) => **guard,
         }
     }
 
     fn set_cleanup_fenced(&mut self, fenced: bool) {
-        match self {
-            Self::Recovery(guard) => **guard = fenced,
-            Self::Ordinary(_) => unreachable!("recovery cleanup requires exclusive ownership"),
+        match &mut self.guard {
+            SessionInitializationGuard::Recovery(guard) => **guard = fenced,
+            SessionInitializationGuard::Ordinary(_) => {
+                unreachable!("recovery cleanup requires exclusive ownership")
+            }
         }
     }
 }
@@ -573,15 +612,16 @@ async fn acquire_session_initialization(
     session_id: &SessionId,
     recovery: bool,
 ) -> Result<SessionInitialization, Error> {
-    let lock = client.inner.router.initialization(session_id);
+    let entry = client.inner.router.initialization(session_id);
+    let lock = entry.lock();
     let initialization = if recovery {
         lock.clone()
             .try_write_owned()
-            .map(SessionInitialization::Recovery)
+            .map(SessionInitializationGuard::Recovery)
     } else {
         lock.clone()
             .try_read_owned()
-            .map(SessionInitialization::Ordinary)
+            .map(SessionInitializationGuard::Ordinary)
     };
     let initialization = match initialization {
         Ok(initialization) => initialization,
@@ -599,11 +639,15 @@ async fn acquire_session_initialization(
                 ));
             }
             if recovery {
-                SessionInitialization::Recovery(lock.write_owned().await)
+                SessionInitializationGuard::Recovery(lock.clone().write_owned().await)
             } else {
-                SessionInitialization::Ordinary(lock.read_owned().await)
+                SessionInitializationGuard::Ordinary(lock.clone().read_owned().await)
             }
         }
+    };
+    let initialization = SessionInitialization {
+        guard: initialization,
+        _entry: entry,
     };
     check_session_initialization(&initialization)?;
     Ok(initialization)
@@ -792,11 +836,19 @@ impl PendingSessionRegistration {
                 return Err(ErrorKind::Session(SessionErrorKind::EventLoopClosed).into());
             }
             // Inline response dispatch cannot wait for an in-flight same-ID detach.
-            let lock = client.inner.router.initialization(&parsed.session_id);
-            let initialization = if recovery {
-                lock.try_write_owned().map(SessionInitialization::Recovery)
+            let entry = client.inner.router.initialization(&parsed.session_id);
+            let guard = if recovery {
+                entry
+                    .lock()
+                    .clone()
+                    .try_write_owned()
+                    .map(SessionInitializationGuard::Recovery)
             } else {
-                lock.try_read_owned().map(SessionInitialization::Ordinary)
+                entry
+                    .lock()
+                    .clone()
+                    .try_read_owned()
+                    .map(SessionInitializationGuard::Ordinary)
             }
             .map_err(|_| {
                 Error::with_message(
@@ -804,6 +856,10 @@ impl PendingSessionRegistration {
                     "Session initialization or cleanup is still in progress",
                 )
             })?;
+            let initialization = SessionInitialization {
+                guard,
+                _entry: entry,
+            };
             check_session_initialization(&initialization)?;
             let registration = client.register_session(&parsed.session_id);
             *stashed = Some((parsed.session_id, registration, initialization));
@@ -1685,8 +1741,8 @@ impl Session {
                 let response = completed.response.ok_or_else(|| {
                     structured_output_error("run completed without a structured assistant response")
                 })?;
-                let data: crate::session_events::AssistantMessageData =
-                    serde_json::from_value(response.data.clone())?;
+                let data =
+                    crate::session_events::AssistantMessageData::deserialize(&response.data)?;
                 if data
                     .tool_requests
                     .is_some_and(|requests| !requests.is_empty())
@@ -1734,22 +1790,21 @@ impl Session {
                 .store(true, Ordering::Release);
             return Ok(None);
         }
-        let completed = result
-            .as_ref()
-            .ok()
-            .map(|value| {
-                serde_json::from_value::<crate::generated::api_types::SendAndWaitResult>(
-                    value.clone(),
-                )
-            })
-            .transpose()?;
+        let (completed, error) = match result {
+            Ok(value) => (
+                Some(serde_json::from_value::<
+                    crate::generated::api_types::SendAndWaitResult,
+                >(value)?),
+                None,
+            ),
+            Err(error) => (None, Some(error)),
+        };
         let boundary = completed
             .as_ref()
             .and_then(|result| result.completion_event_id.as_deref())
             .or_else(|| {
-                result
+                error
                     .as_ref()
-                    .err()
                     .and_then(|error| error.rpc_data())
                     .and_then(|data| data.get("completionEventId"))
                     .and_then(serde_json::Value::as_str)
@@ -1769,17 +1824,19 @@ impl Session {
                 }
             }
         }
-        result.map_err(|error| {
-            if error
-                .rpc_data()
-                .and_then(|data| data.get("completionEventId"))
-                .is_some()
-            {
-                error.into_agent_error()
-            } else {
-                error
-            }
-        })?;
+        if let Some(error) = error {
+            return Err(
+                if error
+                    .rpc_data()
+                    .and_then(|data| data.get("completionEventId"))
+                    .is_some()
+                {
+                    error.into_agent_error()
+                } else {
+                    error
+                },
+            );
+        }
         if completed
             .as_ref()
             .and_then(|result| result.response.as_ref())
@@ -2555,6 +2612,25 @@ impl Client {
         self.prepare_resume_session(config)?.start().await
     }
 
+    // Keep the large startup futures' poll/drop code in the SDK rather than
+    // instantiating their concrete types again in every downstream host.
+    #[inline(never)]
+    fn start_prepared(
+        &self,
+        kind: PreparedKind,
+        event_tx: tokio::sync::broadcast::Sender<SessionEvent>,
+        shutdown: CancellationToken,
+    ) -> BoxFuture<'_, Result<Session, Error>> {
+        match kind {
+            PreparedKind::Create(config) => {
+                Box::pin(self.start_prepared_create(*config, event_tx, shutdown))
+            }
+            PreparedKind::Resume(config) => {
+                Box::pin(self.start_prepared_resume(*config, event_tx, shutdown))
+            }
+        }
+    }
+
     async fn start_prepared_create(
         &self,
         mut config: CreateSessionOptions,
@@ -2574,16 +2650,21 @@ impl Client {
                 "Memory stores are not supported for cloud sessions.",
             ));
         }
-        let ahp_creation_config = if self
-            .inner
-            .ahp_host_sessions
-            .upgrade()
-            .is_some_and(|sessions| sessions.expects_session(config.session_id.as_ref()))
-        {
-            Some(crate::ahp_host::config_for_host(&config)?)
-        } else {
-            None
-        };
+        let ahp_creation_config =
+            if self
+                .inner
+                .ahp_host_sessions
+                .upgrade()
+                .is_some_and(|sessions| {
+                    sessions
+                        .into_sessions()
+                        .expects_session(config.session_id.as_ref())
+                })
+            {
+                Some(crate::ahp_host::config_for_host(&config)?)
+            } else {
+                None
+            };
         // Non-cloud IDs are generated locally when omitted by the caller.
         // Start the loop before the RPC: session.create may issue
         // sessionFs.writeFile for workspace metadata before its response.
@@ -2603,67 +2684,23 @@ impl Client {
             config.hooks.has_handlers = Some(true);
         }
         if let Some(transforms) = config.system_message_transform.clone() {
-            inject_transform_sections(&mut config, transforms.as_ref());
+            inject_transform_sections(&mut config.system_message, transforms.as_ref());
         }
         let mode = self.inner.mode;
-        if mode == crate::ClientMode::Empty && config.tools.available_tools.is_none() {
-            return Err(Error::with_message(
-                ErrorKind::InvalidConfig,
-                "ClientMode::Empty requires available_tools to be set on the session config. \
-                 Use ToolSet to specify which tools the session may use (e.g. \
-                 ToolSet::new().add_builtin_many(BUILTIN_TOOLS_ISOLATED)).",
-            ));
-        }
-        crate::mode::validate_tool_filter_list(
-            "available_tools",
-            config.tools.available_tools.as_deref(),
-        )?;
-        crate::mode::validate_tool_filter_list(
-            "excluded_tools",
-            config.tools.excluded_tools.as_deref(),
-        )?;
-        config.system_message =
-            crate::mode::system_message_for_mode(mode, config.system_message.take());
-        config.state.memory = crate::mode::memory_for_mode(mode, config.state.memory.take());
-        validate_memory_store(
-            config.state.memory_store.is_some(),
-            config.state.memory.as_ref(),
-        )?;
-        config.experiments.enable_experimental_mode = crate::mode::experimental_mode_for_mode(
+        apply_session_mode(
             mode,
-            config.experiments.enable_experimental_mode,
-        );
-        if mode == crate::ClientMode::Empty {
-            if config.github.telemetry_enabled.is_none() {
-                config.github.telemetry_enabled = Some(false);
-            }
-            if config.state.skip_embedding_retrieval.is_none() {
-                config.state.skip_embedding_retrieval = Some(true);
-            }
-            if config.instructions.on_demand_discovery.is_none() {
-                config.instructions.on_demand_discovery = Some(false);
-            }
-            if config.hooks.enable_repository_hooks.is_none() {
-                config.hooks.enable_repository_hooks = Some(false);
-            }
-            if config.git.enable_host_git_operations.is_none() {
-                config.git.enable_host_git_operations = Some(false);
-            }
-            if config.state.enable_cross_session_store.is_none() {
-                config.state.enable_cross_session_store = Some(false);
-            }
-            if config.skills.enabled.is_none() {
-                config.skills.enabled = Some(false);
-            }
-        }
-        if mode == crate::ClientMode::Empty && config.mcp.oauth_token_storage.is_none() {
-            config.mcp.oauth_token_storage = Some("in-memory".into());
-        }
-        if mode == crate::ClientMode::Empty && config.state.embedding_cache_storage.is_none() {
-            config.state.embedding_cache_storage = Some("in-memory".into());
-        }
-        config.agents.local_discovery_only =
-            crate::mode::resolve_custom_agents_local_only(mode, config.agents.local_discovery_only);
+            &config.tools,
+            &mut config.system_message,
+            &mut config.state,
+            &mut config.experiments,
+            &mut config.github,
+            &mut config.instructions.on_demand_discovery,
+            &mut config.hooks,
+            &mut config.git,
+            &mut config.skills,
+            &mut config.mcp,
+            &mut config.agents,
+        )?;
         let opt_skip_custom_instructions = config.instructions.skip_custom_instructions;
         let opt_custom_agents_local_only = config.agents.local_discovery_only;
         let opt_coauthor_enabled = config.git.coauthor_enabled;
@@ -2672,30 +2709,14 @@ impl Client {
         let (mut wire, mut runtime) = config.into_wire(local_session_id.clone())?;
         wire.github.telemetry_forwarding = self.inner.on_github_telemetry.is_some().then_some(true);
 
-        let permission_handler = crate::permission::resolve_handler(
-            runtime.permission_handler.take(),
-            runtime.permission_policy.take(),
-        );
-        let tool_handlers = Arc::new(parking_lot::RwLock::new(std::mem::take(
-            &mut runtime.tool_handlers,
-        )));
-        let handlers = SessionHandlers {
-            permission: permission_handler,
-            managed_settings_enabled: has_managed_settings(
+        let handlers = SessionHandlers::take_from(
+            &mut runtime,
+            has_managed_settings(
                 wire.github.fetch_managed_settings,
                 wire.policy.managed_settings.as_ref(),
             ),
-            elicitation: runtime.elicitation_handler.take(),
-            mcp_auth: runtime.mcp_auth_handler.take(),
-            user_input: runtime.user_input_handler.take(),
-            exit_plan_mode: runtime.exit_plan_mode_handler.take(),
-            auto_mode_switch: runtime.auto_mode_switch_handler.take(),
-            shell_authentication: runtime.shell_authentication_handler.take(),
-            skill_provider: runtime.skill_provider.take(),
-            memory_store: runtime.memory_store.take(),
-            session_creation: Arc::default(),
-            tools: tool_handlers.clone(),
-        };
+        );
+        let tool_handlers = handlers.tools.clone();
         let session_creation = handlers.session_creation.clone();
         let hooks = runtime.hooks_handler.take();
         let transforms = runtime.system_message_transform.take();
@@ -2714,38 +2735,7 @@ impl Client {
             .as_ref()
             .map(|registration| registration.id().to_string());
         let has_mcp_auth_handler = handlers.mcp_auth.is_some();
-        if self.inner.session_fs_configured && session_fs_provider.is_none() {
-            return Err(ErrorKind::Session(SessionErrorKind::SessionFsProviderRequired).into());
-        }
-        if self.inner.session_fs_sqlite_declared
-            && let Some(ref provider) = session_fs_provider
-            && provider.sqlite().is_none()
-        {
-            return Err(Error::with_message(
-                ErrorKind::InvalidConfig,
-                "SessionFs capabilities declare SQLite support but the provider \
-                 does not implement SessionFsSqliteProvider",
-            ));
-        }
-        if self.inner.session_fs_binary_declared
-            && let Some(ref provider) = session_fs_provider
-            && provider.binary().is_none()
-        {
-            return Err(Error::with_message(
-                ErrorKind::InvalidConfig,
-                "SessionFs capabilities declare binary support but the provider does not implement SessionFsBinaryProvider",
-            ));
-        }
-
-        if self.inner.session_fs_read_file_range_declared
-            && let Some(ref provider) = session_fs_provider
-            && provider.byte_ranges().is_none()
-        {
-            return Err(Error::with_message(
-                ErrorKind::InvalidConfig,
-                "SessionFs capabilities declare byte-range reads but the provider does not implement SessionFsReadFileRangeProvider",
-            ));
-        }
+        self.validate_session_fs_provider(session_fs_provider.as_deref())?;
 
         let mut params = serde_json::to_value(&wire)?;
         let trace_ctx = self.resolve_trace_context().await;
@@ -3035,81 +3025,42 @@ impl Client {
             }
             config.session_id = canonical;
         }
-        let ahp_creation_config = if self
-            .inner
-            .ahp_host_sessions
-            .upgrade()
-            .is_some_and(|sessions| sessions.expects_session(Some(&config.session_id)))
-        {
-            Some(crate::ahp_host::resume_config_for_host(&config)?)
-        } else {
-            None
-        };
+        let ahp_creation_config =
+            if self
+                .inner
+                .ahp_host_sessions
+                .upgrade()
+                .is_some_and(|sessions| {
+                    sessions
+                        .into_sessions()
+                        .expects_session(Some(&config.session_id))
+                })
+            {
+                Some(crate::ahp_host::resume_config_for_host(&config)?)
+            } else {
+                None
+            };
         let session_id = config.session_id.clone();
         if config.hooks.handlers.is_some() && config.hooks.has_handlers.is_none() {
             config.hooks.has_handlers = Some(true);
         }
         if let Some(transforms) = config.system_message_transform.clone() {
-            inject_transform_sections_resume(&mut config, transforms.as_ref());
+            inject_transform_sections(&mut config.system_message, transforms.as_ref());
         }
-        if mode == crate::ClientMode::Empty && config.tools.available_tools.is_none() {
-            return Err(Error::with_message(
-                ErrorKind::InvalidConfig,
-                "ClientMode::Empty requires available_tools to be set on the session config. \
-                 Use ToolSet to specify which tools the session may use (e.g. \
-                 ToolSet::new().add_builtin_many(BUILTIN_TOOLS_ISOLATED)).",
-            ));
-        }
-        crate::mode::validate_tool_filter_list(
-            "available_tools",
-            config.tools.available_tools.as_deref(),
-        )?;
-        crate::mode::validate_tool_filter_list(
-            "excluded_tools",
-            config.tools.excluded_tools.as_deref(),
-        )?;
-        config.system_message =
-            crate::mode::system_message_for_mode(mode, config.system_message.take());
-        config.state.memory = crate::mode::memory_for_mode(mode, config.state.memory.take());
-        validate_memory_store(
-            config.state.memory_store.is_some(),
-            config.state.memory.as_ref(),
-        )?;
-        config.experiments.enable_experimental_mode = crate::mode::experimental_mode_for_mode(
+        apply_session_mode(
             mode,
-            config.experiments.enable_experimental_mode,
-        );
-        if mode == crate::ClientMode::Empty {
-            if config.github.telemetry_enabled.is_none() {
-                config.github.telemetry_enabled = Some(false);
-            }
-            if config.state.skip_embedding_retrieval.is_none() {
-                config.state.skip_embedding_retrieval = Some(true);
-            }
-            if config.instructions.on_demand_discovery.is_none() {
-                config.instructions.on_demand_discovery = Some(false);
-            }
-            if config.hooks.enable_repository_hooks.is_none() {
-                config.hooks.enable_repository_hooks = Some(false);
-            }
-            if config.git.enable_host_git_operations.is_none() {
-                config.git.enable_host_git_operations = Some(false);
-            }
-            if config.state.enable_cross_session_store.is_none() {
-                config.state.enable_cross_session_store = Some(false);
-            }
-            if config.skills.enabled.is_none() {
-                config.skills.enabled = Some(false);
-            }
-        }
-        if mode == crate::ClientMode::Empty && config.mcp.oauth_token_storage.is_none() {
-            config.mcp.oauth_token_storage = Some("in-memory".into());
-        }
-        if mode == crate::ClientMode::Empty && config.state.embedding_cache_storage.is_none() {
-            config.state.embedding_cache_storage = Some("in-memory".into());
-        }
-        config.agents.local_discovery_only =
-            crate::mode::resolve_custom_agents_local_only(mode, config.agents.local_discovery_only);
+            &config.tools,
+            &mut config.system_message,
+            &mut config.state,
+            &mut config.experiments,
+            &mut config.github,
+            &mut config.instructions.on_demand_discovery,
+            &mut config.hooks,
+            &mut config.git,
+            &mut config.skills,
+            &mut config.mcp,
+            &mut config.agents,
+        )?;
         let opt_skip_custom_instructions = config.instructions.skip_custom_instructions;
         let opt_custom_agents_local_only = config.agents.local_discovery_only;
         let opt_coauthor_enabled = config.git.coauthor_enabled;
@@ -3118,30 +3069,14 @@ impl Client {
         let (mut wire, mut runtime) = config.into_wire()?;
         wire.github.telemetry_forwarding = self.inner.on_github_telemetry.is_some().then_some(true);
 
-        let permission_handler = crate::permission::resolve_handler(
-            runtime.permission_handler.take(),
-            runtime.permission_policy.take(),
-        );
-        let tool_handlers = Arc::new(parking_lot::RwLock::new(std::mem::take(
-            &mut runtime.tool_handlers,
-        )));
-        let handlers = SessionHandlers {
-            permission: permission_handler,
-            managed_settings_enabled: has_managed_settings(
+        let handlers = SessionHandlers::take_from(
+            &mut runtime,
+            has_managed_settings(
                 wire.github.fetch_managed_settings,
                 wire.policy.managed_settings.as_ref(),
             ),
-            elicitation: runtime.elicitation_handler.take(),
-            mcp_auth: runtime.mcp_auth_handler.take(),
-            user_input: runtime.user_input_handler.take(),
-            exit_plan_mode: runtime.exit_plan_mode_handler.take(),
-            auto_mode_switch: runtime.auto_mode_switch_handler.take(),
-            shell_authentication: runtime.shell_authentication_handler.take(),
-            skill_provider: runtime.skill_provider.take(),
-            memory_store: runtime.memory_store.take(),
-            session_creation: Arc::default(),
-            tools: tool_handlers.clone(),
-        };
+        );
+        let tool_handlers = handlers.tools.clone();
         let session_creation = handlers.session_creation.clone();
         let hooks = runtime.hooks_handler.take();
         let transforms = runtime.system_message_transform.take();
@@ -3160,38 +3095,7 @@ impl Client {
             .as_ref()
             .map(|registration| registration.id().to_string());
         let has_mcp_auth_handler = handlers.mcp_auth.is_some();
-        if self.inner.session_fs_configured && session_fs_provider.is_none() {
-            return Err(ErrorKind::Session(SessionErrorKind::SessionFsProviderRequired).into());
-        }
-        if self.inner.session_fs_sqlite_declared
-            && let Some(ref provider) = session_fs_provider
-            && provider.sqlite().is_none()
-        {
-            return Err(Error::with_message(
-                ErrorKind::InvalidConfig,
-                "SessionFs capabilities declare SQLite support but the provider \
-                 does not implement SessionFsSqliteProvider",
-            ));
-        }
-        if self.inner.session_fs_binary_declared
-            && let Some(ref provider) = session_fs_provider
-            && provider.binary().is_none()
-        {
-            return Err(Error::with_message(
-                ErrorKind::InvalidConfig,
-                "SessionFs capabilities declare binary support but the provider does not implement SessionFsBinaryProvider",
-            ));
-        }
-
-        if self.inner.session_fs_read_file_range_declared
-            && let Some(ref provider) = session_fs_provider
-            && provider.byte_ranges().is_none()
-        {
-            return Err(Error::with_message(
-                ErrorKind::InvalidConfig,
-                "SessionFs capabilities declare byte-range reads but the provider does not implement SessionFsReadFileRangeProvider",
-            ));
-        }
+        self.validate_session_fs_provider(session_fs_provider.as_deref())?;
 
         let mut params = serde_json::to_value(&wire)?;
         let trace_ctx = self.resolve_trace_context().await;
@@ -3384,6 +3288,37 @@ impl Client {
         );
         finish_session_setup(session, registration, patch, initialization).await
     }
+
+    fn validate_session_fs_provider(
+        &self,
+        provider: Option<&dyn SessionFsProvider>,
+    ) -> Result<(), Error> {
+        if self.inner.session_fs_configured && provider.is_none() {
+            return Err(ErrorKind::Session(SessionErrorKind::SessionFsProviderRequired).into());
+        }
+        if let Some(provider) = provider {
+            if self.inner.session_fs_sqlite_declared && provider.sqlite().is_none() {
+                return Err(Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "SessionFs capabilities declare SQLite support but the provider \
+                     does not implement SessionFsSqliteProvider",
+                ));
+            }
+            if self.inner.session_fs_binary_declared && provider.binary().is_none() {
+                return Err(Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "SessionFs capabilities declare binary support but the provider does not implement SessionFsBinaryProvider",
+                ));
+            }
+            if self.inner.session_fs_read_file_range_declared && provider.byte_ranges().is_none() {
+                return Err(Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "SessionFs capabilities declare byte-range reads but the provider does not implement SessionFsReadFileRangeProvider",
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A session that has been configured but not yet created on the CLI.
@@ -3521,21 +3456,60 @@ impl PreparedSession {
             event_tx,
             shutdown,
         } = self;
-        // The startup state machines exceed 16 KiB; boxing them keeps this
-        // future, and every public caller awaiting it, small enough for
-        // 2 MiB worker stacks and `clippy::large_futures`.
-        match kind {
-            PreparedKind::Create(config) => {
-                Box::pin(client.start_prepared_create(*config, event_tx, shutdown)).await
-            }
-            PreparedKind::Resume(config) => {
-                Box::pin(client.start_prepared_resume(*config, event_tx, shutdown)).await
-            }
-        }
+        client.start_prepared(kind, event_tx, shutdown).await
     }
 }
 
 type CommandHandlerMap = HashMap<String, Arc<dyn CommandHandler>>;
+
+#[allow(clippy::too_many_arguments)]
+fn apply_session_mode(
+    mode: ClientMode,
+    tools: &SessionToolOptions,
+    system_message: &mut Option<SystemMessageConfig>,
+    state: &mut SessionStateOptions,
+    experiments: &mut SessionExperimentOptions,
+    github: &mut SessionGitHubOptions,
+    on_demand_discovery: &mut Option<bool>,
+    hooks: &mut SessionHookOptions,
+    git: &mut SessionGitOptions,
+    skills: &mut SessionSkillOptions,
+    mcp: &mut SessionMcpOptions,
+    agents: &mut SessionAgentOptions,
+) -> Result<(), Error> {
+    if mode == ClientMode::Empty && tools.available_tools.is_none() {
+        return Err(Error::with_message(
+            ErrorKind::InvalidConfig,
+            "ClientMode::Empty requires available_tools to be set on the session config. \
+             Use ToolSet to specify which tools the session may use (e.g. \
+             ToolSet::new().add_builtin_many(BUILTIN_TOOLS_ISOLATED)).",
+        ));
+    }
+    crate::mode::validate_tool_filter_list("available_tools", tools.available_tools.as_deref())?;
+    crate::mode::validate_tool_filter_list("excluded_tools", tools.excluded_tools.as_deref())?;
+    *system_message = crate::mode::system_message_for_mode(mode, system_message.take());
+    state.memory = crate::mode::memory_for_mode(mode, state.memory.take());
+    validate_memory_store(state.memory_store.is_some(), state.memory.as_ref())?;
+    experiments.enable_experimental_mode =
+        crate::mode::experimental_mode_for_mode(mode, experiments.enable_experimental_mode);
+    if mode == ClientMode::Empty {
+        github.telemetry_enabled.get_or_insert(false);
+        state.skip_embedding_retrieval.get_or_insert(true);
+        on_demand_discovery.get_or_insert(false);
+        hooks.enable_repository_hooks.get_or_insert(false);
+        git.enable_host_git_operations.get_or_insert(false);
+        state.enable_cross_session_store.get_or_insert(false);
+        skills.enabled.get_or_insert(false);
+        mcp.oauth_token_storage
+            .get_or_insert_with(|| "in-memory".into());
+        state
+            .embedding_cache_storage
+            .get_or_insert_with(|| "in-memory".into());
+    }
+    agents.local_discovery_only =
+        crate::mode::resolve_custom_agents_local_only(mode, agents.local_discovery_only);
+    Ok(())
+}
 
 fn validate_memory_store(
     has_memory_store: bool,
@@ -3738,7 +3712,6 @@ fn spawn_event_loop(
         shutdown: shutdown.clone(),
     };
     let connection_closed = client.inner.rpc.connection_closed_token();
-
     // A root span: the loop and every callback span nested under it outlive
     // the create or resume call, so they must not be attributed to whatever
     // span the caller had current at that moment.
@@ -3882,16 +3855,13 @@ fn permission_request_data(
     event_data: &Value,
     managed_settings_enabled: bool,
 ) -> PermissionRequestData {
-    let request_data = event_data
-        .get("permissionRequest")
-        .cloned()
-        .unwrap_or_else(|| event_data.clone());
+    let request_data = event_data.get("permissionRequest").unwrap_or(event_data);
     let managed_approval_required = match request_data.get("managedApprovalRequired") {
         None => None,
         Some(Value::Bool(value)) => Some(*value),
         Some(_) => Some(true),
     };
-    match serde_json::from_value::<PermissionRequestData>(request_data) {
+    match PermissionRequestData::deserialize(request_data) {
         Ok(mut data) => {
             data.extra = event_data.clone();
             data.managed_settings_enabled = managed_settings_enabled;
@@ -4048,8 +4018,8 @@ async fn handle_notification(
 
     if let Some(bootstrap) = resume_bootstrap {
         bootstrap.publish(event_tx, event.clone());
-    } else {
-        // No receivers is normal before any consumer subscribes.
+    } else if event_tx.receiver_count() != 0 {
+        // Avoid cloning the payload for an event with no live subscribers.
         let _ = event_tx.send(event.clone());
     }
     if is_root_agent_event(event)
@@ -4975,7 +4945,7 @@ async fn handle_memory_store_request(
 async fn handle_request(
     session_id: &SessionId,
     ctx: RequestDispatchContext<'_>,
-    request: crate::JsonRpcRequest,
+    mut request: crate::JsonRpcRequest,
 ) {
     let sid = session_id.clone();
     let client = ctx.client;
@@ -5020,15 +4990,19 @@ async fn handle_request(
 
     match request.method.as_str() {
         "hooks.invoke" => {
+            // Move the input out instead of deep-cloning it; tool hooks can
+            // carry large arguments and results. Nothing else reads it.
+            let input = request
+                .params
+                .as_mut()
+                .and_then(|p| p.as_object_mut())
+                .and_then(|p| p.remove("input"))
+                .unwrap_or(Value::Object(Default::default()));
             let params = request.params.as_ref();
             let hook_type = params
                 .and_then(|p| p.get("hookType"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let input = params
-                .and_then(|p| p.get("input"))
-                .cloned()
-                .unwrap_or(Value::Object(Default::default()));
 
             let rpc_result = if let Some(hooks) = hooks {
                 match crate::hooks::dispatch_hook(hooks, &sid, hook_type, input).await {
@@ -5362,10 +5336,11 @@ async fn send_error_response(
 /// Inject `action: "transform"` sections into a `SystemMessageConfig`,
 /// forcing `mode: "customize"` (required by the CLI for transforms to fire).
 /// Preserves any existing caller-provided section overrides.
-fn apply_transform_sections(
-    sys_msg: &mut SystemMessageConfig,
+fn inject_transform_sections(
+    system_message: &mut Option<SystemMessageConfig>,
     transforms: &dyn SystemMessageTransform,
 ) {
+    let sys_msg = system_message.get_or_insert_with(Default::default);
     sys_msg.mode = Some("customize".to_string());
     let sections = sys_msg.sections.get_or_insert_with(HashMap::new);
     for id in transforms.section_ids() {
@@ -5374,22 +5349,6 @@ fn apply_transform_sections(
             content: None,
         });
     }
-}
-
-fn inject_transform_sections(
-    config: &mut CreateSessionOptions,
-    transforms: &dyn SystemMessageTransform,
-) {
-    let sys_msg = config.system_message.get_or_insert_with(Default::default);
-    apply_transform_sections(sys_msg, transforms);
-}
-
-fn inject_transform_sections_resume(
-    config: &mut ResumeSessionOptions,
-    transforms: &dyn SystemMessageTransform,
-) {
-    let sys_msg = config.system_message.get_or_insert_with(Default::default);
-    apply_transform_sections(sys_msg, transforms);
 }
 
 #[cfg(test)]

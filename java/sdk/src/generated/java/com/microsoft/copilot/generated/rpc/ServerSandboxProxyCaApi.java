@@ -27,6 +27,50 @@ public final class ServerSandboxProxyCaApi {
     }
 
     /**
+     * Atomically replaces a stale stored certificate authority only if OS trust does not include it. Never trusts the replacement. Returns false when no certificate authority exists, it is current, or another process already trusted it. A host can use this after a user declines an update without granting consent to trust a replacement.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<Boolean> rotateIfUntrusted(SandboxProxyCaRotateIfUntrustedParams params) {
+        return caller.invoke("sandbox.proxyCa.rotateIfUntrusted", params, Boolean.class);
+    }
+
+    /**
+     * Removes the stored certificate authority for the selected Copilot configuration directory from OS trust. Keeps the stored certificate authority. Can show an OS authentication prompt. The sandboxConfig field does not affect removal.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SandboxProxyCaRemoveForConfigDirResult> removeForConfigDir(SandboxProxyCaRemoveForConfigDirParams params) {
+        return caller.invoke("sandbox.proxyCa.removeForConfigDir", params, SandboxProxyCaRemoveForConfigDirResult.class);
+    }
+
+    /**
+     * Reports whether the user declined the ordinary certificate-authority installation offer in this explicit host context. A stale certificate authority still needs a new consent decision.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<Boolean> getDeclined(SandboxProxyCaGetDeclinedParams params) {
+        return caller.invoke("sandbox.proxyCa.getDeclined", params, Boolean.class);
+    }
+
+    /**
+     * Remembers a user's decline of the ordinary certificate-authority installation offer in this explicit host context. Changes no certificate or OS trust. Hosts must not call this when an offer was never shown or when the user declines an update to a stale certificate authority.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<Void> decline(SandboxProxyCaDeclineParams params) {
+        return caller.invoke("sandbox.proxyCa.decline", params, Void.class);
+    }
+
+    /**
      * Reports whether this runtime process can offer installing the sandbox credential-proxy certificate authority into OS trust.
      *
      * @apiNote This method is experimental and may change in a future version.
@@ -90,6 +134,61 @@ public final class ServerSandboxProxyCaApi {
     @CopilotExperimental
     public CompletableFuture<SandboxProxyCaTrustResult> trust(SandboxProxyCaTrustParams params) {
         return caller.invoke("sandbox.proxyCa.trust", params, SandboxProxyCaTrustResult.class);
+    }
+
+    /**
+     * Reports whether the selected Copilot profile's sandbox credential-proxy certificate authority exists, whether OS trust includes it, and whether it needs rotation. Changes nothing.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SandboxProxyCaGetStatusForConfigDirResult> getStatusForConfigDir(SandboxProxyCaGetStatusForConfigDirParams params) {
+        return caller.invoke("sandbox.proxyCa.getStatusForConfigDir", params, SandboxProxyCaGetStatusForConfigDirResult.class);
+    }
+
+    /**
+     * Creates the selected Copilot profile's sandbox credential-proxy certificate authority if none exists. Returns its public certificate path without changes to OS trust. Keeps an existing certificate authority, even when it needs rotation. Fails where OS trust is unsupported. Use sandbox.proxyCa.trustForConfigDir to trust it.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SandboxProxyCaCreateForConfigDirResult> createForConfigDir(SandboxProxyCaCreateForConfigDirParams params) {
+        return caller.invoke("sandbox.proxyCa.createForConfigDir", params, SandboxProxyCaCreateForConfigDirResult.class);
+    }
+
+    /**
+     * Replaces the selected Copilot profile's sandbox credential-proxy certificate authority for its current credential hosts. If OS trust included the old certificate authority, removes it and trusts the replacement. Can show an OS authentication prompt. Active sandboxed tools keep the old certificate authority until they restart.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SandboxProxyCaRotateForConfigDirResult> rotateForConfigDir(SandboxProxyCaRotateForConfigDirParams params) {
+        return caller.invoke("sandbox.proxyCa.rotateForConfigDir", params, SandboxProxyCaRotateForConfigDirResult.class);
+    }
+
+    /**
+     * Adds the selected Copilot profile's sandbox credential-proxy certificate authority to OS trust. Call createForConfigDir first. Refuses a certificate authority that is not constrained to the current credential hosts. Can show an OS authentication prompt.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SandboxProxyCaTrustForConfigDirResult> trustForConfigDir(SandboxProxyCaTrustForConfigDirParams params) {
+        return caller.invoke("sandbox.proxyCa.trustForConfigDir", params, SandboxProxyCaTrustForConfigDirResult.class);
+    }
+
+    /**
+     * Validates and adds a supplied credential-proxy CA certificate to OS trust. Device-management hosts can distribute a certificate file and explicitly permit its credential hosts. Includes the selected profile's saved credential hosts. Refuses unsafe certificate constraints before any OS trust change. Without a file, uses the selected profile's stored CA. Can show an OS authentication prompt.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SandboxProxyCaTrustCertificateResult> trustCertificate(SandboxProxyCaTrustCertificateParams params) {
+        return caller.invoke("sandbox.proxyCa.trustCertificate", params, SandboxProxyCaTrustCertificateResult.class);
     }
 
     /**

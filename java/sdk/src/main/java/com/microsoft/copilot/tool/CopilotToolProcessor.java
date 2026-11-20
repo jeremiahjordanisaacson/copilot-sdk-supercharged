@@ -539,6 +539,16 @@ public class CopilotToolProcessor extends AbstractProcessor {
                                 .append(" = ").append(generateArgExtraction(varName + "Raw", paramType)).append(";\n");
                     } else if (isOptionalType(paramType)) {
                         generateOptionalExtraction(sb, paramName, varName, paramType);
+                    } else if (paramAnnotation != null && !paramAnnotation.required()
+                            && paramType.getKind() == TypeKind.DECLARED
+                            && isBoxedNumeric(((TypeElement) ((DeclaredType) paramType).asElement()).getQualifiedName()
+                                    .toString())) {
+                        // Pass null for an optional boxed number the arguments omit or set to null,
+                        // as for other optional reference types, instead of unboxing it.
+                        String argExpr = "args.get(\"" + paramName + "\")";
+                        sb.append("                    ").append(getTypeString(paramType)).append(" ").append(varName)
+                                .append(" = ").append(argExpr).append(" != null ? ")
+                                .append(generateArgExtractionFromMap(paramName, paramType)).append(" : null;\n");
                     } else {
                         sb.append("                    ").append(getTypeString(paramType)).append(" ").append(varName)
                                 .append(" = ").append(generateArgExtractionFromMap(paramName, paramType)).append(";\n");

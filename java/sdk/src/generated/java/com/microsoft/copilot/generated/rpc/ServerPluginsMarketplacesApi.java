@@ -38,6 +38,17 @@ public final class ServerPluginsMarketplacesApi {
     }
 
     /**
+     * Restores a retired default marketplace in the runtime's configured profile when a retained plugin install still needs it. Uses retained managed policy without fetching catalogs or policy. Returns the persisted result so a launcher can report the settings change before opening a session or running a plugin command. Repeated calls are guarded per profile; malformed settings and write failures reject the call.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<PluginsMarketplacesMigrateRetiredDefaultResult> migrateRetiredDefault() {
+        return caller.invoke("plugins.marketplaces.migrateRetiredDefault", java.util.Map.of(), PluginsMarketplacesMigrateRetiredDefaultResult.class);
+    }
+
+    /**
      * Registers a new marketplace from a source (owner/repo, URL, or local path).
      *
      * @apiNote This method is experimental and may change in a future version.

@@ -30,7 +30,7 @@ use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 #[cfg(feature = "network-forwarding")]
 use std::sync::LazyLock;
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -62,7 +62,7 @@ use crate::generated::api_types::{
     LlmInferenceHttpResponseChunkRequest, LlmInferenceHttpResponseStartRequest,
 };
 use crate::{
-    Client, ClientInner, JsonRpcRequest, JsonRpcResponse, RequestId, SessionId, error_codes,
+    Client, JsonRpcRequest, JsonRpcResponse, RequestId, SessionId, WeakClientInner, error_codes,
 };
 
 mod http_response_reader;
@@ -790,7 +790,7 @@ struct CopilotRequestExchange {
     request_id: String,
     meta: OnceLock<RequestMeta>,
     cancel: CancellationToken,
-    client: Weak<ClientInner>,
+    client: WeakClientInner,
     /// Sender feeding the request body stream. Dropped (set to `None`) on `end`
     /// or `cancel` to close the stream.
     body_tx: Mutex<Option<mpsc::UnboundedSender<RequestBodyFrame>>>,
@@ -799,7 +799,7 @@ struct CopilotRequestExchange {
 }
 
 impl CopilotRequestExchange {
-    fn new(request_id: String, client: Weak<ClientInner>) -> Self {
+    fn new(request_id: String, client: WeakClientInner) -> Self {
         let (body_tx, body_rx) = mpsc::unbounded_channel();
         Self {
             request_id,
@@ -1278,7 +1278,7 @@ impl FinishedRequestIds {
 /// reassembling each request's streaming body and acking every frame.
 pub(crate) struct CopilotRequestDispatcher {
     handler: Arc<dyn CopilotRequestHandler>,
-    client: OnceLock<Weak<ClientInner>>,
+    client: OnceLock<WeakClientInner>,
     pending: Mutex<HashMap<String, Arc<CopilotRequestExchange>>>,
     /// Locked only while `pending` is held, so a frame cannot recreate an entry
     /// for a request that is being removed.
@@ -1297,19 +1297,19 @@ impl CopilotRequestDispatcher {
     }
 
     #[cfg(any(feature = "runtime", test))]
-    pub(crate) fn set_client(&self, client: Weak<ClientInner>) {
+    pub(crate) fn set_client(&self, client: WeakClientInner) {
         let _ = self.client.set(client);
     }
 
     fn client(&self) -> Option<Client> {
         self.client
             .get()
-            .and_then(Weak::upgrade)
+            .and_then(WeakClientInner::upgrade)
             .map(Client::from_inner)
     }
 
-    fn client_weak(&self) -> Weak<ClientInner> {
-        self.client.get().cloned().unwrap_or_else(Weak::new)
+    fn client_weak(&self) -> WeakClientInner {
+        self.client.get().cloned().unwrap_or_default()
     }
 
     pub(crate) async fn dispatch(self: &Arc<Self>, request: JsonRpcRequest) {

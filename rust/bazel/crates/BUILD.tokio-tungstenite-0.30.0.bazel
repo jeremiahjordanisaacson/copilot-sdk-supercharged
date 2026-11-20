@@ -126,7 +126,7 @@ rust_library(
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
             "@sdk_vendor__rustls-0.23.46//:rustls",  # aarch64-apple-darwin
             "@sdk_vendor__rustls-native-certs-0.8.5//:rustls_native_certs",  # aarch64-apple-darwin
-            "@sdk_vendor__rustls-pki-types-1.15.1//:rustls_pki_types",  # aarch64-apple-darwin
+            "@sdk_vendor__rustls-pki-types-1.16.0//:rustls_pki_types",  # aarch64-apple-darwin
             "@sdk_vendor__tokio-rustls-0.26.6//:tokio_rustls",  # aarch64-apple-darwin
         ],
         "@rules_rust//rust/platform:aarch64-pc-windows-msvc": [
@@ -140,7 +140,7 @@ rust_library(
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
             "@sdk_vendor__rustls-0.23.46//:rustls",  # x86_64-apple-darwin
             "@sdk_vendor__rustls-native-certs-0.8.5//:rustls_native_certs",  # x86_64-apple-darwin
-            "@sdk_vendor__rustls-pki-types-1.15.1//:rustls_pki_types",  # x86_64-apple-darwin
+            "@sdk_vendor__rustls-pki-types-1.16.0//:rustls_pki_types",  # x86_64-apple-darwin
             "@sdk_vendor__tokio-rustls-0.26.6//:tokio_rustls",  # x86_64-apple-darwin
         ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [

@@ -115,13 +115,13 @@ rust_library(
         "@sdk_vendor__http-1.5.0//:http",
         "@sdk_vendor__httparse-1.10.1//:httparse",
         "@sdk_vendor__log-0.4.35//:log",
-        "@sdk_vendor__rand-0.10.3//:rand",
+        "@sdk_vendor__rand-0.10.4//:rand",
         "@sdk_vendor__sha1-0.11.0//:sha1",
         "@sdk_vendor__thiserror-2.0.21//:thiserror",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
             "@sdk_vendor__rustls-0.23.46//:rustls",  # aarch64-apple-darwin
-            "@sdk_vendor__rustls-pki-types-1.15.1//:rustls_pki_types",  # aarch64-apple-darwin
+            "@sdk_vendor__rustls-pki-types-1.16.0//:rustls_pki_types",  # aarch64-apple-darwin
         ],
         "@rules_rust//rust/platform:aarch64-pc-windows-msvc": [
             "@sdk_vendor__native-tls-0.2.18//:native_tls",  # aarch64-pc-windows-msvc
@@ -131,7 +131,7 @@ rust_library(
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
             "@sdk_vendor__rustls-0.23.46//:rustls",  # x86_64-apple-darwin
-            "@sdk_vendor__rustls-pki-types-1.15.1//:rustls_pki_types",  # x86_64-apple-darwin
+            "@sdk_vendor__rustls-pki-types-1.16.0//:rustls_pki_types",  # x86_64-apple-darwin
         ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
             "@sdk_vendor__native-tls-0.2.18//:native_tls",  # x86_64-pc-windows-msvc

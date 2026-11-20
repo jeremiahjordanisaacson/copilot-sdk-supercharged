@@ -2,7 +2,7 @@
 
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use futures_util::FutureExt;
@@ -13,7 +13,7 @@ use tracing::warn;
 pub use crate::rpc::EntraTokenAcquireRequest as EntraTokenProviderArgs;
 use crate::rpc::EntraTokenGetTokenRequest;
 use crate::{
-    Client, ClientInner, JsonRpcError, JsonRpcRequest, JsonRpcResponse, Result, error_codes,
+    Client, JsonRpcError, JsonRpcRequest, JsonRpcResponse, Result, WeakClientInner, error_codes,
 };
 
 pub(crate) const ACQUIRE_METHOD: &str = "entraToken.getToken";
@@ -113,7 +113,7 @@ where
 
 pub(crate) struct EntraTokenDispatcher {
     provider: Option<Arc<dyn EntraTokenProvider>>,
-    client: OnceLock<Weak<ClientInner>>,
+    client: OnceLock<WeakClientInner>,
 }
 
 impl EntraTokenDispatcher {
@@ -124,12 +124,12 @@ impl EntraTokenDispatcher {
         }
     }
 
-    pub(crate) fn set_client(&self, client: Weak<ClientInner>) {
+    pub(crate) fn set_client(&self, client: WeakClientInner) {
         let _ = self.client.set(client);
     }
 
     pub(crate) fn dispatch(self: &Arc<Self>, request: JsonRpcRequest) {
-        let Some(client) = self.client.get().and_then(Weak::upgrade) else {
+        let Some(client) = self.client.get().and_then(WeakClientInner::upgrade) else {
             return;
         };
         let Some(pending) = client.rpc.cancellable_requests.claim(request.id) else {
@@ -175,7 +175,7 @@ impl EntraTokenDispatcher {
                     }),
                 ),
             };
-            let Some(client) = dispatcher.client.get().and_then(Weak::upgrade) else {
+            let Some(client) = dispatcher.client.get().and_then(WeakClientInner::upgrade) else {
                 return;
             };
             if Client::from_inner(client)

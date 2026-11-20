@@ -21,7 +21,7 @@ import javax.annotation.processing.Generated;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record SessionLimitsConfig(
-    /** Maximum AI Credits allowed across the session's current accounting window. */
+    /** Maximum AI Credits allowed across the session's current accounting window. When setting a limit, the value must be at least 30 and greater than the AI Credits the session has already used. */
     @JsonProperty("maxAiCredits") Double maxAiCredits
 ) {
 

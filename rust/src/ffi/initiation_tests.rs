@@ -154,7 +154,6 @@ impl Peer {
             },
             MessageWriter::Synchronous(Arc::new(move |frame| sender.write_frame(frame))),
             None,
-            None,
             PathBuf::from("."),
             None,
             None,

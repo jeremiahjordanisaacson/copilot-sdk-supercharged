@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import re
 import uuid
 
 import httpx
@@ -117,16 +118,49 @@ async def _assert_session_limits_applied(session, max_ai_credits: float) -> None
     assert snapshot.session_limits.max_ai_credits == max_ai_credits
 
 
-def _get_task_agent_types(exchange: dict) -> list[str]:
+def _stable_prompt_prefix_enabled() -> bool:
+    return os.environ.get("COPILOT_EXP_COPILOT_CLI_STABLE_PROMPT_PREFIX") == "true"
+
+
+async def _get_task_agent_types(ctx: E2ETestContext, exchange: dict) -> list[str]:
     for tool in exchange.get("request", {}).get("tools", []) or []:
         function = tool.get("function") if isinstance(tool, dict) else None
         if isinstance(function, dict) and function.get("name") == "task":
             parameters = function.get("parameters")
             assert isinstance(parameters, dict)
-            values = parameters["properties"]["agent_type"]["enum"]
-            assert isinstance(values, list)
-            return [str(value) for value in values]
-    raise AssertionError("Expected task tool in request")
+            if not _stable_prompt_prefix_enabled():
+                values = parameters["properties"]["agent_type"]["enum"]
+                assert isinstance(values, list)
+                return [str(value) for value in values]
+            # Under the stable prompt prefix the agents state note lists the agents.
+            agent_type = parameters["properties"]["agent_type"]
+            assert agent_type["type"] == "string"
+            assert "enum" not in agent_type
+            break
+    else:
+        raise AssertionError("Expected task tool in request")
+
+    # Normalized exchanges omit runtime reminders; inspect the actual provider request.
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"{ctx.proxy_url}/requests")
+        response.raise_for_status()
+    requests = [request for request in response.json() if is_inference_url(request["url"])]
+    assert requests, "Expected a captured provider request"
+    body = json.loads(requests[-1]["body"])
+    messages = body.get("messages", body.get("input"))
+    assert isinstance(messages, list), "Expected provider request messages"
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, list):
+            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        if not isinstance(content, str) or "<system_reminder>\n<agents>\n" not in content:
+            continue
+        catalog = re.search(r"<available_agents>\n([\s\S]*?)\n</available_agents>", content)
+        assert catalog is not None, "Expected available agents in state note"
+        return re.findall(r"^- \*\*([^*]+)\*\*:", catalog.group(1), re.MULTILINE)
+    raise AssertionError("Expected agents state note in the latest provider request")
 
 
 class _RecordingRequestHandler(CopilotRequestHandler):
@@ -513,7 +547,7 @@ class TestSessionConfig:
             permissions={"on_request": PermissionHandler.approve_all}
         )
         baseline_exchange = await _send_and_get_next_exchange(baseline_session, ctx, prompt)
-        assert excluded_agent in _get_task_agent_types(baseline_exchange)
+        assert excluded_agent in await _get_task_agent_types(ctx, baseline_exchange)
         await baseline_session.disconnect()
 
         excluded_session = await ctx.client.create_session(
@@ -521,7 +555,7 @@ class TestSessionConfig:
             agents={"excluded_builtin_agents": [excluded_agent]},
         )
         excluded_exchange = await _send_and_get_next_exchange(excluded_session, ctx, prompt)
-        agent_types = _get_task_agent_types(excluded_exchange)
+        agent_types = await _get_task_agent_types(ctx, excluded_exchange)
         assert agent_types
         assert excluded_agent not in agent_types
 
@@ -539,7 +573,7 @@ class TestSessionConfig:
         )
 
         exchange = await _send_and_get_next_exchange(session2, ctx, "What is 1+1?")
-        agent_types = _get_task_agent_types(exchange)
+        agent_types = await _get_task_agent_types(ctx, exchange)
         assert agent_types
         assert excluded_agent not in agent_types
 

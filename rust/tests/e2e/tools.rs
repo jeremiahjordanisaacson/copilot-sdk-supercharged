@@ -97,7 +97,7 @@ async fn low_level_tool_definition() {
         Box::pin(async move {
             ctx.set_default_copilot_user();
             let client = ctx.start_client().await;
-            let __perm = Arc::new(ApproveAllHandler);
+            let permissions = Arc::new(ApproveAllHandler);
             let current_phase = Arc::new(Mutex::new(String::new()));
             let tools = vec![
                 set_current_phase_tool(current_phase.clone()),
@@ -111,11 +111,8 @@ async fn low_level_tool_definition() {
                 .into_vec();
             let session = client
                 .create_session(
-                    CreateSessionOptions::default()
-                        .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
-                        .with_permissions(|group| group.with_on_request(__perm))
-                        .with_tools(|group| group.with_definitions(tools))
-                        .with_tools(|group| group.with_available_tools(available_tools)),
+                    tool_session_options(permissions, tools)
+.with_tools(|group| group.with_available_tools(available_tools)),
                 )
                 .await
                 .expect("create session");
@@ -146,15 +143,10 @@ async fn handles_tool_calling_errors() {
         Box::pin(async move {
             ctx.set_default_copilot_user();
             let client = ctx.start_client().await;
-            let __perm = Arc::new(ApproveAllHandler);
+            let permissions = Arc::new(ApproveAllHandler);
             let tools = vec![error_tool()];
             let session = client
-                .create_session(
-                    CreateSessionOptions::default()
-                        .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
-                        .with_permissions(|group| group.with_on_request(__perm))
-                        .with_tools(|group| group.with_definitions(tools)),
-                )
+                .create_session(tool_session_options(permissions, tools))
                 .await
                 .expect("create session");
 
@@ -195,15 +187,11 @@ async fn can_receive_and_return_complex_types() {
         Box::pin(async move {
             ctx.set_default_copilot_user();
             let client = ctx.start_client().await;
-            let __perm = Arc::new(ApproveAllHandler);
+            let permissions = Arc::new(ApproveAllHandler);
             let tools = vec![db_query_tool()];
             let session = client
                 .create_session(
-                    CreateSessionOptions::default()
-                        .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
-                        .with_permissions(|group| group.with_on_request(__perm))
-                        .with_tools(|group| group.with_definitions(tools)),
-                )
+                    tool_session_options(permissions, tools))
                 .await
                 .expect("create session");
 
@@ -238,17 +226,10 @@ async fn overrides_built_in_tool_with_custom_tool() {
             Box::pin(async move {
                 ctx.set_default_copilot_user();
                 let client = ctx.start_client().await;
-                let __perm = Arc::new(ApproveAllHandler);
+                let permissions = Arc::new(ApproveAllHandler);
                 let tools = vec![custom_grep_tool()];
                 let session = client
-                    .create_session(
-                        CreateSessionOptions::default()
-                            .with_github(|group| {
-                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
-                            })
-                            .with_permissions(|group| group.with_on_request(__perm))
-                            .with_tools(|group| group.with_definitions(tools)),
-                    )
+                    .create_session(tool_session_options(permissions, tools))
                     .await
                     .expect("create session");
 
@@ -278,21 +259,13 @@ async fn skippermission_sent_in_tool_definition() {
                 ctx.set_default_copilot_user();
                 let client = ctx.start_client().await;
                 let (permission_tx, mut permission_requests) = mpsc::unbounded_channel();
-                let handler = Arc::new(RecordingPermissionHandler {
+                let permissions = Arc::new(RecordingPermissionHandler {
                     permission_tx,
                     decision: PermissionResult::reject(None),
                 });
-                let __perm = handler;
                 let tools = vec![safe_lookup_tool()];
                 let session = client
-                    .create_session(
-                        CreateSessionOptions::default()
-                            .with_github(|group| {
-                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
-                            })
-                            .with_permissions(|group| group.with_on_request(__perm))
-                            .with_tools(|group| group.with_definitions(tools)),
-                    )
+                    .create_session(tool_session_options(permissions, tools))
                     .await
                     .expect("create session");
 
@@ -331,21 +304,13 @@ async fn invokes_custom_tool_with_permission_handler() {
                 ctx.set_default_copilot_user();
                 let client = ctx.start_client().await;
                 let (permission_tx, mut permission_rx) = mpsc::unbounded_channel();
-                let handler = Arc::new(RecordingPermissionHandler {
+                let permissions = Arc::new(RecordingPermissionHandler {
                     permission_tx,
                     decision: PermissionResult::approve_once(),
                 });
-                let __perm = handler;
-                let tools = vec![encrypt_string_tool()];
+                let tools = vec![encrypt_string_tool(None)];
                 let session = client
-                    .create_session(
-                        CreateSessionOptions::default()
-                            .with_github(|group| {
-                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
-                            })
-                            .with_permissions(|group| group.with_on_request(__perm))
-                            .with_tools(|group| group.with_definitions(tools)),
-                    )
+                    .create_session(tool_session_options(permissions, tools))
                     .await
                     .expect("create session");
 
@@ -378,21 +343,13 @@ async fn denies_custom_tool_when_permission_denied() {
                 let client = ctx.start_client().await;
                 let (call_tx, mut call_rx) = mpsc::unbounded_channel();
                 let (permission_tx, _permission_rx) = mpsc::unbounded_channel();
-                let handler = Arc::new(RecordingPermissionHandler {
+                let permissions = Arc::new(RecordingPermissionHandler {
                     permission_tx,
                     decision: PermissionResult::reject(None),
                 });
-                let __perm = handler;
-                let tools = vec![tracked_encrypt_string_tool(call_tx)];
+                let tools = vec![encrypt_string_tool(Some(call_tx))];
                 let session = client
-                    .create_session(
-                        CreateSessionOptions::default()
-                            .with_github(|group| {
-                                group.with_token(super::support::DEFAULT_TEST_TOKEN)
-                            })
-                            .with_permissions(|group| group.with_on_request(__perm))
-                            .with_tools(|group| group.with_definitions(tools)),
-                    )
+                    .create_session(tool_session_options(permissions, tools))
                     .await
                     .expect("create session");
 
@@ -426,18 +383,14 @@ async fn should_execute_multiple_custom_tools_in_parallel_single_turn() {
                 let client = ctx.start_client().await;
                 let (city_tx, mut city_rx) = mpsc::unbounded_channel();
                 let (country_tx, mut country_rx) = mpsc::unbounded_channel();
-                let __perm = Arc::new(ApproveAllHandler);
+                let permissions = Arc::new(ApproveAllHandler);
                 let tools = vec![
                     lookup_city_tool(city_tx),
                     lookup_country_tool(country_tx),
                 ];
                 let session = client
                     .create_session(
-                        CreateSessionOptions::default()
-                            .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
-                            .with_permissions(|group| group.with_on_request(__perm))
-                            .with_tools(|group| group.with_definitions(tools)),
-                    )
+                        tool_session_options(permissions, tools))
                     .await
                     .expect("create session");
 
@@ -463,62 +416,60 @@ async fn should_execute_multiple_custom_tools_in_parallel_single_turn() {
     .await;
 }
 
-struct EncryptStringTool;
+/// Handler for tools that take a single string argument and reply with a
+/// value computed from it, optionally recording each received argument.
+struct StringArgTool {
+    arg: &'static str,
+    calls: Option<mpsc::UnboundedSender<String>>,
+    respond: fn(&str) -> String,
+}
 
-fn encrypt_string_tool() -> Tool {
-    Tool::new("encrypt_string")
-        .with_description("Encrypts a string")
+fn string_arg_tool(
+    name: &str,
+    description: &str,
+    arg: &'static str,
+    arg_schema: serde_json::Value,
+    calls: Option<mpsc::UnboundedSender<String>>,
+    respond: fn(&str) -> String,
+) -> Tool {
+    Tool::new(name)
+        .with_description(description)
         .with_parameters(json!({
             "type": "object",
-            "properties": {
-                "input": {
-                    "type": "string",
-                    "description": "String to encrypt"
-                }
-            },
-            "required": ["input"]
+            "properties": { arg: arg_schema },
+            "required": [arg]
         }))
-        .with_handler(Arc::new(EncryptStringTool))
+        .with_handler(Arc::new(StringArgTool {
+            arg,
+            calls,
+            respond,
+        }))
 }
 
 #[async_trait::async_trait]
-impl ToolHandler for EncryptStringTool {
+impl ToolHandler for StringArgTool {
     async fn call(&self, invocation: ToolInvocation) -> Result<ToolResult, Error> {
-        let input = invocation
+        let value = invocation
             .arguments
-            .get("input")
+            .get(self.arg)
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
-        Ok(ToolResult::Text(input.to_uppercase()))
+        if let Some(calls) = &self.calls {
+            let _ = calls.send(value.to_string());
+        }
+        Ok(ToolResult::Text((self.respond)(value)))
     }
 }
 
-struct TrackedEncryptStringTool {
-    call_tx: mpsc::UnboundedSender<()>,
-}
-
-fn tracked_encrypt_string_tool(call_tx: mpsc::UnboundedSender<()>) -> Tool {
-    Tool::new("encrypt_string")
-        .with_description("Encrypts a string")
-        .with_parameters(json!({
-            "type": "object",
-            "properties": {
-                "input": {
-                    "type": "string",
-                    "description": "String to encrypt"
-                }
-            },
-            "required": ["input"]
-        }))
-        .with_handler(Arc::new(TrackedEncryptStringTool { call_tx }))
-}
-
-#[async_trait::async_trait]
-impl ToolHandler for TrackedEncryptStringTool {
-    async fn call(&self, invocation: ToolInvocation) -> Result<ToolResult, Error> {
-        let _ = self.call_tx.send(());
-        EncryptStringTool.call(invocation).await
-    }
+fn encrypt_string_tool(calls: Option<mpsc::UnboundedSender<String>>) -> Tool {
+    string_arg_tool(
+        "encrypt_string",
+        "Encrypts a string",
+        "input",
+        json!({ "type": "string", "description": "String to encrypt" }),
+        calls,
+        str::to_uppercase,
+    )
 }
 
 struct ErrorTool;
@@ -535,8 +486,6 @@ impl ToolHandler for ErrorTool {
         Err(std::io::Error::other("Melbourne").into())
     }
 }
-
-struct CustomGrepTool;
 
 struct SetCurrentPhaseTool {
     current_phase: Arc<Mutex<String>>,
@@ -573,151 +522,74 @@ impl ToolHandler for SetCurrentPhaseTool {
     }
 }
 
-struct SearchItemsTool;
-
 fn search_items_tool() -> Tool {
-    Tool::new("search_items")
-        .with_description("Search for items by keyword")
-        .with_parameters(json!({
-            "type": "object",
-            "properties": {
-                "keyword": { "type": "string" }
-            },
-            "required": ["keyword"]
-        }))
-        .with_handler(Arc::new(SearchItemsTool))
-}
-
-#[async_trait::async_trait]
-impl ToolHandler for SearchItemsTool {
-    async fn call(&self, invocation: ToolInvocation) -> Result<ToolResult, Error> {
-        let keyword = invocation
-            .arguments
-            .get("keyword")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        assert_eq!(keyword, "copilot");
-        Ok(ToolResult::Text("Found: item_alpha, item_beta".to_string()))
-    }
+    string_arg_tool(
+        "search_items",
+        "Search for items by keyword",
+        "keyword",
+        json!({ "type": "string" }),
+        None,
+        |keyword| {
+            assert_eq!(keyword, "copilot");
+            "Found: item_alpha, item_beta".to_string()
+        },
+    )
 }
 
 fn custom_grep_tool() -> Tool {
-    Tool::new("grep")
-        .with_description("A custom grep implementation that overrides the built-in")
-        .with_overrides_built_in_tool(true)
-        .with_parameters(json!({
-            "type": "object",
-            "properties": {
-                "query": { "type": "string", "description": "Search query" }
-            },
-            "required": ["query"]
-        }))
-        .with_handler(Arc::new(CustomGrepTool))
+    string_arg_tool(
+        "grep",
+        "A custom grep implementation that overrides the built-in",
+        "query",
+        json!({ "type": "string", "description": "Search query" }),
+        None,
+        |query| format!("CUSTOM_GREP_RESULT: {query}"),
+    )
+    .with_overrides_built_in_tool(true)
 }
-
-#[async_trait::async_trait]
-impl ToolHandler for CustomGrepTool {
-    async fn call(&self, invocation: ToolInvocation) -> Result<ToolResult, Error> {
-        let query = invocation
-            .arguments
-            .get("query")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        Ok(ToolResult::Text(format!("CUSTOM_GREP_RESULT: {query}")))
-    }
-}
-
-struct SafeLookupTool;
 
 fn safe_lookup_tool() -> Tool {
-    Tool::new("safe_lookup")
-        .with_description("A tool that skips permission")
-        .with_skip_permission(true)
-        .with_parameters(json!({
-            "type": "object",
-            "properties": {
-                "id": { "type": "string", "description": "Lookup ID" }
-            },
-            "required": ["id"]
-        }))
-        .with_handler(Arc::new(SafeLookupTool))
+    string_arg_tool(
+        "safe_lookup",
+        "A tool that skips permission",
+        "id",
+        json!({ "type": "string", "description": "Lookup ID" }),
+        None,
+        |id| format!("RESULT: {id}"),
+    )
+    .with_skip_permission(true)
 }
 
-#[async_trait::async_trait]
-impl ToolHandler for SafeLookupTool {
-    async fn call(&self, invocation: ToolInvocation) -> Result<ToolResult, Error> {
-        let id = invocation
-            .arguments
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        Ok(ToolResult::Text(format!("RESULT: {id}")))
-    }
+fn lookup_city_tool(calls: mpsc::UnboundedSender<String>) -> Tool {
+    string_arg_tool(
+        "lookup_city",
+        "Looks up city information",
+        "city",
+        json!({ "type": "string", "description": "City name" }),
+        Some(calls),
+        |city| format!("CITY_{}", city.to_uppercase()),
+    )
 }
 
-struct LookupCityTool {
-    call_tx: mpsc::UnboundedSender<String>,
+fn lookup_country_tool(calls: mpsc::UnboundedSender<String>) -> Tool {
+    string_arg_tool(
+        "lookup_country",
+        "Looks up country information",
+        "country",
+        json!({ "type": "string", "description": "Country name" }),
+        Some(calls),
+        |country| format!("COUNTRY_{}", country.to_uppercase()),
+    )
 }
 
-fn lookup_city_tool(call_tx: mpsc::UnboundedSender<String>) -> Tool {
-    Tool::new("lookup_city")
-        .with_description("Looks up city information")
-        .with_parameters(json!({
-            "type": "object",
-            "properties": {
-                "city": { "type": "string", "description": "City name" }
-            },
-            "required": ["city"]
-        }))
-        .with_handler(Arc::new(LookupCityTool { call_tx }))
-}
-
-#[async_trait::async_trait]
-impl ToolHandler for LookupCityTool {
-    async fn call(&self, invocation: ToolInvocation) -> Result<ToolResult, Error> {
-        let city = invocation
-            .arguments
-            .get("city")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let _ = self.call_tx.send(city.clone());
-        Ok(ToolResult::Text(format!("CITY_{}", city.to_uppercase())))
-    }
-}
-
-struct LookupCountryTool {
-    call_tx: mpsc::UnboundedSender<String>,
-}
-
-fn lookup_country_tool(call_tx: mpsc::UnboundedSender<String>) -> Tool {
-    Tool::new("lookup_country")
-        .with_description("Looks up country information")
-        .with_parameters(json!({
-            "type": "object",
-            "properties": {
-                "country": { "type": "string", "description": "Country name" }
-            },
-            "required": ["country"]
-        }))
-        .with_handler(Arc::new(LookupCountryTool { call_tx }))
-}
-
-#[async_trait::async_trait]
-impl ToolHandler for LookupCountryTool {
-    async fn call(&self, invocation: ToolInvocation) -> Result<ToolResult, Error> {
-        let country = invocation
-            .arguments
-            .get("country")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let _ = self.call_tx.send(country.clone());
-        Ok(ToolResult::Text(format!(
-            "COUNTRY_{}",
-            country.to_uppercase()
-        )))
-    }
+fn tool_session_options(
+    permissions: Arc<dyn PermissionHandler>,
+    tools: Vec<Tool>,
+) -> CreateSessionOptions {
+    CreateSessionOptions::default()
+        .with_github(|group| group.with_token(super::support::DEFAULT_TEST_TOKEN))
+        .with_permissions(|group| group.with_on_request(permissions))
+        .with_tools(|group| group.with_definitions(tools))
 }
 
 struct RecordingPermissionHandler {

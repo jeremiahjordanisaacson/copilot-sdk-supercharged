@@ -111,6 +111,15 @@ pub(crate) fn main() {
         resolve_version_and_optional_hash(&manifest_dir, platform.package_name);
     let version = &release.version;
 
+    // The source-checkout placeholder has no published release, so a download
+    // can only 404. Contributor builds supply a same-checkout runtime instead.
+    if is_dev_placeholder(version) {
+        println!(
+            "cargo:warning=Copilot CLI version is the development placeholder '{DEV_PLACEHOLDER_VERSION}', which has no published release — skipping runtime download/bundle/cache. Set COPILOT_CLI_PATH (or use CliProgram::Path) to a built CLI when running the SDK, or enable the `local-runtime` feature."
+        );
+        return;
+    }
+
     // Keep diagnostics on the actual version, and cache paths on a
     // release-scoped identity. Neither exposes build-machine paths.
     println!("cargo:rustc-env=COPILOT_SDK_CLI_VERSION={version}");
@@ -429,6 +438,12 @@ fn resolve_version_and_optional_hash(
         snapshot.display(),
         package_json.display(),
     );
+}
+
+const DEV_PLACEHOLDER_VERSION: &str = "0.0.0-dev";
+
+fn is_dev_placeholder(version: &str) -> bool {
+    version == DEV_PLACEHOLDER_VERSION
 }
 
 fn resolve_cli_hash(release: &Release, asset_name: &str) -> String {

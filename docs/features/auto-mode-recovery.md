@@ -8,16 +8,16 @@ Recovery retries once through Auto with the session's tier and configured on-dev
 
 ## Enroll on create and resume
 
-Recovery requires runtime rollout enablement and explicit enrollment. Set the language-specific `autoModeRecovery` option and supply an Auto-mode-switch handler on create and resume. A handler alone keeps its legacy behavior. Event subscriptions do not enroll a session.
+Recovery requires runtime rollout enablement and explicit enrollment. In the session's interaction options, set the language-specific `autoModeRecovery` option and supply an Auto-mode-switch handler on create and resume. A handler alone keeps its legacy behavior. Event subscriptions do not enroll a session.
 
-| SDK     | Create and resume option         | Required handler                      | Runtime acknowledgment                                                                             |
-| ------- | -------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Node.js | `autoModeRecovery: true`         | `onAutoModeSwitchRequest`             | `session.capabilities.ui?.autoModeRecovery === true`                                               |
-| Python  | `auto_mode_recovery=True`        | `on_auto_mode_switch_request`         | `session.capabilities.get("ui", {}).get("autoModeRecovery") is True`                               |
-| Go      | `AutoModeRecovery: true`         | `OnAutoModeSwitchRequest`             | `session.Capabilities().UI.AutoModeRecovery` when `UI` is non-nil                                  |
-| .NET    | `AutoModeRecovery = true`        | `OnAutoModeSwitchRequest`             | `session.Capabilities.Ui?.AutoModeRecovery == true`                                                |
-| Java    | `.setAutoModeRecovery(true)`     | `.setOnAutoModeSwitch(...)`           | `session.getCapabilities().getUi().getAutoModeRecovery().orElse(false)` when `getUi()` is non-null |
-| Rust    | `.with_auto_mode_recovery(true)` | `.with_auto_mode_switch_handler(...)` | `session.auto_mode_recovery_supported()`                                                           |
+| SDK     | Create and resume option                                                       | Required handler                                                   | Runtime acknowledgment                                                                             |
+| ------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Node.js | `interaction: { autoModeRecovery: true }`                                      | `interaction.onAutoModeSwitchRequest`                              | `session.capabilities.ui?.autoModeRecovery === true`                                               |
+| Python  | `interaction={"auto_mode_recovery": True}`                                     | `interaction["on_auto_mode_switch_request"]`                       | `session.capabilities.get("ui", {}).get("autoModeRecovery") is True`                               |
+| Go      | `Interaction: copilot.SessionInteractionOptions{AutoModeRecovery: true}`       | `Interaction.OnAutoModeSwitchRequest`                              | `session.Capabilities().UI.AutoModeRecovery` when `UI` is non-nil                                  |
+| .NET    | `Interaction = new SessionInteractionOptions { AutoModeRecovery = true }`      | `Interaction.OnAutoModeSwitchRequest`                              | `session.Capabilities.Ui?.AutoModeRecovery == true`                                                |
+| Java    | `.setInteraction(new SessionInteractionOptions().setAutoModeRecovery(true))`   | `SessionInteractionOptions.setOnAutoModeSwitchRequest(...)`        | `session.getCapabilities().getUi().getAutoModeRecovery().orElse(false)` when `getUi()` is non-null |
+| Rust    | `.with_interaction(\|interaction\| interaction.with_auto_mode_recovery(true))` | `SessionInteractionOptions::with_on_auto_mode_switch_request(...)` | `session.auto_mode_recovery_supported()`                                                           |
 
 Enrollment sends `requestAutoModeRecovery: true` apart from `requestAutoModeSwitch`; missing handlers fail before RPC. Missing/false acknowledgment fails. New attachments detach; SDKs delete rejected server-assigned cloud creates. Rejected resumes restore owners; accepted resident resumes missing acknowledgment retain new owners in all SDKs. SDKs fence IDs through cleanup and uncertain failure until reconnect. Python/Go/Rust/.NET cancellation preserves cleanup callbacks. Go/Python reject same-ID initialization during SessionFS callbacks; Node.js rejects callback re-entry and teardown opens. Events update acknowledgment.
 

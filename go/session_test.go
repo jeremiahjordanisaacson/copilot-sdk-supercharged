@@ -120,7 +120,7 @@ func TestPermissionHandlerReceivesDerivedPromptContext(t *testing.T) {
 }
 
 func (s *Session) dispatchEvent(event SessionEvent) {
-	s.dispatchEventWithPermissionEnvelope(event, nil, nil)
+	s.dispatchEventWithPermissionEnvelope(event, nil, nil, nil)
 }
 
 func TestPermissionInvocationWithoutProgramOwnership(t *testing.T) {
@@ -350,7 +350,7 @@ func TestToolResultWithEmptyTextIsSentAsEmptyText(t *testing.T) {
 				ToolCallID: "tool-call-1",
 				ToolName:   "record_note",
 				Arguments:  map[string]any{},
-			}, "")
+			}, "", nil)
 
 			completion := server.expectRequest(t, "session.tools.handlePendingToolCall")
 			result, ok := completion.Params["result"].(map[string]any)
@@ -361,6 +361,43 @@ func TestToolResultWithEmptyTextIsSentAsEmptyText(t *testing.T) {
 				t.Errorf("textResultForLlm = %#v, want the empty string the handler returned", result["textResultForLlm"])
 			}
 			tt.check(t, result)
+			server.respond(t, completion.ID, map[string]any{})
+		})
+	}
+}
+
+func TestToolResultPreservesLargeOutputPolicy(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		skip *bool
+	}{
+		{"omitted", nil},
+		{"process", new(false)},
+		{"skip", new(true)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			session, server := newSetToolsTestSession(t)
+			session.registerTools([]Tool{{Name: "record_note", Handler: func(ToolInvocation) (ToolResult, error) {
+				return ToolResult{TextResultForLLM: "large output", SkipLargeOutputProcessing: tt.skip}, nil
+			}}})
+			session.startExternalTool(&ExternalToolRequestedData{
+				RequestID: "request-1", SessionID: "session-1", ToolCallID: "tool-call-1",
+				ToolName: "record_note", Arguments: map[string]any{},
+			}, "", nil)
+
+			completion := server.expectRequest(t, "session.tools.handlePendingToolCall")
+			result, ok := completion.Params["result"].(map[string]any)
+			if !ok {
+				t.Fatalf("completion params = %#v, want a result object", completion.Params)
+			}
+			value, present := result["skipLargeOutputProcessing"]
+			if tt.skip == nil {
+				if present {
+					t.Errorf("skipLargeOutputProcessing = %#v, want omitted", value)
+				}
+			} else if !present || value != *tt.skip {
+				t.Errorf("skipLargeOutputProcessing = %#v, want %v", value, *tt.skip)
+			}
 			server.respond(t, completion.ID, map[string]any{})
 		})
 	}
@@ -378,7 +415,7 @@ func TestToolResultThatFailsToSendIsReportedAndAnsweredWithError(t *testing.T) {
 		ToolCallID: "tool-call-1",
 		ToolName:   "record_note",
 		Arguments:  map[string]any{},
-	}, "")
+	}, "", nil)
 
 	delivery := server.expectRequest(t, "session.tools.handlePendingToolCall")
 	if _, ok := delivery.Params["result"].(map[string]any); !ok {
@@ -414,7 +451,7 @@ func TestToolResultThatFailsToSendAfterDisconnectIsNotAnswered(t *testing.T) {
 		ToolCallID: "tool-call-1",
 		ToolName:   "record_note",
 		Arguments:  map[string]any{},
-	}, "")
+	}, "", nil)
 
 	delivery := server.expectRequest(t, "session.tools.handlePendingToolCall")
 	// The request is already claimed, so disconnecting cannot cancel it.
@@ -442,7 +479,7 @@ func TestSetToolsTestSessionCleanupRetiresInFlightToolResult(t *testing.T) {
 			ToolCallID: "tool-call-1",
 			ToolName:   "record_note",
 			Arguments:  map[string]any{},
-		}, "")
+		}, "", nil)
 
 		// Leave the claimed result unanswered so fixture cleanup interrupts delivery.
 		server.expectRequest(t, "session.tools.handlePendingToolCall")
@@ -500,7 +537,7 @@ func TestToolErrorThatFailsToSendIsAnsweredOnceWithDeliveryError(t *testing.T) {
 				ToolCallID: "tool-call-1",
 				ToolName:   "record_note",
 				Arguments:  map[string]any{},
-			}, "")
+			}, "", nil)
 
 			delivery := server.expectRequest(t, "session.tools.handlePendingToolCall")
 			if delivery.Params["error"] != tt.wantErr {
@@ -560,7 +597,7 @@ func TestToolResultWithUnencodableTelemetryIsAnsweredWithError(t *testing.T) {
 				ToolCallID: "tool-call-1",
 				ToolName:   "record_note",
 				Arguments:  map[string]any{},
-			}, "")
+			}, "", nil)
 
 			completion := server.expectRequest(t, "session.tools.handlePendingToolCall")
 			if result, ok := completion.Params["result"]; ok {
@@ -613,7 +650,7 @@ func TestToolHandlerErrorWithEmptyMessageIsAnsweredWithError(t *testing.T) {
 				ToolCallID: "tool-call-1",
 				ToolName:   "record_note",
 				Arguments:  map[string]any{},
-			}, "")
+			}, "", nil)
 
 			completion := server.expectRequest(t, "session.tools.handlePendingToolCall")
 			if result, ok := completion.Params["result"]; ok {
@@ -639,7 +676,7 @@ func TestToolResultTelemetryIsEncodedOnce(t *testing.T) {
 		ToolCallID: "tool-call-1",
 		ToolName:   "record_note",
 		Arguments:  map[string]any{},
-	}, "")
+	}, "", nil)
 
 	completion := server.expectRequest(t, "session.tools.handlePendingToolCall")
 	if err, ok := completion.Params["error"]; ok {
@@ -982,7 +1019,7 @@ func TestSession_SetToolsRunningCallsFinishOnOriginalHandler(t *testing.T) {
 		SessionID:  "session-1",
 		ToolCallID: "tool-call-1",
 		ToolName:   "lookup",
-	}, "")
+	}, "", nil)
 	select {
 	case <-started:
 	case <-time.After(2 * time.Second):
@@ -3127,6 +3164,182 @@ func TestSession_AgentStopHook(t *testing.T) {
 	if out.Decision != "block" || out.Reason != "finish the remaining work" {
 		t.Errorf("unexpected output: %#v", out)
 	}
+}
+
+// TestSession_PostToolUseModifiedResultResultType sends a postToolUse hook's
+// output through the hooks.invoke handler. A ToolResult with neither
+// ResultType nor Error set gets "success", as a tool handler's result does;
+// every other ModifiedResult reaches the runtime as the hook returned it.
+func TestSession_PostToolUseModifiedResultResultType(t *testing.T) {
+	image := []ToolBinaryResult{{Data: "aW1n", MIMEType: "image/png", Type: "image"}}
+	full := ToolResult{
+		TextResultForLLM:    "redacted",
+		BinaryResultsForLLM: image,
+		SessionLog:          "log",
+		ToolTelemetry:       map[string]any{"k": 1},
+		ToolReferences:      []string{"grep"},
+	}
+	tests := []struct {
+		name   string
+		output *PostToolUseHookOutput
+		want   string
+	}{
+		// The reported shapes: no ResultType and no Error.
+		{"value, no type", &PostToolUseHookOutput{ModifiedResult: ToolResult{TextResultForLLM: "redacted"}},
+			`{"output":{"modifiedResult":{"textResultForLlm":"redacted","resultType":"success"}}}`},
+		{"pointer, no type", &PostToolUseHookOutput{ModifiedResult: &ToolResult{TextResultForLLM: "redacted"}},
+			`{"output":{"modifiedResult":{"textResultForLlm":"redacted","resultType":"success"}}}`},
+		{"zero value", &PostToolUseHookOutput{ModifiedResult: ToolResult{}},
+			`{"output":{"modifiedResult":{"textResultForLlm":"","resultType":"success"}}}`},
+		{"every field, no type", &PostToolUseHookOutput{ModifiedResult: full},
+			`{"output":{"modifiedResult":{"textResultForLlm":"redacted","binaryResultsForLlm":[{"data":"aW1n","mimeType":"image/png","type":"image"}],"resultType":"success","sessionLog":"log","toolTelemetry":{"k":1},"toolReferences":["grep"]}}}`},
+		{"no type, with additional context and suppressed output", &PostToolUseHookOutput{ModifiedResult: &ToolResult{TextResultForLLM: "redacted"}, AdditionalContext: "ctx", SuppressOutput: true},
+			`{"output":{"modifiedResult":{"textResultForLlm":"redacted","resultType":"success"},"additionalContext":"ctx","suppressOutput":true}}`},
+		// Rows the fix must leave as they are.
+		{"explicit success", &PostToolUseHookOutput{ModifiedResult: ToolResult{TextResultForLLM: "redacted", ResultType: "success"}},
+			`{"output":{"modifiedResult":{"textResultForLlm":"redacted","resultType":"success"}}}`},
+		{"explicit failure", &PostToolUseHookOutput{ModifiedResult: ToolResult{TextResultForLLM: "redacted", ResultType: "failure"}},
+			`{"output":{"modifiedResult":{"textResultForLlm":"redacted","resultType":"failure"}}}`},
+		{"explicit rejected pointer", &PostToolUseHookOutput{ModifiedResult: &ToolResult{TextResultForLLM: "redacted", ResultType: "rejected"}},
+			`{"output":{"modifiedResult":{"textResultForLlm":"redacted","resultType":"rejected"}}}`},
+		{"error set, no type", &PostToolUseHookOutput{ModifiedResult: ToolResult{TextResultForLLM: "redacted", Error: "boom"}},
+			`{"output":{"modifiedResult":{"textResultForLlm":"redacted","resultType":"","error":"boom"}}}`},
+		{"pointer, error set, no type", &PostToolUseHookOutput{ModifiedResult: &ToolResult{TextResultForLLM: "redacted", Error: "boom"}},
+			`{"output":{"modifiedResult":{"textResultForLlm":"redacted","resultType":"","error":"boom"}}}`},
+		{"nil ToolResult pointer", &PostToolUseHookOutput{ModifiedResult: (*ToolResult)(nil)},
+			`{"output":{"modifiedResult":null}}`},
+		{"map without resultType", &PostToolUseHookOutput{ModifiedResult: map[string]any{"textResultForLlm": "redacted"}},
+			`{"output":{"modifiedResult":{"textResultForLlm":"redacted"}}}`},
+		{"map with empty resultType", &PostToolUseHookOutput{ModifiedResult: map[string]any{"textResultForLlm": "redacted", "resultType": ""}},
+			`{"output":{"modifiedResult":{"textResultForLlm":"redacted","resultType":""}}}`},
+		{"string", &PostToolUseHookOutput{ModifiedResult: "redacted"},
+			`{"output":{"modifiedResult":"redacted"}}`},
+		{"no modified result", &PostToolUseHookOutput{AdditionalContext: "ctx"},
+			`{"output":{"additionalContext":"ctx"}}`},
+		{"nil output", nil, `{"output":null}`},
+	}
+	input := map[string]any{
+		"sessionId":  "s1",
+		"timestamp":  1700000000000,
+		"cwd":        "/work",
+		"toolName":   "lookup",
+		"toolArgs":   map[string]any{},
+		"toolResult": map[string]any{"textResultForLlm": "original", "resultType": "success"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session, cleanup := newTestSession()
+			defer cleanup()
+			session.SessionID = "s1"
+			session.registerHooks(&SessionHooks{
+				OnPostToolUse: func(PostToolUseHookInput, HookInvocation) (*PostToolUseHookOutput, error) {
+					return tt.output, nil
+				},
+			})
+			client := &Client{sessions: map[string]*Session{"s1": session}}
+
+			response, err := (&hooksAdapter{client: client}).Invoke(&rpc.HookInvokeRequest{
+				SessionID: "s1",
+				HookType:  rpc.HookTypePostToolUse,
+				Input:     input,
+			})
+			if err != nil {
+				t.Fatalf("hooks.invoke failed: %v", err)
+			}
+			raw, err := json.Marshal(response)
+			if err != nil {
+				t.Fatalf("marshal response: %v", err)
+			}
+			var got, want any
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("bad response JSON %s: %v", raw, err)
+			}
+			if err := json.Unmarshal([]byte(tt.want), &want); err != nil {
+				t.Fatalf("bad expected JSON: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("response = %s\nwant       %s", raw, tt.want)
+			}
+		})
+	}
+
+	// An earlier postToolUse hook can set the tool's resultType, and the
+	// runtime passes that result to this hook, so a result without a type
+	// keeps it rather than turning it into "success".
+	for _, tt := range []struct {
+		name       string
+		toolResult any
+		want       string
+	}{
+		{"failure set by an earlier hook", map[string]any{"textResultForLlm": "x", "resultType": "failure"}, "failure"},
+		{"rejected set by an earlier hook", map[string]any{"textResultForLlm": "x", "resultType": "rejected"}, "rejected"},
+		{"success", map[string]any{"textResultForLlm": "x", "resultType": "success"}, "success"},
+		{"empty result type", map[string]any{"textResultForLlm": "x", "resultType": ""}, "success"},
+		{"no result type", map[string]any{"textResultForLlm": "x"}, "success"},
+		{"result is not an object", "x", "success"},
+		{"no result", nil, "success"},
+	} {
+		t.Run("keeps the tool's result type: "+tt.name, func(t *testing.T) {
+			session, cleanup := newTestSession()
+			defer cleanup()
+			session.SessionID = "s1"
+			session.registerHooks(&SessionHooks{
+				OnPostToolUse: func(PostToolUseHookInput, HookInvocation) (*PostToolUseHookOutput, error) {
+					return &PostToolUseHookOutput{ModifiedResult: ToolResult{TextResultForLLM: "redacted"}}, nil
+				},
+			})
+			raw, err := json.Marshal(map[string]any{"sessionId": "s1", "cwd": "/work", "toolName": "lookup", "toolResult": tt.toolResult})
+			if err != nil {
+				t.Fatal(err)
+			}
+			output, err := session.handleHooksInvoke("postToolUse", raw)
+			if err != nil {
+				t.Fatalf("hook failed: %v", err)
+			}
+			got := output.(*PostToolUseHookOutput).ModifiedResult.(ToolResult)
+			if got.ResultType != tt.want {
+				t.Fatalf("ResultType = %q, want %q", got.ResultType, tt.want)
+			}
+		})
+	}
+
+	t.Run("the hook's own values are not modified", func(t *testing.T) {
+		session, cleanup := newTestSession()
+		defer cleanup()
+		session.SessionID = "s1"
+		result := &ToolResult{TextResultForLLM: "redacted"}
+		output := &PostToolUseHookOutput{ModifiedResult: result}
+		session.registerHooks(&SessionHooks{
+			OnPostToolUse: func(PostToolUseHookInput, HookInvocation) (*PostToolUseHookOutput, error) {
+				return output, nil
+			},
+		})
+		if _, err := session.handleHooksInvoke("postToolUse", json.RawMessage(`{}`)); err != nil {
+			t.Fatalf("hook failed: %v", err)
+		}
+		if result.ResultType != "" || output.ModifiedResult != any(result) {
+			t.Fatalf("the hook's output was modified: %+v, %+v", output, result)
+		}
+	})
+
+	t.Run("a hook error is returned as it is", func(t *testing.T) {
+		session, cleanup := newTestSession()
+		defer cleanup()
+		session.SessionID = "s1"
+		session.registerHooks(&SessionHooks{
+			OnPostToolUse: func(PostToolUseHookInput, HookInvocation) (*PostToolUseHookOutput, error) {
+				return &PostToolUseHookOutput{ModifiedResult: ToolResult{TextResultForLLM: "redacted"}}, errors.New("hook broke")
+			},
+		})
+		output, err := session.handleHooksInvoke("postToolUse", json.RawMessage(`{}`))
+		if err == nil || err.Error() != "hook broke" {
+			t.Fatalf("err = %v, want hook broke", err)
+		}
+		out, ok := output.(*PostToolUseHookOutput)
+		if !ok || out.ModifiedResult.(ToolResult).ResultType != "" {
+			t.Fatalf("output = %#v, want the hook's own output", output)
+		}
+	})
 }
 
 func TestSession_HookForwardCompatibility(t *testing.T) {

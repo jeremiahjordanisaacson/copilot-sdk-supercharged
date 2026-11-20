@@ -20,6 +20,18 @@ namespace Microsoft.Copilot.Test.Unit;
 /// </summary>
 public class PublicDtoTests
 {
+    [Fact]
+    public void FeedbackUpload_IsInternal_WithoutRemovingExistingPublicServerGroups()
+    {
+        Assert.Null(typeof(Rpc.ServerRpc).GetProperty("Feedback"));
+        Assert.DoesNotContain(typeof(CopilotClient).Assembly.GetExportedTypes(),
+            type => type.FullName is "Microsoft.Copilot.Rpc.ServerFeedbackApi" or "Microsoft.Copilot.Rpc.ServerFeedbackUploadApi"
+                || type.Name.StartsWith("FeedbackUpload", StringComparison.Ordinal));
+        Assert.Equal(typeof(Rpc.ServerPersistenceApi), typeof(Rpc.ServerRpc).GetProperty("Persistence")?.PropertyType);
+        Assert.Equal(typeof(Rpc.ServerSettingsApi), typeof(Rpc.ServerRpc).GetProperty("Settings")?.PropertyType);
+        Assert.Equal(typeof(Rpc.ServerModelsApi), typeof(Rpc.ServerRpc).GetProperty("Models")?.PropertyType);
+    }
+
     [Theory]
     [InlineData(typeof(Rpc.ProtocolExternalToolDefinition))]
     [InlineData(typeof(ExternalToolRequestedData))]

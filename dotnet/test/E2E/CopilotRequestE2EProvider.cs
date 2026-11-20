@@ -29,7 +29,7 @@ namespace Microsoft.Copilot.Test.E2E;
 /// <para>
 /// All response bodies are emitted as raw JSON string literals rather than via
 /// <c>JsonSerializer</c>: the test project disables reflection-based STJ on
-/// net8.0 (<c>JsonSerializerIsReflectionEnabledByDefault=false</c>), so
+/// net10.0 (<c>JsonSerializerIsReflectionEnabledByDefault=false</c>), so
 /// serializing anonymous types would throw at runtime.
 /// </para>
 /// </remarks>

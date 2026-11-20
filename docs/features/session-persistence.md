@@ -549,6 +549,7 @@ Session state is saved to `~/.copilot/session-state/{sessionId}/`:
 | Tool call results | ✅ Yes | Cached for context |
 | Agent planning state | ✅ Yes | `plan.md` file |
 | Session artifacts | ✅ Yes | In `files/` directory |
+| Permission grants for the session | ⚠️ Partially | A person's answer that approves something for the rest of the session is restored on resume when the session's owning connection labels it as theirs (`createAttributedPermissionResult` with `source: "human_response"`). Unlabeled and automated approvals last only until the process exits, and a resumed session asks its permission handler again. A denial the session keeps for the rest of the session is restored whoever gave it; approve-once answers are not |
 | Provider/API keys | ❌ No | Security: must re-provide |
 | In-memory tool state | ❌ No | Tools should be stateless |
 
@@ -716,7 +717,7 @@ Each SDK also provides idiomatic automatic cleanup patterns:
 | Language | Pattern | Example |
 |----------|---------|---------|
 | **TypeScript** | `Symbol.asyncDispose` | `await using session = await client.createSession(config);` |
-| **Python** | `async with` context manager | `async with await client.create_session(on_permission_request=handler) as session:` |
+| **Python** | `async with` context manager | `async with await client.create_session(permissions={"on_request": handler}) as session:` |
 | **C#** | `IAsyncDisposable` | `await using var session = await client.CreateSessionAsync(config);` |
 | **Go** | `defer` | `defer session.Disconnect()` |
 
@@ -933,7 +934,7 @@ await withSessionLock("user-123-task-456", async () => {
 |---------|------------|
 | **Create resumable session** | Create a session and send a message; provide your own `sessionId` to choose the ID |
 | **Resume session** | `client.resumeSession(sessionId, config)` |
-| **BYOK resume** | Re-provide `provider` config |
+| **BYOK resume** | Re-provide `inference.providers` |
 | **List sessions** | `client.listSessions(filter?)` |
 | **Disconnect from active session** | `session.disconnect()`—releases in-memory resources; session data on disk is preserved for resumption |
 | **Delete session permanently** | `client.deleteSession(sessionId)`—permanently removes all session data from disk; cannot be resumed |

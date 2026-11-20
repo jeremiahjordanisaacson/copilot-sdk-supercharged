@@ -107,6 +107,26 @@ public sealed class SetToolsTests
     }
 
     [Fact]
+    public async Task SetToolsAsync_Leaves_Out_Numeric_Defaults_The_Runtime_Would_Round()
+    {
+        await using var server = await SetToolsFakeServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
+        server.ClearRequests();
+
+        await session.SetToolsAsync([
+            CopilotTool.DefineTool(
+                (decimal rounded = 18446744073709551617m, decimal exact = 18446744073709551615m) => "ok",
+                factoryOptions: new AIFunctionFactoryOptions { Name = "numeric_defaults" }),
+        ]);
+
+        var request = Assert.Single(server.Requests, request => request.Method == "session.tools.set");
+        var properties = request.Params.GetProperty("tools")[0].GetProperty("parameters").GetProperty("properties");
+        Assert.False(properties.GetProperty("rounded").TryGetProperty("default", out _));
+        Assert.Equal("18446744073709551615", properties.GetProperty("exact").GetProperty("default").GetRawText());
+    }
+
+    [Fact]
     public async Task DeclarationOnly_Request_Does_Not_Run_The_Previous_Handler()
     {
         await using var server = await SetToolsFakeServer.StartAsync();

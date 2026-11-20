@@ -3,6 +3,7 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_doc", "rust_doc_test")
 load("//bazel:rust_rules.bzl", "copilot_rust_binary_explicit", "copilot_rust_build_script", "copilot_rust_library_explicit", "copilot_rust_test")
+load("//bazel:rust_test_runner.bzl", shared_rust_test = "rust_test")
 load("//src/sdk/rust/bazel/crates:defs.bzl", "aliases", "all_crate_deps", "crate_deps")
 
 _FEATURES = {
@@ -40,6 +41,12 @@ _TEST_PROFILES = [
     "external-test",
 ]
 
+_UNIT_TEST_SRC_GLOBS = [
+    "src/**/*_tests.rs",
+    "src/**/tests.rs",
+    "src/**/tests/**/*.rs",
+]
+
 def _features(requested):
     features = {feature: True for feature in requested}
     for _ in _FEATURES:
@@ -75,7 +82,11 @@ def _sdk_deps(features):
         "tokio-util",
         "tracing",
         "uuid",
-    ]) + _platform_deps(windows = crate_deps(["windows-sys"]))
+    ]) + _platform_deps(
+        windows = crate_deps(["windows-sys"]),
+        macos = crate_deps(["libc"]),
+        linux = crate_deps(["libc"]),
+    )
     if "in-process" in features:
         deps += crate_deps(["libloading"])
     if "derive" in features:
@@ -129,7 +140,7 @@ def _sdk_profile(profile, features):
     deps = [":" + name + "_build_script"] + _sdk_deps(features)
     copilot_rust_library_explicit(
         name = name,
-        srcs = native.glob(["src/**/*.rs"]),
+        srcs = native.glob(["src/**/*.rs"], exclude = _UNIT_TEST_SRC_GLOBS),
         compile_data = ["README.md"],
         crate_features = features,
         crate_name = "copilot_sdk",
@@ -269,14 +280,14 @@ def _sdk_profile(profile, features):
 
 _LOCAL_RUNTIME_DEPS = [
     "@vendor__base64-0.23.1//:base64",
-    "@vendor__bytes-1.12.1//:bytes",
+    "@vendor__bytes-1.12.2//:bytes",
     "@vendor__futures-util-0.3.34//:futures_util",
     "@vendor__getrandom-0.4.3//:getrandom",
     "@vendor__http-1.5.0//:http",
     "@vendor__indexmap-2.14.2//:indexmap",
-    "@vendor__libloading-0.9.0//:libloading",
+    "@vendor__libloading-0.9.1//:libloading",
     "@vendor__parking_lot-0.12.5//:parking_lot",
-    "@vendor__regex-1.13.1//:regex",
+    "@vendor__regex-1.13.2//:regex",
     "@vendor__serde-1.0.229//:serde",
     "@vendor__serde_json-1.0.154//:serde_json",
     "@vendor//tokio",
@@ -291,6 +302,10 @@ _LOCAL_RUNTIME_DEPS = [
     "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
         "@vendor__windows-sys-0.61.2//:windows_sys",
     ],
+    "@rules_rust//rust/platform:aarch64-apple-darwin": ["@vendor//libc"],
+    "@rules_rust//rust/platform:x86_64-apple-darwin": ["@vendor//libc"],
+    "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": ["@vendor//libc"],
+    "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": ["@vendor//libc"],
     "//conditions:default": [],
 })
 
@@ -349,7 +364,7 @@ def sdk_targets(name = "platform_dirs_srcs"):
 
     copilot_rust_library_explicit(
         name = "copilot-sdk-local-runtime",
-        srcs = native.glob(["src/**/*.rs"]),
+        srcs = native.glob(["src/**/*.rs"], exclude = _UNIT_TEST_SRC_GLOBS),
         compile_data = ["README.md"],
         crate_features = [
             "in-process",
@@ -377,16 +392,36 @@ def sdk_targets(name = "platform_dirs_srcs"):
         deps = _LOCAL_RUNTIME_DEPS,
     )
 
-    for test in ["api_types", "session_events"]:
+    wire_tests = ["api_types", "session_events"]
+    wire_deps = [
+        ":copilot-sdk-local-runtime",
+        "@vendor__serde_json-1.0.154//:serde_json",
+    ]
+    copilot_rust_test(
+        name = "sdk_wire_compatibility_binary",
+        srcs = ["tests/wire_suite/bazel.rs"] + ["tests/" + test + "_test.rs" for test in wire_tests],
+        crate_root = "tests/wire_suite/bazel.rs",
+        edition = "2024",
+        tags = ["manual"],
+        deps = wire_deps,
+    )
+    for test in wire_tests:
+        suite = "sdk_" + test + "_test"
+
+        # Clippy still checks each standalone Cargo root with the local-runtime SDK.
         copilot_rust_test(
-            name = "sdk_" + test + "_test",
+            name = suite + "_standalone",
             srcs = ["tests/" + test + "_test.rs"],
             crate_root = "tests/" + test + "_test.rs",
             edition = "2024",
-            deps = [
-                ":copilot-sdk-local-runtime",
-                "@vendor__serde_json-1.0.154//:serde_json",
-            ],
+            tags = ["manual"],
+            deps = wire_deps,
+        )
+        shared_rust_test(
+            name = suite,
+            binary = ":sdk_wire_compatibility_binary",
+            tags = ["copilot-libtest-module"],
+            test_module = suite,
         )
 
     copilot_rust_test(

@@ -29,15 +29,15 @@ In the interactive CLI, remembered folder trust refreshes repository customizati
 
 ## SDK inputs
 
-Session creation, resume, and option updates accept the same four lists. TypeScript and Java use `skillDirectories`, `agentDirectories`, `instructionDirectories`, and `hookDirectories`. Python and Rust use snake case; Go and .NET use Pascal case.
+Session creation, resume, and option updates accept the same four lists, each as `directories` in its option group: `skills.directories`, `agents.directories`, `instructions.directories`, and `hooks.directories`. Python and Rust use the same names; Go and .NET use Pascal case (`Skills.Directories`); Java uses each group's `setDirectories`.
 
 SDK directories can be outside the checkout. Leading and trailing whitespace is trimmed, and blank entries are ignored. A leading `~` or `~/` resolves to the home directory. Other relative SDK paths resolve once against the request's effective working directory when supplied. Changing the working directory doesn't move retained SDK roots. Supplying a new relative list uses the new effective working directory. An empty list clears only the explicit SDK contribution; omission or `null` leaves it unchanged during an update.
 
-If adopting a `hookDirectories` replacement fails or is canceled before the new hook service takes ownership, the previous directory option and live hook service remain in place. Overlapping failed updates restore the retained value rather than another failed update's directories. A failed update doesn't roll back a newer accepted update.
+If adopting a `hooks.directories` replacement fails or is canceled before the new hook service takes ownership, the previous directory option and live hook service remain in place. Overlapping failed updates restore the retained value rather than another failed update's directories. A failed update doesn't roll back a newer accepted update.
 
-Explicit agent and file-hook directories don't require ambient configuration discovery. `enableFileHooks` controls repository-origin hooks, including conventional `.github/hooks`, but not explicit SDK hook directories or callback `hooks`. Managed restrictions and hook disables still apply.
+Explicit agent and file-hook directories don't require ambient configuration discovery. `hooks.enableRepositoryHooks` controls repository-origin hooks, including conventional `.github/hooks`, but not explicit SDK hook directories or callback `hooks.handlers`. Managed restrictions and hook disables still apply.
 
-Directory inputs are discovery configuration, not general filesystem grants. They don't widen `additionalDirectories`. Existing file-hook sandbox rules remain in effect.
+Directory inputs are discovery configuration, not general filesystem grants. They don't widen `filesystem.additionalDirectories`. Existing file-hook sandbox rules remain in effect.
 
 Loading active local skills adds read-only grants for their contributing SDK skill directories under the runtime's skill-resource policy. Empty, ignored, and disabled skill sources don't add those grants. Repository-defined skill directories don't add them.
 

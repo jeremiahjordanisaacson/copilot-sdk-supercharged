@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	copilot "github.com/microsoft/copilot-sdk/go/v2"
 	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 	"github.com/microsoft/copilot-sdk/go/v2/rpc"
@@ -68,9 +68,10 @@ func assertSessionLimitsApplied(t *testing.T, session *copilot.Session, maxAiCre
 	}
 }
 
-func getTaskAgentTypes(t *testing.T, exchange testharness.ParsedHttpExchange) []string {
+func getTaskAgentTypes(t *testing.T, ctx *testharness.TestContext, exchange testharness.ParsedHttpExchange) []string {
 	t.Helper()
 
+	foundTask := false
 	for _, tool := range exchange.Request.Tools {
 		if tool.Function.Name != "task" {
 			continue
@@ -78,16 +79,93 @@ func getTaskAgentTypes(t *testing.T, exchange testharness.ParsedHttpExchange) []
 		var parameters struct {
 			Properties struct {
 				AgentType struct {
-					Enum []string `json:"enum"`
+					Type string          `json:"type"`
+					Enum json.RawMessage `json:"enum"`
 				} `json:"agent_type"`
 			} `json:"properties"`
 		}
 		if err := json.Unmarshal(tool.Function.Parameters, &parameters); err != nil {
 			t.Fatalf("Failed to unmarshal task tool parameters: %v", err)
 		}
-		return parameters.Properties.AgentType.Enum
+		if os.Getenv("COPILOT_EXP_COPILOT_CLI_STABLE_PROMPT_PREFIX") != "true" {
+			var values []string
+			if parameters.Properties.AgentType.Enum != nil {
+				if err := json.Unmarshal(parameters.Properties.AgentType.Enum, &values); err != nil {
+					t.Fatalf("Failed to unmarshal task agent_type enum: %v", err)
+				}
+			}
+			return values
+		}
+		// Under the stable prompt prefix the agents state note lists the agents.
+		if parameters.Properties.AgentType.Type != "string" || parameters.Properties.AgentType.Enum != nil {
+			t.Fatalf("Expected a fixed task agent_type string without an enum, got %s", tool.Function.Parameters)
+		}
+		foundTask = true
+		break
 	}
-	t.Fatal("Expected task tool in request")
+	if !foundTask {
+		t.Fatal("Expected task tool in request")
+	}
+
+	// Normalized exchanges omit runtime reminders; inspect the actual provider request.
+	requests, err := ctx.GetRequests()
+	if err != nil {
+		t.Fatalf("GetRequests failed: %v", err)
+	}
+	for i := len(requests) - 1; i >= 0; i-- {
+		if !isInferenceURL(requests[i].URL) {
+			continue
+		}
+		var body struct {
+			Messages []testharness.ChatCompletionMessage `json:"messages"`
+			Input    []testharness.ChatCompletionMessage `json:"input"`
+		}
+		if err := json.Unmarshal([]byte(requests[i].Body), &body); err != nil {
+			t.Fatalf("Failed to parse provider request: %v", err)
+		}
+		messages := body.Messages
+		if messages == nil {
+			messages = body.Input
+		}
+		for j := len(messages) - 1; j >= 0; j-- {
+			if messages[j].Role != "user" {
+				continue
+			}
+			content := messages[j].Content
+			if content == "" && len(messages[j].RawContent) > 0 {
+				var parts []struct {
+					Text string `json:"text"`
+				}
+				if json.Unmarshal(messages[j].RawContent, &parts) == nil {
+					for _, part := range parts {
+						content += part.Text
+					}
+				}
+			}
+			if !strings.Contains(content, "<system_reminder>\n<agents>\n") {
+				continue
+			}
+			_, catalog, ok := strings.Cut(content, "<available_agents>\n")
+			if !ok {
+				t.Fatal("Expected available agents in state note")
+			}
+			catalog, _, ok = strings.Cut(catalog, "\n</available_agents>")
+			if !ok {
+				t.Fatal("Expected end of available agents in state note")
+			}
+			var values []string
+			for _, line := range strings.Split(catalog, "\n") {
+				if entry, ok := strings.CutPrefix(line, "- **"); ok {
+					if name, _, ok := strings.Cut(entry, "**:"); ok {
+						values = append(values, name)
+					}
+				}
+			}
+			return values
+		}
+		t.Fatal("Expected agents state note in the latest provider request")
+	}
+	t.Fatal("Expected a captured provider request")
 	return nil
 }
 
@@ -334,7 +412,7 @@ func TestSessionConfigNewOptionsE2E(t *testing.T) {
 			t.Fatalf("CreateSession baseline failed: %v", err)
 		}
 		baselineExchange := sendAndGetNextExchange(t, ctx, baseline, prompt)
-		if !containsAgentType(getTaskAgentTypes(t, baselineExchange), excludedAgent) {
+		if !containsAgentType(getTaskAgentTypes(t, ctx, baselineExchange), excludedAgent) {
 			t.Fatalf("Expected baseline task agents to include %q", excludedAgent)
 		}
 		_ = baseline.Disconnect()
@@ -346,7 +424,7 @@ func TestSessionConfigNewOptionsE2E(t *testing.T) {
 		defer excluded.Disconnect()
 
 		excludedExchange := sendAndGetNextExchange(t, ctx, excluded, prompt)
-		agentTypes := getTaskAgentTypes(t, excludedExchange)
+		agentTypes := getTaskAgentTypes(t, ctx, excludedExchange)
 		if len(agentTypes) == 0 {
 			t.Fatal("Expected task tool agent types")
 		}
@@ -372,7 +450,7 @@ func TestSessionConfigNewOptionsE2E(t *testing.T) {
 		defer session2.Disconnect()
 
 		exchange := sendAndGetNextExchange(t, ctx, session2, "What is 1+1?")
-		agentTypes := getTaskAgentTypes(t, exchange)
+		agentTypes := getTaskAgentTypes(t, ctx, exchange)
 		if len(agentTypes) == 0 {
 			t.Fatal("Expected task tool agent types")
 		}
@@ -996,13 +1074,11 @@ func createProxyProvider(ctx *testharness.TestContext, headerName, headerValue s
 // newUUID generates a v4 UUID string for tests that need a custom session ID.
 func newUUID(t *testing.T) string {
 	t.Helper()
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatalf("rand.Read failed: %v", err)
+	id, err := uuid.NewRandomFromReader(rand.Reader)
+	if err != nil {
+		t.Fatalf("UUID generation failed: %v", err)
 	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	return id.String()
 }
 
 // assistantMessageContains returns true when the SendAndWait return value is a

@@ -193,20 +193,24 @@ Use this when a user approves a plan that already contains independent work item
 
 Fleet mode relies on explicit coordination state instead of implicit shared memory. The parent agent decomposes the work into todos, each sub-agent owns one todo, and the orchestrator dispatches workers whose dependencies are already complete.
 
-The canonical schema is:
+The runtime creates these tables in the session database on first use:
 
 ```sql
-CREATE TABLE todos (
+CREATE TABLE IF NOT EXISTS todos (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     description TEXT,
-    status TEXT DEFAULT 'pending'
+    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'in_progress', 'done', 'blocked')),
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE todo_deps (
-    todo_id TEXT,
-    depends_on TEXT,
-    PRIMARY KEY (todo_id, depends_on)
+CREATE TABLE IF NOT EXISTS todo_deps (
+    todo_id TEXT NOT NULL,
+    depends_on TEXT NOT NULL,
+    PRIMARY KEY (todo_id, depends_on),
+    FOREIGN KEY (todo_id) REFERENCES todos(id),
+    FOREIGN KEY (depends_on) REFERENCES todos(id)
 );
 ```
 

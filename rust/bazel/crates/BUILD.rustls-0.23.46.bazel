@@ -27,7 +27,7 @@ rust_library(
         allow_empty = True,
     ),
     aliases = {
-        "@sdk_vendor__rustls-pki-types-1.15.1//:rustls_pki_types": "pki_types",
+        "@sdk_vendor__rustls-pki-types-1.16.0//:rustls_pki_types": "pki_types",
     },
     compile_data = glob(
         include = ["**"],
@@ -79,8 +79,8 @@ rust_library(
         "@sdk_vendor__aws-lc-rs-1.19.0//:aws_lc_rs",
         "@sdk_vendor__log-0.4.35//:log",
         "@sdk_vendor__once_cell-1.21.4//:once_cell",
-        "@sdk_vendor__rustls-pki-types-1.15.1//:rustls_pki_types",
-        "@sdk_vendor__rustls-webpki-0.103.16//:webpki",
+        "@sdk_vendor__rustls-pki-types-1.16.0//:rustls_pki_types",
+        "@sdk_vendor__rustls-webpki-0.103.17//:webpki",
         "@sdk_vendor__subtle-2.6.1//:subtle",
         "@sdk_vendor__zeroize-1.9.1//:zeroize",
     ],

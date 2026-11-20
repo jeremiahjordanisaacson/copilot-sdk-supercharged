@@ -11,6 +11,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.microsoft.copilot.CopilotExperimental;
+import java.util.List;
 import javax.annotation.processing.Generated;
 
 /**
@@ -29,7 +30,9 @@ public record PluginsUpdateResult(
     /** Version after the update, when reported by the plugin manifest */
     @JsonProperty("newVersion") String newVersion,
     /** Number of skills discovered and installed after the update */
-    @JsonProperty("skillsInstalled") Long skillsInstalled
+    @JsonProperty("skillsInstalled") Long skillsInstalled,
+    /** Warnings from the updated plugin's manifest, including ignored fields or the reason the loader rejects the plugin. Callers should surface these to end users. Absent when the manifest raised none. */
+    @JsonProperty("warnings") List<String> warnings
 ) {
 
     /**
@@ -54,6 +57,7 @@ public record PluginsUpdateResult(
         private String previousVersion;
         private String newVersion;
         private Long skillsInstalled;
+        private List<String> warnings;
 
         /**
          * Sets the {@code previousVersion} property.
@@ -89,6 +93,17 @@ public record PluginsUpdateResult(
         }
 
         /**
+         * Sets the {@code warnings} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder warnings(List<String> value) {
+            this.warnings = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
@@ -96,7 +111,7 @@ public record PluginsUpdateResult(
          */
         public PluginsUpdateResult build() {
             if (skillsInstalled == null) throw new IllegalStateException("Missing required property: skillsInstalled");
-            return new PluginsUpdateResult(previousVersion, newVersion, skillsInstalled);
+            return new PluginsUpdateResult(previousVersion, newVersion, skillsInstalled, warnings);
         }
     }
 }

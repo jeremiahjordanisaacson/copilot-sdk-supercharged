@@ -17,6 +17,15 @@ go get -tool github.com/microsoft/copilot-sdk/go/v2/cmd/bundler
 go tool bundler
 ```
 
+The SDK does not find the Copilot CLI on `PATH`. Before running your application, either embed the CLI with the bundler (from your `main` package directory):
+
+```bash
+go get -tool github.com/microsoft/copilot-sdk/go/v2/cmd/bundler   # once per module
+go tool bundler                                                   # before each build
+```
+
+or point `COPILOT_CLI_PATH` at an installed Copilot CLI. Without either, `client.Start` fails with `managed Copilot runtime unavailable: the embedded bundle does not contain copilot-runtime ...`. See [Distributing your application with an embedded GitHub Copilot CLI](#distributing-your-application-with-an-embedded-github-copilot-cli) for details.
+
 ## Run the Sample
 
 Try the interactive chat sample (from the repo root):
@@ -139,8 +148,8 @@ func main() {
 When targeting MCP tools configured through `MCP.Servers`, remember the runtime
 tool name is `<server-key>-<tool-name>`. For `Tools.AvailableTools` and
 `Tools.ExcludedTools`, prefer the source-qualified form
-`mcp:<server-key>-<tool-name>`. For `CustomAgents[].Tools` and
-`DefaultAgent.ExcludedTools`, use `<server-key>-<tool-name>` directly.
+`mcp:<server-key>-<tool-name>`. For `Agents.Definitions[].Tools` and
+`Agents.Default.ExcludedTools`, use `<server-key>-<tool-name>` directly.
 
 ## Untyped JSON numbers
 
@@ -1347,7 +1356,7 @@ func main() {
 }
 ```
 
-When `Streaming: copilot.Bool(true)`:
+When `Events.Streaming` is `copilot.Bool(true)`:
 
 - `assistant.message_delta` events are sent with `DeltaContent` containing incremental text
 - `assistant.reasoning_delta` events are sent with `DeltaContent` for reasoning/chain-of-thought (model-dependent)

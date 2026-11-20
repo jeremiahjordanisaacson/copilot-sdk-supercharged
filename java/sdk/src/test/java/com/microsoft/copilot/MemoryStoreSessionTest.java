@@ -164,7 +164,7 @@ class MemoryStoreSessionTest {
         sessionsField.setAccessible(true);
         var sessions = (Map<String, CopilotSession>) sessionsField.get(client);
         new RpcHandlerDispatcher(sessions, event -> {
-        }, null, new GitHubTokenProviderRegistry()).registerHandlers(runtime.rpcClient);
+        }, null, new GitHubTokenProviderRegistry(), sessions.values()).registerHandlers(runtime.rpcClient);
         return client;
     }
 

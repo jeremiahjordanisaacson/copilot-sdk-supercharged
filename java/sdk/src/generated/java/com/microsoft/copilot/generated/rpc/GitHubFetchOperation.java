@@ -30,6 +30,8 @@ enum GitHubFetchOperation {
     JOB_STATUS("job-status"),
     /** The {@code sessions-list} variant. */
     SESSIONS_LIST("sessions-list"),
+    /** The {@code session-status} variant. */
+    SESSION_STATUS("session-status"),
     /** The {@code pull-requests-graphql} variant. */
     PULL_REQUESTS_GRAPHQL("pull-requests-graphql"),
     /** The {@code pull-request} variant. */

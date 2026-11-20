@@ -2,9 +2,12 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
+using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Xunit;
 
@@ -79,6 +82,144 @@ public class JsonRpcTests
             ValueTask.FromResult(new SingleObjectResponse { Value = request.Value });
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(100_000)]
+    public async Task JsonRpc_Sends_One_Complete_Frame_With_Utf8_Byte_Length(int paddingLength)
+    {
+        var json = "\"" + new string('x', paddingLength) + "\u00e9\u6f22\ud83d\ude00\"";
+        using var sendStream = new GatedSendStream();
+        sendStream.Unblock();
+        using var receiveStream = new MemoryStream(CreateResponseFrame(1, "ok"));
+        using var rpc = new JsonRpcReflection(sendStream, receiveStream);
+
+        var pending = rpc.InvokeAsync<string>("framed", [new RawSendPayload(json)]);
+        rpc.StartListening();
+
+        Assert.Equal("ok", await pending.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(1, sendStream.WriteCount);
+        Assert.Equal(
+            CreateFrame($$"""{"jsonrpc":"2.0","id":1,"method":"framed","params":{{json}}}"""),
+            sendStream.ToArray());
+    }
+
+    [Fact]
+    public async Task JsonRpc_Serialization_Failure_Does_Not_Send_Partial_Frame()
+    {
+        using var sendStream = new GatedSendStream();
+        sendStream.Unblock();
+        using var receiveStream = new MemoryStream(CreateResponseFrame(2, "ok"));
+        using var rpc = new JsonRpcReflection(sendStream, receiveStream);
+        var json = "\"" + new string('x', 100_000) + "\"";
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            rpc.InvokeAsync<string>("failed", [new RawSendPayload(json, Fail: true)]));
+        Assert.Equal("Serialization failed", error.Message);
+        Assert.Equal(0, sendStream.WriteCount);
+
+        var pending = rpc.InvokeAsync<string>("afterFailure", args: null);
+        rpc.StartListening();
+        Assert.Equal("ok", await pending.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(1, sendStream.WriteCount);
+        Assert.Equal(
+            CreateFrame("""{"jsonrpc":"2.0","id":2,"method":"afterFailure"}"""),
+            sendStream.ToArray());
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task JsonRpc_Does_Not_Write_If_Canceled_Or_Closed_During_Serialization(bool closeConnection, bool cancelRequest)
+    {
+        using var sendStream = new GatedSendStream();
+        sendStream.Unblock();
+        using var rpc = new JsonRpcReflection(sendStream, Stream.Null);
+        using var cancellation = new CancellationTokenSource();
+        var shutdownError = new IOException("connection stopped");
+        var error = await Record.ExceptionAsync(() => rpc.InvokeAsync<string>(
+            "notSent",
+            [new RawSendPayload("\"payload\"", BeforeWrite: () =>
+            {
+                if (closeConnection)
+                {
+                    rpc.Dispose(shutdownError);
+                }
+                if (cancelRequest)
+                {
+                    cancellation.Cancel();
+                }
+            })],
+            cancellation.Token).WaitAsync(TimeSpan.FromSeconds(5)));
+        rpc.Dispose(shutdownError);
+
+        if (closeConnection)
+        {
+            Assert.Same(shutdownError, error);
+        }
+        else
+        {
+            Assert.IsAssignableFrom<OperationCanceledException>(error);
+        }
+        Assert.DoesNotContain("\"method\":\"notSent\"", Encoding.UTF8.GetString(sendStream.ToArray()), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(typeof(OperationCanceledException))]
+    [InlineData(typeof(TaskCanceledException))]
+    public async Task JsonRpc_Answers_Handler_That_Fails_With_Its_Own_Cancellation(Type exceptionType)
+    {
+        using var pair = JsonRpcReflectionPair.Create();
+        pair.Server.SetLocalRpcMethod(
+            "ownCancellation",
+            (Func<SingleObjectRequest, CancellationToken, Task>)(async (request, cancellationToken) =>
+            {
+                await Task.Yield();
+                // Not the request's token: a deadline or a cancelled operation inside the handler.
+                throw (Exception)Activator.CreateInstance(exceptionType, request.Value)!;
+            }),
+            singleObjectParam: true);
+        pair.StartListening();
+
+        var error = await Assert.ThrowsAnyAsync<Exception>(() =>
+            pair.Client.InvokeAsync<object?>("ownCancellation", [new SingleObjectRequest { Value = "upstream gave up" }])
+                .WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Equal(-32603, GetRemoteErrorCode(error));
+        Assert.Contains("upstream gave up", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task JsonRpc_Answers_Handler_Whose_Own_Deadline_Expires()
+    {
+        using var pair = JsonRpcReflectionPair.Create();
+        var deadlineReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        pair.Server.SetLocalRpcMethod(
+            "deadline",
+            (Func<SingleObjectRequest, CancellationToken, Task>)(async (request, cancellationToken) =>
+            {
+                // The shape of an HttpClient.Timeout: a token source the handler owns runs out.
+                using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(10));
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, deadline.Token);
+                }
+                finally
+                {
+                    deadlineReached.TrySetResult();
+                }
+            }),
+            singleObjectParam: true);
+        pair.StartListening();
+
+        var error = await Assert.ThrowsAnyAsync<Exception>(() =>
+            pair.Client.InvokeAsync<object?>("deadline", [new SingleObjectRequest { Value = "lookup" }])
+                .WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.True(deadlineReached.Task.IsCompleted, error.ToString());
+        Assert.Equal(-32603, GetRemoteErrorCode(error));
+    }
+
     [Fact]
     public async Task JsonRpc_Cancels_And_Disposes_Pending_Requests()
     {
@@ -95,16 +236,84 @@ public class JsonRpcTests
     }
 
     [Theory]
+    [InlineData(false, typeof(IOException))]
+    [InlineData(true, typeof(IOException))]
+    [InlineData(false, typeof(OperationCanceledException))]
+    [InlineData(true, typeof(OperationCanceledException))]
+    [InlineData(false, typeof(ObjectDisposedException))]
+    [InlineData(true, typeof(ObjectDisposedException))]
+    public async Task JsonRpc_Logs_Failed_Response_Writes_But_Not_Teardown(bool handlerFails, Type exceptionType)
+    {
+        var failure = (Exception)Activator.CreateInstance(exceptionType, "transport failure")!;
+        var logger = new DeliveryLogger();
+        using var sendStream = new FailingSendStream { Failure = failure };
+        using var receiveStream = new MemoryStream(CreateRequestFrame(42, "reply", "[]"));
+        using var rpc = new JsonRpcReflection(sendStream, receiveStream, logger);
+        var invoked = false;
+        rpc.SetLocalRpcMethod("reply", (Func<string>)(() =>
+        {
+            invoked = true;
+            return handlerFails ? throw new InvalidOperationException("private handler payload") : "private result payload";
+        }));
+
+        // The handler and stream complete synchronously, so no response task outlives the read loop.
+        rpc.StartListening();
+        await rpc.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(invoked);
+        Assert.Equal(1, sendStream.WriteAttempts);
+        AssertDeliveryLog(logger, failure, handlerFails ? "error response" : "response");
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(OperationCanceledException))]
+    [InlineData(typeof(ObjectDisposedException))]
+    public async Task JsonRpc_Logs_Failed_Cancellation_Writes_But_Preserves_Cancellation(Type exceptionType)
+    {
+        var failure = (Exception)Activator.CreateInstance(exceptionType, "transport failure")!;
+        var logger = new DeliveryLogger();
+        using var sendStream = new FailingSendStream();
+        using var rpc = new JsonRpcReflection(sendStream, Stream.Null, logger);
+        using var cancellation = new CancellationTokenSource();
+        var pending = rpc.InvokeAsync<string>("pending", args: null, cancellation.Token);
+        Assert.Equal(1, sendStream.WriteAttempts);
+        sendStream.Failure = failure;
+
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Equal(2, sendStream.WriteAttempts);
+        AssertDeliveryLog(logger, failure, "cancellation notification");
+    }
+
+    private static void AssertDeliveryLog(DeliveryLogger logger, Exception failure, string messageKind)
+    {
+        if (failure is not IOException)
+        {
+            Assert.Empty(logger.Warnings);
+            return;
+        }
+
+        var entry = Assert.Single(logger.Warnings);
+        Assert.Same(failure, entry.Exception);
+        Assert.Equal("LogMessageDeliveryFailed", entry.EventId.Name);
+        Assert.Equal(messageKind, entry.Properties.Single(property => property.Key == "MessageKind").Value);
+        Assert.Equal($"Failed to send JSON-RPC {messageKind}", entry.Message);
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]
     [InlineData(true, true)]
     public async Task JsonRpc_Dispose_During_Send_Does_Not_Mask_Error(bool blockFlush, bool failSend)
     {
+        var json = "\"" + new string('x', 100_000) + "\u00e9\"";
         var sendError = failSend ? new IOException("send failed") : null;
         using var sendStream = new GatedSendStream(blockFlush, sendError);
         using var rpc = new JsonRpcReflection(sendStream, Stream.Null);
-        var pending = rpc.InvokeAsync<string>("pending", args: null);
+        var pending = rpc.InvokeAsync<string>("pending", [new RawSendPayload(json)]);
         var shutdownError = new IOException("connection stopped");
         var timeout = TimeSpan.FromSeconds(5);
 
@@ -125,7 +334,7 @@ public class JsonRpcTests
         if (!failSend)
         {
             Assert.Equal(
-                CreateFrame("""{"jsonrpc":"2.0","id":1,"method":"pending"}"""),
+                CreateFrame($$"""{"jsonrpc":"2.0","id":1,"method":"pending","params":{{json}}}"""),
                 sendStream.ToArray());
         }
     }
@@ -139,6 +348,7 @@ public class JsonRpcTests
         using var rpc = new JsonRpcReflection(sendStream, Stream.Null);
         using var cancellation = new CancellationTokenSource();
         var active = rpc.InvokeAsync<string>("active", args: null);
+        var queuedSerialized = false;
         Task<string>? queued = null;
         var shutdownError = Assert.Throws<IOException>((Action)(() => throw new IOException("connection stopped")));
         var originalStackTrace = shutdownError.StackTrace!;
@@ -147,8 +357,10 @@ public class JsonRpcTests
         try
         {
             await sendStream.Blocked.WaitAsync(timeout);
-            queued = rpc.InvokeAsync<string>("queued", args: null, cancellation.Token);
+            queued = rpc.InvokeAsync<string>(
+                "queued", [new RawSendPayload("{}", BeforeWrite: () => queuedSerialized = true)], cancellation.Token);
             Assert.False(queued.IsCompleted);
+            Assert.False(queuedSerialized);
             if (cancelQueued)
             {
                 cancellation.Cancel();
@@ -165,6 +377,7 @@ public class JsonRpcTests
         var activeError = await Record.ExceptionAsync(() => active.WaitAsync(timeout));
         var queuedError = await Record.ExceptionAsync(() => queued!.WaitAsync(timeout));
         cancellation.Cancel();
+        Assert.False(queuedSerialized);
         Assert.Same(shutdownError, activeError);
         if (cancelQueued)
         {
@@ -625,6 +838,25 @@ public class JsonRpcTests
         public string Value { get; set; } = string.Empty;
     }
 
+    [JsonConverter(typeof(RawSendPayloadConverter))]
+    private sealed record RawSendPayload(string Json, bool Fail = false, Action? BeforeWrite = null);
+
+    private sealed class RawSendPayloadConverter : JsonConverter<RawSendPayload>
+    {
+        public override RawSendPayload Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            throw new NotSupportedException();
+
+        public override void Write(Utf8JsonWriter writer, RawSendPayload value, JsonSerializerOptions options)
+        {
+            value.BeforeWrite?.Invoke();
+            writer.WriteRawValue(value.Json);
+            if (value.Fail)
+            {
+                throw new InvalidOperationException("Serialization failed");
+            }
+        }
+    }
+
     private sealed class JsonRpcReflectionPair : IDisposable
     {
         private readonly InMemoryDuplexStream _clientStream;
@@ -698,13 +930,13 @@ public class JsonRpcTests
         {
         }
 
-        public JsonRpcReflection(Stream sendStream, Stream receiveStream)
+        public JsonRpcReflection(Stream sendStream, Stream receiveStream, ILogger? logger = null)
         {
             _instance = Activator.CreateInstance(
                 JsonRpcType,
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                 binder: null,
-                args: [sendStream, receiveStream, SerializerOptions, null],
+                args: [sendStream, receiveStream, SerializerOptions, logger],
                 culture: null)!;
         }
 
@@ -787,12 +1019,59 @@ public class JsonRpcTests
         }
     }
 
+    private sealed class DeliveryLogger : ILogger
+    {
+        public ConcurrentQueue<(EventId EventId, Exception? Exception, string Message, IReadOnlyList<KeyValuePair<string, object?>> Properties)> Warnings { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel >= LogLevel.Warning)
+            {
+                Warnings.Enqueue((eventId, exception, formatter(state, exception),
+                    Assert.IsAssignableFrom<IReadOnlyList<KeyValuePair<string, object?>>>(state)));
+            }
+        }
+    }
+
+    private sealed class FailingSendStream : MemoryStream
+    {
+        public Exception? Failure { get; set; }
+        public int WriteAttempts { get; private set; }
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+#if NET8_0_OR_GREATER
+        public override
+#else
+        internal
+#endif
+        ValueTask WriteAsync(ReadOnlyMemory<byte> source, CancellationToken cancellationToken = default)
+        {
+            WriteAttempts++;
+            if (Failure is { } failure)
+            {
+                return new ValueTask(Task.FromException(failure));
+            }
+
+            var bytes = source.ToArray();
+            base.Write(bytes, 0, bytes.Length);
+            return default;
+        }
+    }
+
     private sealed class GatedSendStream(bool blockFlush = false, Exception? sendError = null) : MemoryStream
     {
         private readonly TaskCompletionSource _blocked = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task Blocked => _blocked.Task;
+
+        public int WriteCount { get; private set; }
 
         public void Unblock() => _release.TrySetResult();
 
@@ -809,6 +1088,7 @@ public class JsonRpcTests
 
         private async ValueTask WriteCoreAsync(ReadOnlyMemory<byte> source, CancellationToken cancellationToken)
         {
+            WriteCount++;
             Assert.False(cancellationToken.CanBeCanceled);
             if (!blockFlush)
             {

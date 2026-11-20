@@ -327,7 +327,6 @@ class TestSkillProviders:
         )
         before = await first.rpc.skills.list()
         assert any(s.name == "unbound-lookup" for s in before.skills)
-        calls_before_resume = len(provider.calls)
 
         # Resume while the provider is still bound so the unbind is observable.
         session = await ctx.client.resume_session(
@@ -335,11 +334,13 @@ class TestSkillProviders:
         )
 
         try:
-            await session.rpc.skills.reload()
+            # Old-owner callbacks may still finish during the handoff. Observe the
+            # completed reload instead of counting those callbacks.
+            reloaded = await session.rpc.skills.reload()
             skills = await session.rpc.skills.list()
 
+            assert reloaded.errors == []
             assert [s for s in skills.skills if s.source == SkillSource.SDK] == []
-            assert len(provider.calls) == calls_before_resume
         finally:
             await session.disconnect()
 

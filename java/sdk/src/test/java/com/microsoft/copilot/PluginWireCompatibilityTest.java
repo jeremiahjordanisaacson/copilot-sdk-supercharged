@@ -37,6 +37,22 @@ class PluginWireCompatibilityTest {
     }
 
     @Test
+    void canonicalConstructorPreservesTeamWithoutVerifiedSource() {
+        var plugin = new Plugin(null, "plugin", "market", "1.0.0", true, null, "/plugin", "/market", "marketplace",
+                null, false, true, false, true, "plugin-id");
+        var json = MAPPER.valueToTree(plugin);
+
+        assertEquals(Boolean.TRUE, plugin.team());
+        assertTrue(json.get("team").booleanValue());
+        assertFalse(json.get("managed").booleanValue());
+        assertFalse(json.get("managedDesiredEnabled").booleanValue());
+        assertTrue(json.get("installed").booleanValue());
+        assertEquals("plugin-id", json.get("id").textValue());
+        assertNull(plugin.verifiedSource());
+        assertFalse(json.has("verifiedSource"));
+    }
+
+    @Test
     void assignmentDeserializesThroughTheCanonicalRecords() throws Exception {
         var json = """
                 {"name":"plugin","marketplace":"market","enabled":true,

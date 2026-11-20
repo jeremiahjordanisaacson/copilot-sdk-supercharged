@@ -13,7 +13,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import javax.annotation.processing.Generated;
 
 /**
- * An absolute URL on the identity's GitHub host.
+ * An absolute URL on the selected GitHub host.
  *
  * @since 1.0.0
  */

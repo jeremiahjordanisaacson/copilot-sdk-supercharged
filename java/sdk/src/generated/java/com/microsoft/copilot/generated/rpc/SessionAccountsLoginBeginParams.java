@@ -32,7 +32,7 @@ public record SessionAccountsLoginBeginParams(
     @JsonProperty("method") AuthLoginMethod method,
     /** Neutral identity-selection intent. Omitted is equivalent to default. */
     @JsonProperty("mode") AuthLoginMode mode,
-    /** Opaque cached base identity id returned by accounts.enumerate loginAccounts. Valid only with default mode; consumers must not parse it. */
+    /** Opaque cached base identity id returned by accounts.login.list. Valid only with default mode; consumers must not parse it. */
     @JsonProperty("accountId") String accountId
 ) {
 

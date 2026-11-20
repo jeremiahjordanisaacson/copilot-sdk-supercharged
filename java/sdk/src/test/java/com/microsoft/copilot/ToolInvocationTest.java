@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
@@ -129,6 +130,24 @@ public class ToolInvocationTest {
     }
 
     /**
+     * Test getArgumentsAs decodes an Optional record component, which tool
+     * parameter schemas leave out of {@code required}.
+     */
+    @Test
+    void testGetArgumentsAsWithOptionalRecordComponent() {
+        ObjectNode supplied = JsonNodeFactory.instance.objectNode().put("title", "a").put("tag", "b");
+        ObjectNode omitted = JsonNodeFactory.instance.objectNode().put("title", "a");
+        ObjectNode explicitNull = JsonNodeFactory.instance.objectNode().put("title", "a").putNull("tag");
+
+        assertEquals(new TaggedArgs("a", Optional.of("b")),
+                new ToolInvocation().setArguments(supplied).getArgumentsAs(TaggedArgs.class));
+        assertEquals(new TaggedArgs("a", Optional.empty()),
+                new ToolInvocation().setArguments(omitted).getArgumentsAs(TaggedArgs.class));
+        assertEquals(new TaggedArgs("a", Optional.empty()),
+                new ToolInvocation().setArguments(explicitNull).getArgumentsAs(TaggedArgs.class));
+    }
+
+    /**
      * Test getArgumentsAs throws IllegalArgumentException on deserialization
      * failure.
      */
@@ -161,6 +180,12 @@ public class ToolInvocationTest {
      * Record with java.time fields for testing date and time deserialization.
      */
     record EventArgs(String title, Instant when, LocalDate day) {
+    }
+
+    /**
+     * Record with an Optional component for testing optional arguments.
+     */
+    record TaggedArgs(String title, Optional<String> tag) {
     }
 
     /**

@@ -27,7 +27,7 @@ public final class ServerSecretsApi {
     }
 
     /**
-     * Registers secret values for redaction in session logs and exports. The SDK calls this to inject dynamically generated secret values (e.g., OIDC tokens).
+     * Registers secret values for best-effort redaction in session logs and exports while this client remains connected. Repeated adds are idempotent. Discouraged for runtime code: retain an owned secret registration instead. Remove rotating or unused values with secrets.removeFilterValues; historical output and late echoes may no longer be redacted after removal or disconnect.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0
@@ -35,6 +35,28 @@ public final class ServerSecretsApi {
     @CopilotExperimental
     public CompletableFuture<SecretsAddFilterValuesResult> addFilterValues(SecretsAddFilterValuesParams params) {
         return caller.invoke("secrets.addFilterValues", params, SecretsAddFilterValuesResult.class);
+    }
+
+    /**
+     * Releases values previously added by this client. Repeated or unmatched removals are no-ops; other live registrations remain effective. Only remove values once they are reasonably unlikely to be logged again: historical output and late echoes may no longer be redacted.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SecretsRemoveFilterValuesResult> removeFilterValues(SecretsRemoveFilterValuesParams params) {
+        return caller.invoke("secrets.removeFilterValues", params, SecretsRemoveFilterValuesResult.class);
+    }
+
+    /**
+     * Redacts text or JSON with the runtime's process filter, including registered values and live environment sources. Requires COPILOT_ENABLE_SECRET_FILTERING=true in the runtime's environment, as for secrets.addFilterValues.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SecretsFilterResult> filter(SecretsFilterParams params) {
+        return caller.invoke("secrets.filter", params, SecretsFilterResult.class);
     }
 
 }

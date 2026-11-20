@@ -14,6 +14,10 @@ use super::cli_api_types::{rpc_methods, *};
 use crate::session::Session;
 use crate::{Client, Error};
 
+/// Session method paths for in-process host adapters.
+#[doc(hidden)]
+pub const SESSION_METHOD_PATHS: &[(&str, &[&str])] = &[];
+
 /// Typed view over the [`Client`]'s server-level RPC namespace.
 #[derive(Clone, Copy)]
 pub struct ClientRpc<'a> {
@@ -21,6 +25,20 @@ pub struct ClientRpc<'a> {
 }
 
 impl<'a> ClientRpc<'a> {
+    /// `agents.*` sub-namespace.
+    pub fn agents(&self) -> ClientRpcAgents<'a> {
+        ClientRpcAgents {
+            client: self.client,
+        }
+    }
+
+    /// `ahp.*` sub-namespace.
+    pub fn ahp(&self) -> ClientRpcAhp<'a> {
+        ClientRpcAhp {
+            client: self.client,
+        }
+    }
+
     /// `cafeMetrics.*` sub-namespace.
     pub fn cafe_metrics(&self) -> ClientRpcCafeMetrics<'a> {
         ClientRpcCafeMetrics {
@@ -40,6 +58,619 @@ impl<'a> ClientRpc<'a> {
         ClientRpcSession {
             client: self.client,
         }
+    }
+}
+
+/// `agents.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcAgents<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcAgents<'a> {
+    /// Lists the agents this runtime ships, by name. A consumer separating shipped agents from ones the user or a plugin authored should compare against these names rather than against `AgentInfo.source`: an authored agent may carry the `builtin` source while not being one of these, and the runtime treats the two as separate questions. `disableableNames` is the subset a user may turn off, which a client needs to decide whether to offer a toggle. `yamlBasedNames` is the subset backed by a shipped YAML definition, which a client needs before asking the runtime to load one.
+    ///
+    /// Wire method: `agents.getBuiltins`.
+    ///
+    /// # Returns
+    ///
+    /// The agents this runtime ships, named so a consumer can tell them apart from authored ones.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn get_builtins(&self) -> Result<AgentsGetBuiltinsResult, Error> {
+        let wire_params = serde_json::json!({});
+        self.client
+            .call_typed(rpc_methods::AGENTS_GETBUILTINS, Some(wire_params))
+            .await
+    }
+
+    /// Lists the shipped agents a client should offer right now, filtered by the feature flags it passes. `getBuiltins` names every agent the runtime knows about; some of those are gated, so a client rendering a picker wants this narrower list together with the description to show beside each name.
+    ///
+    /// Wire method: `agents.getAvailableBuiltins`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The feature flags to evaluate shipped agents against.
+    ///
+    /// # Returns
+    ///
+    /// The shipped agents available under the requested flags.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn get_available_builtins(
+        &self,
+        params: AgentsGetAvailableBuiltinsRequest,
+    ) -> Result<AgentsGetAvailableBuiltinsResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AGENTS_GETAVAILABLEBUILTINS, Some(wire_params))
+            .await
+    }
+
+    /// Loads one shipped agent's YAML definition, for a client that needs what the agent declares rather than only its name. `getBuiltins` reports which names have a definition to load: a name outside its `yamlBasedNames` is special-cased in code and has none. The definition crosses as its own JSON rather than as contract-typed fields, because the runtime parses it with the agent schema's tolerant shape and re-typing it here would drop the keys that shape accepts and this one does not. The projected `__nativeCustomAgent` view the runtime derives is included, so a caller reading the declared model and a caller rendering the agent see the same definition.
+    ///
+    /// Wire method: `agents.getBuiltinDefinition`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The shipped agent whose definition to load.
+    ///
+    /// # Returns
+    ///
+    /// One shipped agent's definition.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn get_builtin_definition(
+        &self,
+        params: AgentsGetBuiltinDefinitionRequest,
+    ) -> Result<AgentsGetBuiltinDefinitionResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AGENTS_GETBUILTINDEFINITION, Some(wire_params))
+            .await
+    }
+
+    /// Resolves the model a custom agent asks for against the models actually available, and answers both the model to switch to and the warning a user should see when the agent's preference cannot be met. A custom agent may name several acceptable models in preference order, so the decision is a match rather than a lookup, and an agent whose preference is unavailable is a normal outcome that produces a warning rather than an error. A host must call this rather than pick the first available name itself, because the preference order and the wording of the warning are what keep one installation's agent selection the same as another's.
+    ///
+    /// Wire method: `agents.customAgentInitialModelDecision`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The models a custom agent asks for, and the models actually available.
+    ///
+    /// # Returns
+    ///
+    /// The model to switch to, and the warning to show when the agent's preference could not be met.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn custom_agent_initial_model_decision(
+        &self,
+        params: AgentsCustomAgentInitialModelDecisionParams,
+    ) -> Result<AgentsCustomAgentInitialModelDecisionResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::AGENTS_CUSTOMAGENTINITIALMODELDECISION,
+                Some(wire_params),
+            )
+            .await
+    }
+}
+
+/// `ahp.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcAhp<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcAhp<'a> {
+    /// `ahp.connectionLogs.*` sub-namespace.
+    pub fn connection_logs(&self) -> ClientRpcAhpConnectionLogs<'a> {
+        ClientRpcAhpConnectionLogs {
+            client: self.client,
+        }
+    }
+
+    /// `ahp.connections.*` sub-namespace.
+    pub fn connections(&self) -> ClientRpcAhpConnections<'a> {
+        ClientRpcAhpConnections {
+            client: self.client,
+        }
+    }
+}
+
+/// `ahp.connectionLogs.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcAhpConnectionLogs<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcAhpConnectionLogs<'a> {
+    /// Opens a redacted diagnostic log owned by this admitted SDK connection, before any relay authentication starts.
+    ///
+    /// Wire method: `ahp.connectionLogs.open`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Opens a diagnostic log before outgoing authentication starts.
+    ///
+    /// # Returns
+    ///
+    /// Identifies a diagnostic log owned by the originating SDK connection.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn open(
+        &self,
+        params: AhpConnectionLogOpenRequest,
+    ) -> Result<AhpConnectionLogRequest, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONLOGS_OPEN, Some(wire_params))
+            .await
+    }
+
+    /// Appends diagnostic text through the runtime's live secret filter to an owned connection log.
+    ///
+    /// Wire method: `ahp.connectionLogs.write`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Appends a redacted diagnostic message to a connection log.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn write(&self, params: AhpConnectionLogWriteRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::AHP_CONNECTIONLOGS_WRITE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Waits for an owned connection log's admitted writes to reach its file.
+    ///
+    /// Wire method: `ahp.connectionLogs.flush`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies a diagnostic log owned by the originating SDK connection.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn flush(&self, params: AhpConnectionLogRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::AHP_CONNECTIONLOGS_FLUSH, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Flushes and closes an owned connection log. The log lifetime is independent of relay authentication and retries.
+    ///
+    /// Wire method: `ahp.connectionLogs.close`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies a diagnostic log owned by the originating SDK connection.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn close(&self, params: AhpConnectionLogRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::AHP_CONNECTIONLOGS_CLOSE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+}
+
+/// `ahp.connections.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcAhpConnections<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcAhpConnections<'a> {
+    /// Creates a session at the remote AHP source and returns its refreshed catalog state. This does not create a local SDK attachment.
+    ///
+    /// Wire method: `ahp.connections.createSession`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Creates a session at the remote source, not a local SDK attachment.
+    ///
+    /// # Returns
+    ///
+    /// A session created at the remote source and its refreshed connection snapshot.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn create_session(
+        &self,
+        params: AhpConnectionCreateSessionRequest,
+    ) -> Result<AhpConnectionCreateSessionResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::AHP_CONNECTIONS_CREATESESSION,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Selects a source catalog session without subscribing to its complete state. A null summary means no session matched.
+    ///
+    /// Wire method: `ahp.connections.selectSession`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects a remote source session without opening a session subscription.
+    ///
+    /// # Returns
+    ///
+    /// The selected source catalog row.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn select_session(
+        &self,
+        params: AhpConnectionSelectSessionRequest,
+    ) -> Result<AhpConnectionSelectSessionResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::AHP_CONNECTIONS_SELECTSESSION,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Disposes a session at the remote source for every attached client. This is not a local SDK detach.
+    ///
+    /// Wire method: `ahp.connections.disposeSession`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Disposes a remote source session for every attached client.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn dispose_session(
+        &self,
+        params: AhpConnectionDisposeSessionRequest,
+    ) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(
+                rpc_methods::AHP_CONNECTIONS_DISPOSESESSION,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Creates an inert outgoing AHP connection owned by this admitted SDK connection. Uses its existing original auth owner and never accepts a setup bearer.
+    ///
+    /// Wire method: `ahp.connections.create`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Creates an inert outgoing connection under the caller's existing runtime auth owner.
+    ///
+    /// # Returns
+    ///
+    /// The connection's current protocol snapshot and negotiated client identity.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn create(
+        &self,
+        params: AhpConnectionCreateRequest,
+    ) -> Result<AhpConnectionStateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_CREATE, Some(wire_params))
+            .await
+    }
+
+    /// Attaches a runtime-owned SDK session facade to a session on the caller's outgoing AHP connection. Session state, history, approvals, and turn lifetimes stay in the runtime.
+    ///
+    /// Wire method: `ahp.connections.attachSession`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Attaches a runtime session facade to an existing AHP session.
+    ///
+    /// # Returns
+    ///
+    /// A registered runtime session and its independent attachment lease.
+    /// Read session.remote.readProjection before using host state.
+    /// The first read waits for subscription readiness and reports initialization errors.
+    /// Release the lease if initialization fails.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn attach_session(
+        &self,
+        params: AhpSessionAttachRequest,
+    ) -> Result<AhpSessionAttachResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::AHP_CONNECTIONS_ATTACHSESSION,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Releases the caller's AHP session facade, settles pending requests, and releases its subscription without disposing the host session.
+    ///
+    /// Wire method: `ahp.connections.detachSession`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Releases this caller's runtime facade without disposing the host's session.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn detach_session(&self, params: AhpSessionDetachRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(
+                rpc_methods::AHP_CONNECTIONS_DETACHSESSION,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Connects and initializes an owned outgoing AHP connection. Connection errors remain in the returned state.
+    ///
+    /// Wire method: `ahp.connections.connect`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects an outgoing connection owned by this SDK connection.
+    ///
+    /// # Returns
+    ///
+    /// The connection's current protocol snapshot and negotiated client identity.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn connect(
+        &self,
+        params: AhpConnectionRequest,
+    ) -> Result<AhpConnectionStateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_CONNECT, Some(wire_params))
+            .await
+    }
+
+    /// Reconnects the same outgoing client and restores its active subscriptions.
+    ///
+    /// Wire method: `ahp.connections.reconnect`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects an outgoing connection owned by this SDK connection.
+    ///
+    /// # Returns
+    ///
+    /// The connection's current protocol snapshot and negotiated client identity.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn reconnect(
+        &self,
+        params: AhpConnectionRequest,
+    ) -> Result<AhpConnectionStateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_RECONNECT, Some(wire_params))
+            .await
+    }
+
+    /// Refreshes the outgoing connection's session catalog.
+    ///
+    /// Wire method: `ahp.connections.refresh`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects an outgoing connection owned by this SDK connection.
+    ///
+    /// # Returns
+    ///
+    /// The connection's current protocol snapshot and negotiated client identity.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn refresh(
+        &self,
+        params: AhpConnectionRequest,
+    ) -> Result<AhpConnectionStateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_REFRESH, Some(wire_params))
+            .await
+    }
+
+    /// Authenticates pending protected resources with this connection's renewable account-bound credential. Reports failures per resource.
+    ///
+    /// Wire method: `ahp.connections.authenticate`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Authenticates pending protected resources with the connection's renewable credential source.
+    ///
+    /// # Returns
+    ///
+    /// Authentication outcome for each protected resource.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn authenticate(
+        &self,
+        params: AhpConnectionAuthenticateRequest,
+    ) -> Result<AhpConnectionsAuthenticateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_AUTHENTICATE, Some(wire_params))
+            .await
+    }
+
+    /// Waits for the next connection-owned event batch. Only one reader may wait at a time. Disposal releases the waiter.
+    ///
+    /// Wire method: `ahp.connections.readEvents`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects an outgoing connection owned by this SDK connection.
+    ///
+    /// # Returns
+    ///
+    /// Events admitted for this connection, in protocol order.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn read_events(
+        &self,
+        params: AhpConnectionRequest,
+    ) -> Result<AhpConnectionReadEventsResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_READEVENTS, Some(wire_params))
+            .await
+    }
+
+    /// Disposes an owned outgoing connection, cancels its protocol work, and releases its subscriptions.
+    ///
+    /// Wire method: `ahp.connections.dispose`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects an outgoing connection owned by this SDK connection.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn dispose(&self, params: AhpConnectionRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_DISPOSE, Some(wire_params))
+            .await?;
+        Ok(())
     }
 }
 
@@ -106,6 +737,33 @@ impl<'a> ClientRpcCafeMetrics<'a> {
         self.client
             .call_typed(rpc_methods::CAFEMETRICS_RESOLVEADMISSION, Some(wire_params))
             .await
+    }
+
+    /// Records only the first interactive CLI readiness observation in this process. Invalid durations produce no sample. Requires the private trusted CLI host capability.
+    ///
+    /// Wire method: `cafeMetrics.recordCliReady`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Existing initial interactive CLI readiness observation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn record_cli_ready(
+        &self,
+        params: CafeMetricsRecordCliReadyRequest,
+    ) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::CAFEMETRICS_RECORDCLIREADY, Some(wire_params))
+            .await?;
+        Ok(())
     }
 
     /// Records one terminal resume result. Does nothing before startup. Requires the private trusted CLI host capability.
@@ -244,9 +902,30 @@ impl<'a> ClientRpcSession<'a> {
         }
     }
 
+    /// `session.eventLog.*` sub-namespace.
+    pub fn event_log(&self) -> ClientRpcSessionEventLog<'a> {
+        ClientRpcSessionEventLog {
+            client: self.client,
+        }
+    }
+
     /// `session.mcp.*` sub-namespace.
     pub fn mcp(&self) -> ClientRpcSessionMcp<'a> {
         ClientRpcSessionMcp {
+            client: self.client,
+        }
+    }
+
+    /// `session.remote.*` sub-namespace.
+    pub fn remote(&self) -> ClientRpcSessionRemote<'a> {
+        ClientRpcSessionRemote {
+            client: self.client,
+        }
+    }
+
+    /// `session.sandbox.*` sub-namespace.
+    pub fn sandbox(&self) -> ClientRpcSessionSandbox<'a> {
+        ClientRpcSessionSandbox {
             client: self.client,
         }
     }
@@ -340,6 +1019,43 @@ impl<'a> ClientRpcSessionCanvasSource<'a> {
     }
 }
 
+/// `session.eventLog.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcSessionEventLog<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcSessionEventLog<'a> {
+    /// Publishes an existing event type for an admitted controller. The runtime validates, timestamps, orders, projects, and stores the event.
+    ///
+    /// Wire method: `session.eventLog.publish`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Publishes a controller event through the runtime-owned session log.
+    ///
+    /// # Returns
+    ///
+    /// Runtime acceptance of a controller event.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn publish(
+        &self,
+        params: SessionEventLogPublishParams,
+    ) -> Result<SessionEventPublishResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SESSION_EVENTLOG_PUBLISH, Some(wire_params))
+            .await
+    }
+}
+
 /// `session.mcp.*` RPCs.
 #[derive(Clone, Copy)]
 pub struct ClientRpcSessionMcp<'a> {
@@ -347,11 +1063,58 @@ pub struct ClientRpcSessionMcp<'a> {
 }
 
 impl<'a> ClientRpcSessionMcp<'a> {
+    /// `mcp.externalClient.*` sub-namespace.
+    pub fn external_client(&self) -> ClientRpcSessionMcpExternalClient<'a> {
+        ClientRpcSessionMcpExternalClient {
+            client: self.client,
+        }
+    }
+
     /// `mcp.oauth.*` sub-namespace.
     pub fn oauth(&self) -> ClientRpcSessionMcpOauth<'a> {
         ClientRpcSessionMcpOauth {
             client: self.client,
         }
+    }
+}
+
+/// `mcp.externalClient.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcSessionMcpExternalClient<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcSessionMcpExternalClient<'a> {
+    /// Private trusted CLI transport for a caller-owned live MCP client. Exchanges serializable advertisements, correlated tool and protocol callbacks, progress, reverse requests, cancellation, and catalog notifications. The caller retains the client and transport.
+    ///
+    /// Wire method: `session.mcp.externalClient.exchange`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Object envelope for one trusted live-client transport operation.
+    ///
+    /// # Returns
+    ///
+    /// Operation-specific reply or a complete live-client callback frame.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn exchange(
+        &self,
+        params: SessionMcpExternalClientExchangeParams,
+    ) -> Result<McpExternalClientResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SESSION_MCP_EXTERNALCLIENT_EXCHANGE,
+                Some(wire_params),
+            )
+            .await
     }
 }
 
@@ -630,6 +1393,171 @@ impl<'a> ClientRpcSessionMcpOauth<'a> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::SESSION_MCP_OAUTH_STOREKEY, Some(wire_params))
+            .await
+    }
+}
+
+/// `session.remote.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcSessionRemote<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcSessionRemote<'a> {
+    /// Replaces an owned session subscription in release and restore phases. Release returns a generation so the caller can check cancellation before restore. Restore requires the same lease and generation and waits for the authoritative snapshot to apply.
+    ///
+    /// Wire method: `session.remote.reattach`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Request for one phase of replacing an attached session's transport subscription.
+    ///
+    /// # Returns
+    ///
+    /// Runtime generation that fences the two subscription replacement phases.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn reattach(
+        &self,
+        params: SessionRemoteReattachParams,
+    ) -> Result<AhpSessionLeaseResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SESSION_REMOTE_REATTACH, Some(wire_params))
+            .await
+    }
+
+    /// Reads this caller's read-only AHP collaboration and pending-request projection, waiting after an unchanged revision.
+    ///
+    /// Wire method: `session.remote.readProjection`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Reads the host-owned collaboration and pending-request projection.
+    ///
+    /// # Returns
+    ///
+    /// A read-only host projection for clients with synchronous render paths.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn read_projection(
+        &self,
+        params: SessionRemoteReadProjectionParams,
+    ) -> Result<AhpSessionProjectionResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SESSION_REMOTE_READPROJECTION,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Submits one message through its originating trusted CLI host's request-owned admission callback. The runtime owns preparation, routing, and the admitted write.
+    ///
+    /// Wire method: `session.remote.sendWithAdmission`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - One trusted CLI host's message and its invocation-local admission identity.
+    ///
+    /// # Returns
+    ///
+    /// Result of sending a user message
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn send_with_admission(
+        &self,
+        params: SessionRemoteSendWithAdmissionParams,
+    ) -> Result<SendResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SESSION_REMOTE_SENDWITHADMISSION,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Publishes composer or view state through an owned AHP session. The runtime coalesces updates and owns retries.
+    ///
+    /// Wire method: `session.remote.publishState`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Publishes this client's collaboration state through the AHP host.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn publish_state(
+        &self,
+        params: SessionRemotePublishStateParams,
+    ) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::SESSION_REMOTE_PUBLISHSTATE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+}
+
+/// `session.sandbox.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcSessionSandbox<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcSessionSandbox<'a> {
+    /// Invokes a closed sandbox operation through the session's original authenticated attachment or AHP owner. Requires a trusted in-process host and a matching runtime-owned session binding. Never falls back to the local presentation session.
+    ///
+    /// Wire method: `session.sandbox.invokeOwned`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Request for an admitted host to use its original remote sandbox owner.
+    ///
+    /// # Returns
+    ///
+    /// Existing result of the sandbox operation on its original transport owner.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn invoke_owned(
+        &self,
+        params: SessionSandboxInvokeOwnedParams,
+    ) -> Result<SandboxInvokeOwnedResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SESSION_SANDBOX_INVOKEOWNED, Some(wire_params))
             .await
     }
 }

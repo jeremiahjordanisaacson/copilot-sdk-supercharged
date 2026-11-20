@@ -14,9 +14,11 @@ BYOK uses named `inference.providers` connections and per-model `inference.model
 | Microsoft Foundry Local          | `"openai"`              | Run AI models locally on your device via OpenAI-compatible API             |
 | Other OpenAI-compatible          | `"openai"`              | vLLM, LiteLLM, etc.                                                        |
 
-## Model identity and editing tools
+## Model identity, editing tools, and token limits
 
 Select models directly with session `model`, usually `provider/id`. Optional `inference.defaultProvider` routes unqualified selections through a named connection and requires CAPI disabled. Omission creates no default or preserves it on resume; explicit `null` clears it. It never selects the initial model. Unregistered pass-through aliases use inferred metadata plus session processing, without provider-wide model defaults.
+
+Recognized canonical model IDs also supply default prompt and context-window token limits when `maxPromptTokens` is omitted. Models with 1M-token windows use their standard context tier by default (for example, `272,000` prompt tokens for `gpt-6.1-sol` and `200,000` for 1M-window Claude and Gemini models) and use their full native prompt window when `contextTier: "long_context"` is selected; set `maxPromptTokens` to override either budget explicitly.
 
 Selection, behavior, and inference identities are separate: `models[].id` identifies the entry within the provider, `models[].modelId` selects model behavior (defaulting to `id`), and `models[].wireModel` controls the inference request's model (also defaulting to `id`). Choosing an editing policy does not change the provider endpoint or wire model, and does not bypass permission checks or explicit tool filters.
 

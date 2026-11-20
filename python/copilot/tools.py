@@ -9,6 +9,7 @@ generation from Pydantic models.
 
 from __future__ import annotations
 
+import copy
 import inspect
 import json
 from collections.abc import Awaitable, Callable
@@ -55,6 +56,11 @@ class ToolResult:
     session_log: str | None = None
     tool_telemetry: dict[str, Any] | None = None
     tool_references: list[str] | None = None
+    skip_large_output_processing: bool | None = None
+    """When true, bypass spill-to-file processing for this result.
+
+    False or None uses the session's normal large-output policy.
+    """
     _from_exception: bool = field(default=False, repr=False)
 
 
@@ -296,7 +302,7 @@ def define_tool(
         # Generate schema from Pydantic model
         schema = None
         if ptype is not None and _is_pydantic_model(ptype):
-            schema = ptype.model_json_schema()
+            schema = _parameters_schema(ptype)
 
         async def wrapped_handler(invocation: ToolInvocation) -> ToolResult:
             try:
@@ -368,7 +374,7 @@ def define_tool(
 
     # If a parameter model is provided without a handler, expose a declaration-only tool.
     if name is not None and params_type is not None:
-        schema = params_type.model_json_schema() if _is_pydantic_model(params_type) else None
+        schema = _parameters_schema(params_type) if _is_pydantic_model(params_type) else None
         return Tool(
             name=name,
             description=description or "",
@@ -393,6 +399,71 @@ def _is_pydantic_model(t: Any) -> bool:
         return isinstance(t, type) and issubclass(t, BaseModel)
     except TypeError:
         return False
+
+
+# The runtime reads a JSON integer exactly only within the signed and unsigned
+# 64-bit ranges, and any other number as a double.
+_EXACT_INT_MIN = -(2**63)
+_EXACT_INT_MAX = 2**64 - 1
+
+# JSON Schema keywords whose values are subschemas, grouped by how they hold them.
+_SUBSCHEMA_MAPS = ("properties", "patternProperties", "$defs", "definitions", "dependentSchemas")
+_SUBSCHEMA_LISTS = ("allOf", "anyOf", "oneOf", "prefixItems")
+_SUBSCHEMA_VALUES = (
+    "items",
+    "additionalItems",
+    "additionalProperties",
+    "unevaluatedItems",
+    "unevaluatedProperties",
+    "contains",
+    "propertyNames",
+    "not",
+    "if",
+    "then",
+    "else",
+)
+
+
+def _parameters_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Build a tool's parameter schema from its Pydantic model.
+
+    A default the runtime would read back as a different number is left out, so
+    the model never sees a value other than the one the handler receives;
+    ``model_validate`` still applies it when the argument is omitted.
+    """
+    schema = copy.deepcopy(model.model_json_schema())
+    _drop_inexact_defaults(schema)
+    return schema
+
+
+def _drop_inexact_defaults(schema: Any) -> None:
+    if not isinstance(schema, dict):
+        return
+    if "default" in schema and _has_inexact_number(schema["default"]):
+        del schema["default"]
+    for keyword, value in schema.items():
+        if keyword in _SUBSCHEMA_MAPS and isinstance(value, dict):
+            subschemas = list(value.values())
+        elif keyword in _SUBSCHEMA_LISTS and isinstance(value, list):
+            subschemas = value
+        elif keyword in _SUBSCHEMA_VALUES:
+            subschemas = value if isinstance(value, list) else [value]
+        else:
+            continue
+        for subschema in subschemas:
+            _drop_inexact_defaults(subschema)
+
+
+def _has_inexact_number(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return not _EXACT_INT_MIN <= value <= _EXACT_INT_MAX
+    if isinstance(value, dict):
+        return any(_has_inexact_number(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_inexact_number(item) for item in value)
+    return False
 
 
 def _normalize_result(result: Any) -> ToolResult:
@@ -502,7 +573,7 @@ def tool_result_to_external_tool_text_result_for_llm(
 ) -> ExternalToolTextResultForLlm:
     """Convert a ToolResult into the RPC payload sent to HandlePendingToolCall."""
     binary_results_for_llm = None
-    if tool_result.binary_results_for_llm:
+    if tool_result.binary_results_for_llm is not None:
         binary_results_for_llm = [
             ExternalToolTextResultForLlmBinaryResultsForLlm(
                 data=binary_result.data,
@@ -521,4 +592,5 @@ def tool_result_to_external_tool_text_result_for_llm(
         session_log=tool_result.session_log,
         tool_references=tool_result.tool_references,
         tool_telemetry=tool_result.tool_telemetry,
+        skip_large_output_processing=tool_result.skip_large_output_processing,
     )

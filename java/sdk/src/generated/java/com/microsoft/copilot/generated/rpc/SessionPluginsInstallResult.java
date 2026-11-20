@@ -35,7 +35,7 @@ public record SessionPluginsInstallResult(
     @JsonProperty("postInstallMessage") String postInstallMessage,
     /** Set when the install path is deprecated (e.g. direct repo / URL / local installs). Callers should surface this to end users. */
     @JsonProperty("deprecationWarning") String deprecationWarning,
-    /** Report-and-ignore warnings raised while reading the plugin's manifest, such as a field the manifest's schema does not define and the loader therefore ignored. Callers should surface these to end users: a plugin whose skills sit behind an ignored field otherwise installs, lists, and contributes nothing, with no signal to its author. Absent when the manifest raised none. */
+    /** Warnings raised while reading the plugin's manifest: a field the manifest's schema does not define, which the loader ignores, or the reason the loader rejects the whole manifest. Callers should surface these to end users: a plugin whose skills sit behind an ignored field, or whose manifest is rejected, otherwise installs, lists, and contributes nothing, with no signal to its author. Absent when the manifest raised none. */
     @JsonProperty("warnings") List<String> warnings
 ) {
 

@@ -37,11 +37,7 @@ internal sealed class ShellAuthenticationCancellation : IDisposable
         try
         {
             // Consumer callbacks must not run on the reader or the thread retiring the session.
-#if NET8_0_OR_GREATER
             await _source.CancelAsync().ConfigureAwait(false);
-#else
-            await Task.Run(() => _source.Cancel()).ConfigureAwait(false);
-#endif
         }
         catch (AggregateException)
         {

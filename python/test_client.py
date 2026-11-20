@@ -48,6 +48,8 @@ from copilot.client import (
     ExpConfigEntry,
     ManagedSettings,
     ManagedSettingsPermissions,
+    _HookInvokeRequest,
+    _HooksAdapter,
     _InternalTestOptions,
 )
 from copilot.rpc import (
@@ -70,7 +72,7 @@ from copilot.session_events import (
     SessionEventType,
 )
 from copilot.session_fs_provider import SessionFsProvider, create_session_fs_adapter
-from copilot.tools import Tool
+from copilot.tools import Tool, ToolBinaryResult, ToolResult
 from e2e.testharness import CLI_PATH
 from e2e.testharness.provider_options import byok_inference
 
@@ -1647,6 +1649,201 @@ class TestClientShutdown:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    @staticmethod
+    def _stopping_client(detach):
+        """A connected client with an owned runtime whose session requests go to ``detach``."""
+        process = Mock()
+        process.poll.side_effect = [None, 0]
+        process.wait.return_value = 0
+
+        class Runtime:
+            async def shutdown(self, *, timeout=None):
+                pass
+
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path="copilot")
+        )
+        rpc = Mock(stop=AsyncMock(), request=AsyncMock(side_effect=detach))
+        client._client = rpc
+        client._rpc = Mock(runtime=Runtime())
+        client._process = process
+        client._cli_process = process
+        client._is_external_server = False
+        return client, rpc
+
+    @staticmethod
+    async def _invoke_hook(client, session_id, hook_type):
+        request = _HookInvokeRequest.from_dict(
+            {"sessionId": session_id, "hookType": hook_type, "input": {}}
+        )
+        try:
+            return (await _HooksAdapter(client._get_session).invoke(request)).output
+        except ValueError as error:
+            return str(error)
+
+    async def _observe_stop_with_two_sessions(self) -> dict[str, object]:
+        """What the runtime's callbacks see while ``stop()`` detaches two open sessions."""
+        observed: dict[str, object] = {}
+        events: dict[str, list[str]] = {"first": [], "second": []}
+
+        async def detach(method, params):
+            assert method == "session.detach"
+            session_id = params["sessionId"]
+            # The runtime runs sessionEnd hooks and emits session.shutdown while detaching.
+            observed[
+                f"{session_id}: own sessionEnd hook during its detach"
+            ] = await self._invoke_hook(client, session_id, "sessionEnd")
+            if session_id == "first":
+                # A hook type "second" does not handle answers None only if it is registered.
+                observed["first detaching: second is still registered"] = await self._invoke_hook(
+                    client, "second", "agentStop"
+                )
+            else:
+                observed["second detaching: first is unregistered"] = await self._invoke_hook(
+                    client, "first", "agentStop"
+                )
+            client._handle_notification(
+                "session.event",
+                {
+                    "sessionId": session_id,
+                    "event": {
+                        "id": "00000000-0000-4000-8000-000000000001",
+                        "timestamp": "2026-01-01T00:00:00Z",
+                        "type": "session.shutdown",
+                        "parentId": None,
+                        "data": {
+                            "shutdownType": "routine",
+                            "totalApiDurationMs": 0,
+                            "sessionStartTime": 0,
+                            "codeChanges": {
+                                "linesAdded": 0,
+                                "linesRemoved": 0,
+                                "filesModified": [],
+                            },
+                            "modelMetrics": {},
+                        },
+                    },
+                },
+            )
+            observed[
+                f"{session_id}: shell authentication during its detach"
+            ] = await client._handle_shell_authentication_request(
+                {
+                    "sessionId": session_id,
+                    "requestId": "request-1",
+                    "program": "ssh",
+                    "prompt": "Passphrase: ",
+                    "inputKind": "secret",
+                }
+            )
+            try:
+                client._register_session(CopilotSession(f"late-{session_id}", rpc))
+                observed[f"{session_id}: new session during its detach"] = "registered"
+            except RuntimeError as error:
+                observed[f"{session_id}: new session during its detach"] = str(error)
+            return {"success": True}
+
+        client, rpc = self._stopping_client(detach)
+        sessions = []
+        for session_id in ("first", "second"):
+            session = CopilotSession(session_id, rpc)
+
+            async def on_session_end(input_data, invocation, session_id=session_id):
+                return {"sessionSummary": f"ended {session_id}"}
+
+            session._register_hooks({"on_session_end": on_session_end})
+            session.on(
+                lambda event, session_id=session_id: events[session_id].append(event.type.value)
+            )
+            client._register_session(session)
+            sessions.append(session)
+
+        await asyncio.wait_for(client.stop(), timeout=5)
+
+        observed["events delivered during detach"] = events
+        observed["registry after stop"] = sorted(client._sessions)
+        observed["sessionEnd hooks after stop"] = [
+            await self._invoke_hook(client, session_id, "sessionEnd")
+            for session_id in ("first", "second")
+        ]
+        observed["sessions disconnected after stop"] = [session._destroyed for session in sessions]
+        return observed
+
+    # Every row runs through stop(). Rows marked "fixed" failed before the fix; the rest
+    # describe stop() before and after it alike.
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("row", "expected"),
+        [
+            # fixed: the runtime's sessionEnd callback reaches the session being detached
+            ("first: own sessionEnd hook during its detach", {"sessionSummary": "ended first"}),
+            ("second: own sessionEnd hook during its detach", {"sessionSummary": "ended second"}),
+            # fixed: a session stop() has not detached yet is still open, as Go and Node.js
+            # keep it, so its callbacks and events still reach it
+            ("first detaching: second is still registered", None),
+            (
+                "events delivered during detach",
+                {"first": ["session.shutdown"], "second": ["session.shutdown"]},
+            ),
+            # each session leaves the registry once its own detach finishes
+            ("second detaching: first is unregistered", "unknown session first"),
+            ("first: shell authentication during its detach", {"action": "cancel"}),
+            ("second: shell authentication during its detach", {"action": "cancel"}),
+            ("first: new session during its detach", "Client not connected"),
+            ("second: new session during its detach", "Client not connected"),
+            ("registry after stop", []),
+            (
+                "sessionEnd hooks after stop",
+                ["unknown session first", "unknown session second"],
+            ),
+            ("sessions disconnected after stop", [True, True]),
+        ],
+    )
+    async def test_stop_keeps_each_session_registered_until_its_own_detach(self, row, expected):
+        observed = await self._observe_stop_with_two_sessions()
+        assert observed[row] == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "outcome", ["detached", "detach rejected", "detach raised", "detach timed out", "cancelled"]
+    )
+    async def test_stop_unregisters_every_session_whatever_its_detach_outcome(
+        self, monkeypatch, outcome
+    ):
+        detaching = asyncio.Event()
+
+        async def detach(method, params):
+            assert method == "session.detach"
+            detaching.set()
+            if outcome == "detach rejected":
+                return {"success": False, "error": "busy"}
+            if outcome == "detach raised":
+                raise RuntimeError("connection reset")
+            if outcome in ("detach timed out", "cancelled"):
+                await asyncio.Event().wait()
+            return {"success": True}
+
+        monkeypatch.setattr(client_module, "_RUNTIME_SHUTDOWN_TIMEOUT_SECONDS", 0.2)
+        client, rpc = self._stopping_client(detach)
+        session = CopilotSession("only", rpc)
+        client._register_session(session)
+
+        stopping = asyncio.create_task(client.stop())
+        await asyncio.wait_for(detaching.wait(), timeout=5)
+        if outcome == "cancelled":
+            stopping.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await stopping
+        elif outcome == "detached":
+            await asyncio.wait_for(stopping, timeout=5)
+        else:
+            with pytest.raises(ExceptionGroup):
+                await asyncio.wait_for(stopping, timeout=5)
+
+        assert client._sessions == {}
+        assert session._destroyed
+        assert await self._invoke_hook(client, "only", "sessionEnd") == "unknown session only"
 
     @pytest.mark.asyncio
     async def test_force_stop_and_external_stop_do_not_request_runtime_shutdown(self):
@@ -6237,6 +6434,125 @@ class TestPostToolUseFailureHookDispatch:
             },
         )
         assert result == {"additionalContext": "sync-ok"}
+
+
+class TestPostToolUseModifiedResultWireForm:
+    """A postToolUse hook's ``modifiedResult`` reaches the runtime as JSON it can apply."""
+
+    @staticmethod
+    async def _sent_output(modified_result):
+        from copilot._generated.rpc import _HookInvokeRequest
+        from copilot.client import _HooksAdapter
+        from copilot.session import CopilotSession, SessionHooks
+
+        def on_post_tool_use(input_data, invocation):
+            return {"modifiedResult": modified_result, "additionalContext": "kept"}
+
+        session = CopilotSession.__new__(CopilotSession)
+        CopilotSession.__init__(session, "sess-1", client=None)
+        session._hooks = SessionHooks(on_post_tool_use=on_post_tool_use)  # type: ignore[typeddict-item]
+        request = _HookInvokeRequest.from_dict(
+            {
+                "sessionId": "sess-1",
+                "hookType": "postToolUse",
+                "input": {
+                    "sessionId": "sess-1",
+                    "timestamp": 0,
+                    "cwd": "/",
+                    "toolName": "view",
+                    "toolArgs": {},
+                    "toolResult": {"textResultForLlm": "original", "resultType": "success"},
+                },
+            }
+        )
+        response = await _HooksAdapter(lambda _session_id: session).invoke(request)
+        # The JSON-RPC writer encodes the response with json.dumps.
+        return json.loads(json.dumps(response.to_dict()))["output"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("modified_result", "expected"),
+        [
+            pytest.param(
+                ToolResult(text_result_for_llm="redacted"),
+                {"textResultForLlm": "redacted", "resultType": "success"},
+                id="text only",
+            ),
+            pytest.param(
+                ToolResult(text_result_for_llm="redacted", binary_results_for_llm=[]),
+                {
+                    "textResultForLlm": "redacted",
+                    "resultType": "success",
+                    "binaryResultsForLlm": [],
+                },
+                id="explicitly clear images",
+            ),
+            pytest.param(
+                ToolResult(
+                    text_result_for_llm="see image",
+                    binary_results_for_llm=[ToolBinaryResult(data="aGk=", mime_type="image/png")],
+                ),
+                {
+                    "textResultForLlm": "see image",
+                    "resultType": "success",
+                    "binaryResultsForLlm": [
+                        {"data": "aGk=", "mimeType": "image/png", "type": "image"}
+                    ],
+                },
+                id="image without description",
+            ),
+            pytest.param(
+                ToolResult(
+                    text_result_for_llm="failed",
+                    result_type="failure",
+                    error="boom",
+                    binary_results_for_llm=[
+                        ToolBinaryResult(
+                            data="aGk=",
+                            mime_type="text/plain",
+                            type="resource",
+                            description="file:///log.txt",
+                        )
+                    ],
+                    session_log="log",
+                    tool_telemetry={"count": 1},
+                    tool_references=["grep"],
+                ),
+                {
+                    "textResultForLlm": "failed",
+                    "resultType": "failure",
+                    "error": "boom",
+                    "binaryResultsForLlm": [
+                        {
+                            "data": "aGk=",
+                            "mimeType": "text/plain",
+                            "type": "resource",
+                            "description": "file:///log.txt",
+                        }
+                    ],
+                    "sessionLog": "log",
+                    "toolTelemetry": {"count": 1},
+                    "toolReferences": ["grep"],
+                },
+                id="every member set",
+            ),
+        ],
+    )
+    async def test_tool_result_is_sent_with_only_the_members_it_sets(
+        self, modified_result, expected
+    ):
+        output = await self._sent_output(modified_result)
+        assert output == {"modifiedResult": expected, "additionalContext": "kept"}
+
+    @pytest.mark.asyncio
+    async def test_wire_form_dict_is_sent_unchanged_including_explicit_nulls(self):
+        modified_result = {
+            "textResultForLlm": "redacted",
+            "resultType": "success",
+            "binaryResultsForLlm": None,
+        }
+        output = await self._sent_output(dict(modified_result))
+        assert output == {"modifiedResult": modified_result, "additionalContext": "kept"}
 
 
 class TestHookErrorObjectNormalization:

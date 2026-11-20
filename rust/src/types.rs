@@ -2011,23 +2011,6 @@ impl NamedProviderConfig {
     }
 }
 
-fn prepare_bearer_token_providers(
-    providers: &mut Option<Vec<NamedProviderConfig>>,
-) -> HashMap<String, Arc<dyn BearerTokenProvider>> {
-    let mut bearer_token_providers = HashMap::new();
-
-    if let Some(providers) = providers.as_mut() {
-        for provider in providers {
-            if let Some(token_provider) = provider.bearer_token_provider.take() {
-                provider.has_bearer_token_provider = Some(true);
-                bearer_token_providers.insert(provider.name.clone(), token_provider);
-            }
-        }
-    }
-
-    bearer_token_providers
-}
-
 /// A BYOK model definition in the multi-provider registry.
 ///
 /// **Experimental.** Multi-provider BYOK configuration is part of an
@@ -2387,6 +2370,36 @@ impl std::fmt::Debug for SessionInferenceOptions {
     }
 }
 impl SessionInferenceOptions {
+    fn into_wire(
+        mut self,
+    ) -> (
+        crate::wire::SessionInferenceWire,
+        HashMap<String, Arc<dyn BearerTokenProvider>>,
+    ) {
+        let mut bearer_token_providers = HashMap::new();
+        if let Some(providers) = &mut self.providers {
+            for provider in providers {
+                if let Some(token_provider) = provider.bearer_token_provider.take() {
+                    provider.has_bearer_token_provider = Some(true);
+                    bearer_token_providers.insert(provider.name.clone(), token_provider);
+                }
+            }
+        }
+
+        let wire = crate::wire::SessionInferenceWire {
+            allow_multiple_tool_calls: self.allow_multiple_tool_calls,
+            reasoning_effort: self.reasoning_effort,
+            reasoning_summary: self.reasoning_summary,
+            context_tier: self.context_tier,
+            default_provider: self.default_provider,
+            providers: self.providers,
+            models: self.models,
+            enable_citations: self.enable_citations,
+            capabilities: self.capabilities,
+        };
+        (wire, bearer_token_providers)
+    }
+
     /// Construct an empty option group.
     pub fn new() -> Self {
         Self::default()
@@ -2620,6 +2633,40 @@ impl std::fmt::Debug for SessionInteractionOptions {
     }
 }
 impl SessionInteractionOptions {
+    fn validate_auto_mode_recovery(&self) -> Result<(), crate::Error> {
+        if self.auto_mode_recovery && self.on_auto_mode_switch_request.is_none() {
+            return Err(crate::Error::with_message(
+                crate::ErrorKind::InvalidConfig,
+                "auto_mode_recovery requires auto_mode_switch_handler",
+            ));
+        }
+        Ok(())
+    }
+
+    fn to_wire(&self) -> crate::wire::SessionInteractionWire {
+        crate::wire::SessionInteractionWire {
+            ask_user_variant: self.ask_user_variant,
+            request_user_input: self.on_user_input_request.is_some(),
+            request_exit_plan_mode: self.on_exit_plan_mode_request.is_some(),
+            request_auto_mode_switch: self.on_auto_mode_switch_request.is_some(),
+            request_auto_mode_recovery: self.auto_mode_recovery.then_some(true),
+            request_elicitation: self.on_elicitation_request.is_some(),
+            request_shell_authentication: self
+                .on_shell_authentication_request
+                .is_some()
+                .then_some(true),
+            commands: self.commands.as_ref().map(|commands| {
+                commands
+                    .iter()
+                    .map(|command| crate::wire::CommandWireDefinition {
+                        name: command.name.clone(),
+                        description: command.description.clone().unwrap_or_default(),
+                    })
+                    .collect()
+            }),
+        }
+    }
+
     /// Construct an empty option group.
     pub fn new() -> Self {
         Self::default()
@@ -2708,6 +2755,19 @@ impl std::fmt::Debug for SessionToolOptions {
     }
 }
 impl SessionToolOptions {
+    fn into_wire(self) -> Result<(crate::wire::SessionToolWire, ToolHandlerMap), crate::Error> {
+        let tool_handlers = collect_tool_handlers(self.definitions.as_deref().unwrap_or_default())?;
+        let wire = crate::wire::SessionToolWire {
+            definitions: self.definitions,
+            available_tools: self.available_tools,
+            excluded_tools: self.excluded_tools,
+            large_output: self.large_output,
+            search: self.search,
+            image_generation: self.image_generation,
+        };
+        Ok((wire, tool_handlers))
+    }
+
     /// Construct an empty option group.
     pub fn new() -> Self {
         Self::default()
@@ -3074,7 +3134,8 @@ pub struct SessionMcpOptions {
     /// Optional MCP OAuth handler.
     pub on_auth_request: Option<Arc<dyn McpAuthHandler>>,
     /// Controls how MCP OAuth tokens are stored for this session.
-    /// Storage mode for MCP OAuth tokens.
+    /// Omitted storage defaults to in-memory in empty mode. Other modes preserve
+    /// resident storage on resume and otherwise use persistent storage.
     pub oauth_token_storage: Option<String>,
 }
 impl std::fmt::Debug for SessionMcpOptions {
@@ -3477,6 +3538,34 @@ impl std::fmt::Debug for SessionGitHubOptions {
     }
 }
 impl SessionGitHubOptions {
+    fn into_wire(
+        self,
+    ) -> Result<
+        (
+            crate::wire::SessionGitHubWire,
+            Option<Arc<dyn GitHubTokenProvider>>,
+        ),
+        crate::Error,
+    > {
+        if self.token.is_some() && self.token_provider.is_some() {
+            return Err(crate::Error::with_message(
+                crate::ErrorKind::InvalidConfig,
+                "github.token and github.token_provider are mutually exclusive",
+            ));
+        }
+        let wire = crate::wire::SessionGitHubWire {
+            telemetry_forwarding: None,
+            mcp: self.mcp,
+            capi: self.capi,
+            telemetry_enabled: self.telemetry_enabled,
+            token: self.token,
+            token_provider_registration_id: None,
+            fetch_managed_settings: self.fetch_managed_settings,
+            interactive_user: self.interactive_user,
+        };
+        Ok((wire, self.token_provider))
+    }
+
     /// Construct an empty option group.
     pub fn new() -> Self {
         Self::default()
@@ -3935,6 +4024,7 @@ pub struct CreateSessionOptions {
     /// Working directory for the session. Tool operations resolve
     /// relative paths against this directory.
     pub working_directory: Option<PathBuf>,
+    remote_session: Option<crate::rpc::RemoteSessionMode>,
     /// Creates a remote session in the cloud instead of a local session.
     /// The optional repository is associated with the cloud session.
     pub cloud: Option<CloudSessionOptions>,
@@ -4013,6 +4103,7 @@ impl Default for CreateSessionOptions {
             diagnostics: None,
             lifecycle_diagnostics: None,
             working_directory: None,
+            remote_session: None,
             cloud: None,
             system_message_transform: None,
             inference: Default::default(),
@@ -4079,49 +4170,14 @@ impl CreateSessionOptions {
     ///
     /// [`SessionCreateWire`]: crate::wire::SessionCreateWire
     pub(crate) fn into_wire(
-        mut self,
+        self,
         session_id: Option<SessionId>,
     ) -> Result<(crate::wire::SessionCreateWire, SessionOptionsRuntime), crate::Error> {
-        if self.interaction.auto_mode_recovery
-            && self.interaction.on_auto_mode_switch_request.is_none()
-        {
-            return Err(crate::Error::with_message(
-                crate::ErrorKind::InvalidConfig,
-                "auto_mode_recovery requires auto_mode_switch_handler",
-            ));
-        }
-        if self.github.token.is_some() && self.github.token_provider.is_some() {
-            return Err(crate::Error::with_message(
-                crate::ErrorKind::InvalidConfig,
-                "github.token and github.token_provider are mutually exclusive",
-            ));
-        }
-        let permission_active =
-            self.permissions.on_request.is_some() || self.permissions.policy.is_some();
-        let request_user_input = self.interaction.on_user_input_request.is_some();
-        let request_exit_plan_mode = self.interaction.on_exit_plan_mode_request.is_some();
-        let request_auto_mode_switch = self.interaction.on_auto_mode_switch_request.is_some();
-        let request_shell_authentication =
-            self.interaction.on_shell_authentication_request.is_some();
-        let request_elicitation = self.interaction.on_elicitation_request.is_some();
-        let hooks_flag = self.hooks.handlers.is_some();
-        let has_skill_provider = self.skills.provider.is_some();
-        let has_memory_store = self.state.memory_store.is_some();
-
-        let tool_handlers =
-            collect_tool_handlers(self.tools.definitions.as_deref().unwrap_or_default())?;
-
-        let wire_commands = self.interaction.commands.as_ref().map(|cmds| {
-            cmds.iter()
-                .map(|c| crate::wire::CommandWireDefinition {
-                    name: c.name.clone(),
-                    description: c.description.clone().unwrap_or_default(),
-                })
-                .collect()
-        });
-        let wire_canvases = self.canvases.definitions.clone();
-        let canvas_handler = self.canvases.handler.clone();
-        let bearer_token_providers = prepare_bearer_token_providers(&mut self.inference.providers);
+        self.interaction.validate_auto_mode_recovery()?;
+        let (github, github_token_provider) = self.github.into_wire()?;
+        let (tools, tool_handlers) = self.tools.into_wire()?;
+        let interaction = self.interaction.to_wire();
+        let (inference, bearer_token_providers) = self.inference.into_wire();
 
         let wire = crate::wire::SessionCreateWire {
             session_id,
@@ -4132,19 +4188,9 @@ impl CreateSessionOptions {
             diagnostics: self.diagnostics,
             lifecycle_diagnostics: self.lifecycle_diagnostics,
             working_directory: self.working_directory,
-            remote_session: None,
+            remote_session: self.remote_session,
             cloud: self.cloud,
-            inference: crate::wire::SessionInferenceWire {
-                allow_multiple_tool_calls: self.inference.allow_multiple_tool_calls,
-                reasoning_effort: self.inference.reasoning_effort,
-                reasoning_summary: self.inference.reasoning_summary,
-                context_tier: self.inference.context_tier,
-                default_provider: self.inference.default_provider,
-                providers: self.inference.providers,
-                models: self.inference.models,
-                enable_citations: self.inference.enable_citations,
-                capabilities: self.inference.capabilities,
-            },
+            inference,
             policy: crate::wire::SessionPolicyWire {
                 allowed_models: self.policy.allowed_models,
                 excluded_managed_settings: self.policy.excluded_managed_settings,
@@ -4155,26 +4201,10 @@ impl CreateSessionOptions {
                 streaming: self.events.streaming,
                 include_sub_agent_streaming_events: self.events.include_sub_agent_streaming_events,
             },
-            interaction: crate::wire::SessionInteractionWire {
-                ask_user_variant: self.interaction.ask_user_variant,
-                request_user_input,
-                request_exit_plan_mode,
-                request_auto_mode_switch,
-                request_auto_mode_recovery: self.interaction.auto_mode_recovery.then_some(true),
-                request_elicitation,
-                request_shell_authentication: request_shell_authentication.then_some(true),
-                commands: wire_commands,
-            },
-            tools: crate::wire::SessionToolWire {
-                definitions: self.tools.definitions,
-                available_tools: self.tools.available_tools,
-                excluded_tools: self.tools.excluded_tools,
-                large_output: self.tools.large_output,
-                search: self.tools.search,
-                image_generation: self.tools.image_generation,
-            },
+            interaction,
+            tools,
             canvases: crate::wire::SessionCreateCanvasWire {
-                definitions: wire_canvases,
+                definitions: self.canvases.definitions,
                 request_renderer: self.canvases.request_renderer,
                 provider: self.canvases.provider,
             },
@@ -4204,7 +4234,7 @@ impl CreateSessionOptions {
                 embedding_cache_storage: self.state.embedding_cache_storage,
                 skip_embedding_retrieval: self.state.skip_embedding_retrieval,
                 enable_cross_session_store: self.state.enable_cross_session_store,
-                has_memory_store: has_memory_store.then_some(true),
+                has_memory_store: self.state.memory_store.is_some().then_some(true),
                 infinite_sessions: self.state.infinite_sessions,
                 memory: self.state.memory,
             },
@@ -4223,7 +4253,7 @@ impl CreateSessionOptions {
             },
             hooks: crate::wire::SessionHookWire {
                 enable_repository_hooks: self.hooks.enable_repository_hooks,
-                has_handlers: hooks_flag,
+                has_handlers: self.hooks.handlers.is_some(),
                 directories: self.hooks.directories,
             },
             git: crate::wire::SessionGitWire {
@@ -4231,25 +4261,16 @@ impl CreateSessionOptions {
             },
             skills: crate::wire::SessionSkillWire {
                 enabled: self.skills.enabled,
-                has_provider: has_skill_provider.then_some(true),
+                has_provider: self.skills.provider.is_some().then_some(true),
                 directories: self.skills.directories,
                 disabled_skills: self.skills.disabled_skills,
             },
             permissions: crate::wire::SessionPermissionWire {
-                request: permission_active,
+                request: self.permissions.on_request.is_some() || self.permissions.policy.is_some(),
                 sandbox: self.permissions.sandbox,
                 mode: self.permissions.mode,
             },
-            github: crate::wire::SessionGitHubWire {
-                telemetry_forwarding: None,
-                mcp: self.github.mcp,
-                capi: self.github.capi,
-                telemetry_enabled: self.github.telemetry_enabled,
-                token: self.github.token,
-                token_provider_registration_id: None,
-                fetch_managed_settings: self.github.fetch_managed_settings,
-                interactive_user: self.github.interactive_user,
-            },
+            github,
             plugins: crate::wire::SessionPluginWire {
                 directories: self.plugins.directories,
             },
@@ -4276,12 +4297,12 @@ impl CreateSessionOptions {
             hooks_handler: self.hooks.handlers,
             system_message_transform: self.system_message_transform,
             tool_handlers,
-            canvas_handler,
+            canvas_handler: self.canvases.handler,
             session_fs_provider: self.state.session_fs_provider,
             skill_provider: self.skills.provider,
             memory_store: self.state.memory_store,
             bearer_token_providers,
-            github_token_provider: self.github.token_provider,
+            github_token_provider,
             commands: self.interaction.commands,
         };
 
@@ -4342,6 +4363,15 @@ impl CreateSessionOptions {
     /// relative paths against this directory.
     pub fn with_working_directory(mut self, dir: impl Into<PathBuf>) -> Self {
         self.working_directory = Some(dir.into());
+        self
+    }
+
+    /// Set per-session remote behavior.
+    #[deprecated(
+        note = "Legacy v1 remote-control compatibility is temporary and may be removed in a future release"
+    )]
+    pub fn with_remote_session(mut self, mode: crate::rpc::RemoteSessionMode) -> Self {
+        self.remote_session = Some(mode);
         self
     }
 
@@ -4570,6 +4600,7 @@ pub struct ResumeSessionOptions {
     pub(crate) lifecycle_diagnostics: Option<LifecycleDiagnosticsConfiguration>,
     /// Per-session working directory on resume.
     pub working_directory: Option<PathBuf>,
+    remote_session: Option<crate::rpc::RemoteSessionMode>,
     /// When `true`, the runtime does not emit the `session.resume` event for
     /// this resume. Useful for reconnecting to a session without triggering
     /// resume-related side effects. Most callers should leave this unset
@@ -4661,15 +4692,7 @@ impl std::fmt::Debug for ResumeSessionOptions {
 
 impl ResumeSessionOptions {
     pub(crate) fn validate_auto_mode_recovery(&self) -> Result<(), crate::Error> {
-        if self.interaction.auto_mode_recovery
-            && self.interaction.on_auto_mode_switch_request.is_none()
-        {
-            return Err(crate::Error::with_message(
-                crate::ErrorKind::InvalidConfig,
-                "auto_mode_recovery requires auto_mode_switch_handler",
-            ));
-        }
-        Ok(())
+        self.interaction.validate_auto_mode_recovery()
     }
 
     /// Consume this config to produce the [`SessionResumeWire`] payload
@@ -4680,41 +4703,13 @@ impl ResumeSessionOptions {
     ///
     /// [`SessionResumeWire`]: crate::wire::SessionResumeWire
     pub(crate) fn into_wire(
-        mut self,
+        self,
     ) -> Result<(crate::wire::SessionResumeWire, SessionOptionsRuntime), crate::Error> {
         self.validate_auto_mode_recovery()?;
-        if self.github.token.is_some() && self.github.token_provider.is_some() {
-            return Err(crate::Error::with_message(
-                crate::ErrorKind::InvalidConfig,
-                "github.token and github.token_provider are mutually exclusive",
-            ));
-        }
-        let permission_active =
-            self.permissions.on_request.is_some() || self.permissions.policy.is_some();
-        let request_user_input = self.interaction.on_user_input_request.is_some();
-        let request_exit_plan_mode = self.interaction.on_exit_plan_mode_request.is_some();
-        let request_auto_mode_switch = self.interaction.on_auto_mode_switch_request.is_some();
-        let request_shell_authentication =
-            self.interaction.on_shell_authentication_request.is_some();
-        let request_elicitation = self.interaction.on_elicitation_request.is_some();
-        let hooks_flag = self.hooks.handlers.is_some();
-        let has_skill_provider = self.skills.provider.is_some();
-        let has_memory_store = self.state.memory_store.is_some();
-
-        let tool_handlers =
-            collect_tool_handlers(self.tools.definitions.as_deref().unwrap_or_default())?;
-
-        let wire_commands = self.interaction.commands.as_ref().map(|cmds| {
-            cmds.iter()
-                .map(|c| crate::wire::CommandWireDefinition {
-                    name: c.name.clone(),
-                    description: c.description.clone().unwrap_or_default(),
-                })
-                .collect()
-        });
-        let wire_canvases = self.canvases.definitions.clone();
-        let canvas_handler = self.canvases.handler.clone();
-        let bearer_token_providers = prepare_bearer_token_providers(&mut self.inference.providers);
+        let (github, github_token_provider) = self.github.into_wire()?;
+        let (tools, tool_handlers) = self.tools.into_wire()?;
+        let interaction = self.interaction.to_wire();
+        let (inference, bearer_token_providers) = self.inference.into_wire();
 
         let wire = crate::wire::SessionResumeWire {
             session_id: self.session_id,
@@ -4724,21 +4719,11 @@ impl ResumeSessionOptions {
             diagnostics: self.diagnostics,
             lifecycle_diagnostics: self.lifecycle_diagnostics,
             working_directory: self.working_directory,
-            remote_session: None,
+            remote_session: self.remote_session,
             suppress_resume_event: self.suppress_resume_event,
             continue_pending_work: self.continue_pending_work,
             allow_transcript_recovery: self.allow_transcript_recovery,
-            inference: crate::wire::SessionInferenceWire {
-                allow_multiple_tool_calls: self.inference.allow_multiple_tool_calls,
-                reasoning_effort: self.inference.reasoning_effort,
-                reasoning_summary: self.inference.reasoning_summary,
-                context_tier: self.inference.context_tier,
-                default_provider: self.inference.default_provider,
-                providers: self.inference.providers,
-                models: self.inference.models,
-                enable_citations: self.inference.enable_citations,
-                capabilities: self.inference.capabilities,
-            },
+            inference,
             policy: crate::wire::SessionPolicyWire {
                 allowed_models: self.policy.allowed_models,
                 excluded_managed_settings: self.policy.excluded_managed_settings,
@@ -4749,26 +4734,10 @@ impl ResumeSessionOptions {
                 streaming: self.events.streaming,
                 include_sub_agent_streaming_events: self.events.include_sub_agent_streaming_events,
             },
-            interaction: crate::wire::SessionInteractionWire {
-                ask_user_variant: self.interaction.ask_user_variant,
-                request_user_input,
-                request_exit_plan_mode,
-                request_auto_mode_switch,
-                request_auto_mode_recovery: self.interaction.auto_mode_recovery.then_some(true),
-                request_elicitation,
-                request_shell_authentication: request_shell_authentication.then_some(true),
-                commands: wire_commands,
-            },
-            tools: crate::wire::SessionToolWire {
-                definitions: self.tools.definitions,
-                available_tools: self.tools.available_tools,
-                excluded_tools: self.tools.excluded_tools,
-                large_output: self.tools.large_output,
-                search: self.tools.search,
-                image_generation: self.tools.image_generation,
-            },
+            interaction,
+            tools,
             canvases: crate::wire::SessionResumeCanvasWire {
-                definitions: wire_canvases,
+                definitions: self.canvases.definitions,
                 open: self.canvases.open,
                 request_renderer: self.canvases.request_renderer,
                 provider: self.canvases.provider,
@@ -4799,7 +4768,7 @@ impl ResumeSessionOptions {
                 embedding_cache_storage: self.state.embedding_cache_storage,
                 skip_embedding_retrieval: self.state.skip_embedding_retrieval,
                 enable_cross_session_store: self.state.enable_cross_session_store,
-                has_memory_store: has_memory_store.then_some(true),
+                has_memory_store: self.state.memory_store.is_some().then_some(true),
                 infinite_sessions: self.state.infinite_sessions,
                 memory: self.state.memory,
             },
@@ -4812,7 +4781,7 @@ impl ResumeSessionOptions {
             },
             hooks: crate::wire::SessionHookWire {
                 enable_repository_hooks: self.hooks.enable_repository_hooks,
-                has_handlers: hooks_flag,
+                has_handlers: self.hooks.handlers.is_some(),
                 directories: self.hooks.directories,
             },
             git: crate::wire::SessionGitWire {
@@ -4820,25 +4789,16 @@ impl ResumeSessionOptions {
             },
             skills: crate::wire::SessionSkillWire {
                 enabled: self.skills.enabled,
-                has_provider: has_skill_provider.then_some(true),
+                has_provider: self.skills.provider.is_some().then_some(true),
                 directories: self.skills.directories,
                 disabled_skills: self.skills.disabled_skills,
             },
             permissions: crate::wire::SessionPermissionWire {
-                request: permission_active,
+                request: self.permissions.on_request.is_some() || self.permissions.policy.is_some(),
                 sandbox: self.permissions.sandbox,
                 mode: self.permissions.mode,
             },
-            github: crate::wire::SessionGitHubWire {
-                telemetry_forwarding: None,
-                mcp: self.github.mcp,
-                capi: self.github.capi,
-                telemetry_enabled: self.github.telemetry_enabled,
-                token: self.github.token,
-                token_provider_registration_id: None,
-                fetch_managed_settings: self.github.fetch_managed_settings,
-                interactive_user: self.github.interactive_user,
-            },
+            github,
             plugins: crate::wire::SessionPluginWire {
                 directories: self.plugins.directories,
             },
@@ -4869,12 +4829,12 @@ impl ResumeSessionOptions {
             hooks_handler: self.hooks.handlers,
             system_message_transform: self.system_message_transform,
             tool_handlers,
-            canvas_handler,
+            canvas_handler: self.canvases.handler,
             session_fs_provider: self.state.session_fs_provider,
             skill_provider: self.skills.provider,
             memory_store: self.state.memory_store,
             bearer_token_providers,
-            github_token_provider: self.github.token_provider,
+            github_token_provider,
             commands: self.interaction.commands,
         };
 
@@ -4894,6 +4854,7 @@ impl ResumeSessionOptions {
             diagnostics: None,
             lifecycle_diagnostics: None,
             working_directory: None,
+            remote_session: None,
             suppress_resume_event: None,
             continue_pending_work: None,
             allow_transcript_recovery: None,
@@ -4960,6 +4921,15 @@ impl ResumeSessionOptions {
     /// Set the per-session working directory on resume.
     pub fn with_working_directory(mut self, dir: impl Into<PathBuf>) -> Self {
         self.working_directory = Some(dir.into());
+        self
+    }
+
+    /// Set per-session remote behavior on resume.
+    #[deprecated(
+        note = "Legacy v1 remote-control compatibility is temporary and may be removed in a future release"
+    )]
+    pub fn with_remote_session(mut self, mode: crate::rpc::RemoteSessionMode) -> Self {
+        self.remote_session = Some(mode);
         self
     }
 
@@ -6582,6 +6552,10 @@ pub struct ToolResultExpanded {
     /// Names of tools returned by a tool-search tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_references: Option<Vec<String>>,
+    /// When true, bypasses spill-to-file processing for this result.
+    /// False or unset uses the session's normal large-output policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_large_output_processing: Option<bool>,
 }
 
 impl ToolResultExpanded {
@@ -6597,6 +6571,7 @@ impl ToolResultExpanded {
             error: None,
             tool_telemetry: None,
             tool_references: None,
+            skip_large_output_processing: None,
         }
     }
 
@@ -6621,6 +6596,12 @@ impl ToolResultExpanded {
     /// Set the tool-specific telemetry emitted with the result.
     pub fn with_tool_telemetry(mut self, telemetry: HashMap<String, Value>) -> Self {
         self.tool_telemetry = Some(telemetry);
+        self
+    }
+
+    /// Set whether to bypass spill-to-file processing for this result.
+    pub fn with_skip_large_output_processing(mut self, skip: bool) -> Self {
+        self.skip_large_output_processing = Some(skip);
         self
     }
 

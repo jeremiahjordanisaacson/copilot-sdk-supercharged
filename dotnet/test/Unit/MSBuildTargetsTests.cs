@@ -100,6 +100,40 @@ public class MSBuildTargetsTests
     }
 
     [Fact]
+    public async Task DevPlaceholderVersion_SkipsDownloadWithActionableMessage()
+    {
+        using var sandbox = MSBuildSandbox.Create(version: "0.0.0-dev");
+
+        var result = await sandbox.BuildAsync(new Dictionary<string, string>
+        {
+            // Unroutable, so any download attempt fails the build.
+            ["CopilotCliReleaseBaseUrl"] = "http://127.0.0.1:9/releases",
+        });
+
+        Assert.True(result.Succeeded, result.FailureMessage());
+        Assert.DoesNotContain("Downloading Copilot CLI", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("development placeholder '0.0.0-dev'", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("CopilotCliBinaryPath", result.StandardOutput, StringComparison.Ordinal);
+        Assert.False(File.Exists(sandbox.ExpectedOutputBinary()), result.FailureMessage());
+    }
+
+    [Fact]
+    public async Task DevPlaceholderVersion_WithCliBinaryPath_StillCopiesToOutput()
+    {
+        using var sandbox = MSBuildSandbox.Create(version: "0.0.0-dev");
+        var preinstalled = sandbox.WritePreinstalledBinary("fake-cli-contents");
+
+        var result = await sandbox.BuildAsync(new Dictionary<string, string>
+        {
+            ["CopilotCliBinaryPath"] = preinstalled,
+        });
+
+        Assert.True(result.Succeeded, result.FailureMessage());
+        Assert.DoesNotContain("development placeholder", result.StandardOutput, StringComparison.Ordinal);
+        Assert.True(File.Exists(sandbox.ExpectedOutputBinary()), result.FailureMessage());
+    }
+
+    [Fact]
     public async Task PreinstalledCliBinaryPath_WithSkipCliDownload_StillCopiesToOutput()
     {
         using var sandbox = MSBuildSandbox.Create();
@@ -311,7 +345,7 @@ public class MSBuildTargetsTests
 
         var rid = MSBuildSandbox.GetPortableRid();
         var entries = sandbox.GetPackageEntries();
-        var nativePath = $"tools/net8.0/{rid}/runtimes/{rid}/native";
+        var nativePath = $"tools/net10.0/{rid}/runtimes/{rid}/native";
         Assert.Contains($"{nativePath}/{BinaryName}", entries);
         Assert.Contains($"{nativePath}/{RuntimeWrapperName}", entries);
         Assert.Contains($"{nativePath}/runtime.node", entries);
@@ -531,7 +565,7 @@ public class MSBuildTargetsTests
             var csproj = $"""
                 <Project Sdk="Microsoft.NET.Sdk">
                   <PropertyGroup>
-                    <TargetFramework>net8.0</TargetFramework>
+                    <TargetFramework>net10.0</TargetFramework>
                     <RuntimeIdentifier>{GetPortableRid()}</RuntimeIdentifier>
                     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>{cliVersionProperty}
                     <EnableDefaultCompileItems>true</EnableDefaultCompileItems>{toolProperties}
@@ -610,7 +644,7 @@ public class MSBuildTargetsTests
         public string ExpectedOutputBinary()
         {
             var rid = GetPortableRid();
-            return Path.Combine(ProjectDir, "bin", "Debug", "net8.0", "runtimes", rid, "native", BinaryName);
+            return Path.Combine(ProjectDir, "bin", "Debug", "net10.0", "runtimes", rid, "native", BinaryName);
         }
 
         public void WriteRuntimeCacheAsset(params string[] pathAndContents)
@@ -623,7 +657,7 @@ public class MSBuildTargetsTests
 
         public string ExpectedCacheAsset(params string[] pathParts)
         {
-            var path = Path.Combine(ProjectDir, "obj", "Debug", "net8.0", "copilot-cli", _version,
+            var path = Path.Combine(ProjectDir, "obj", "Debug", "net10.0", "copilot-cli", _version,
                 GetReleasePlatform());
             foreach (var part in pathParts)
             {
@@ -639,7 +673,7 @@ public class MSBuildTargetsTests
         public string PublishedRuntimeAsset(params string[] pathParts)
         {
             var rid = GetPortableRid();
-            var path = Path.Combine(ProjectDir, "bin", "Debug", "net8.0", rid, "publish", "runtimes", rid, "native");
+            var path = Path.Combine(ProjectDir, "bin", "Debug", "net10.0", rid, "publish", "runtimes", rid, "native");
             foreach (var part in pathParts)
             {
                 path = Path.Combine(path, part);
@@ -649,7 +683,7 @@ public class MSBuildTargetsTests
 
         public string ExpectedRuntimeAsset(params string[] pathParts)
         {
-            var path = Path.Combine(ProjectDir, "bin", "Debug", "net8.0", "runtimes", GetPortableRid(), "native");
+            var path = Path.Combine(ProjectDir, "bin", "Debug", "net10.0", "runtimes", GetPortableRid(), "native");
             foreach (var part in pathParts)
             {
                 path = Path.Combine(path, part);

@@ -91,7 +91,7 @@ rust_library(
     version = "1.54.1",
     deps = [
         "@sdk_vendor__bytes-1.12.1//:bytes",
-        "@sdk_vendor__mio-1.2.4//:mio",
+        "@sdk_vendor__mio-1.2.5//:mio",
         "@sdk_vendor__pin-project-lite-0.2.17//:pin_project_lite",
         "@sdk_vendor__socket2-0.6.5//:socket2",
     ] + select({

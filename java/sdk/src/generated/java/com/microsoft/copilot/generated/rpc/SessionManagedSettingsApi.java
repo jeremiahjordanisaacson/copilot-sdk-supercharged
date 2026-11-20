@@ -77,6 +77,17 @@ public final class SessionManagedSettingsApi {
     }
 
     /**
+     * Re-reads device policy and fetches fresh managed settings for a live session. Waits for tracked policy application, including MCP, and returns the same snapshot type as session.managedSettings.get. On failure, rejects rather than returning retained policy as fresh. Requires opting in to managed-settings fetching in the SDK's GitHub session options.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SessionManagedSettingsGetResult> refresh() {
+        return caller.invoke("session.managedSettings.refresh", java.util.Map.of("sessionId", this.sessionId), SessionManagedSettingsGetResult.class);
+    }
+
+    /**
      * Runs a fresh Policy Helper evaluation for the live session's current account, registration, working directory, repository and client context, bypassing only a completed cached helper result for that exact context while coalescing an equivalent execution already in flight. The previous failure and safeguards remain active until fresh success is applied. Returns the same retained snapshot as session.managedSettings.get after the recheck settles.
      *
      * @apiNote This method is experimental and may change in a future version.

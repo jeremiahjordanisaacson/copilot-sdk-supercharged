@@ -218,7 +218,7 @@ await using var session = await client.CreateSessionAsync(new CreateSessionOptio
 
 ## Disabling configured servers per session
 
-Set `disabledMcpServers` to exact MCP server names that must not run in a session.
+Set `mcp.disabledServers` to exact MCP server names that must not run in a session.
 The setting is scoped to the individual create or resume request; it does not
 modify global MCP settings or the server configuration.
 
@@ -241,12 +241,12 @@ const session = await client.createSession({
 
 | SDK | Configuration property |
 | --- | --- |
-| Node.js | `disabledMcpServers` |
-| Python | `disabled_mcp_servers` |
-| Go | `DisabledMCPServers` |
-| .NET | `DisabledMcpServers` |
-| Java | `setDisabledMcpServers(...)` |
-| Rust | `with_disabled_mcp_servers(...)` |
+| Node.js | `mcp: { disabledServers: [...] }` |
+| Python | `mcp={"disabled_servers": [...]}` |
+| Go | `MCP: copilot.SessionMCPOptions{DisabledServers: ...}` |
+| .NET | `Mcp = new SessionMcpOptions { DisabledServers = ... }` |
+| Java | `.setMcp(new SessionMcpOptions().setDisabledServers(...))` |
+| Rust | `.with_mcp(\|mcp\| mcp.with_disabled_servers(...))` |
 
 On session creation and a **cold** resume, disabled servers are not started and
 the runtime does not initiate their authentication. A resident resume cannot
@@ -444,6 +444,37 @@ directories for different applications.
 | `workingDirectory` | `string` | No | Working directory for the server process |
 | `tools` | `string[]` | No | Tools to enable (`["*"]` for all, `[]` for none) |
 | `timeout` | `number` | No | Timeout in milliseconds |
+
+#### Session identity for local servers
+
+The runtime sets the `COPILOT_AGENT_SESSION_ID` environment variable on every
+local/stdio server process. Its value is the ID of the session that started the
+process: the `sessionId` you pass to `createSession`, or the generated ID in
+`session.sessionId`. Use it to correlate a server's own logs, caches, or state
+with a Copilot session.
+
+* **Scope**: Each session starts its own server processes, so two sessions that
+  use the same configuration see different values.
+* **Lifetime**: The value is fixed for the life of a server process. A server
+  process never observes a different session ID.
+* **Resume**: Resuming a session keeps its ID, both when the session is still
+  resident in the runtime and when a new runtime process resumes it from disk
+  (cold resume). After a cold resume, the servers that start receive the
+  original session ID.
+* **Override**: A value you set for this name in the server's `env` takes
+  precedence, and the server receives your value instead of the session ID.
+  Omit this name from `env` to receive the session ID.
+* **Format**: Treat the value as an opaque string. Do not parse it or depend on
+  its length or character set.
+
+> [!WARNING]
+> The session ID is not a secret, does not authenticate the caller, and does
+> not attest that any sandbox or policy is enforced. A server can't use it to
+> prove that a request came from Copilot or that a policy applies. The ID also
+> doesn't tell a server where or how policy is stored; there is no supported
+> on-disk policy format to read.
+
+Remote (HTTP/SSE) servers don't receive this variable.
 
 ### Remote server (HTTP/SSE)
 
@@ -645,7 +676,7 @@ The abort signal stops the loop after its current bounded read completes; it is
 not passed to the RPC call. Disabling capture wakes an outstanding read.
 
 MCP startup is lazy: enabling or reading diagnostics does not start a server.
-Configure `mcpServers` on session creation, then either use the session normally
+Configure `mcp.servers` on session creation, then either use the session normally
 or call `session.rpc.mcp.startServer({ serverName })` for an installed server
 to troubleshoot initialization without making a model request.
 

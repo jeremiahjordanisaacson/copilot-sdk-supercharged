@@ -24,7 +24,7 @@ import javax.annotation.processing.Generated;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record SessionNameSetAutoResult(
-    /** Whether the auto-generated summary was persisted. False if the session already has a user-set name, the summary normalized to empty, or the session does not have a workspace. */
+    /** Whether the auto-generated summary was persisted. False if the session already has a user-set name, the summary normalized to empty, the normalized summary already is the session's name, or the session does not have a workspace. */
     @JsonProperty("applied") Boolean applied
 ) {
 

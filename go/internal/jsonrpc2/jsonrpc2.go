@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const version = "2.0"
@@ -313,7 +315,11 @@ func (c *Client) RequestWithInlineResponse(ctx context.Context, method string, p
 	default:
 	}
 
-	requestID := generateUUID()
+	requestUUID, err := uuid.NewRandomFromReader(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate request ID: %w", err)
+	}
+	requestID := requestUUID.String()
 
 	// Create response channel
 	responseChan := make(chan *Response, 1)
@@ -380,7 +386,7 @@ func (c *Client) RequestWithInlineResponse(ctx context.Context, method string, p
 		}
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	if method == "session.sendAndWait" || method == "session.featureFlags.read" || method == "localModels.watch" || method == "taskAnalytics.classifyTrajectory" {
+	if method == "session.sendAndWait" || method == "session.featureFlags.read" || method == "localModels.watch" || method == "feedback.upload.read" || method == "taskAnalytics.classifyTrajectory" || method == "session.resume" {
 		defer func() {
 			if ctx.Err() != nil {
 				c.mu.Lock()
@@ -769,15 +775,6 @@ func (c *Client) sendErrorResponse(ctx context.Context, id json.RawMessage, rpcE
 	if err := c.sendMessage(ctx, response); err != nil {
 		fmt.Printf("Failed to send JSON-RPC error response: %v\n", err)
 	}
-}
-
-// generateUUID generates a simple UUID v4 without external dependencies
-func generateUUID() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	b[6] = (b[6] & 0x0f) | 0x40 // Version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // Variant is 10
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
 // decodeMessage decodes a JSON-RPC message from raw bytes, returning either

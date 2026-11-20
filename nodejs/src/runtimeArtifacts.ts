@@ -87,6 +87,9 @@ function isExcluded(relativePath: string): boolean {
         /^tree-sitter.*\.wasm$/.test(topLevel) ||
         /^voice-.*\.js$/.test(topLevel) ||
         fileName === "cli-native.node" ||
+        fileName === "copilot-voice" ||
+        fileName.startsWith("copilot-voice.") ||
+        fileName.startsWith("copilot-voice-assets.") ||
         parts.includes("mediaremote-adapter") ||
         fileName.startsWith("copilot-runtime-bin")
     );

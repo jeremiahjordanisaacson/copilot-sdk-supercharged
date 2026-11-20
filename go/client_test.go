@@ -23,6 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/microsoft/copilot-sdk/go/v2/internal/embeddedcli"
@@ -186,6 +187,93 @@ func TestClientStartAfterTransportLossRetiresLostSessions(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("SendAndWait on the lost session was still waiting after Start reconnected")
+	}
+}
+
+func TestClientForceStopEndsStartWaitingForExternalServer(t *testing.T) {
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	if err := listener.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient(&ClientOptions{Mode: ModeCodingAgent, Runtime: TCPConnection{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port}})
+	t.Cleanup(client.ForceStop)
+	accept := func() (*installationConfirmationPeer, installationConfirmationMessage) {
+		t.Helper()
+		conn, err := listener.Accept()
+		if err != nil {
+			t.Fatal("client did not connect:", err)
+		}
+		t.Cleanup(func() { conn.Close() })
+		peer := &installationConfirmationPeer{t: t, conn: conn, reader: bufio.NewReader(conn)}
+		connect := peer.readMessage()
+		if connect.Method != "connect" {
+			t.Fatalf("first request = %q, want connect", connect.Method)
+		}
+		return peer, connect
+	}
+
+	// The server never answers connect, and the caller's context never ends.
+	started := make(chan error, 1)
+	go func() { started <- client.Start(context.Background()) }()
+	accept()
+	stopped := make(chan struct{})
+	go func() {
+		client.ForceStop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ForceStop waited for a Start blocked on the connect handshake")
+	}
+	select {
+	case err := <-started:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Start error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start was still waiting for the connect handshake after ForceStop")
+	}
+
+	restarted := make(chan error, 1)
+	go func() { restarted <- client.Start(t.Context()) }()
+	peer, connect := accept()
+	peer.write(map[string]any{"jsonrpc": "2.0", "id": connect.ID, "result": map[string]any{
+		"ok": true, "protocolVersion": SDKProtocolVersion, "version": "test",
+	}})
+	select {
+	case err := <-restarted:
+		if err != nil {
+			t.Fatal("Start after ForceStop:", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start after ForceStop did not finish")
+	}
+}
+
+func TestClientStartFailsWhileForceStopWaitsForIt(t *testing.T) {
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	client := NewClient(&ClientOptions{Mode: ModeCodingAgent, Runtime: TCPConnection{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port}})
+	t.Cleanup(client.ForceStop)
+
+	// A ForceStop that found no Start in progress, because Start had not yet
+	// published it, is waiting for startStopMux. Start must end itself rather
+	// than wait for a server that never answers.
+	client.pendingForceStops.Add(1)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	err = client.Start(ctx)
+	client.pendingForceStops.Add(-1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start error = %v, want context.Canceled", err)
 	}
 }
 
@@ -542,8 +630,18 @@ func TestGetStatusResponseHostDiagnostics(t *testing.T) {
 func TestResolveRuntimeExecutable(t *testing.T) {
 	t.Run("managed launch requires bundled runtime pair", func(t *testing.T) {
 		_, err := resolveRuntimeExecutable("", "")
-		if err == nil || !strings.Contains(err.Error(), "copilot-runtime and adjacent runtime.node") {
-			t.Fatalf("expected missing managed runtime error, got %v", err)
+		if err == nil {
+			t.Fatal("expected missing managed runtime error")
+		}
+		for _, want := range []string{
+			"copilot-runtime and adjacent runtime.node",
+			"go get -tool github.com/microsoft/copilot-sdk/go/v2/cmd/bundler",
+			"go tool bundler",
+			"COPILOT_CLI_PATH",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("missing managed runtime error %q does not mention %q", err, want)
+			}
 		}
 	})
 
@@ -2311,6 +2409,204 @@ func TestClient_ConnectionQueriesWaitForStart(t *testing.T) {
 	}
 }
 
+func TestClient_StartWaitingForAnotherStartObservesItsContext(t *testing.T) {
+	server := newConnectionQueryServer(t, false, true)
+	client := NewClient(&ClientOptions{Mode: ModeCodingAgent, Runtime: server.connection})
+	t.Cleanup(client.ForceStop)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	started := make(chan error, 1)
+	go func() { started <- client.Start(ctx) }()
+	select {
+	case <-server.connected:
+	case <-ctx.Done():
+		t.Fatal("Start did not send connect")
+	}
+
+	// The first Start is waiting for its connect reply. Two more Starts wait
+	// for it, and cancelling one of them ends only that one.
+	waiterCtx, cancelWaiter := context.WithCancel(ctx)
+	cancelled := make(chan error, 1)
+	go func() { cancelled <- client.Start(waiterCtx) }()
+	waiting := make(chan error, 1)
+	go func() { waiting <- client.Start(ctx) }()
+	time.Sleep(100 * time.Millisecond)
+	cancelWaiter()
+	select {
+	case err := <-cancelled:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("cancelled Start returned %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a Start waiting for another Start ignored its cancelled context")
+	}
+	select {
+	case err := <-started:
+		t.Fatalf("first Start returned when a waiting Start was cancelled: %v", err)
+	case err := <-waiting:
+		t.Fatalf("waiting Start returned when another waiting Start was cancelled: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	server.releaseConnect()
+	for name, result := range map[string]chan error{"first Start": started, "waiting Start": waiting} {
+		select {
+		case err := <-result:
+			if err != nil {
+				t.Errorf("%s failed: %v", name, err)
+			}
+		case <-ctx.Done():
+			t.Fatalf("%s did not return after connect was answered", name)
+		}
+	}
+	// The cancelled Start released its claim on the start/stop lock.
+	stopped := make(chan error, 1)
+	go func() { stopped <- client.Stop() }()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Errorf("Stop failed: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("Stop did not return after the cancelled Start")
+	}
+}
+
+type startWaitGrantContext struct {
+	context.Context
+	done    chan struct{}
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *startWaitGrantContext) Done() <-chan struct{} {
+	close(c.entered)
+	<-c.release
+	return c.done
+}
+
+func TestClient_StartWaiterChecksContextAfterGrant(t *testing.T) {
+	for _, cancelled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancelled=%t", cancelled), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				client := &Client{}
+				client.startStopMux.Lock()
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				waitCtx := &startWaitGrantContext{
+					Context: ctx,
+					done:    make(chan struct{}),
+					entered: make(chan struct{}),
+					release: make(chan struct{}),
+				}
+				defer close(waitCtx.done)
+				result := make(chan error, 1)
+				go func() { result <- client.lockStartStop(waitCtx) }()
+				<-waitCtx.entered
+
+				if cancelled {
+					cancel()
+				}
+				client.startStopMux.Unlock()
+				synctest.Wait()
+				// Resume only after the grant is ready. Context permits Done
+				// to close asynchronously after cancellation; delay that signal
+				// so select must take the grant and check Err itself.
+				close(waitCtx.release)
+				synctest.Wait()
+				err := <-result
+				if err == nil {
+					client.startStopMux.Unlock()
+				}
+				if cancelled && !errors.Is(err, context.Canceled) {
+					t.Errorf("cancelled waiter returned %v, want context.Canceled", err)
+				} else if !cancelled && err != nil {
+					t.Errorf("live waiter returned %v, want nil", err)
+				}
+				if !client.startStopMux.TryLock() {
+					t.Fatal("waiter did not release the start/stop lock")
+				}
+				client.startStopMux.Unlock()
+			})
+		})
+	}
+}
+
+func TestClient_CancelledStartWaitersDoNotAccumulateGoroutines(t *testing.T) {
+	client := &Client{}
+	client.startStopMux.Lock() // a Start that never finishes
+	before := runtime.NumGoroutine()
+
+	const waiters = 200
+	var wg sync.WaitGroup
+	for range waiters {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+			defer cancel()
+			if err := client.lockStartStop(ctx); !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("lockStartStop returned %v, want context.DeadlineExceeded", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	client.startWaitMux.Lock()
+	queued := len(client.startWaiters)
+	client.startWaitMux.Unlock()
+	if queued != 0 {
+		t.Errorf("%d cancelled waiters are still queued", queued)
+	}
+	// One shared goroutine keeps waiting on the lock while it is held; the
+	// cancelled waiters must not each keep one. Deadline callbacks of the
+	// timed-out contexts can still be finishing after wg.Wait, so give that
+	// transient teardown time to end before judging, with the lock still held.
+	extra := 0
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		extra = runtime.NumGoroutine() - before
+		if extra <= 2 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if extra > 2 {
+		t.Errorf("%d goroutines remain after %d cancelled waiters, want at most 2", extra, waiters)
+	}
+
+	// A waiter that is still live gets the lock once the first holder lets go.
+	acquired := make(chan error, 1)
+	go func() { acquired <- client.lockStartStop(t.Context()) }()
+	time.Sleep(50 * time.Millisecond)
+	client.startStopMux.Unlock()
+	select {
+	case err := <-acquired:
+		if err != nil {
+			t.Fatalf("live waiter failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("live waiter never acquired the lock")
+	}
+	client.startStopMux.Unlock()
+
+	// With no waiters left the shared goroutine ends and the lock is free.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		client.startWaitMux.Lock()
+		running := client.startWaitHandoff
+		client.startWaitMux.Unlock()
+		if !running && client.startStopMux.TryLock() {
+			client.startStopMux.Unlock()
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("start/stop lock handoff did not finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestClient_ConnectionQueriesDuringStop(t *testing.T) {
 	for _, mode := range []string{"Stop", "ForceStop"} {
 		t.Run(mode, func(t *testing.T) {
@@ -2687,6 +2983,21 @@ func TestClient_ForwardsPermissionModeToSessionRequests(t *testing.T) {
 			assertOptionalStringJSONField(t, <-resumeParams, "permissions.mode", string(mode))
 			assertPermissionModeResult(t, resumed.PermissionModeResult(), mode)
 		})
+	}
+}
+
+func TestSessionPermissionModeResultIsIndependentOfSessionState(t *testing.T) {
+	reason := "managed_policy"
+	session := &Session{permissionModeResult: &rpc.PermissionsSetModeResult{
+		Success: false,
+		Mode:    rpc.PermissionModeManual,
+		Reason:  &reason,
+	}}
+
+	*session.PermissionModeResult().Reason = "mutated"
+
+	if got := session.PermissionModeResult().Reason; got == nil || *got != "managed_policy" {
+		t.Fatalf("PermissionModeResult().Reason = %v, want managed_policy", got)
 	}
 }
 
@@ -3223,6 +3534,63 @@ func TestClient_ForwardsNewSessionOptionsToSessionRequests(t *testing.T) {
 		map[string]any{"maxContinues": float64(2)})
 }
 
+func TestClient_SendsDisabledSkillsAndExcludedToolsOnResume(t *testing.T) {
+	// The runtime replaces a loaded session's disabled skills and excluded tools
+	// whenever the key is present, so an empty list must reach it to clear them;
+	// nil keeps them.
+	for _, tc := range []struct {
+		name  string
+		names []string
+		want  string
+	}{
+		{"omitted", nil, ""},
+		{"empty", []string{}, `[]`},
+		{"subset", []string{"foo"}, `["foo"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rpcClient, server, _ := newRuntimeShutdownRpcPair(t)
+			t.Cleanup(server.Stop)
+			client := &Client{
+				client: rpcClient, RPC: rpc.NewServerRPC(rpcClient),
+				sessions: make(map[string]*Session),
+			}
+			params := make(chan json.RawMessage, 1)
+			server.SetRequestHandler("session.resume", func(request json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
+				params <- append(json.RawMessage(nil), request...)
+				return []byte(`{"sessionId":"` + sessionIDFromParams(t, request) + `"}`), nil
+			})
+			if _, err := client.ResumeSession(t.Context(), "s1", &ResumeSessionOptions{
+				Skills: SessionSkillOptions{DisabledSkills: tc.names},
+				Tools:  SessionToolOptions{ExcludedTools: tc.names},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(<-params, &payload); err != nil {
+				t.Fatal(err)
+			}
+			for group, key := range map[string]string{"skills": "disabledSkills", "tools": "excludedTools"} {
+				var fields map[string]json.RawMessage
+				if raw, present := payload[group]; present {
+					if err := json.Unmarshal(raw, &fields); err != nil {
+						t.Fatalf("decode %s: %v", group, err)
+					}
+				}
+				value, present := fields[key]
+				if tc.want == "" {
+					if present {
+						t.Errorf("expected %s to be omitted, got %s", key, value)
+					}
+					continue
+				}
+				if !present || string(value) != tc.want {
+					t.Errorf("expected %s %s, got %s (present=%v)", key, tc.want, value, present)
+				}
+			}
+		})
+	}
+}
+
 func TestClient_PreservesIncludedBuiltInAgentsOnCreateAndResume(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -3274,6 +3642,51 @@ func TestClient_PreservesIncludedBuiltInAgentsOnCreateAndResume(t *testing.T) {
 						t.Fatalf("expected allowlist %s, got %s", want, value)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestClient_SendsExcludedBuiltInAgentsOnResume(t *testing.T) {
+	// The runtime replaces a loaded session's exclusions whenever the key is
+	// present, so an empty list must reach it to clear them; nil keeps them.
+	for _, tc := range []struct {
+		name   string
+		agents []string
+		want   string
+	}{
+		{"omitted", nil, ""},
+		{"empty", []string{}, `[]`},
+		{"subset", []string{"task"}, `["task"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rpcClient, server, _ := newRuntimeShutdownRpcPair(t)
+			t.Cleanup(server.Stop)
+			client := &Client{
+				client: rpcClient, RPC: rpc.NewServerRPC(rpcClient),
+				sessions: make(map[string]*Session),
+			}
+			params := make(chan json.RawMessage, 1)
+			server.SetRequestHandler("session.resume", func(request json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
+				params <- append(json.RawMessage(nil), request...)
+				return []byte(`{"sessionId":"` + sessionIDFromParams(t, request) + `"}`), nil
+			})
+			if _, err := client.ResumeSession(t.Context(), "s1", &ResumeSessionOptions{Agents: SessionAgentOptions{ExcludedBuiltinAgents: tc.agents}}); err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(<-params, &payload); err != nil {
+				t.Fatal(err)
+			}
+			value, present := sessionWireGroup(payload, "agents")["excludedBuiltinAgents"]
+			if tc.want == "" {
+				if present {
+					t.Fatalf("expected excludedBuiltinAgents to be omitted, got %s", value)
+				}
+				return
+			}
+			if !present || string(value) != tc.want {
+				t.Fatalf("expected excludedBuiltinAgents %s, got %s (present=%v)", tc.want, value, present)
 			}
 		})
 	}
@@ -4974,6 +5387,39 @@ func TestSessionRequests_PluginDirectoriesAndLargeOutput(t *testing.T) {
 		}
 	})
 
+	t.Run("create and resume include explicit empty pluginDirectories and omit nil", func(t *testing.T) {
+		// An explicitly empty list must reach the runtime: on resume it unloads the
+		// plugins the session mounted from these directories, which omitting the key
+		// cannot express.
+		cases := []struct {
+			request any
+			present bool
+		}{
+			{createSessionRequest{PluginDirectories: []string{}}, true},
+			{resumeSessionRequest{SessionID: "s1", PluginDirectories: []string{}}, true},
+			{createSessionRequest{}, false},
+			{resumeSessionRequest{SessionID: "s1"}, false},
+		}
+
+		for _, tc := range cases {
+			data, err := json.Marshal(tc.request)
+			if err != nil {
+				t.Fatalf("Failed to marshal: %v", err)
+			}
+			var m map[string]any
+			if err := json.Unmarshal(data, &m); err != nil {
+				t.Fatalf("Failed to unmarshal: %v", err)
+			}
+			value, ok := sessionWireGroup(m, "plugins")["directories"]
+			if tc.present && (!ok || !reflect.DeepEqual(value, []any{})) {
+				t.Errorf("Expected explicit empty pluginDirectories in %T, got %v (present=%v)", tc.request, value, ok)
+			}
+			if !tc.present && ok {
+				t.Errorf("Expected pluginDirectories to be omitted from %T, got %v", tc.request, value)
+			}
+		}
+	})
+
 	t.Run("create omits pluginDirectories and largeOutput when nil", func(t *testing.T) {
 		req := createSessionRequest{}
 		data, err := json.Marshal(req)
@@ -5958,6 +6404,93 @@ func TestListModelsHandlerCachesResults(t *testing.T) {
 	_, _ = client.ListModels(t.Context())
 	if callCount != 1 {
 		t.Errorf("expected handler called once due to caching, got %d", callCount)
+	}
+}
+
+func TestClient_PublicSettingsRedactionPreservesExactNumbers(t *testing.T) {
+	home := t.TempDir()
+	client := NewClient(&ClientOptions{
+		Mode:    ModeCodingAgent,
+		Runtime: SpawnedStdioConnection{Path: findCLIPathForTest(t), BaseDirectory: home},
+	})
+	t.Cleanup(func() { client.ForceStop() })
+	if err := client.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(home, "settings.json")
+	for _, integer := range []string{"9007199254740993", "-9007199254740993", "18446744073709551615"} {
+		original := `{"statusLine":{"command":"echo before","padding":` + integer + `}}`
+		if err := os.WriteFile(file, []byte(original), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := client.RPC.User.Settings().Get(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		value := snapshot.Settings["statusLine"].Value
+		before, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(before, []byte(integer)) {
+			t.Fatalf("public settings read changed %s: %s", integer, before)
+		}
+		padding := value.(map[string]any)["padding"]
+		for _, input := range []any{value, padding} {
+			result, err := client.internalRPC.Settings.RedactValueForDisplay(t.Context(), &rpc.SettingsRedactValueForDisplayRequest{
+				Value:    input,
+				BasePath: []string{"statusLine"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := json.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual, err := json.Marshal(result.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("public settings display: before=%s displayed=%s", want, actual)
+			if !bytes.Equal(actual, want) {
+				t.Fatalf("redaction changed an exact public settings value:\ngot: %s\nwant: %s", actual, want)
+			}
+		}
+		secret, err := client.internalRPC.Settings.RedactValueForDisplay(t.Context(), &rpc.SettingsRedactValueForDisplayRequest{
+			Value:    padding,
+			BasePath: []string{"api", "copilot", "token"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if secret.Value != "******" {
+			t.Fatalf("numeric secret was not masked: %#v", secret.Value)
+		}
+		after, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(after, before) {
+			t.Fatalf("redaction changed the caller: before=%s after=%s", before, after)
+		}
+		persisted, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(persisted) != original {
+			t.Fatalf("redaction changed the settings file: %s", persisted)
+		}
+	}
+	result, err := client.internalRPC.Settings.RedactValueForDisplay(t.Context(), &rpc.SettingsRedactValueForDisplayRequest{
+		Value:    nil,
+		BasePath: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value != nil {
+		t.Fatalf("redaction changed null: %#v", result.Value)
 	}
 }
 

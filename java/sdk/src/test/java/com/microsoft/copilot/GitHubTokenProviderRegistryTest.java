@@ -75,4 +75,22 @@ class GitHubTokenProviderRegistryTest {
         failed.close();
         assertNull(registry.get(failed.id()));
     }
+
+    @Test
+    void retiredRegistrationsCannotReclaimOwnershipFromTheCurrentProvider() {
+        var registry = new GitHubTokenProviderRegistry();
+        var first = registry.register(args -> CompletableFuture.completedFuture(GitHubTokenProviderResult.cancelled()));
+        first.claim("session");
+        var current = registry
+                .register(args -> CompletableFuture.completedFuture(GitHubTokenProviderResult.cancelled()));
+        current.claim("session");
+
+        first.claim("session");
+        assertNotNull(registry.get(current.id()), "A displaced claim must not remove the live provider");
+        first.close();
+        first.claim("session");
+        assertNotNull(registry.get(current.id()), "A closed claim must not remove the live provider");
+        registry.retire("session");
+        assertNull(registry.get(current.id()), "The current registration must retain session ownership");
+    }
 }

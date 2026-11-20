@@ -37,6 +37,72 @@ public final class ServerSandboxApi {
     }
 
     /**
+     * Atomically consumes the first-enable sandbox onboarding marker in the supplied host context. Reports whether this call first recorded the marker, including prior consumption through the sandbox enable command. The caller owns its onboarding message.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SandboxConsumeOnboardingResult> consumeOnboarding(SandboxConsumeOnboardingParams params) {
+        return caller.invoke("sandbox.consumeOnboarding", params, SandboxConsumeOnboardingResult.class);
+    }
+
+    /**
+     * Returns the runtime's writable temporary directory for local hosts that stage files for sandboxed tools. On macOS without TMPDIR, this is the runtime's private directory, not another host library's independent private directory. Remote clients must not interpret this runtime-local filesystem path.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<String> getTemporaryDirectory() {
+        return caller.invoke("sandbox.getTemporaryDirectory", java.util.Map.of(), String.class);
+    }
+
+    /**
+     * Returns sandbox opt-out capability and managed-policy notices from the same authoritative policy rules. Hosts use this projection to keep status labels and policy notices consistent without duplicating policy defaults.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SandboxPolicyPresentationResult> getPolicyPresentation(SandboxGetPolicyPresentationParams params) {
+        return caller.invoke("sandbox.getPolicyPresentation", params, SandboxPolicyPresentationResult.class);
+    }
+
+    /**
+     * Probes how shell commands start under the managed learning policy and explains why a host cannot apply permissive learning mode. Hosts must await this probe instead of assuming denial capture support.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SandboxLearningModeStartResult> getLearningModeStart(SandboxGetLearningModeStartParams params) {
+        return caller.invoke("sandbox.getLearningModeStart", params, SandboxLearningModeStartResult.class);
+    }
+
+    /**
+     * Normalizes a sandbox credential host pattern or proxy URL with the runtime validation rule before a host saves it. Invalid host patterns fail the request; invalid proxy URLs return no accepted value.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SandboxNormalizeInputResult> normalizeInput(SandboxNormalizeInputParams params) {
+        return caller.invoke("sandbox.normalizeInput", params, SandboxNormalizeInputResult.class);
+    }
+
+    /**
+     * Compares sandbox configurations under runtime identity rules, ignoring managed routing provenance and inactive routing flags. Hosts use this result to avoid restarting services when their effective policy does not change.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<Boolean> configsEqual(SandboxConfigsEqualParams params) {
+        return caller.invoke("sandbox.configsEqual", params, Boolean.class);
+    }
+
+    /**
      * Raises a user's sandbox settings to an administrator's managed sandbox floor and returns the result a session should actually run under. The floor can only tighten: an enterprise force-on is reflected even when the user's own `enabled` is false, and a user cannot lower a setting the floor raised. The result is normalized through the declared sandbox shape, so a key reorder or an undeclared passthrough key is not mistaken for a policy change by callers that diff two results. A host must call this rather than merge the two layers itself, because reimplementing the direction of the fold is what turns an administrator's floor into a suggestion.
      *
      * @apiNote This method is experimental and may change in a future version.

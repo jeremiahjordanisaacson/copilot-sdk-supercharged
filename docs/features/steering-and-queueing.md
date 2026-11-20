@@ -195,6 +195,7 @@ func main() {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
 using Microsoft.Copilot;
 using Microsoft.Copilot.Rpc;
 

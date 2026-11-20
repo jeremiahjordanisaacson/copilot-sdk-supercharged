@@ -226,12 +226,16 @@ type Client struct {
 	nextLifecycleHandlerID    uint64
 	lifecycleHandlersMux      sync.Mutex
 	startStopMux              sync.RWMutex // protects process and state during start/[force]stop
-	transportMux              sync.Mutex   // guards startup, stop fencing and transport visibility; see ensureConnected
+	startWaitMux              sync.Mutex   // guards startWaiters and startWaitHandoff; see lockStartStop
+	startWaiters              []chan struct{}
+	startWaitHandoff          bool       // a handOffStartStop goroutine is running
+	transportMux              sync.Mutex // guards startup, stop fencing and transport visibility; see ensureConnected
 	startup                   *startupAttempt
 	lastStartup               *startupAttempt
 	stopGeneration            uint64
 	stopsInProgress           int
-	testHookTransportAcquired func() // tests only: runs after ensureConnected acquires a transport
+	pendingForceStops         atomic.Int32 // ForceStop calls waiting for startStopMux; see Start
+	testHookTransportAcquired func()       // tests only: runs after ensureConnected acquires a transport
 	processDone               chan struct{}
 	processErrorPtr           *error
 	osProcess                 atomic.Pointer[os.Process]
@@ -415,7 +419,10 @@ func resolveRuntimeExecutable(explicitPath, bundledRuntimePath string) (string, 
 	}
 	if bundledRuntimePath == "" {
 		return "", errors.New(
-			"managed Copilot runtime unavailable: the embedded bundle does not contain copilot-runtime and adjacent runtime.node; regenerate the bundle, provide an explicit path, or set COPILOT_CLI_PATH",
+			"managed Copilot runtime unavailable: the embedded bundle does not contain copilot-runtime and adjacent runtime.node. " +
+				"To embed the CLI, run `go get -tool github.com/microsoft/copilot-sdk/go/v2/cmd/bundler` once, then run `go tool bundler` in your main package directory before building; " +
+				"alternatively, set COPILOT_CLI_PATH or provide an explicit CLI path. " +
+				"See https://github.com/github/copilot-sdk/tree/main/go#distributing-your-application-with-an-embedded-github-copilot-cli",
 		)
 	}
 	return bundledRuntimePath, nil
@@ -575,7 +582,8 @@ func setEnvValue(env []string, key string, value string) []string {
 //
 // Management helpers call this method automatically when the client is not connected.
 // Operations called while Start is in progress wait for it and fail with its
-// error if it fails.
+// error if it fails. If Start has to wait for another Start, Stop or ForceStop
+// to finish, it stops waiting and returns ctx's error when ctx is done.
 //
 // Returns an error if the server fails to start or the connection fails.
 //
@@ -591,7 +599,9 @@ func (c *Client) Start(ctx context.Context) error {
 }
 
 func (c *Client) start(ctx context.Context, expected *transportGeneration) (err error) {
-	c.startStopMux.Lock()
+	if err := c.lockStartStop(ctx); err != nil {
+		return err
+	}
 	defer c.startStopMux.Unlock()
 
 	if expected != nil {
@@ -643,11 +653,19 @@ func (c *Client) start(ctx context.Context, expected *transportGeneration) (err 
 	// Publish startup before creating the transport and while holding
 	// startStopMux, so ensureConnected never observes a partially started
 	// transport and never waits on startup while Stop holds the lock.
-	startup := &startupAttempt{done: make(chan struct{})}
+	// ForceStop cancels startCtx without waiting for startStopMux.
+	startCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	startup := &startupAttempt{done: make(chan struct{}), cancel: cancel}
 	c.transportMux.Lock()
 	c.startup = startup
 	c.lastStartup = startup
 	c.transportMux.Unlock()
+	// A ForceStop that looked for startup before it was published is waiting
+	// for startStopMux, and will stop the client once this attempt returns.
+	if c.pendingForceStops.Load() > 0 {
+		cancel()
+	}
 	defer func() {
 		c.transportMux.Lock()
 		c.startup = nil
@@ -659,7 +677,7 @@ func (c *Client) start(ctx context.Context, expected *transportGeneration) (err 
 
 	// Only start a runtime host if not connecting to an external server.
 	if !c.isExternalServer {
-		if err := c.startCLIServer(ctx); err != nil {
+		if err := c.startCLIServer(startCtx); err != nil {
 			c.process = nil
 			c.state = stateError
 			return err
@@ -667,7 +685,7 @@ func (c *Client) start(ctx context.Context, expected *transportGeneration) (err 
 	}
 
 	// Connect to the server
-	if err := c.connectToServer(ctx); err != nil {
+	if err := c.connectToServer(startCtx); err != nil {
 		killErr := c.killProcess()
 		if !c.isExternalServer {
 			c.actualPort.Store(0)
@@ -676,7 +694,7 @@ func (c *Client) start(ctx context.Context, expected *transportGeneration) (err 
 		return errors.Join(err, killErr)
 	}
 
-	if err := c.initializeConnection(ctx); err != nil {
+	if err := c.initializeConnection(startCtx); err != nil {
 		// Fail waiting operations first: one may be a handler on the reader that
 		// closing the connection joins.
 		startup.finish(err)
@@ -698,6 +716,77 @@ func (c *Client) start(ctx context.Context, expected *transportGeneration) (err 
 
 	c.state = stateConnected
 	return nil
+}
+
+// lockStartStop acquires startStopMux for Start, or returns ctx's error if ctx
+// is done first. Start holds the lock while it starts the runtime and connects,
+// so another Start can wait for it indefinitely, and Lock cannot observe ctx.
+//
+// Waiters queue in startWaiters and one shared goroutine blocks on Lock for all
+// of them, so a cancelled waiter leaves the queue at once and the cost of
+// retrying against a hung start stays constant.
+func (c *Client) lockStartStop(ctx context.Context) error {
+	if c.startStopMux.TryLock() {
+		return nil
+	}
+	granted := make(chan struct{}, 1)
+	c.startWaitMux.Lock()
+	c.startWaiters = append(c.startWaiters, granted)
+	if !c.startWaitHandoff {
+		c.startWaitHandoff = true
+		go c.handOffStartStop()
+	}
+	c.startWaitMux.Unlock()
+
+	select {
+	case <-granted:
+		if err := ctx.Err(); err != nil {
+			c.startStopMux.Unlock()
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		c.startWaitMux.Lock()
+		for i, w := range c.startWaiters {
+			if w == granted {
+				c.startWaiters = append(c.startWaiters[:i], c.startWaiters[i+1:]...)
+				c.startWaitMux.Unlock()
+				return ctx.Err()
+			}
+		}
+		c.startWaitMux.Unlock()
+		// The lock was handed to this waiter as ctx ended; give it back.
+		c.startStopMux.Unlock()
+		return ctx.Err()
+	}
+}
+
+// handOffStartStop is the one goroutine that waits on startStopMux for queued
+// Start calls. Each time it acquires the lock it passes it to the oldest
+// remaining waiter, or releases it when none is left, and it exits once the
+// queue is empty.
+func (c *Client) handOffStartStop() {
+	for {
+		c.startStopMux.Lock()
+		c.startWaitMux.Lock()
+		if len(c.startWaiters) == 0 {
+			c.startWaitHandoff = false
+			c.startWaitMux.Unlock()
+			c.startStopMux.Unlock()
+			return
+		}
+		next := c.startWaiters[0]
+		c.startWaiters = c.startWaiters[1:]
+		more := len(c.startWaiters) > 0
+		if !more {
+			c.startWaitHandoff = false
+		}
+		c.startWaitMux.Unlock()
+		next <- struct{}{} // buffered: the lock now belongs to that waiter
+		if !more {
+			return
+		}
+	}
 }
 
 // initializeConnection verifies the protocol version and registers the
@@ -770,7 +859,10 @@ func (c *Client) initializeConnection(ctx context.Context) error {
 //     share one 10 second timeout, so an unresponsive runtime cannot hold the
 //     remaining steps back
 //  2. Requests runtime shutdown for SDK-owned CLI processes
-//  3. Closes owned stdio input and waits up to 10 seconds for host cleanup and exit
+//  3. Closes owned stdio input and waits up to 10 seconds for host cleanup and exit;
+//     over TCP, sends SIGTERM instead (not on Windows) and waits up to 10 seconds
+//     for the process to exit once the runtime has shut down, or up to 2 seconds
+//     when it has not
 //  4. Terminates any remaining owned CLI process and closes the JSON-RPC connection
 //
 // Note: session data on disk is preserved, so sessions can be resumed later.
@@ -829,6 +921,7 @@ func (c *Client) Stop() error {
 	c.startStopMux.Lock()
 	defer c.startStopMux.Unlock()
 
+	runtimeShutDown := false
 	if (c.process != nil || c.ffiHost != nil) && !c.isExternalServer && c.RPC != nil {
 		rpcClient := c.RPC
 		runtimeShutdownStart := time.Now()
@@ -844,6 +937,7 @@ func (c *Client) Stop() error {
 				c.logDebugTiming(runtimeShutdownStart, "CopilotClient.Stop runtime shutdown failed")
 				errs = append(errs, fmt.Errorf("failed to gracefully shut down runtime: %w", err))
 			} else {
+				runtimeShutDown = true
 				c.logDebugTiming(runtimeShutdownStart, "CopilotClient.Stop runtime shutdown complete")
 			}
 		case <-time.After(runtimeShutdownTimeout):
@@ -867,6 +961,23 @@ func (c *Client) Stop() error {
 			c.process = nil
 		case <-time.After(processExitTimeout):
 			c.logDebugTiming(processExitStart, "CopilotClient.Stop CLI process exit timed out; killing process")
+		}
+	}
+
+	// A TCP process gets no stdin EOF, so ask the process to exit with SIGTERM
+	// before killing it. A launcher such as the installed copilot command passes
+	// SIGTERM on to the runtime it started; it cannot pass SIGKILL on, so a kill
+	// alone leaves that runtime running. A runtime that did not answer
+	// runtime.shutdown gets the same signal with a shorter wait, so it does not add
+	// a second full graceful wait.
+	if !c.useStdio && c.process != nil && !c.isExternalServer {
+		processExitStart := time.Now()
+		wait := processExitTimeout
+		if !runtimeShutDown {
+			wait = unansweredShutdownTerminateTimeout
+		}
+		if c.terminateProcessAndWait(wait) {
+			c.logDebugTiming(processExitStart, "CopilotClient.Stop CLI process exited after SIGTERM")
 		}
 	}
 
@@ -944,6 +1055,7 @@ func (c *Client) logDebugTiming(start time.Time, message string) {
 //
 // Use this when [Client.Stop] fails or takes too long. This method:
 //   - Clears all sessions immediately without destroying them
+//   - Ends a [Client.Start] in progress, which then returns an error
 //   - Force closes the connection
 //   - Kills the CLI process (if spawned by this client)
 //
@@ -974,8 +1086,17 @@ func (c *Client) ForceStop() {
 	finishStop := c.beginStop()
 	defer finishStop()
 	c.disconnectAhpHosts()
-	// Kill the process without waiting for startStopMux, which Start may hold.
-	// This unblocks any I/O Start is doing (connect, version check).
+	// Cancel an in-progress Start and kill the process without waiting for
+	// startStopMux, which Start may hold. This unblocks any I/O Start is doing
+	// (connect, version check), including with an external server, which has
+	// no process to kill.
+	c.pendingForceStops.Add(1)
+	c.transportMux.Lock()
+	startup := c.startup
+	c.transportMux.Unlock()
+	if startup != nil {
+		startup.cancel()
+	}
 	if p := c.osProcess.Swap(nil); p != nil {
 		p.Kill()
 	}
@@ -985,6 +1106,7 @@ func (c *Client) ForceStop() {
 
 	c.startStopMux.Lock()
 	defer c.startStopMux.Unlock()
+	c.pendingForceStops.Add(-1)
 
 	// Kill CLI process (only if we spawned it)
 	// This is a fallback in case the process wasn't killed above (e.g. if Start hadn't set
@@ -1051,9 +1173,10 @@ func (c *Client) retireSessionsLocally() {
 // startupAttempt publishes the outcome of an in-progress Start to the
 // operations waiting for it in ensureConnected.
 type startupAttempt struct {
-	done chan struct{} // closed once the outcome is published
-	err  error         // the startup failure; written before done is closed
-	once sync.Once
+	done   chan struct{}      // closed once the outcome is published
+	err    error              // the startup failure; written before done is closed
+	cancel context.CancelFunc // cancels the attempt's I/O
+	once   sync.Once
 }
 
 type transportGeneration struct {
@@ -2728,6 +2851,14 @@ var runtimeShutdownTimeout = 10 * time.Second
 
 const processExitTimeout = 10 * time.Second
 
+// unansweredShutdownTerminateTimeout is how long Stop waits for a TCP process to
+// exit after SIGTERM when the runtime did not answer runtime.shutdown.
+const unansweredShutdownTerminateTimeout = 2 * time.Second
+
+// processExitPollInterval is how often Stop checks whether a TCP process it sent
+// SIGTERM has exited while a process that one started still holds its output.
+const processExitPollInterval = 50 * time.Millisecond
+
 // processOutputDrainTimeout bounds how long waiting for a stdio runtime that has
 // exited also waits for its output to close. A process the runtime started can
 // inherit its stdout and stderr and hold them open after the runtime exits.
@@ -3218,6 +3349,38 @@ func (c *Client) killProcessAndWait() error {
 		return nil
 	case <-time.After(processExitTimeout):
 		return errors.Join(killErr, fmt.Errorf("timed out waiting for CLI process to exit after kill"))
+	}
+}
+
+// terminateProcessAndWait sends SIGTERM to the owned CLI process and waits up to
+// timeout for it to exit. It reports whether the process and every
+// holder of its output are gone. Once the process itself has exited, it stops
+// waiting for a process that one started to release the output; the kill that
+// follows waits for that as before. Windows has no SIGTERM: Signal fails there,
+// so nothing is sent or awaited.
+func (c *Client) terminateProcessAndWait(timeout time.Duration) bool {
+	p := c.osProcess.Load()
+	done := c.processDone
+	if p == nil || done == nil || p.Signal(syscall.SIGTERM) != nil {
+		return false
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	poll := time.NewTicker(processExitPollInterval)
+	defer poll.Stop()
+	for {
+		select {
+		case <-done:
+			c.osProcess.Store(nil)
+			c.process = nil
+			return true
+		case <-poll.C:
+			if errors.Is(p.Signal(syscall.Signal(0)), os.ErrProcessDone) {
+				return false
+			}
+		case <-deadline.C:
+			return false
+		}
 	}
 }
 
@@ -3875,7 +4038,7 @@ func (c *Client) handleSessionEvent(req sessionEventRequest) {
 	c.sessionsMux.Unlock()
 
 	if ok {
-		session.dispatchEventWithPermissionEnvelope(req.Event, req.permissionEnvelope, req.sdkHasHandler)
+		session.dispatchEventWithPermissionEnvelope(req.Event, req.permissionEnvelope, req.sdkHasHandler, req.sdkToolArguments)
 	}
 }
 

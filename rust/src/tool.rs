@@ -88,33 +88,10 @@ pub fn tool_parameters(schema: serde_json::Value) -> IndexMap<String, serde_json
 
 /// Fallible variant of [`tool_parameters`] for callers handling dynamic schema input.
 pub fn try_tool_parameters(
-    schema: serde_json::Value,
+    mut schema: serde_json::Value,
 ) -> Result<IndexMap<String, serde_json::Value>, serde_json::Error> {
-    serde_json::from_value(sort_object_keys(schema))
-}
-
-/// Sort object keys at every depth so a schema serializes identically however
-/// it was built. With `serde_json/preserve_order` enabled anywhere in the
-/// dependency graph, a schema converted from a `HashMap` would otherwise keep
-/// that map's per-process iteration order and change the tool definitions the
-/// model sees between sessions, defeating prompt caching.
-fn sort_object_keys(value: serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(map) => {
-            let mut entries: Vec<_> = map.into_iter().collect();
-            entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-            serde_json::Value::Object(
-                entries
-                    .into_iter()
-                    .map(|(key, value)| (key, sort_object_keys(value)))
-                    .collect(),
-            )
-        }
-        serde_json::Value::Array(items) => {
-            serde_json::Value::Array(items.into_iter().map(sort_object_keys).collect())
-        }
-        other => other,
-    }
+    schema.sort_all_objects();
+    serde_json::from_value(schema)
 }
 
 /// Convert an MCP `CallToolResult` JSON value into a Copilot tool result.
@@ -201,6 +178,7 @@ pub fn convert_mcp_call_tool_result(value: &serde_json::Value) -> Option<ToolRes
         error: None,
         tool_telemetry: None,
         tool_references: None,
+        skip_large_output_processing: None,
     }))
 }
 

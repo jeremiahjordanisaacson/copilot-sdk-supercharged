@@ -783,6 +783,12 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		e.Data = &d
+	case SessionEventTypeSessionSandboxStateChanged:
+		var d SessionSandboxStateChangedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
 	case SessionEventTypeSessionScheduleCancelled:
 		var d SessionScheduleCancelledData
 		if err := json.Unmarshal(raw.Data, &d); err != nil {
@@ -797,6 +803,12 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 		e.Data = &d
 	case SessionEventTypeSessionScheduleRearmed:
 		var d SessionScheduleRearmedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
+	case SessionEventTypeSessionSensitivityLabelObservation:
+		var d SessionSensitivityLabelObservationData
 		if err := json.Unmarshal(raw.Data, &d); err != nil {
 			return err
 		}
@@ -1614,6 +1626,7 @@ func (r *ToolExecutionCompleteResult) UnmarshalJSON(data []byte) error {
 		MCPMeta             any                              `json:"mcpMeta,omitempty"`
 		MCPResultMeta       map[string]any                   `json:"mcpResultMeta,omitzero"`
 		StructuredContent   any                              `json:"structuredContent,omitempty"`
+		ToolReferences      []string                         `json:"toolReferences,omitzero"`
 		UIResource          *ToolExecutionCompleteUIResource `json:"uiResource,omitempty"`
 	}
 	var raw rawToolExecutionCompleteResult
@@ -1646,6 +1659,7 @@ func (r *ToolExecutionCompleteResult) UnmarshalJSON(data []byte) error {
 	r.MCPMeta = raw.MCPMeta
 	r.MCPResultMeta = raw.MCPResultMeta
 	r.StructuredContent = raw.StructuredContent
+	r.ToolReferences = raw.ToolReferences
 	r.UIResource = raw.UIResource
 	return nil
 }

@@ -176,14 +176,26 @@ alias(
 )
 
 alias(
-    name = "libloading-0.9.0",
-    actual = "@sdk_vendor__libloading-0.9.0//:libloading",
+    name = "libc-0.2.191",
+    actual = "@sdk_vendor__libc-0.2.191//:libc",
+    tags = ["manual"],
+)
+
+alias(
+    name = "libc",
+    actual = "@sdk_vendor__libc-0.2.191//:libc",
+    tags = ["manual"],
+)
+
+alias(
+    name = "libloading-0.9.1",
+    actual = "@sdk_vendor__libloading-0.9.1//:libloading",
     tags = ["manual"],
 )
 
 alias(
     name = "libloading",
-    actual = "@sdk_vendor__libloading-0.9.0//:libloading",
+    actual = "@sdk_vendor__libloading-0.9.1//:libloading",
     tags = ["manual"],
 )
 
@@ -284,14 +296,14 @@ alias(
 )
 
 alias(
-    name = "rusqlite-0.42.0",
-    actual = "@sdk_vendor__rusqlite-0.42.0//:rusqlite",
+    name = "rusqlite-0.43.0",
+    actual = "@sdk_vendor__rusqlite-0.43.0//:rusqlite",
     tags = ["manual"],
 )
 
 alias(
     name = "rusqlite",
-    actual = "@sdk_vendor__rusqlite-0.42.0//:rusqlite",
+    actual = "@sdk_vendor__rusqlite-0.43.0//:rusqlite",
     tags = ["manual"],
 )
 
@@ -476,26 +488,26 @@ alias(
 )
 
 alias(
-    name = "ureq-3.5.1",
-    actual = "@sdk_vendor__ureq-3.5.1//:ureq",
+    name = "ureq-3.5.2",
+    actual = "@sdk_vendor__ureq-3.5.2//:ureq",
     tags = ["manual"],
 )
 
 alias(
     name = "ureq",
-    actual = "@sdk_vendor__ureq-3.5.1//:ureq",
+    actual = "@sdk_vendor__ureq-3.5.2//:ureq",
     tags = ["manual"],
 )
 
 alias(
-    name = "uuid-1.29.1",
-    actual = "@sdk_vendor__uuid-1.29.1//:uuid",
+    name = "uuid-1.29.2",
+    actual = "@sdk_vendor__uuid-1.29.2//:uuid",
     tags = ["manual"],
 )
 
 alias(
     name = "uuid",
-    actual = "@sdk_vendor__uuid-1.29.1//:uuid",
+    actual = "@sdk_vendor__uuid-1.29.2//:uuid",
     tags = ["manual"],
 )
 
@@ -512,13 +524,13 @@ alias(
 )
 
 alias(
-    name = "zip-9.4.2",
-    actual = "@sdk_vendor__zip-9.4.2//:zip",
+    name = "zip-9.5.1",
+    actual = "@sdk_vendor__zip-9.5.1//:zip",
     tags = ["manual"],
 )
 
 alias(
     name = "zip",
-    actual = "@sdk_vendor__zip-9.4.2//:zip",
+    actual = "@sdk_vendor__zip-9.5.1//:zip",
     tags = ["manual"],
 )

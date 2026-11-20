@@ -25,12 +25,20 @@ public final class ServerRpc {
 
     private final RpcCaller caller;
 
+    /** API methods for the {@code git} namespace. */
+    final ServerGitApi git;
     /** API methods for the {@code providers} namespace. */
     public final ServerProvidersApi providers;
     /** API methods for the {@code localModels} namespace. */
     public final ServerLocalModelsApi localModels;
+    /** API methods for the {@code logging} namespace. */
+    public final ServerLoggingApi logging;
+    /** API methods for the {@code ahp} namespace. */
+    final ServerAhpApi ahp;
     /** API methods for the {@code sandbox} namespace. */
     public final ServerSandboxApi sandbox;
+    /** API methods for the {@code feedback} namespace. */
+    final ServerFeedbackApi feedback;
     /** API methods for the {@code persistence} namespace. */
     final ServerPersistenceApi persistence;
     /** API methods for the {@code user} namespace. */
@@ -89,8 +97,6 @@ public final class ServerRpc {
     final ServerGitHubRepositoryApi gitHubRepository;
     /** API methods for the {@code gitHubOwners} namespace. */
     final ServerGitHubOwnersApi gitHubOwners;
-    /** API methods for the {@code git} namespace. */
-    final ServerGitApi git;
     /** API methods for the {@code runtime} namespace. */
     public final ServerRuntimeApi runtime;
     /** API methods for the {@code sessionFs} namespace. */
@@ -129,9 +135,13 @@ public final class ServerRpc {
      */
     public ServerRpc(RpcCaller caller) {
         this.caller = caller;
+        this.git = new ServerGitApi(caller);
         this.providers = new ServerProvidersApi(caller);
         this.localModels = new ServerLocalModelsApi(caller);
+        this.logging = new ServerLoggingApi(caller);
+        this.ahp = new ServerAhpApi(caller);
         this.sandbox = new ServerSandboxApi(caller);
+        this.feedback = new ServerFeedbackApi(caller);
         this.persistence = new ServerPersistenceApi(caller);
         this.user = new ServerUserApi(caller);
         this.repo = new ServerRepoApi(caller);
@@ -161,7 +171,6 @@ public final class ServerRpc {
         this.settings = new ServerSettingsApi(caller);
         this.gitHubRepository = new ServerGitHubRepositoryApi(caller);
         this.gitHubOwners = new ServerGitHubOwnersApi(caller);
-        this.git = new ServerGitApi(caller);
         this.runtime = new ServerRuntimeApi(caller);
         this.sessionFs = new ServerSessionFsApi(caller);
         this.llmInference = new ServerLlmInferenceApi(caller);

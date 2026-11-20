@@ -303,6 +303,8 @@ The `onSessionEnd` hook is called when a session ends.
 
 A standalone SDK session remains active between prompts. Completing a prompt does not end the session; disconnect or dispose the session to run its end hook.
 
+This callback runs whenever the session ends. Declarative `sessionEnd` hooks discovered from user configuration, settings, repositories, or plugins run only after the session's first prompt (or the first prompt after a resume) has fired its `sessionStart` hooks. Explicit `hooks.directories` and managed-policy hooks run on every session end.
+
 ### Hook signature
 
 <details open>

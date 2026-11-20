@@ -7,14 +7,141 @@
 use serde_json::json;
 
 use super::{
-    build_mode_post_create_patch, has_managed_settings, is_autopilot_continuation_idle,
-    permission_request_data, permission_response_params,
+    acquire_session_initialization, build_mode_post_create_patch, has_managed_settings,
+    is_autopilot_continuation_idle, permission_request_data, permission_response_params,
 };
 use crate::handler::PermissionResult;
 use crate::types::{
     PermissionDecisionContext, PermissionDecisionOutcome, PermissionDecisionSource,
     PermissionDecisionSurface, RequestId, SessionEvent, SessionId,
 };
+use crate::{Client, ClientMode, ErrorKind, SessionErrorKind};
+
+fn initialization_client() -> (Client, tokio::io::DuplexStream) {
+    let (transport, peer) = tokio::io::duplex(4096);
+    let (reader, writer) = tokio::io::split(transport);
+    let client = Client::from_streams(
+        ClientMode::CodingAgent,
+        reader,
+        writer,
+        std::path::PathBuf::from("."),
+    )
+    .unwrap();
+    (client, peer)
+}
+
+#[tokio::test]
+async fn initialization_churn_reclaims_successful_and_rejected_attempts() {
+    let (client, _peer) = initialization_client();
+    for index in 0..32 {
+        let id = SessionId::from(format!("initialization-{index}"));
+        for recovery in [false, true] {
+            let initialization = acquire_session_initialization(&client, &id, recovery)
+                .await
+                .unwrap();
+            if recovery {
+                let callback = client.inner.router.track_rpc_callback(&id);
+                let error = acquire_session_initialization(&client, &id, false)
+                    .await
+                    .err()
+                    .expect("same-ID callback reentry must be rejected");
+                assert_eq!(*error.kind(), ErrorKind::InvalidConfig);
+                drop(callback);
+            }
+            drop(initialization);
+            assert_eq!(client.inner.router.initialization_count(), 0);
+        }
+    }
+    client.force_stop();
+}
+
+#[tokio::test]
+async fn initialization_drop_and_reacquire_preserve_same_id_exclusion() {
+    let (client, _peer) = initialization_client();
+    let id = SessionId::from("contended-initialization");
+    let ordinary = acquire_session_initialization(&client, &id, false)
+        .await
+        .unwrap();
+    let mut recovery = Box::pin(acquire_session_initialization(&client, &id, true));
+    assert!(futures_util::poll!(&mut recovery).is_pending());
+
+    // The queued writer already owns the old lock when its last reader drops.
+    drop(ordinary);
+    client.inner.router.clear();
+    let mut next = Box::pin(acquire_session_initialization(&client, &id, false));
+    assert!(futures_util::poll!(&mut next).is_pending());
+    let recovery = recovery.await.unwrap();
+    assert!(futures_util::poll!(&mut next).is_pending());
+    assert_eq!(client.inner.router.initialization_count(), 1);
+    drop(recovery);
+    drop(next.await.unwrap());
+    assert_eq!(client.inner.router.initialization_count(), 0);
+
+    for _ in 0..32 {
+        drop(
+            acquire_session_initialization(&client, &id, false)
+                .await
+                .unwrap(),
+        );
+        drop(
+            acquire_session_initialization(&client, &id, true)
+                .await
+                .unwrap(),
+        );
+    }
+    assert_eq!(client.inner.router.initialization_count(), 0);
+    client.force_stop();
+}
+
+#[tokio::test]
+async fn initialization_cancelled_waiters_reclaim_after_either_drop_order() {
+    let (client, _peer) = initialization_client();
+    let id = SessionId::from("cancelled-initialization");
+    for recovery in [false, true] {
+        for cancel_first in [false, true] {
+            let held = acquire_session_initialization(&client, &id, !recovery)
+                .await
+                .unwrap();
+            let mut waiting = Box::pin(acquire_session_initialization(&client, &id, recovery));
+            assert!(futures_util::poll!(&mut waiting).is_pending());
+            if cancel_first {
+                drop(waiting);
+                drop(held);
+            } else {
+                drop(held);
+                drop(waiting);
+            }
+            assert_eq!(client.inner.router.initialization_count(), 0);
+        }
+    }
+    client.force_stop();
+}
+
+#[tokio::test]
+async fn initialization_cleanup_fence_survives_release_and_clear() {
+    let (client, _peer) = initialization_client();
+    let id = SessionId::from("fenced-initialization");
+    let mut initialization = acquire_session_initialization(&client, &id, true)
+        .await
+        .unwrap();
+    initialization.set_cleanup_fenced(true);
+    drop(initialization);
+    client.inner.router.clear();
+
+    for recovery in [false, true] {
+        let error = acquire_session_initialization(&client, &id, recovery)
+            .await
+            .err()
+            .expect("failed cleanup must fence later attempts on this connection");
+        assert_eq!(
+            *error.kind(),
+            ErrorKind::Session(SessionErrorKind::AutoModeRecoveryNotSupported)
+        );
+        assert_eq!(client.inner.router.initialization_count(), 1);
+    }
+    client.force_stop();
+    assert_eq!(client.inner.router.initialization_count(), 1);
+}
 
 #[test]
 fn identifies_only_autopilot_continuation_idles() {

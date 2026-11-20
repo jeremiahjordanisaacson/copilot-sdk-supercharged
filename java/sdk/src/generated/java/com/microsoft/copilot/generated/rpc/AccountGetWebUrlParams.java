@@ -14,7 +14,7 @@ import com.microsoft.copilot.CopilotExperimental;
 import javax.annotation.processing.Generated;
 
 /**
- * A path to resolve against the GitHub host an identity is signed in to.
+ * A path to resolve against the selected GitHub host.
  *
  * @apiNote This method is experimental and may change in a future version.
  * @since 1.0.0
@@ -26,8 +26,10 @@ import javax.annotation.processing.Generated;
 record AccountGetWebUrlParams(
     /** Host-relative path, without a leading slash, for example `settings/copilot/features`. */
     @JsonProperty("path") String path,
-    /** Identity whose host the path resolves against. Omit to resolve against the public github.com host. */
-    @JsonProperty("identity") AuthIdentity identity
+    /** Identity whose host the path resolves against. Omit both identity and authOwnerId to use the public github.com host. */
+    @JsonProperty("identity") AuthIdentity identity,
+    /** Opaque selector for a live host-owned credential binding. Cannot be combined with identity. */
+    @JsonProperty("authOwnerId") String authOwnerId
 ) {
 
     /**
@@ -51,6 +53,7 @@ record AccountGetWebUrlParams(
         private Builder() {}
         private String path;
         private AuthIdentity identity;
+        private String authOwnerId;
 
         /**
          * Sets the {@code path} property.
@@ -75,6 +78,17 @@ record AccountGetWebUrlParams(
         }
 
         /**
+         * Sets the {@code authOwnerId} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder authOwnerId(String value) {
+            this.authOwnerId = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
@@ -82,7 +96,7 @@ record AccountGetWebUrlParams(
          */
         public AccountGetWebUrlParams build() {
             if (path == null) throw new IllegalStateException("Missing required property: path");
-            return new AccountGetWebUrlParams(path, identity);
+            return new AccountGetWebUrlParams(path, identity, authOwnerId);
         }
     }
 }

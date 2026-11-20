@@ -5,7 +5,7 @@
         "url": "https://github.com/github/copilot-sdk.git"
     },
     "version": "0.0.0-dev",
-    "copilotCliVersion": "1.0.115-1",
+    "copilotCliVersion": "1.0.115-3",
     "description": "TypeScript SDK for programmatic control of GitHub Copilot CLI via JSON-RPC",
     "main": "./dist/cjs/index.js",
     "types": "./dist/index.d.ts",
@@ -42,7 +42,7 @@
     "author": "Microsoft",
     "license": "MIT",
     "dependencies": {
-        "koffi": "3.3.6",
+        "koffi": "3.3.7",
         "lossless-json": "4.3.3",
         "vscode-jsonrpc": "10.0.0",
         "zod": "4.6.7"

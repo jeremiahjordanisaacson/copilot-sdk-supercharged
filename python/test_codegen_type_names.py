@@ -1,13 +1,41 @@
 import re
 import types
+from unittest.mock import AsyncMock
 
 from copilot import rpc, session_events
 from copilot._generated.rpc import (
-    _load_AuthEnumerateValue,
+    _InternalServerSessionsForgeProposalsApi,
     _load_PermissionDecisionApproveForLocationApproval,
     _load_PermissionDecisionApproveForSessionApproval,
 )
 from copilot._generated.session_events import _load_AssistedApprovalAssessment
+
+
+async def test_forge_manifest_retains_nullable_metadata():
+    base = {"path": ".github/skills/demo/SKILL.md", "change_type": "added"}
+    for metadata in [
+        {},
+        {"after_hash": None, "before_content": None, "before_hash": None},
+        {"after_hash": "after", "before_content": "before", "before_hash": "hash"},
+    ]:
+        wire = {
+            "scope": {"git_root_path": "/repo", "branch_name": "feature"},
+            "triggerMode": "on_demand",
+            "fingerprint": "hash",
+            "manifest": [{**base, **metadata}],
+            "summary": {
+                "file_count": 1,
+                "added_count": 1,
+                "modified_count": 0,
+                "deleted_count": 0,
+                "renamed_count": 0,
+            },
+        }
+        client = AsyncMock()
+        client.request.return_value = {"proposal": None}
+        api = _InternalServerSessionsForgeProposalsApi(client)
+        await api._reconcile(rpc.ForgeProposalReconcileRequest.from_dict(wire))
+        client.request.assert_awaited_once_with("sessions.forgeProposals.reconcile", wire)
 
 
 def test_permission_approval_exports_are_union_aliases():
@@ -86,24 +114,19 @@ def test_assisted_approval_assessment_is_a_discriminated_union():
     assert pending.to_dict()["assistedApprovalAssessment"] == assessment.to_dict()
 
 
-def test_login_account_enumeration_deserializes_concrete_identities():
-    value = _load_AuthEnumerateValue(
+def test_login_identity_deserializes_concrete_fields():
+    value = rpc.AuthLoginIdentity.from_dict(
         {
-            "kind": "loginAccounts",
-            "items": [
-                {
-                    "accountId": "entra:opaque-account",
-                    "active": True,
-                    "label": "person@contoso.example",
-                }
-            ],
+            "accountId": "entra:opaque-account",
+            "active": True,
+            "label": "person@contoso.example",
         }
     )
 
-    assert isinstance(value, rpc.AuthEnumerateValueLoginAccounts)
-    assert isinstance(value.items[0], rpc.AuthLoginIdentity)
-    assert value.kind == rpc.AuthEnumerateQueryKind.LOGIN_ACCOUNTS
-    assert value.items[0].account_id == "entra:opaque-account"
+    assert isinstance(value, rpc.AuthLoginIdentity)
+    assert value.account_id == "entra:opaque-account"
+    assert value.active is True
+    assert value.label == "person@contoso.example"
 
 
 def test_catalog_candidate_provenance_serialises_every_catalog_media_type():

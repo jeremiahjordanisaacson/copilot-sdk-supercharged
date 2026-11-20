@@ -117,7 +117,12 @@ from ._generated.session_events import (
 from ._generated.session_events import (
     ReasoningSummary as _RpcReasoningSummary,
 )
-from ._jsonrpc import JsonRpcError, ProcessExitedError
+from ._jsonrpc import (
+    JsonRpcError,
+    ProcessExitedError,
+    _is_dispatch_cancellation,
+    _propagates_unanswered,
+)
 from ._telemetry import get_trace_context, trace_context
 from .canvas import CanvasError, CanvasHandler, OpenCanvasInstance
 from .tools import (
@@ -269,30 +274,6 @@ async def _run_handler(handler: Callable[..., Any], *args: Any) -> Any:
                 _handler_dispatches.pop(handler_task, None)
 
     return await asyncio.create_task(invoke())
-
-
-def _is_dispatch_cancellation(error: BaseException) -> bool:
-    """Whether ``error`` cancels the running dispatch task rather than reports a handler failure.
-
-    A CancelledError raised by a handler itself, for example from awaiting a future
-    that its owner cancelled, is a handler failure that still needs an answer.
-    """
-    task = asyncio.current_task()
-    return isinstance(error, asyncio.CancelledError) and task is not None and task.cancelling() > 0
-
-
-def _propagates_unanswered(error: BaseException) -> bool:
-    """Whether a dispatch re-raises ``error`` instead of answering its request with a failure.
-
-    A cancellation of the running dispatch task, an exit or interrupt (``SystemExit``,
-    ``KeyboardInterrupt``) and the coroutine being closed (``GeneratorExit``) propagate.
-    Anything else a handler raises is a handler failure that still needs an answer,
-    including a ``BaseException`` that is not an ``Exception``, such as the one
-    ``pytest.fail()`` raises.
-    """
-    return isinstance(
-        error, (KeyboardInterrupt, SystemExit, GeneratorExit)
-    ) or _is_dispatch_cancellation(error)
 
 
 class SessionFsCapabilities(TypedDict, total=False):
@@ -1313,6 +1294,9 @@ class PostToolUseHookOutput(TypedDict, total=False):
     """Output for post-tool-use hook"""
 
     modifiedResult: Any
+    """A :class:`~copilot.tools.ToolResult` or a tool-result dict in wire form, applied
+    over the tool's result: members a ``ToolResult`` leaves as ``None`` keep the tool's
+    values."""
     additionalContext: str
     suppressOutput: bool
 
@@ -1760,6 +1744,8 @@ class SessionLimitsConfig(TypedDict, total=False):
     """Experimental limits for the session's current accounting window."""
 
     # Maximum AI credits available to the session in the current accounting window.
+    # When setting a limit, the value must be at least 30 and greater than the AI
+    # credits the session has already used.
     max_ai_credits: float
 
 
@@ -2052,11 +2038,23 @@ class _CanvasHandlerAdapter:
 
     async def invoke(self, params: CanvasProviderInvokeActionRequest) -> Any:
         try:
-            return await self._handler.on_action(params)
+            result = await self._handler.on_action(params)
         except CanvasError as err:
             raise JsonRpcError(-32603, err.message, data=err.to_envelope()) from err
         except Exception as err:
             raise _canvas_handler_error(err) from err
+        if isinstance(result, ToolResult):
+            return _tool_result_to_wire(result)
+        return result
+
+
+def _tool_result_to_wire(result: ToolResult) -> dict[str, Any]:
+    """Encode a ToolResult a callback returned in the wire form, omitting unset members.
+
+    The runtime applies a postToolUse ``modifiedResult`` over the tool's result key by
+    key, so an unset member sent as ``null`` would erase the tool's value for it.
+    """
+    return tool_result_to_external_tool_text_result_for_llm(result).to_dict()
 
 
 def _canvas_handler_error(err: Exception) -> JsonRpcError:
@@ -2093,9 +2091,7 @@ class _BearerTokenProviderAdapter:
             "provider_name": provider_name,
             "session_id": params.session_id,
         }
-        result = callback(args)
-        if inspect.isawaitable(result):
-            result = await result
+        result = await _run_handler(callback, args)
         return ProviderTokenAcquireResult(token=cast(str, result))
 
 
@@ -4099,9 +4095,7 @@ class CopilotSession:
             request_id = request.get("requestId")
             if isinstance(request_id, str) and request_id:
                 typed_request["requestId"] = request_id
-            result = handler(typed_request, {"session_id": self.session_id})
-            if inspect.isawaitable(result):
-                result = await result
+            result = await _run_handler(handler, typed_request, {"session_id": self.session_id})
             log_timing(
                 logger,
                 logging.DEBUG,
@@ -4315,9 +4309,7 @@ class CopilotSession:
             callback = callbacks.get(section_id) if callbacks else None
             if callback:
                 try:
-                    transformed = callback(content)
-                    if inspect.isawaitable(transformed):
-                        transformed = await transformed
+                    transformed = await _run_handler(callback, content)
                     # A callback that returns no value leaves the section unchanged.
                     result[section_id] = {
                         "content": content if transformed is None else str(transformed)
@@ -4398,9 +4390,11 @@ class CopilotSession:
             # specific TypedDict variant from the runtime ``dict``.
             input_data = cast(Any, transformed)
             with trace_context(transformed.get("traceparent"), transformed.get("tracestate")):
-                result = handler(input_data, {"session_id": self.session_id})
-                if inspect.isawaitable(result):
-                    result = await result
+                result = await _run_handler(handler, input_data, {"session_id": self.session_id})
+            if isinstance(result, dict):
+                modified_result = result.get("modifiedResult")
+                if isinstance(modified_result, ToolResult):
+                    result = {**result, "modifiedResult": _tool_result_to_wire(modified_result)}
             log_timing(
                 logger,
                 logging.DEBUG,

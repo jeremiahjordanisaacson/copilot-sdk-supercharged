@@ -6,6 +6,7 @@ using Xunit;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 #if !NET8_0_OR_GREATER
 using System.Runtime.Serialization;
 #endif
@@ -18,6 +19,50 @@ namespace Microsoft.Copilot.Test.Unit;
 /// </summary>
 public class SerializationTests
 {
+    [Theory]
+    [InlineData(typeof(PluginUpdateResult))]
+    [InlineData(typeof(PluginUpdateAllEntry))]
+    public void PluginUpdateWarnings_OmitNullAndPreserveRejection(Type resultType)
+    {
+        var options = new JsonSerializerOptions
+        {
+            TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
+        };
+        const string noWarnings = """{"skillsInstalled":0,"success":true,"name":"plugin","marketplace":""}""";
+        var result = JsonSerializer.Deserialize(noWarnings, resultType, options)!;
+        using var omitted = JsonDocument.Parse(JsonSerializer.Serialize(result, resultType, options));
+        Assert.False(omitted.RootElement.TryGetProperty("warnings", out _));
+        Assert.Equal(0, omitted.RootElement.GetProperty("skillsInstalled").GetInt64());
+
+        const string rejected = """{"skillsInstalled":0,"success":true,"name":"plugin","marketplace":"","warnings":["Plugin rejected: invalid name"]}""";
+        result = JsonSerializer.Deserialize(rejected, resultType, options)!;
+        using var reported = JsonDocument.Parse(JsonSerializer.Serialize(result, resultType, options));
+        Assert.Equal("Plugin rejected: invalid name", Assert.Single(reported.RootElement.GetProperty("warnings").EnumerateArray()).GetString());
+        Assert.Equal(0, reported.RootElement.GetProperty("skillsInstalled").GetInt64());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(",\"after_hash\":null,\"before_content\":null,\"before_hash\":null")]
+    [InlineData(",\"after_hash\":\"after\",\"before_content\":\"before\",\"before_hash\":\"hash\"")]
+    public void ForgeManifest_Retains_Nullable_Metadata(string metadata)
+    {
+        var options = GetSerializerOptions();
+        var wire = "{\"path\":\".github/skills/demo/SKILL.md\",\"change_type\":\"added\"" + metadata + "}";
+        var entry = JsonSerializer.Deserialize<ForgeProposalManifestEntry>(wire, options)!;
+        using var expected = JsonDocument.Parse(wire);
+        using var actual = JsonDocument.Parse(JsonSerializer.Serialize(entry, options));
+        foreach (var field in new[] { "after_hash", "before_content", "before_hash" })
+        {
+            var present = expected.RootElement.TryGetProperty(field, out var before);
+            Assert.Equal(present, actual.RootElement.TryGetProperty(field, out var after));
+            if (present)
+            {
+                Assert.Equal(before.GetRawText(), after.GetRawText());
+            }
+        }
+    }
+
     [Theory]
     [InlineData(false, 0)]
     [InlineData(false, 1)]
@@ -87,7 +132,7 @@ public class SerializationTests
         var value = new { step_id = 1, source = "user", message = "Fix the build" };
         if (!JsonSerializer.IsReflectionEnabledByDefault)
         {
-            // Without reflection (NativeAOT, or this suite's net8.0 configuration), only types a
+            // Without reflection (NativeAOT, or this suite's net10.0 configuration), only types a
             // source-generated context knows can be serialized.
             Assert.Throws<NotSupportedException>(() => CopilotClient.ToJsonElementForWire(value));
             return;
@@ -305,6 +350,26 @@ public class SerializationTests
         var omitted = JsonSerializer.Serialize(new SandboxConfig { Enabled = true }, options);
         using var omittedDocument = JsonDocument.Parse(omitted);
         Assert.False(omittedDocument.RootElement.TryGetProperty("allowBypass", out _));
+    }
+
+    [Fact]
+    public void SandboxCapabilities_OmitAbsentButPreserveEmptyOptOut_WithDefaultNullHandling()
+    {
+        var options = new JsonSerializerOptions { TypeInfoResolver = new DefaultJsonTypeInfoResolver() };
+        var policy = new SandboxConfigUserPolicy();
+        using var omitted = JsonDocument.Parse(JsonSerializer.Serialize(policy, options));
+        Assert.False(omitted.RootElement.TryGetProperty("capabilities", out _));
+        var omittedWire = CopilotClient.ToJsonElementForWire(policy)!.Value;
+        Assert.False(omittedWire.TryGetProperty("capabilities", out _));
+        Assert.Null(JsonSerializer.Deserialize<SandboxConfigUserPolicy>(omittedWire.GetRawText(), options)!.Capabilities);
+
+        policy.Capabilities = [];
+        using var optedOut = JsonDocument.Parse(JsonSerializer.Serialize(policy, options));
+        Assert.Equal(JsonValueKind.Array, optedOut.RootElement.GetProperty("capabilities").ValueKind);
+        Assert.Equal(0, optedOut.RootElement.GetProperty("capabilities").GetArrayLength());
+        var optedOutWire = CopilotClient.ToJsonElementForWire(policy)!.Value;
+        Assert.Equal(0, optedOutWire.GetProperty("capabilities").GetArrayLength());
+        Assert.Empty(JsonSerializer.Deserialize<SandboxConfigUserPolicy>(optedOutWire.GetRawText(), options)!.Capabilities!);
     }
 
     [Fact]

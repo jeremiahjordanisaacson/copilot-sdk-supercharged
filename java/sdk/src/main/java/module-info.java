@@ -9,6 +9,7 @@ module com.microsoft.copilot.java {
     requires transitive com.fasterxml.jackson.annotation;
     requires com.fasterxml.jackson.core;
     requires transitive com.fasterxml.jackson.databind;
+    requires com.fasterxml.jackson.datatype.jdk8;
     requires com.fasterxml.jackson.datatype.jsr310;
     requires static org.jspecify;
     requires static java.compiler;

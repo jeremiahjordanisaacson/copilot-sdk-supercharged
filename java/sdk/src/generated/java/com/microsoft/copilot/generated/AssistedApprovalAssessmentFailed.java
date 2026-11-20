@@ -36,8 +36,15 @@ public final class AssistedApprovalAssessmentFailed extends AssistedApprovalAsse
     @JsonProperty("reason")
     private String reason;
 
+    /** Runtime-authored explanation of the failure when the runtime knows more than `reason`, such as the model error the judge call returned or how to make a judge model available. Absent when `reason` says everything known. */
+    @JsonProperty("message")
+    private String message;
+
     public String getReason() { return reason; }
     public void setReason(String reason) { this.reason = reason; }
+
+    public String getMessage() { return message; }
+    public void setMessage(String message) { this.message = message; }
 
 
     /**
@@ -56,6 +63,7 @@ public final class AssistedApprovalAssessmentFailed extends AssistedApprovalAsse
     public static final class Builder {
         private Builder() {}
         private String reason;
+        private String message;
 
         /**
          * Sets the {@code reason} property.
@@ -70,6 +78,18 @@ public final class AssistedApprovalAssessmentFailed extends AssistedApprovalAsse
         }
 
         /**
+         * Sets the {@code message} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder message(String value) {
+            this.message = value;
+            return this;
+        }
+
+        /**
          * Builds a variant after checking required property presence.
          * @return a new variant
          * @throws IllegalStateException if a required property is missing
@@ -79,6 +99,7 @@ public final class AssistedApprovalAssessmentFailed extends AssistedApprovalAsse
             if (reason == null) throw new IllegalStateException("Missing required property: reason");
             AssistedApprovalAssessmentFailed instance = new AssistedApprovalAssessmentFailed();
             instance.setReason(reason);
+            instance.setMessage(message);
             return instance;
         }
     }

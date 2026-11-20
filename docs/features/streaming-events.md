@@ -4,7 +4,7 @@ Every action the Copilot agent takes—thinking, writing code, running tools—i
 
 ## Overview
 
-When `streaming: true` is set on a session, the SDK emits **ephemeral** events in real time (deltas, progress updates) alongside **persisted** events (complete messages, tool results). All events share a common envelope and carry a `data` payload whose shape depends on the event `type`.
+When `events.streaming` is set to `true` on a session, the SDK emits **ephemeral** events in real time (deltas, progress updates) alongside **persisted** events (complete messages, tool results). All events share a common envelope and carry a `data` payload whose shape depends on the event `type`.
 
 ```mermaid
 sequenceDiagram
@@ -433,6 +433,7 @@ Ephemeral. Incremental chunk of the model's extended thinking, streamed in real 
 |------------|------|----------|-------------|
 | `reasoningId` | `string` | ✅ | Matches the corresponding `assistant.reasoning` event |
 | `deltaContent` | `string` | ✅ | Text chunk to append to reasoning content |
+| `fusion` | `FusionAttribution` | | Experimental. HydraFusion phase attribution; present without a `commitId` while a staged phase streams provisional reasoning that may still be discarded |
 
 ### `assistant.message`
 
@@ -467,6 +468,7 @@ Ephemeral. Incremental chunk of the assistant's text response, streamed in real 
 |------------|------|----------|-------------|
 | `messageId` | `string` | ✅ | Matches the corresponding `assistant.message` event |
 | `deltaContent` | `string` | ✅ | Text chunk to append to the message |
+| `fusion` | `FusionAttribution` | | Experimental. HydraFusion phase attribution; present without a `commitId` while a staged phase streams provisional text that may still be discarded |
 
 ### `assistant.turn_end`
 
@@ -498,7 +500,7 @@ Ephemeral. Token usage and cost information for an individual API call.
 | `timeToFirstTokenMs` | `number` | | Time from request dispatch to first token received (streaming latency) |
 | `interTokenLatencyMs` | `number` | | Average latency between consecutive tokens (streaming throughput) |
 | `reasoningEffort` | `string` | | Reasoning effort level used for this call (e.g., `"low"`, `"medium"`, `"high"`) |
-| `initiator` | `string` | | What triggered this call (e.g., `"sub-agent"`); absent for user-initiated |
+| `initiator` | `string` | | What triggered this call: `"user"` for a request that carries a user prompt, `"agent"` for an agent-driven request such as the follow-up after a tool result, or the delegating caller (e.g., `"sub-agent"`, `"mcp-sampling"`) |
 | `apiCallId` | `string` | | Completion ID from the provider (e.g., `chatcmpl-abc123`) |
 | `serviceRequestId` | `string` | | Copilot service request ID (`x-copilot-service-request-id`) for CAPI log correlation |
 | `apiEndpoint` | `"/chat/completions" \| "/v1/messages" \| "/responses" \| "ws:/responses" \| "/interactions"` | | API endpoint used for the model call; useful for observability and cost attribution. `ws:/responses` is the websocket variant of the responses API; `/interactions` is the native Gemini Interactions API, served by CAPI or by a BYOK `google` provider |
@@ -520,7 +522,7 @@ These events track the full lifecycle of each tool invocation—from the model r
 
 ### `tool.execution_start`
 
-Emitted when a tool begins executing. MCP identity: `mcpConfigServerName ?? mcpServerName` (legacy-compatible).
+Emitted for each tool call the model requests, when its response arrives and before the tool runs. Permission is checked after this event, so it doesn't mean the call is approved: a call that needs approval emits `permission.requested` next, and a denied call ends with a `tool.execution_complete` whose `success` is `false`. This order is the same for built-in, custom and MCP tools. The exception is a tool from an extension that hasn't started yet ([request-driven activation](../../nodejs/docs/extensions.md#opting-into-request-driven-activation)). Its `tool.execution_start` is held while permission is requested. It's emitted after approval, once the extension starts, or just before its `tool.execution_complete` if the call fails, for example when permission is denied. Don't wait for `tool.execution_start` before answering a `permission.requested`. MCP identity: `mcpConfigServerName ?? mcpServerName` (legacy-compatible).
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
@@ -610,7 +612,9 @@ An error occurred during session processing.
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `errorType` | `string` | ✅ | Error category (e.g., `"authentication"`, `"quota"`, `"rate_limit"`) |
+| `errorCode` | `string` | | Fine-grained classification, an extensible string (e.g., `"no_account"` when the session has no account to send with, `"rate_limited"`) |
 | `message` | `string` | ✅ | Human-readable error message |
+| `remediation` | `string` | | Action the user must take to recover, when the runtime knows one (e.g., `"sign_in"`) |
 | `stack` | `string` | | Error stack trace |
 | `statusCode` | `number` | | HTTP status code from the upstream request |
 | `providerCallId` | `string` | | GitHub request tracing ID for server-side log correlation |
@@ -678,7 +682,7 @@ Session limits changed for the current accounting window. A `null` `sessionLimit
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `sessionLimits` | `SessionLimitsConfig \| null` | ✅ | Current session limits, or `null` when no limits are active |
-| `sessionLimits.maxAiCredits` | `number` | | Maximum AI Credits allowed across the session's current accounting window |
+| `sessionLimits.maxAiCredits` | `number` | | Maximum AI Credits allowed across the session's current accounting window. When setting a limit, the value must be at least 30 and greater than the AI Credits the session has already used |
 
 ### `session.usage_checkpoint`
 
@@ -720,10 +724,13 @@ These events are emitted when the agent needs approval or input from the user be
 
 The agent needs permission to perform an action (run a command, write a file, etc.).
 
+For a tool call, the request is made while the tool executes, so it usually arrives after that call's `tool.execution_start`. A tool from an extension that hasn't started yet asks for permission before its `tool.execution_start` (see [`tool.execution_start`](#toolexecution_start)). Use `permissionRequest.toolCallId` to match a request to its call, and don't require a prior start. A call can raise more than one request. A call that an approval rule or the session's mode already allows normally gets no `permission.requested`. A request the runtime already decided, through a `permissionRequest` hook or an automatic assisted-mode decision, is still reported as a `permission.requested` with `resolvedByHook: true`, followed immediately by its `permission.completed`. Don't prompt for or respond to it: it isn't pending, and SDK permission handlers aren't called for it.
+
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
-| `requestId` | `string` | ✅ | Pass this as the `requestId` of the `session.permissions.handlePendingPermissionRequest` RPC to respond |
+| `requestId` | `string` | ✅ | Pass this as the `requestId` of the `session.permissions.handlePendingPermissionRequest` RPC to respond, unless `resolvedByHook` is `true` |
 | `permissionRequest` | `PermissionRequest` | ✅ | Details of the permission being requested |
+| `resolvedByHook` | `boolean` | | When `true`, the request is already decided and needs no prompt or response |
 
 The `permissionRequest` is a discriminated union on `kind`:
 
@@ -751,6 +758,7 @@ A permission request was resolved.
 |------------|------|----------|-------------|
 | `requestId` | `string` | ✅ | Matches the corresponding `permission.requested` |
 | `result.kind` | `string` | ✅ | One of: `"approved"`, `"denied-by-rules"`, `"denied-interactively-by-user"`, `"denied-no-approval-rule-and-could-not-request-from-user"`, `"denied-by-content-exclusion-policy"` |
+| `decisionSource` | `string` | | Who decided: `"human_response"`, `"assisted_approval"`, `"host_policy"` or `"unattended_fallback"`. Sessions recorded by older runtimes may also contain the historical value `"authorization_carry_forward"`, which current runtimes no longer produce. Read this, not `result.kind`, to tell a person's decision from an automatic one: the Assisted Permissions judge's denials are also saved as `"denied-interactively-by-user"`. Treat an absent value as not a person's decision. |
 
 ### `user_input.requested`
 
@@ -1003,9 +1011,9 @@ assistant.turn_start          → Turn begins
 ├── assistant.usage           → Token usage for this API call (ephemeral)
 │
 ├── [If tools were requested:]
-│   ├── permission.requested  → Needs user approval
+│   ├── tool.execution_start  → Tool call announced (not yet approved; held until approval for an unstarted extension's tool)
+│   ├── permission.requested  → Needs user approval (when no rule or mode allows it)
 │   ├── permission.completed  → Approval result
-│   ├── tool.execution_start  → Tool begins
 │   ├── tool.shell_output              → Stream-tagged terminal output (ephemeral, repeated)
 │   ├── tool.execution_progress        → Progress updates (ephemeral, repeated)
 │   ├── tool.execution_complete        → Tool finished

@@ -62,7 +62,9 @@ public class SetModelOptions {
     /**
      * Gets the reasoning effort level.
      *
-     * @return the reasoning effort level, or {@code null} to use the default
+     * @return the reasoning effort level, or {@code null} when none was set or when
+     *         {@code null} was set to restore the default;
+     *         {@link #hasReasoningEffort()} tells the two apart
      */
     public String getReasoningEffort() {
         return reasoningEffort;
@@ -97,7 +99,8 @@ public class SetModelOptions {
     /**
      * Gets the reasoning summary mode.
      *
-     * @return the reasoning summary mode, or {@code null} to use the default
+     * @return the reasoning summary mode, or {@code null} to keep the session's
+     *         current mode
      */
     public String getReasoningSummary() {
         return reasoningSummary;
@@ -108,7 +111,8 @@ public class SetModelOptions {
      *
      * @param reasoningSummary
      *            reasoning summary mode ({@code "none"}, {@code "concise"}, or
-     *            {@code "detailed"}); {@code null} to use the default
+     *            {@code "detailed"}); {@code null} to keep the session's current
+     *            mode
      * @return this options object for method chaining
      */
     public SetModelOptions setReasoningSummary(String reasoningSummary) {

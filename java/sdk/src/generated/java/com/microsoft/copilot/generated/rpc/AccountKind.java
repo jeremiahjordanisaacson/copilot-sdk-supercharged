@@ -11,7 +11,7 @@ import com.microsoft.copilot.CopilotExperimental;
 import javax.annotation.processing.Generated;
 
 /**
- * The provider kind stamped on a signed-in account.
+ * The provider kind of a signed-in account.
  *
  * @apiNote This type is experimental and may change in a future version.
  *
@@ -20,16 +20,16 @@ import javax.annotation.processing.Generated;
 @CopilotExperimental
 @javax.annotation.processing.Generated("copilot-sdk-codegen")
 public enum AccountKind {
-    /** The {@code githubDotCom} variant. */
-    GITHUBDOTCOM("githubDotCom"),
-    /** The {@code proxima} variant. */
-    PROXIMA("proxima"),
+    /** The {@code gitHub} variant. */
+    GITHUB("gitHub"),
+    /** The {@code gitHubEnterpriseCloud} variant. */
+    GITHUBENTERPRISECLOUD("gitHubEnterpriseCloud"),
     /** The {@code entraEmu} variant. */
     ENTRAEMU("entraEmu"),
     /** The {@code entra} variant. */
     ENTRA("entra"),
-    /** The {@code loki} variant. */
-    LOKI("loki");
+    /** The {@code microsoft365Copilot} variant. */
+    MICROSOFT365COPILOT("microsoft365Copilot");
 
     private final String value;
     AccountKind(String value) { this.value = value; }

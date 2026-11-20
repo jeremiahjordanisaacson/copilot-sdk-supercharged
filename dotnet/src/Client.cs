@@ -673,11 +673,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         {
             try
             {
-#if NET8_0_OR_GREATER
                 await startupLifetime.CancelAsync().ConfigureAwait(false);
-#else
-                await Task.Run(() => startupLifetime.Cancel()).ConfigureAwait(false);
-#endif
             }
             catch (Exception ex) { AddCleanupError(errors, ex, _logger); }
         }
@@ -3094,9 +3090,9 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         {
             throw new InvalidOperationException("Copilot runtime wrapper and adjacent runtime.node must both be non-empty.");
         }
-#if NET8_0_OR_GREATER
         if (!OperatingSystem.IsWindows())
         {
+#if NET8_0_OR_GREATER
             var mode = File.GetUnixFileMode(wrapper);
             const UnixFileMode executeBits =
                 UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
@@ -3104,8 +3100,28 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             {
                 File.SetUnixFileMode(wrapper, mode | executeBits);
             }
-        }
+#else
+            // Use the host's Unix file-mode APIs when a modern .NET app loads the netstandard assembly.
+            if (typeof(File).GetMethod("GetUnixFileMode", [typeof(string)]) is { } getUnixFileMode)
+            {
+                try
+                {
+                    var mode = getUnixFileMode.Invoke(null, [wrapper])!;
+                    const int executeBits = (1 << 6) | (1 << 3) | 1;
+                    var bits = (int)mode;
+                    if ((bits & executeBits) == 0)
+                    {
+                        typeof(File).GetMethod("SetUnixFileMode", [typeof(string), mode.GetType()])!
+                            .Invoke(null, [wrapper, Enum.ToObject(mode.GetType(), bits | executeBits)]);
+                    }
+                }
+                catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is { } inner)
+                {
+                    ExceptionDispatchInfo.Capture(inner).Throw();
+                }
+            }
 #endif
+        }
         return new RuntimeLaunch(wrapper, source);
     }
 
@@ -3323,7 +3339,11 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 "CopilotClient.ConnectToServerAsync transport setup complete. Elapsed={Elapsed}",
                 setupTimestamp);
 
-            connection.CloseCleanup = CancelExternalToolsWhenConnectionClosesAsync(connection);
+            // This waiter lives as long as the connection, not the startup request.
+            using (ExecutionContextHelpers.SuppressFlow())
+            {
+                connection.CloseCleanup = CancelExternalToolsWhenConnectionClosesAsync(connection);
+            }
             _serverRpc = connection.Server;
 
             return connection;
@@ -3350,6 +3370,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
 
     private void RegisterRpcProcessExit(Process cliProcess, JsonRpc rpc)
     {
+        // Process exit monitoring also captures ExecutionContext when it registers its wait.
+        using var flow = ExecutionContextHelpers.SuppressFlow();
         try
         {
             cliProcess.EnableRaisingEvents = true;
@@ -3516,11 +3538,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     {
         try
         {
-#if NET8_0_OR_GREATER
             await pending.CancelAsync().ConfigureAwait(false);
-#else
-            await Task.Run(() => pending.Cancel()).ConfigureAwait(false);
-#endif
         }
         catch (AggregateException)
         {
@@ -3776,7 +3794,17 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     /// </remarks>
     public void Dispose()
     {
-        DisposeAsync().AsTask().GetAwaiter().GetResult();
+        // The stop chain's awaits resume on the caller's SynchronizationContext or TaskScheduler. When that
+        // runs continuations on the thread blocked here (a WinForms or WPF UI thread), blocking inline never
+        // returns, so stop on the thread pool instead.
+        if (SynchronizationContext.Current is null && TaskScheduler.Current == TaskScheduler.Default)
+        {
+            DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        else
+        {
+            Task.Run(() => DisposeAsync().AsTask()).GetAwaiter().GetResult();
+        }
     }
 
     /// <summary>
@@ -3966,6 +3994,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
 
         private ProcessStderrPump(Process process, ILogger logger)
         {
+            using var flow = ExecutionContextHelpers.SuppressFlow();
             _completion = Task.Run(() => PumpAsync(process, logger, _cancellationTokenSource.Token));
         }
 
@@ -4077,7 +4106,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             var toolNamespace = function.AdditionalProperties.TryGetValue(CopilotTool.NamespaceKey, out var namespaceVal) && namespaceVal is ToolNamespace ns
                 ? new ProtocolExternalToolNamespace { Name = ns.Name, Description = ns.Description }
                 : null;
-            return new ToolDefinition(function.Name, function.Description, function.JsonSchema,
+            return new ToolDefinition(function.Name, function.Description, ToolSchemaDefaults.WithoutRoundedDefaults(function.JsonSchema),
                 overrides ? true : null,
                 skipPerm ? true : null,
                 function.GetService<AIFunction>() is not null,

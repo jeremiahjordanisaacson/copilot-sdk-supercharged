@@ -149,9 +149,11 @@ namespace Microsoft.Copilot;
 [JsonDerivedType(typeof(SessionQuotaObservationEvent), "session.quota_observation")]
 [JsonDerivedType(typeof(SessionRemoteSteerableChangedEvent), "session.remote_steerable_changed")]
 [JsonDerivedType(typeof(SessionResumeEvent), "session.resume")]
+[JsonDerivedType(typeof(SessionSandboxStateChangedEvent), "session.sandbox_state_changed")]
 [JsonDerivedType(typeof(SessionScheduleCancelledEvent), "session.schedule_cancelled")]
 [JsonDerivedType(typeof(SessionScheduleCreatedEvent), "session.schedule_created")]
 [JsonDerivedType(typeof(SessionScheduleRearmedEvent), "session.schedule_rearmed")]
+[JsonDerivedType(typeof(SessionSensitivityLabelObservationEvent), "session.sensitivity_label_observation")]
 [JsonDerivedType(typeof(SessionSessionLimitsChangedEvent), "session.session_limits_changed")]
 [JsonDerivedType(typeof(SessionShutdownEvent), "session.shutdown")]
 [JsonDerivedType(typeof(SessionSkillsLoadedEvent), "session.skills_loaded")]
@@ -577,6 +579,8 @@ internal sealed partial class SessionEventJsonConverter : JsonConverter<SessionE
                     return SessionEventsJsonContext.Default.SessionCustomAgentsUpdatedEvent;
                 if (type.SequenceEqual("session.mode_notice_delivered"u8))
                     return SessionEventsJsonContext.Default.SessionModeNoticeDeliveredEvent;
+                if (type.SequenceEqual("session.sandbox_state_changed"u8))
+                    return SessionEventsJsonContext.Default.SessionSandboxStateChangedEvent;
                 break;
             case 30:
                 if (type.SequenceEqual("assistant.fusion_phase_started"u8))
@@ -645,6 +649,8 @@ internal sealed partial class SessionEventJsonConverter : JsonConverter<SessionE
             case 37:
                 if (type.SequenceEqual("session.extensions.attachments_pushed"u8))
                     return SessionEventsJsonContext.Default.SessionExtensionsAttachmentsPushedEvent;
+                if (type.SequenceEqual("session.sensitivity_label_observation"u8))
+                    return SessionEventsJsonContext.Default.SessionSensitivityLabelObservationEvent;
                 break;
             case 39:
                 if (type.SequenceEqual("permission.messageAuthorizationDegraded"u8))
@@ -793,6 +799,19 @@ internal sealed class SessionEventEnvelope
     };
 }
 
+/// <summary>Read-only sandbox state after a live session policy transition.</summary>
+/// <remarks>Represents the <c>session.sandbox_state_changed</c> event.</remarks>
+public sealed partial class SessionSandboxStateChangedEvent : SessionEvent
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "session.sandbox_state_changed";
+
+    /// <summary>The <c>session.sandbox_state_changed</c> event payload.</summary>
+    [JsonPropertyName("data")]
+    public required SessionSandboxStateChangedData Data { get; set; }
+}
+
 /// <summary>Live IDE state. This state never restores a connection from session history.</summary>
 /// <remarks>Represents the <c>ide.connection_changed</c> event.</remarks>
 public sealed partial class IdeConnectionChangedEvent : SessionEvent
@@ -897,7 +916,7 @@ public sealed partial class SessionRemoteSteerableChangedEvent : SessionEvent
     public required SessionRemoteSteerableChangedData Data { get; set; }
 }
 
-/// <summary>Session error details for timeline display. Request-correlated completion RPC failures carry the terminal error's same fields in their error data, with stack and completionEventId.</summary>
+/// <summary>Session error details for timeline display. Request-correlated completion RPC failures carry the terminal error's same fields in their error data, with stack and completionEventId. errorCode is an optional runtime or Copilot API classification, not a closed enum; clients must tolerate unknown values. CAPI HTTP 429 normalizes missing or unknown codes to rate_limited, while HTTP 402 forwards upstream codes or omits an absent code. Direct BYOK provider codes use the separate providerErrorCode field. A code alone does not define remediation or retry policy.</summary>
 /// <remarks>Represents the <c>session.error</c> event.</remarks>
 public sealed partial class SessionErrorEvent : SessionEvent
 {
@@ -1264,6 +1283,20 @@ public sealed partial class SessionQuotaObservationEvent : SessionEvent
     public required SessionQuotaObservationData Data { get; set; }
 }
 
+/// <summary>A provider-reported sensitivity label observation for one model request. Each observation describes only its own request; it neither sets nor clears a session-level label.</summary>
+/// <remarks>Represents the <c>session.sensitivity_label_observation</c> event.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed partial class SessionSensitivityLabelObservationEvent : SessionEvent
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "session.sensitivity_label_observation";
+
+    /// <summary>The <c>session.sensitivity_label_observation</c> event payload.</summary>
+    [JsonPropertyName("data")]
+    public required SessionSensitivityLabelObservationData Data { get; set; }
+}
+
 /// <summary>Working directory and git context at session start.</summary>
 /// <remarks>Represents the <c>session.context_changed</c> event.</remarks>
 public sealed partial class SessionContextChangedEvent : SessionEvent
@@ -1397,7 +1430,7 @@ public sealed partial class SessionFusionRouteFailedEvent : SessionEvent
     public required SessionFusionRouteFailedData Data { get; set; }
 }
 
-/// <summary>Experimental durable validated HydraFusion route and turn policy.</summary>
+/// <summary>Experimental durable validated HydraFusion route and turn policy. An empty phase plan with pattern single runs an ordinary streaming turn, without phase or commit events.</summary>
 /// <remarks>Represents the <c>session.fusion_resolved</c> event.</remarks>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed partial class SessionFusionResolvedEvent : SessionEvent
@@ -1411,7 +1444,7 @@ public sealed partial class SessionFusionResolvedEvent : SessionEvent
     public required SessionFusionResolvedData Data { get; set; }
 }
 
-/// <summary>Experimental durable aggregate outcome of a HydraFusion turn.</summary>
+/// <summary>Experimental durable aggregate outcome of a HydraFusion turn. Phase-free Single reports completed, failed, or cancelled; staged patterns emit this event only on successful or degraded completion.</summary>
 /// <remarks>Represents the <c>session.fusion_completed</c> event.</remarks>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed partial class SessionFusionCompletedEvent : SessionEvent
@@ -2545,7 +2578,7 @@ public sealed partial class SessionLimitsExhaustedCompletedEvent : SessionEvent
     public required SessionLimitsExhaustedCompletedData Data { get; set; }
 }
 
-/// <summary>Auto Intent resolution: the concrete model an auto-mode session settled on, and why. Published when Auto settles on a model that differs from the one it last published in the current Auto selection, so a routing check that keeps the same model does not repeat it; selecting a model, switching Auto tiers, or returning to Auto starts a new selection. Lets SDK clients render the chosen model and the full reason it was picked. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.</summary>
+/// <summary>Auto or Fusion Single resolution: the concrete model the session settled on, with an optional explanation. Published when routing selects a model that differs from the one last published in the current selection; selecting a model, switching Auto tiers, or returning to Auto starts a new selection. Does not change the user's selected model or tier. Lets SDK clients render the chosen model and its selection notice. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.</summary>
 /// <remarks>Represents the <c>session.auto_mode_resolved</c> event.</remarks>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed partial class SessionAutoModeResolvedEvent : SessionEvent
@@ -2987,6 +3020,39 @@ public sealed partial class McpAppToolCallCompleteEvent : SessionEvent
     public required McpAppToolCallCompleteData Data { get; set; }
 }
 
+/// <summary>Read-only sandbox state after a live session policy transition.</summary>
+public sealed partial class SessionSandboxStateChangedData
+{
+    /// <summary>Whether queued sandbox bypass requests may use the session opt-out.</summary>
+    [JsonPropertyName("autoApproveBypass")]
+    public required bool AutoApproveBypass { get; set; }
+
+    /// <summary>Effective sandbox configuration, including the current managed floor.</summary>
+    [JsonPropertyName("config")]
+    public required JsonElement Config { get; set; }
+
+    /// <summary>Exact runtime attribution of the effective sandbox choice.</summary>
+    [JsonPropertyName("configSource")]
+    public required string ConfigSource { get; set; }
+
+    /// <summary>Whether this session holds an authorized or local session opt-out.</summary>
+    [JsonPropertyName("disabledForSession")]
+    public required bool DisabledForSession { get; set; }
+
+    /// <summary>Runtime incarnation of the live session.</summary>
+    [JsonPropertyName("incarnation")]
+    public required long Incarnation { get; set; }
+
+    /// <summary>Monotonic revision of this live session's sandbox projection.</summary>
+    [JsonPropertyName("revision")]
+    public required long Revision { get; set; }
+
+    /// <summary>Explicit session enable choice, when one exists.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    [JsonPropertyName("sessionOverride")]
+    public bool? SessionOverride { get; set; }
+}
+
 /// <summary>Live IDE state. This state never restores a connection from session history.</summary>
 public sealed partial class IdeConnectionChangedData
 {
@@ -3243,6 +3309,16 @@ public sealed partial class SessionResumeData
     [JsonPropertyName("remoteSteerable")]
     public bool? RemoteSteerable { get; set; }
 
+    /// <summary>Whether this resume kept the reasoning that Copilot's Responses API produced on earlier assistant messages in the history it replays. Replaying this event later reapplies the same choice, so the history is rebuilt as it was sent. Omitted for a resume that joined live work, and by resumes recorded before this field existed, which removed that reasoning.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("responsesReasoningKept")]
+    public bool? ResponsesReasoningKept { get; set; }
+
+    /// <summary>True when the COPILOT_STRIP_REASONING_ON_RESUME environment override, rather than the runtime's default for this session, decided responsesReasoningKept. Omitted otherwise.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("responsesReasoningOverridden")]
+    public bool? ResponsesReasoningOverridden { get; set; }
+
     /// <summary>ISO 8601 timestamp when the session was resumed.</summary>
     [JsonPropertyName("resumeTime")]
     public required DateTimeOffset ResumeTime { get; set; }
@@ -3276,15 +3352,20 @@ public sealed partial class SessionRemoteSteerableChangedData
     public required bool RemoteSteerable { get; set; }
 }
 
-/// <summary>Session error details for timeline display. Request-correlated completion RPC failures carry the terminal error's same fields in their error data, with stack and completionEventId.</summary>
+/// <summary>Session error details for timeline display. Request-correlated completion RPC failures carry the terminal error's same fields in their error data, with stack and completionEventId. errorCode is an optional runtime or Copilot API classification, not a closed enum; clients must tolerate unknown values. CAPI HTTP 429 normalizes missing or unknown codes to rate_limited, while HTTP 402 forwards upstream codes or omits an absent code. Direct BYOK provider codes use the separate providerErrorCode field. A code alone does not define remediation or retry policy.</summary>
 public sealed partial class SessionErrorData
 {
+    /// <summary>Typed DLP block, set only when providerErrorCode is a known DLP code. Classified from the exact code, never from the message or HTTP status. Other provider codes remain in providerErrorCode.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("dlpBlock")]
+    public DlpBlockKind? DlpBlock { get; set; }
+
     /// <summary>Only set on `errorType: "rate_limit"`. When `true`, the runtime will follow this error with an `auto_mode_switch.requested` event (or silently switch if `continueOnAutoMode` is enabled). UI clients can use this flag to suppress duplicate rendering of the rate-limit error when they show their own auto-mode-switch prompt.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("eligibleForAutoSwitch")]
     public bool? EligibleForAutoSwitch { get; set; }
 
-    /// <summary>Fine-grained error code from the upstream provider, when available. For `errorType: "rate_limit"`, this is one of the `RateLimitErrorCode` values (e.g., `"user_weekly_rate_limited"`, `"user_global_rate_limited"`, `"rate_limited"`, `"user_model_rate_limited"`, `"integration_rate_limited"`). For `errorType: "quota"`, this is the CAPI quota error code (e.g., `"quota_exceeded"`, `"session_quota_exceeded"`, `"billing_not_configured"`).</summary>
+    /// <summary>Optional fine-grained runtime or Copilot API classification; an extensible string, not a closed enum. May be absent; clients must tolerate unknown values. Runtime-local codes include `ai_credit_soft_cap_exhausted` (`errorType: "session_limits"`) and `no_account` (`errorType: "authentication"`): the session has no account, or no credential resolves for its account, so no request was sent. Session RPC rejections for the same state carry `no_account` in their error data. Policy codes include `misalignment_policy_violation` and `cyber_policy`. CAPI rate limits normalize missing or unknown codes to `rate_limited`; recognized codes also include `user_model_rate_limited`, `user_global_rate_limited`, `user_weekly_rate_limited`, and `integration_rate_limited`. HTTP 402 quota failures forward upstream codes, including unknown values, or omit the field if no code is available. Other terminal CAPI query failures expose only reviewed codes. Direct BYOK provider codes use providerErrorCode instead. A code alone does not define remediation or retry policy.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("errorCode")]
     public string? ErrorCode { get; set; }
@@ -3307,7 +3388,7 @@ public sealed partial class SessionErrorData
     [JsonPropertyName("providerCallId")]
     public string? ProviderCallId { get; set; }
 
-    /// <summary>Provider-defined error code, when available; unset otherwise. Unlike errorCode, this is not a runtime or Copilot API classification and does not imply a remediation or retry policy.</summary>
+    /// <summary>Exact error code from the model endpoint's structured error envelope (Copilot API, BYOK, or another provider), preserved verbatim when available; unset otherwise. Unlike errorCode, this is not a runtime or Copilot API classification and does not imply a remediation or retry policy.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("providerErrorCode")]
     public string? ProviderErrorCode { get; set; }
@@ -3341,6 +3422,11 @@ public sealed partial class SessionErrorData
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("statusCode")]
     public int? StatusCode { get; set; }
+
+    /// <summary>Identifier of the agent-loop turn whose model call failed, matching that turn's assistant.turn_start turnId within the request named by originatingMessageId. Absent when the failure happened outside a model turn.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("turnId")]
+    public string? TurnId { get; set; }
 
     /// <summary>Optional URL associated with this error that the user can open in a browser.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -4042,6 +4128,43 @@ public sealed partial class SessionQuotaObservationData
     public required ProviderQuotaState Observation { get; set; }
 }
 
+/// <summary>A provider-reported sensitivity label observation for one model request. Each observation describes only its own request; it neither sets nor clears a session-level label.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed partial class SessionSensitivityLabelObservationData
+{
+    /// <summary>Why the label could not be determined. Present only when `outcome` is `indeterminate` and the provider described the failure.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("failure")]
+    public SensitivityLabelFailure? Failure { get; set; }
+
+    /// <summary>Identifier of the user interaction that owns the model request, matching assistant.turn_start.interactionId when available.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("interactionId")]
+    public string? InteractionId { get; set; }
+
+    /// <summary>The inherited label. Present only when `outcome` is `inherited`.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("label")]
+    public SensitivityLabel? Label { get; set; }
+
+    /// <summary>How the provider resolved the label for this request.</summary>
+    [JsonPropertyName("outcome")]
+    public required SensitivityLabelOutcome Outcome { get; set; }
+
+    /// <summary>Provider that served the model request.</summary>
+    [JsonPropertyName("provider")]
+    public required ModelProviderRef Provider { get; set; }
+
+    /// <summary>Provider request identifier of the response that carried the observation, when known.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("requestId")]
+    public string? RequestId { get; set; }
+
+    /// <summary>Agent-loop iteration within the interaction that issued the model request.</summary>
+    [JsonPropertyName("turnId")]
+    public required string TurnId { get; set; }
+}
+
 /// <summary>Working directory and git context at session start.</summary>
 public sealed partial class SessionContextChangedData
 {
@@ -4167,6 +4290,18 @@ public sealed partial class SessionCompactionStartData
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("model")]
     public string? Model { get; set; }
+
+    /// <summary>For a context_limit_retry compaction, the client's estimate of the prompt tokens in the rejected request that forced it, when known.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("rejectedRequestTokens")]
+    internal long? RejectedRequestTokens { get; set; }
+
+    /// <summary>For a context_limit_retry compaction, how the provider rejected the request that forced it: "payload_too_large" (HTTP 413) or "context_window_exceeded" (a context-limit error message). Open set; readers must tolerate other values.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("rejectionKind")]
+    internal string? RejectionKind { get; set; }
 
     /// <summary>Number of trailing conversation messages (the turn's not-yet-answered input) kept verbatim after the summary instead of being compacted. Omitted when every message at compaction start is summarized.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -4578,7 +4713,7 @@ public sealed partial class SessionFusionRouteFailedData
     public required string SyntheticModel { get; set; }
 }
 
-/// <summary>Experimental durable validated HydraFusion route and turn policy.</summary>
+/// <summary>Experimental durable validated HydraFusion route and turn policy. An empty phase plan with pattern single runs an ordinary streaming turn, without phase or commit events.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed partial class SessionFusionResolvedData
 {
@@ -4630,7 +4765,7 @@ public sealed partial class SessionFusionResolvedData
     [JsonPropertyName("pattern")]
     public required FusionPattern Pattern { get; set; }
 
-    /// <summary>Presentation-neutral phase plan for clients that render workflow progress.</summary>
+    /// <summary>Presentation-neutral phase plan for workflow progress. An empty plan with pattern single runs an ordinary streaming turn, without phase or commit events.</summary>
     [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("phasePlan")]
@@ -4710,7 +4845,7 @@ public sealed partial class SessionFusionResolvedData
     public required string TurnId { get; set; }
 }
 
-/// <summary>Experimental durable aggregate outcome of a HydraFusion turn.</summary>
+/// <summary>Experimental durable aggregate outcome of a HydraFusion turn. Phase-free Single reports completed, failed, or cancelled; staged patterns emit this event only on successful or degraded completion.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed partial class SessionFusionCompletedData
 {
@@ -4720,16 +4855,16 @@ public sealed partial class SessionFusionCompletedData
     [JsonPropertyName("awaitingBackgroundWork")]
     public bool? AwaitingBackgroundWork { get; set; }
 
-    /// <summary>Total cached input tokens reported across all phases.</summary>
+    /// <summary>Total cached input tokens reported by the turn.</summary>
     [JsonPropertyName("cachedTokens")]
     public required long CachedTokens { get; set; }
 
-    /// <summary>Total tokens written to prompt cache across all phases.</summary>
+    /// <summary>Total tokens written to prompt cache by the turn.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("cacheWriteTokens")]
     public long? CacheWriteTokens { get; set; }
 
-    /// <summary>Idempotency identifier for the authoritative final commit.</summary>
+    /// <summary>Idempotency identifier for completion; a phase-free Single has no commit replay.</summary>
     [JsonPropertyName("commitId")]
     public required string CommitId { get; set; }
 
@@ -4742,12 +4877,24 @@ public sealed partial class SessionFusionCompletedData
     [JsonPropertyName("durationMs")]
     public required double DurationMs { get; set; }
 
+    /// <summary>Error reported by a failed ordinary Single turn, when available.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+
+    /// <summary>Failure category of an ordinary Single turn, which has no phase failure record.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("failureReason")]
+    public string? FailureReason { get; set; }
+
     /// <summary>Concrete model that supplied the authoritative final content.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     [JsonPropertyName("finalSourceModel")]
     public string? FinalSourceModel { get; set; }
 
-    /// <summary>Phase whose output supplied the authoritative final content.</summary>
+    /// <summary>Phase whose output supplied the final content, or null for a phase-free Single.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     [JsonPropertyName("finalSourcePhaseId")]
     public string? FinalSourcePhaseId { get; set; }
@@ -4760,15 +4907,15 @@ public sealed partial class SessionFusionCompletedData
     [JsonPropertyName("fusionId")]
     public required string FusionId { get; set; }
 
-    /// <summary>Total input tokens consumed across all phases.</summary>
+    /// <summary>Total input tokens consumed by the turn.</summary>
     [JsonPropertyName("inputTokens")]
     public required long InputTokens { get; set; }
 
-    /// <summary>Stable aggregate outcome of the HydraFusion turn.</summary>
+    /// <summary>Stable aggregate outcome. Phase-free Single reports completed, failed, or cancelled; staged patterns emit this event only on successful or degraded completion.</summary>
     [JsonPropertyName("outcome")]
     public required string Outcome { get; set; }
 
-    /// <summary>Total output tokens produced across all phases.</summary>
+    /// <summary>Total output tokens produced by the turn.</summary>
     [JsonPropertyName("outputTokens")]
     public required long OutputTokens { get; set; }
 
@@ -4780,7 +4927,13 @@ public sealed partial class SessionFusionCompletedData
     [JsonPropertyName("phaseCount")]
     public required long PhaseCount { get; set; }
 
-    /// <summary>Total concrete model requests made across all phases.</summary>
+    /// <summary>Planned reasoning effort of an ordinary Single turn, which has no phase record.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("reasoningEffort")]
+    public string? ReasoningEffort { get; set; }
+
+    /// <summary>Total concrete model requests made by the turn.</summary>
     [JsonPropertyName("requestCount")]
     public required long RequestCount { get; set; }
 
@@ -4788,7 +4941,7 @@ public sealed partial class SessionFusionCompletedData
     [JsonPropertyName("syntheticModel")]
     public required string SyntheticModel { get; set; }
 
-    /// <summary>Total normalized AI-unit cost reported across all phases, in nano-AIU.</summary>
+    /// <summary>Total normalized AI-unit cost reported by the turn, in nano-AIU.</summary>
     [JsonPropertyName("totalNanoAiu")]
     public required double TotalNanoAiu { get; set; }
 
@@ -5306,6 +5459,12 @@ public sealed partial class AssistantReasoningData
     [JsonPropertyName("content")]
     public required string Content { get; set; }
 
+    /// <summary>Experimental HydraFusion phase attribution. Present without a `commitId` while a staged root phase streams provisional output that the orchestrator may still discard.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("fusion")]
+    public FusionAttribution? Fusion { get; set; }
+
     /// <summary>Whether the model call that produced this reasoning used a user-managed provider or an on-device model.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("isByok")]
@@ -5338,6 +5497,12 @@ public sealed partial class AssistantReasoningDeltaData
     [JsonPropertyName("deltaContent")]
     public required string DeltaContent { get; set; }
 
+    /// <summary>Experimental HydraFusion phase attribution. Present without a `commitId` while a staged root phase streams provisional output that the orchestrator may still discard.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("fusion")]
+    public FusionAttribution? Fusion { get; set; }
+
     /// <summary>Reasoning block ID this delta belongs to, matching the corresponding assistant.reasoning event.</summary>
     [JsonPropertyName("reasoningId")]
     public required string ReasoningId { get; set; }
@@ -5346,6 +5511,12 @@ public sealed partial class AssistantReasoningDeltaData
 /// <summary>Streaming tool-call input delta for incremental tool-call updates.</summary>
 public sealed partial class AssistantToolCallDeltaData
 {
+    /// <summary>Experimental HydraFusion phase attribution. Present without a `commitId` while a staged root phase streams provisional output that the orchestrator may still discard.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("fusion")]
+    public FusionAttribution? Fusion { get; set; }
+
     /// <summary>Raw provider tool input fragment to append for this tool call. Function/tool-use providers stream serialized JSON argument text (so newlines inside JSON string values may appear as escaped `\n` until the accumulated JSON is parsed); custom tool calls stream raw custom input.</summary>
     [JsonPropertyName("inputDelta")]
     public required string InputDelta { get; set; }
@@ -5436,7 +5607,7 @@ public sealed partial class AssistantMessageData
     [JsonPropertyName("originatingMessageId")]
     public string? OriginatingMessageId { get; set; }
 
-    /// <summary>Output tokens this message adds to replayed context, for token accounting: the API response's completion_tokens, plus reasoning tokens a wire replays as input but reports separately, shared across the response's message chunks. Use assistant.usage for billed usage.</summary>
+    /// <summary>Output tokens this message adds to replayed context, for token accounting: the API response's completion_tokens, shared across the response's message chunks. Use assistant.usage for billed usage.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("outputTokens")]
     public long? OutputTokens { get; set; }
@@ -5505,6 +5676,12 @@ public sealed partial class AssistantMessageData
 /// <summary>Streaming assistant message start metadata.</summary>
 public sealed partial class AssistantMessageStartData
 {
+    /// <summary>Experimental HydraFusion phase attribution. Present without a `commitId` while a staged root phase streams provisional output that the orchestrator may still discard.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("fusion")]
+    public FusionAttribution? Fusion { get; set; }
+
     /// <summary>Message ID this start event belongs to, matching subsequent deltas and assistant.message.</summary>
     [JsonPropertyName("messageId")]
     public required string MessageId { get; set; }
@@ -5521,6 +5698,12 @@ public sealed partial class AssistantMessageDeltaData
     /// <summary>Incremental text chunk to append to the message content.</summary>
     [JsonPropertyName("deltaContent")]
     public required string DeltaContent { get; set; }
+
+    /// <summary>Experimental HydraFusion phase attribution. Present without a `commitId` while a staged root phase streams provisional output that the orchestrator may still discard.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("fusion")]
+    public FusionAttribution? Fusion { get; set; }
 
     /// <summary>Message ID this delta belongs to, matching the corresponding assistant.message event.</summary>
     [JsonPropertyName("messageId")]
@@ -5567,6 +5750,12 @@ public sealed partial class AssistantUsageData
     [JsonPropertyName("accounting")]
     public UsageAccountingIdentity? Accounting { get; set; }
 
+    /// <summary>Whether the logical request was the first the session sent after a resume prepared its history.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("afterResume")]
+    internal bool? AfterResume { get; set; }
+
     /// <summary>Availability of this call's reported AI-credit amount. Missing billing is unavailable, not a zero charge.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("aiCreditsStatus")]
@@ -5581,6 +5770,12 @@ public sealed partial class AssistantUsageData
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("apiEndpoint")]
     public AssistantUsageApiEndpoint? ApiEndpoint { get; set; }
+
+    /// <summary>Zero-based index of the dispatched attempt of the logical request that produced this usage.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("attemptIndex")]
+    internal long? AttemptIndex { get; set; }
 
     /// <summary>Number of tools available to the model for this call.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -5676,7 +5871,7 @@ public sealed partial class AssistantUsageData
     [JsonPropertyName("inferenceGateway")]
     public bool? InferenceGateway { get; set; }
 
-    /// <summary>What initiated this API call (e.g., "sub-agent", "mcp-sampling"); absent for user-initiated calls.</summary>
+    /// <summary>What initiated this API call: "user" for a request that carries a user prompt, "agent" for an agent-driven request such as the follow-up after a tool result, or the delegating caller (e.g., "sub-agent", "mcp-sampling").</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("initiator")]
     public string? Initiator { get; set; }
@@ -5718,6 +5913,12 @@ public sealed partial class AssistantUsageData
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("isByok")]
     public bool? IsByok { get; set; }
+
+    /// <summary>Identifier of the logical request this call answered, shared by the request's attempts and its `prompt_request_usage` telemetry.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("logicalRequestId")]
+    internal string? LogicalRequestId { get; set; }
 
     /// <summary>Requested maximum output tokens used for this model call.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -5854,6 +6055,18 @@ public sealed partial class AssistantUsageData
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("responseModel")]
     public string? ResponseModel { get; set; }
+
+    /// <summary>Identifier of the `session.resume` event whose resume last prepared the session history in this process. Absent when no resume prepared it; random when that resume recorded no event.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("resumeGeneration")]
+    internal string? ResumeGeneration { get; set; }
+
+    /// <summary>Zero-based index of the retry the attempt that produced this usage belongs to.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("retryIndex")]
+    internal long? RetryIndex { get; set; }
 
     /// <summary>Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -6144,7 +6357,7 @@ public sealed partial class ModelCallFailureData
     [JsonPropertyName("inferenceGateway")]
     public bool? InferenceGateway { get; set; }
 
-    /// <summary>What initiated this API call (e.g., "sub-agent", "mcp-sampling"); absent for user-initiated calls.</summary>
+    /// <summary>What initiated this failed API call, when reported (e.g., "sub-agent", "mcp-sampling"); absent for main-loop failures, whether user- or agent-initiated.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("initiator")]
     public string? Initiator { get; set; }
@@ -6943,6 +7156,11 @@ public sealed partial class SubagentStartedData
     [JsonPropertyName("executionMode")]
     public string? ExecutionMode { get; set; }
 
+    /// <summary>Interaction ID inherited from the user action that started this sub-agent.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("interactionId")]
+    public string? InteractionId { get; set; }
+
     /// <summary>Model the sub-agent will run with, when known at start.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("model")]
@@ -7047,6 +7265,11 @@ public sealed partial class SubagentCompletedData
     [JsonPropertyName("firstDispatchedModel")]
     public string? FirstDispatchedModel { get; set; }
 
+    /// <summary>Interaction ID of the user action that produced this sub-agent turn.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("interactionId")]
+    public string? InteractionId { get; set; }
+
     /// <summary>Model used by the sub-agent.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("model")]
@@ -7122,6 +7345,11 @@ public sealed partial class SubagentFailedData
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("firstDispatchedModel")]
     public string? FirstDispatchedModel { get; set; }
+
+    /// <summary>Interaction ID of the user action that produced this sub-agent turn.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("interactionId")]
+    public string? InteractionId { get; set; }
 
     /// <summary>Model selected for the sub-agent, when known.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -8156,7 +8384,7 @@ public sealed partial class SessionLimitsExhaustedCompletedData
     public required SessionLimitsExhaustedResponse Response { get; set; }
 }
 
-/// <summary>Auto Intent resolution: the concrete model an auto-mode session settled on, and why. Published when Auto settles on a model that differs from the one it last published in the current Auto selection, so a routing check that keeps the same model does not repeat it; selecting a model, switching Auto tiers, or returning to Auto starts a new selection. Lets SDK clients render the chosen model and the full reason it was picked. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.</summary>
+/// <summary>Auto or Fusion Single resolution: the concrete model the session settled on, with an optional explanation. Published when routing selects a model that differs from the one last published in the current selection; selecting a model, switching Auto tiers, or returning to Auto starts a new selection. Does not change the user's selected model or tier. Lets SDK clients render the chosen model and its selection notice. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed partial class SessionAutoModeResolvedData
 {
@@ -8234,7 +8462,7 @@ public sealed partial class SessionAutoModeResolvedData
     [JsonPropertyName("routingMethod")]
     public string? RoutingMethod { get; set; }
 
-    /// <summary>Short human-readable sentence from the routing service explaining why this model was chosen, for display alongside the model. Present only when the service supplied one: it is omitted for on-device selections, when the service did not provide an explanation, and when a replayed decision made no routing call. The text is display-only and drawn from a fixed catalogue; several distinct routing categories share identical wording, so it cannot be used to recover the category or keyed on programmatically.</summary>
+    /// <summary>Short human-readable selection notice. Auto forwards the routing service's explanation when supplied; Fusion Single supplies a neutral announcement of the selected model, without inventing a routing rationale. Otherwise omitted when no explanation is available. The text is display-only: several distinct routing categories share identical wording, so it cannot be used to recover the category or keyed on programmatically.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("selectionReason")]
     public string? SelectionReason { get; set; }
@@ -9000,7 +9228,7 @@ public sealed partial class WorkingDirectoryContext
 /// <remarks>Nested data type for <c>SessionLimitsConfig</c>.</remarks>
 public sealed partial class SessionLimitsConfig
 {
-    /// <summary>Maximum AI Credits allowed across the session's current accounting window.</summary>
+    /// <summary>Maximum AI Credits allowed across the session's current accounting window. When setting a limit, the value must be at least 30 and greater than the AI Credits the session has already used.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("maxAiCredits")]
     public double? MaxAiCredits { get; set; }
@@ -9758,6 +9986,54 @@ public sealed partial class ProviderQuotaState
     public required ProviderQuotaUnit Unit { get; set; }
 }
 
+/// <summary>Why the provider could not determine a sensitivity label.</summary>
+/// <remarks>Nested data type for <c>SensitivityLabelFailure</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed partial class SensitivityLabelFailure
+{
+    /// <summary>Provider-defined failure category.</summary>
+    [JsonPropertyName("category")]
+    public required string Category { get; set; }
+
+    /// <summary>Whether the provider reported that retrying the request may determine a label.</summary>
+    [JsonPropertyName("retryable")]
+    public required bool Retryable { get; set; }
+
+    /// <summary>Status code the provider reported for the failure, when present.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("status")]
+    public int? Status { get; set; }
+}
+
+/// <summary>A sensitivity label the provider applied to one model request.</summary>
+/// <remarks>Nested data type for <c>SensitivityLabel</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed partial class SensitivityLabel
+{
+    /// <summary>Display color of the label, when the provider supplied one.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("color")]
+    public string? Color { get; set; }
+
+    /// <summary>Label identifier, a lowercase hyphenated GUID.</summary>
+    [JsonPropertyName("id")]
+    public required string Id { get; set; }
+
+    /// <summary>Whether the label encrypts content, when the provider stated it explicitly. Absent means unknown.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("isEncrypted")]
+    public bool? IsEncrypted { get; set; }
+
+    /// <summary>Display name of the label.</summary>
+    [JsonPropertyName("name")]
+    public required string Name { get; set; }
+
+    /// <summary>Tooltip text describing the label, when the provider supplied one.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("tooltip")]
+    public string? Tooltip { get; set; }
+}
+
 /// <summary>End-to-end timing of a compaction attempt and the configuration it ran under, measured from the start of the compaction to its terminal event.</summary>
 /// <remarks>Nested data type for <c>CompactionCompleteAttemptMetrics</c>.</remarks>
 internal sealed partial class CompactionCompleteAttemptMetrics
@@ -9781,6 +10057,18 @@ internal sealed partial class CompactionCompleteAttemptMetrics
     [JsonInclude]
     [JsonPropertyName("cancelledRequestCount")]
     internal long? CancelledRequestCount { get; set; }
+
+    /// <summary>Bounded outcome of the capacity catalog refresh: "not_applicable", "not_needed", "succeeded", "failed" or "capacity_unavailable".</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("capacityRefreshOutcome")]
+    internal string? CapacityRefreshOutcome { get; set; }
+
+    /// <summary>How the summarizer's context capacity was established: "authoritative" or "threshold_inferred".</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("capacitySource")]
+    internal string? CapacitySource { get; set; }
 
     /// <summary>The deadline limit that ended the compaction, in milliseconds. Absent unless a deadline fired.</summary>
     [JsonConverter(typeof(MillisecondsTimeSpanConverter))]
@@ -9832,6 +10120,12 @@ internal sealed partial class CompactionCompleteAttemptMetrics
     [JsonInclude]
     [JsonPropertyName("failureOperation")]
     internal string? FailureOperation { get; set; }
+
+    /// <summary>Conservative context limit inferred from current history and the automatic compaction threshold. Absent unless capacitySource is "threshold_inferred".</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("inferredContextLimitTokens")]
+    internal double? InferredContextLimitTokens { get; set; }
 
     /// <summary>Retry-After of the latest failed summarizer request, in milliseconds. Absent when that request sent none.</summary>
     [JsonConverter(typeof(MillisecondsTimeSpanConverter))]
@@ -11049,6 +11343,68 @@ public sealed partial class FusionPhaseUsage
     public required double TotalNanoAiu { get; set; }
 }
 
+/// <summary>Experimental attribution linking an ordinary event to the HydraFusion turn, phase, and concrete source that produced it.</summary>
+/// <remarks>Nested data type for <c>FusionAttribution</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed partial class FusionAttribution
+{
+    /// <summary>Idempotency identifier for the authoritative commit, when the event belongs to the selected output.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("commitId")]
+    public string? CommitId { get; set; }
+
+    /// <summary>Conversation scope in which the concrete phase executed.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("conversationScope")]
+    public string? ConversationScope { get; set; }
+
+    /// <summary>Stable identifier for the HydraFusion turn that produced the event.</summary>
+    [JsonPropertyName("fusionId")]
+    public required string FusionId { get; set; }
+
+    /// <summary>Whether this model request consumed a user steering message rather than only internal Fusion work.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("hasUserSteering")]
+    public bool? HasUserSteering { get; set; }
+
+    /// <summary>HydraFusion orchestration pattern selected for the turn.</summary>
+    [JsonPropertyName("pattern")]
+    public required string Pattern { get; set; }
+
+    /// <summary>Identifier of the concrete phase that produced the event.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("phaseId")]
+    public string? PhaseId { get; set; }
+
+    /// <summary>Kind of concrete phase that produced the event.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("phaseKind")]
+    public string? PhaseKind { get; set; }
+
+    /// <summary>HydraFusion routing policy used for the turn.</summary>
+    [JsonPropertyName("policy")]
+    public required string Policy { get; set; }
+
+    /// <summary>Semantic role assigned to the concrete phase.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("role")]
+    public string? Role { get; set; }
+
+    /// <summary>Concrete model that produced the attributed event.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("sourceModel")]
+    public string? SourceModel { get; set; }
+
+    /// <summary>Phase whose output supplied the authoritative content, when different from the executing phase.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("sourcePhaseId")]
+    public string? SourcePhaseId { get; set; }
+
+    /// <summary>Synthetic HydraFusion model selected for the session.</summary>
+    [JsonPropertyName("syntheticModel")]
+    public required string SyntheticModel { get; set; }
+}
+
 /// <summary>A source that backs one or more cited spans in the assistant's response.</summary>
 /// <remarks>Nested data type for <c>CitationSource</c>.</remarks>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
@@ -11204,68 +11560,6 @@ public sealed partial class Citations
     /// <summary>Spans of generated text annotated with the sources that support them.</summary>
     [JsonPropertyName("spans")]
     public required CitationSpan[] Spans { get; set; }
-}
-
-/// <summary>Experimental attribution linking an ordinary event to the HydraFusion turn, phase, and concrete source that produced it.</summary>
-/// <remarks>Nested data type for <c>FusionAttribution</c>.</remarks>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed partial class FusionAttribution
-{
-    /// <summary>Idempotency identifier for the authoritative commit, when the event belongs to the selected output.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("commitId")]
-    public string? CommitId { get; set; }
-
-    /// <summary>Conversation scope in which the concrete phase executed.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("conversationScope")]
-    public string? ConversationScope { get; set; }
-
-    /// <summary>Stable identifier for the HydraFusion turn that produced the event.</summary>
-    [JsonPropertyName("fusionId")]
-    public required string FusionId { get; set; }
-
-    /// <summary>Whether this model request consumed a user steering message rather than only internal Fusion work.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("hasUserSteering")]
-    public bool? HasUserSteering { get; set; }
-
-    /// <summary>HydraFusion orchestration pattern selected for the turn.</summary>
-    [JsonPropertyName("pattern")]
-    public required string Pattern { get; set; }
-
-    /// <summary>Identifier of the concrete phase that produced the event.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("phaseId")]
-    public string? PhaseId { get; set; }
-
-    /// <summary>Kind of concrete phase that produced the event.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("phaseKind")]
-    public string? PhaseKind { get; set; }
-
-    /// <summary>HydraFusion routing policy used for the turn.</summary>
-    [JsonPropertyName("policy")]
-    public required string Policy { get; set; }
-
-    /// <summary>Semantic role assigned to the concrete phase.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("role")]
-    public string? Role { get; set; }
-
-    /// <summary>Concrete model that produced the attributed event.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("sourceModel")]
-    public string? SourceModel { get; set; }
-
-    /// <summary>Phase whose output supplied the authoritative content, when different from the executing phase.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("sourcePhaseId")]
-    public string? SourcePhaseId { get; set; }
-
-    /// <summary>Synthetic HydraFusion model selected for the session.</summary>
-    [JsonPropertyName("syntheticModel")]
-    public required string SyntheticModel { get; set; }
 }
 
 /// <summary>Neutral provider-tagged reasoning content blocks preserved verbatim for round-tripping.</summary>
@@ -12376,6 +12670,11 @@ public sealed partial class ToolExecutionCompleteResult
     [JsonPropertyName("structuredContent")]
     public JsonElement? StructuredContent { get; set; }
 
+    /// <summary>Tool names discovered by client-side tool search, preserved so replay restores the original tool-reference content. References do not grant execution permission.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("toolReferences")]
+    public string[]? ToolReferences { get; set; }
+
     /// <summary>MCP Apps UI resource content for rendering in a sandboxed iframe.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("uiResource")]
@@ -12549,6 +12848,11 @@ public sealed partial class SandboxDecisionDataPolicyResolved : SandboxDecisionD
     [JsonPropertyName("allowOutbound")]
     public required bool AllowOutbound { get; set; }
 
+    /// <summary>Whether the system temporary directory is granted read-write automatically. False when the host set `allowTempStorage` to false. Omitted by runtimes that predate the option, which always grant it. The resolved path appears in `effectiveFilesystemPolicy.readwritePaths` when content capture is enabled.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("allowTempStorage")]
+    public bool? AllowTempStorage { get; set; }
+
     /// <summary>Process-containment implementation backing the sandbox.</summary>
     [JsonPropertyName("backend")]
     public required SandboxBackend Backend { get; set; }
@@ -12586,6 +12890,11 @@ public sealed partial class SandboxDecisionDataPolicyResolved : SandboxDecisionD
     /// <summary>Whether the macOS keychain was reachable from inside the sandbox. Always false on other platforms.</summary>
     [JsonPropertyName("keychainAccess")]
     public required bool KeychainAccess { get; set; }
+
+    /// <summary>Controls whose value the enterprise-managed policy decided, as opposed to the user's own setting. Omitted when no control was managed.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("managedControls")]
+    public SandboxManagedControl[]? ManagedControls { get; set; }
 
     /// <summary>Whether the resolved policy is fully active or degraded.</summary>
     [JsonPropertyName("outcome")]
@@ -13351,7 +13660,7 @@ public sealed partial class AssistedApprovalAssessmentExcluded : AssistedApprova
     [JsonIgnore]
     public override string Status => "excluded";
 
-    /// <summary>Machine-readable exclusion reason. Current runtimes emit `managed-approval-required`, `sandbox-bypass`, `extension-permission-access`, `action-too-long`, `authorization-history-incomplete`, `path-not-authorized`, or `content-excluded`; consumers must tolerate future strings.</summary>
+    /// <summary>Machine-readable exclusion reason. Current runtimes emit `managed-approval-required`, `sandbox-bypass`, `extension-permission-access`, `action-too-long`, `credential-minting`, `credential-exposure`, `authorization-history-incomplete`, `path-not-authorized`, or `content-excluded`; consumers must tolerate future strings.</summary>
     [JsonPropertyName("reason")]
     public required string Reason { get; set; }
 }
@@ -13383,6 +13692,11 @@ public sealed partial class AssistedApprovalAssessmentFailed : AssistedApprovalA
     /// <inheritdoc />
     [JsonIgnore]
     public override string Status => "failed";
+
+    /// <summary>Runtime-authored explanation of the failure when the runtime knows more than `reason`, such as the model error the judge call returned or how to make a judge model available. Absent when `reason` says everything known.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
 
     /// <summary>Machine-readable failure reason. Current runtimes emit `timeout`, `abort`, `empty_response`, `model_error`, `parse_error`, or `context_too_large`; consumers must tolerate future strings.</summary>
     [JsonPropertyName("reason")]
@@ -15078,7 +15392,7 @@ public sealed partial class PermissionResultDeniedNoApprovalRuleAndCouldNotReque
     public override string Kind => "denied-no-approval-rule-and-could-not-request-from-user";
 }
 
-/// <summary>Permission response variant denied in an interactive user prompt, with optional feedback and force-reject flag.</summary>
+/// <summary>Permission response variant for a rejection given in answer to a permission prompt, with optional feedback and force-reject flag. A person or an automated responder, such as the Assisted Permissions judge or a host policy, may have given it; the completion's `decisionSource` says which.</summary>
 /// <remarks>The <c>denied-interactively-by-user</c> variant of <see cref="PermissionResult"/>.</remarks>
 public sealed partial class PermissionResultDeniedInteractivelyByUser : PermissionResult
 {
@@ -15086,7 +15400,7 @@ public sealed partial class PermissionResultDeniedInteractivelyByUser : Permissi
     [JsonIgnore]
     public override string Kind => "denied-interactively-by-user";
 
-    /// <summary>Optional feedback from the user explaining the denial.</summary>
+    /// <summary>Optional feedback explaining the denial, from whoever gave it.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("feedback")]
     public string? Feedback { get; set; }
@@ -16152,6 +16466,67 @@ public readonly struct Verbosity : IEquatable<Verbosity>
         public override void Write(Utf8JsonWriter writer, Verbosity value, JsonSerializerOptions options)
         {
             GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(Verbosity));
+        }
+    }
+}
+
+/// <summary>Data loss prevention (DLP) block reported by the model provider's exact error code. Resending the same conversation is blocked again; rewind to the user.message whose messageId equals the error's originatingMessageId.</summary>
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct DlpBlockKind : IEquatable<DlpBlockKind>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="DlpBlockKind"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="DlpBlockKind"/>.</param>
+    [JsonConstructor]
+    public DlpBlockKind(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="DlpBlockKind"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>The provider's DLP policy blocked the prompt (provider code `prompt_dlp_blocked`).</summary>
+    public static DlpBlockKind PromptDlpBlocked { get; } = new("prompt_dlp_blocked");
+
+    /// <summary>The provider blocked restricted content included inline in the request (provider code `inline_restricted`).</summary>
+    public static DlpBlockKind InlineRestricted { get; } = new("inline_restricted");
+
+    /// <summary>Returns a value indicating whether two <see cref="DlpBlockKind"/> instances are equivalent.</summary>
+    public static bool operator ==(DlpBlockKind left, DlpBlockKind right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="DlpBlockKind"/> instances are not equivalent.</summary>
+    public static bool operator !=(DlpBlockKind left, DlpBlockKind right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is DlpBlockKind other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(DlpBlockKind other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{DlpBlockKind}"/> for serializing <see cref="DlpBlockKind"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<DlpBlockKind>
+    {
+        /// <inheritdoc />
+        public override DlpBlockKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, DlpBlockKind value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(DlpBlockKind));
         }
     }
 }
@@ -18094,6 +18469,74 @@ public readonly struct ProviderQuotaQuantityKind : IEquatable<ProviderQuotaQuant
         public override void Write(Utf8JsonWriter writer, ProviderQuotaQuantityKind value, JsonSerializerOptions options)
         {
             GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(ProviderQuotaQuantityKind));
+        }
+    }
+}
+
+/// <summary>How the provider resolved the sensitivity label for one model request.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct SensitivityLabelOutcome : IEquatable<SensitivityLabelOutcome>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="SensitivityLabelOutcome"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="SensitivityLabelOutcome"/>.</param>
+    [JsonConstructor]
+    public SensitivityLabelOutcome(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="SensitivityLabelOutcome"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>The request inherited the sensitivity label carried in `label`.</summary>
+    public static SensitivityLabelOutcome Inherited { get; } = new("inherited");
+
+    /// <summary>The request's sources carried no sensitivity labels.</summary>
+    public static SensitivityLabelOutcome NoSourceLabels { get; } = new("no_source_labels");
+
+    /// <summary>The request's sources were labeled, but no label applies to the request.</summary>
+    public static SensitivityLabelOutcome NoApplicableLabel { get; } = new("no_applicable_label");
+
+    /// <summary>The provider could not determine the label; `failure` may describe why.</summary>
+    public static SensitivityLabelOutcome Indeterminate { get; } = new("indeterminate");
+
+    /// <summary>Returns a value indicating whether two <see cref="SensitivityLabelOutcome"/> instances are equivalent.</summary>
+    public static bool operator ==(SensitivityLabelOutcome left, SensitivityLabelOutcome right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="SensitivityLabelOutcome"/> instances are not equivalent.</summary>
+    public static bool operator !=(SensitivityLabelOutcome left, SensitivityLabelOutcome right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is SensitivityLabelOutcome other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(SensitivityLabelOutcome other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{SensitivityLabelOutcome}"/> for serializing <see cref="SensitivityLabelOutcome"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<SensitivityLabelOutcome>
+    {
+        /// <inheritdoc />
+        public override SensitivityLabelOutcome Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, SensitivityLabelOutcome value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(SensitivityLabelOutcome));
         }
     }
 }
@@ -21925,6 +22368,67 @@ public readonly struct SandboxEnforcementPoint : IEquatable<SandboxEnforcementPo
     }
 }
 
+/// <summary>Sandbox control whose value the enterprise-managed policy decided.</summary>
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct SandboxManagedControl : IEquatable<SandboxManagedControl>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="SandboxManagedControl"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="SandboxManagedControl"/>.</param>
+    [JsonConstructor]
+    public SandboxManagedControl(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="SandboxManagedControl"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>The managed policy forced the sandbox on.</summary>
+    public static SandboxManagedControl Enabled { get; } = new("enabled");
+
+    /// <summary>The managed policy forbade per-command sandbox bypass.</summary>
+    public static SandboxManagedControl AllowBypass { get; } = new("allow_bypass");
+
+    /// <summary>Returns a value indicating whether two <see cref="SandboxManagedControl"/> instances are equivalent.</summary>
+    public static bool operator ==(SandboxManagedControl left, SandboxManagedControl right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="SandboxManagedControl"/> instances are not equivalent.</summary>
+    public static bool operator !=(SandboxManagedControl left, SandboxManagedControl right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is SandboxManagedControl other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(SandboxManagedControl other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{SandboxManagedControl}"/> for serializing <see cref="SandboxManagedControl"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<SandboxManagedControl>
+    {
+        /// <inheritdoc />
+        public override SandboxManagedControl Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, SandboxManagedControl value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(SandboxManagedControl));
+        }
+    }
+}
+
 /// <summary>Finite result of a sandbox decision. Each `SandboxDecisionData` variant uses a disjoint subset: `policy_resolved` is `resolved | degraded`, `spawn_completed` and `permissive_retry_completed` are `succeeded | failed`, `enforcement_state` is `engaged | inactive | failed`, `access_denied` is `denied`, `access_recorded` is `allowed`, and escalation decisions are `approved | declined`.</summary>
 [JsonConverter(typeof(Converter))]
 [DebuggerDisplay("{Value,nq}")]
@@ -23623,6 +24127,12 @@ public readonly struct PermissionApprovalEvaluationReasonCode : IEquatable<Permi
 
     /// <summary>An action field exceeded the judge input limit.</summary>
     public static PermissionApprovalEvaluationReasonCode ActionTooLong { get; } = new("action-too-long");
+
+    /// <summary>The action would grant login or privilege to whoever holds a key, which always requires explicit approval.</summary>
+    public static PermissionApprovalEvaluationReasonCode CredentialMinting { get; } = new("credential-minting");
+
+    /// <summary>An automation started the turn, and the command would use a live credential from a credential store, which requires explicit approval.</summary>
+    public static PermissionApprovalEvaluationReasonCode CredentialExposure { get; } = new("credential-exposure");
 
     /// <summary>The script path was not authorized for inspection.</summary>
     public static PermissionApprovalEvaluationReasonCode PathNotAuthorized { get; } = new("path-not-authorized");
@@ -26179,6 +26689,8 @@ public readonly struct ExtensionsLoadedExtensionStatus : IEquatable<ExtensionsLo
 [JsonSerializable(typeof(SandboxDecisionDataSpawnCompleted))]
 [JsonSerializable(typeof(SandboxDecisionEvent))]
 [JsonSerializable(typeof(SandboxFilesystemPolicyDetails))]
+[JsonSerializable(typeof(SensitivityLabel))]
+[JsonSerializable(typeof(SensitivityLabelFailure))]
 [JsonSerializable(typeof(SessionAutoModeResolvedData))]
 [JsonSerializable(typeof(SessionAutoModeResolvedEvent))]
 [JsonSerializable(typeof(SessionAutoTierRecommendationData))]
@@ -26293,12 +26805,16 @@ public readonly struct ExtensionsLoadedExtensionStatus : IEquatable<ExtensionsLo
 [JsonSerializable(typeof(SessionRemoteSteerableChangedEvent))]
 [JsonSerializable(typeof(SessionResumeData))]
 [JsonSerializable(typeof(SessionResumeEvent))]
+[JsonSerializable(typeof(SessionSandboxStateChangedData))]
+[JsonSerializable(typeof(SessionSandboxStateChangedEvent))]
 [JsonSerializable(typeof(SessionScheduleCancelledData))]
 [JsonSerializable(typeof(SessionScheduleCancelledEvent))]
 [JsonSerializable(typeof(SessionScheduleCreatedData))]
 [JsonSerializable(typeof(SessionScheduleCreatedEvent))]
 [JsonSerializable(typeof(SessionScheduleRearmedData))]
 [JsonSerializable(typeof(SessionScheduleRearmedEvent))]
+[JsonSerializable(typeof(SessionSensitivityLabelObservationData))]
+[JsonSerializable(typeof(SessionSensitivityLabelObservationEvent))]
 [JsonSerializable(typeof(SessionSessionLimitsChangedData))]
 [JsonSerializable(typeof(SessionSessionLimitsChangedEvent))]
 [JsonSerializable(typeof(SessionShutdownData))]

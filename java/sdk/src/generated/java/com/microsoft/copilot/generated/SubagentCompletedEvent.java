@@ -63,7 +63,9 @@ public final class SubagentCompletedEvent extends SessionEvent {
         /** Wall-clock duration of the sub-agent execution in milliseconds */
         @JsonProperty("durationMs") Long durationMs,
         /** Whether the sub-agent was torn down by cancellation - its own abort, or an ancestor being killed - instead of finishing its work. Cancellation is not a failure, so the run still reports completion; this distinguishes a torn-down sub-agent from one that ran to the end. */
-        @JsonProperty("cancelled") Boolean cancelled
+        @JsonProperty("cancelled") Boolean cancelled,
+        /** Interaction ID of the user action that produced this sub-agent turn */
+        @JsonProperty("interactionId") String interactionId
     ) {
 
         /**
@@ -100,6 +102,7 @@ public final class SubagentCompletedEvent extends SessionEvent {
             private Long totalTokens;
             private Long durationMs;
             private Boolean cancelled;
+            private String interactionId;
 
             /**
              * Sets the {@code toolCallId} property.
@@ -267,6 +270,17 @@ public final class SubagentCompletedEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code interactionId} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder interactionId(String value) {
+                this.interactionId = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
@@ -276,7 +290,7 @@ public final class SubagentCompletedEvent extends SessionEvent {
                 if (toolCallId == null) throw new IllegalStateException("Missing required property: toolCallId");
                 if (agentName == null) throw new IllegalStateException("Missing required property: agentName");
                 if (agentDisplayName == null) throw new IllegalStateException("Missing required property: agentDisplayName");
-                return new SubagentCompletedEventData(toolCallId, agentName, agentDisplayName, model, firstDispatchedModel, configuredModelPreference, explicitModelOverride, explicitModelMatchesPreference, modelOverrideReason, modelSelectionSource, configuredModelMatchesActual, totalToolCalls, totalTokens, durationMs, cancelled);
+                return new SubagentCompletedEventData(toolCallId, agentName, agentDisplayName, model, firstDispatchedModel, configuredModelPreference, explicitModelOverride, explicitModelMatchesPreference, modelOverrideReason, modelSelectionSource, configuredModelMatchesActual, totalToolCalls, totalTokens, durationMs, cancelled, interactionId);
             }
         }
     }

@@ -57,13 +57,26 @@ public final class ServerPluginsApi {
 
     /**
      * Lists plugins installed in user/global state.
+     * <p>
+     * Invokes the method with no params, applying the runtime defaults.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0
      */
     @CopilotExperimental
     public CompletableFuture<PluginsListResult> list() {
-        return caller.invoke("plugins.list", java.util.Map.of(), PluginsListResult.class);
+        return list(null);
+    }
+
+    /**
+     * Lists plugins installed in user/global state.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<PluginsListResult> list(PluginsListParams params) {
+        return caller.invoke("plugins.list", params == null ? java.util.Map.of() : params, PluginsListResult.class);
     }
 
     /**
@@ -130,6 +143,17 @@ public final class ServerPluginsApi {
     @CopilotExperimental
     public CompletableFuture<Void> disable(PluginsDisableParams params) {
         return caller.invoke("plugins.disable", params, Void.class);
+    }
+
+    /**
+     * Runs the sessionStart hooks of one built-in plugin without a session, so that the plugin can do its host setup before the first turn. Settings and managed policy that turn off the plugin or its hooks apply. The hooks run on the host, not in a session sandbox, so managed policy that turns on the sandbox prevents activation. The call fails when managed policy cannot be determined. Extension callers cannot use this method.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<PluginsActivateResult> activate(PluginsActivateParams params) {
+        return caller.invoke("plugins.activate", params, PluginsActivateResult.class);
     }
 
 }

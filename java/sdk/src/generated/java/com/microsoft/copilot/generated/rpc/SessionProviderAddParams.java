@@ -27,7 +27,7 @@ import javax.annotation.processing.Generated;
 public record SessionProviderAddParams(
     /** Target session identifier */
     @JsonProperty("sessionId") String sessionId,
-    /** Named BYOK provider connections to register, additive to any providers already in the registry. Each name must be unique across the registry and must not contain '/'. */
+    /** Named BYOK provider connections to register, additive to the session registry. Names must not contain '/'. An existing name can be supplied only when this call adds new models for it and the connection settings, including headers, match the registered provider. */
     @JsonProperty("providers") List<NamedProviderConfig> providers,
     /** BYOK model definitions to register. Each must reference a provider that is already registered or included in this same call. Selection ids (`provider/id`) must be unique across the registry. */
     @JsonProperty("models") List<ProviderModelConfig> models

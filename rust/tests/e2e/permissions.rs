@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -342,7 +341,6 @@ async fn should_preserve_assisted_assessment_in_handler_pending_and_resume() {
             );
             ctx.set_default_copilot_user();
 
-            let feature_flags = HashMap::from([("AUTO_APPROVAL".to_owned(), true)]);
             let (request_tx, mut request_rx) = mpsc::unbounded_channel();
             let client = ctx.start_client().await;
             let session = client
@@ -351,7 +349,6 @@ async fn should_preserve_assisted_assessment_in_handler_pending_and_resume() {
                         .with_model("claude-sonnet-4.5")
                         .with_working_directory(ctx.work_dir())
                         .with_extensions(|group| group.with_enabled(false))
-                        .with_experiments(|group| group.with_flags(feature_flags.clone()))
                         .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
                         .with_permissions(|group| group.with_on_request(Arc::new(NotifyingPermissionHandler {
                             request_tx,
@@ -406,7 +403,6 @@ async fn should_preserve_assisted_assessment_in_handler_pending_and_resume() {
                         .with_working_directory(ctx.work_dir())
                         .with_extensions(|group| group.with_enabled(false))
                         .with_continue_pending_work(true)
-                        .with_experiments(|group| group.with_flags(feature_flags))
                         .with_github(|group| group.with_token(DEFAULT_TEST_TOKEN))
                         .with_permissions(|group| group.with_on_request(Arc::new(StaticPermissionHandler::new(
                             PermissionResult::no_result(),

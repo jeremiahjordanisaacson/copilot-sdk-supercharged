@@ -29,7 +29,7 @@ Modify the generated `extension.mjs` using `edit` or `create` tools. The file mu
 extensions_reload({})
 ```
 
-This refreshes discovery and running extensions. [Opted-in dormant extensions](extensions.md#opting-into-request-driven-activation) remain unstarted until requested; their declared tools are immediately discoverable.
+This refreshes discovery and running extensions. [Opted-in dormant extensions](extensions.md#opting-into-request-driven-activation) remain unstarted until requested; their declared tools, canvases, and slash commands are immediately discoverable.
 
 ### Step 4: Verify
 
@@ -54,7 +54,7 @@ Discovery rules:
 - It also scans the user's copilot config extensions directory
 - Only immediate subdirectories are checked (not recursive)
 - Each subdirectory must contain a file named `extension.mjs`, `extension.cjs` or `extension.js`
-- Project extensions shadow user extensions on name collision
+- A project extension and a user extension with the same name do not replace each other: both are discovered, with the IDs `project:<name>` and `user:<name>`, and `inspect` needs the full ID to tell them apart
 
 ---
 
@@ -369,4 +369,4 @@ Low-level typed RPC access to all session APIs (model, mode, plan, workspace, et
 - **Don't call `session.send()` synchronously from `onUserPromptSubmitted`.** Use `setTimeout(() => session.send(...), 0)` to avoid infinite loops.
 - **Extensions are reloaded on `/clear`.** Any in-memory state is lost between sessions.
 - **The entry file must be `.mjs`, `.cjs` or `.js`.** TypeScript (`.ts`) is not yet supported.
-- **The handler's return value is the tool result.** Returning `undefined` sends an empty success. Throwing sends a failure with the error message.
+- **The handler's return value is the tool result.** Returning `undefined` sends an empty success. Throwing sends a failure, but the model only sees the generic `Tool execution failed`: the thrown message is written to the runtime log and never forwarded, because exceptions can carry secrets or internal details. To tell the model why a call failed, return `{ textResultForLlm: "<explanation>", resultType: "failure" }` instead.

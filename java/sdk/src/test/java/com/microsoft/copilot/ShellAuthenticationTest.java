@@ -96,7 +96,7 @@ class ShellAuthenticationTest {
         responseStream = serverSideSocket.getInputStream();
         sessions = new ConcurrentHashMap<>();
         dispatcher = new RpcHandlerDispatcher(sessions, event -> {
-        }, null, new GitHubTokenProviderRegistry());
+        }, null, new GitHubTokenProviderRegistry(), sessions.values());
         dispatcher.registerHandlers(rpc);
 
         Field f = JsonRpcClient.class.getDeclaredField("notificationHandlers");

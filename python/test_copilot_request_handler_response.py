@@ -176,7 +176,7 @@ async def test_default_websocket_forwarder_filters_handshake_headers():
                 },
             )
         )
-        await asyncio.wait_for(adapter._pending["handshake-headers"].task, timeout=2)
+        await adapter._pending["handshake-headers"].task
 
     assert len(received_headers) == 1
     headers = received_headers[0]

@@ -392,7 +392,6 @@ func TestSkillProviderE2E(t *testing.T) {
 		if findSkill(before, "unbound-lookup") == nil {
 			t.Fatal("Expected unbound-lookup before resume")
 		}
-		callsBeforeResume := len(provider.Calls())
 
 		session, err := client.ResumeSession(t.Context(), first.SessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
@@ -400,8 +399,14 @@ func TestSkillProviderE2E(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = session.Disconnect() })
 
-		if _, err := session.RPC.Skills.Reload(t.Context()); err != nil {
+		// Old-owner callbacks may still finish during the handoff. Observe the
+		// completed reload instead of counting those callbacks.
+		reloaded, err := session.RPC.Skills.Reload(t.Context())
+		if err != nil {
 			t.Fatalf("Skills.Reload failed: %v", err)
+		}
+		if len(reloaded.Errors) != 0 {
+			t.Fatalf("Skills.Reload after unbound resume returned errors: %v", reloaded.Errors)
 		}
 		list, err := session.RPC.Skills.List(t.Context())
 		if err != nil {
@@ -409,9 +414,6 @@ func TestSkillProviderE2E(t *testing.T) {
 		}
 		if sdkSkills := sdkSkills(list); len(sdkSkills) != 0 {
 			t.Fatalf("Expected no sdk skills after unbound resume, got %+v", sdkSkills)
-		}
-		if got := len(provider.Calls()); got != callsBeforeResume {
-			t.Fatalf("Provider call count after unbound resume = %d, want %d", got, callsBeforeResume)
 		}
 	})
 

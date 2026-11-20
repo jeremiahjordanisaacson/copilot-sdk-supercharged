@@ -47,6 +47,71 @@ async def test_create_and_resume_preserve_builtin_agent_allowlist(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("plugin_directories", [None, [], ["plugins"]])
+async def test_create_and_resume_preserve_explicit_empty_plugin_directories(
+    monkeypatch, plugin_directories
+):
+    # An explicitly empty list must reach the runtime: on resume it unloads the
+    # plugins the session mounted from these directories, which omitting the key
+    # cannot express.
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
+    rpc = AsyncMock(spec=JsonRpcClient)
+    captured = {}
+
+    async def request(method, params, **kwargs):
+        captured[method] = params
+        result = {"sessionId": params["sessionId"]}
+        if callback := kwargs.get("on_response_inline"):
+            callback(result)
+        return result
+
+    rpc.request.side_effect = request
+    monkeypatch.setattr(client, "_client", rpc)
+    try:
+        session = await client.create_session(plugins={"directories": plugin_directories})
+        await client.resume_session(session.session_id, plugins={"directories": plugin_directories})
+        for method in ("session.create", "session.resume"):
+            if plugin_directories is None:
+                assert "directories" not in captured[method].get("plugins", {})
+            else:
+                assert captured[method]["plugins"]["directories"] == plugin_directories
+    finally:
+        await client.force_stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disabled_skills", [None, [], ["foo"]])
+async def test_resume_sends_explicit_empty_disabled_skills(monkeypatch, disabled_skills):
+    # The runtime replaces a loaded session's disabled skills whenever the key is
+    # present, so an empty list must reach it to re-enable them; None keeps them.
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
+    rpc = AsyncMock(spec=JsonRpcClient)
+    captured = {}
+
+    async def request(method, params, **kwargs):
+        captured[method] = params
+        result = {"sessionId": params["sessionId"]}
+        if callback := kwargs.get("on_response_inline"):
+            callback(result)
+        return result
+
+    rpc.request.side_effect = request
+    monkeypatch.setattr(client, "_client", rpc)
+    try:
+        await client.resume_session("s1", skills={"disabled_skills": disabled_skills})
+        if disabled_skills is None:
+            assert "disabledSkills" not in captured["session.resume"].get("skills", {})
+        else:
+            assert captured["session.resume"]["skills"]["disabledSkills"] == disabled_skills
+    finally:
+        await client.force_stop()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("roots", [None, [], ["relative-root", "other-root"]])
 async def test_customization_roots_preserved_on_create_and_resume(monkeypatch, roots):
     client = CopilotClient(

@@ -468,13 +468,13 @@ This boundary applies only to sessions using a session filesystem provider. All 
 
 Verified public SDK surfaces:
 
-| Language   | Client-level config    | Per-session provider            |
-| ---------- | ---------------------- | ------------------------------- |
-| TypeScript | `sessionFs`            | `createSessionFsProvider`       |
-| Python     | `session_fs`           | `create_session_fs_handler`     |
-| Go         | `SessionFS`            | `CreateSessionFSProvider`       |
-| .NET       | `SessionFs`            | `CreateSessionFsProvider`       |
-| Rust       | `with_session_fs(...)` | `with_session_fs_provider(...)` |
+| Language   | Client-level config    | Per-session provider                                        |
+| ---------- | ---------------------- | ----------------------------------------------------------- |
+| TypeScript | `sessionFs`            | `state.createSessionFsProvider`                             |
+| Python     | `session_fs`           | `state={"create_session_fs_provider": ...}`                 |
+| Go         | `SessionFS`            | `State.CreateSessionFSProvider`                             |
+| .NET       | `SessionFs`            | `State.CreateSessionFsProvider`                             |
+| Rust       | `with_session_fs(...)` | `with_state(\|state\| state.with_session_fs_provider(...))` |
 
 Java does not currently expose a verified public `sessionFs` option, so this guide does not show a Java `sessionFs` sample.
 
@@ -495,9 +495,9 @@ If the server requires a connection token, pass it with the connection, for exam
 
 External runtimes manage their own process-level authentication and storage. Don't set runtime startup options such as the client-level `github.token`, `observability.telemetry`, `baseDirectory` or `sessionIdleTimeoutSeconds` on an attached client; configure them on the runtime server instead. Pass per-session tokens on `createSession` or `resumeSession` when you need user-specific auth.
 
-### Per-session `gitHubToken`
+### Per-session `github.token`
 
-Set `gitHubToken` on each session to scope GitHub auth to the requesting user. This is different from a client-level token, which authenticates the runtime process.
+Set `github.token` on each session to scope GitHub auth to the requesting user. This is different from a client-level token, which authenticates the runtime process.
 
 <!-- docs-validate: hidden -->
 
@@ -618,7 +618,7 @@ Session-level isolation means the runtime keeps user-specific model and state in
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Model list cache | Per-session. Model lookup uses the session's model list cache.                                                                                                                              |
 | Session state    | Per session ID under `COPILOT_HOME/session-state/{sessionId}`.                                                                                                                              |
-| GitHub identity  | Per-session when `gitHubToken` is set on the session.                                                                                                                                       |
+| GitHub identity  | Per-session when `github.token` is set on the session.                                                                                                                                      |
 | Tools            | Explicit in `mode: "empty"`; ambient in `mode: "coding-agent"`.                                                                                                                             |
 | Skills           | In `mode: "empty"` no runtime-bundled built-in skills are eligible by default; callers can allow selected built-ins or opt into their own custom skills. Ambient in `mode: "coding-agent"`. |
 | Host filesystem  | Shared by the runtime process if host tools are available.                                                                                                                                  |
@@ -650,7 +650,7 @@ flowchart TB
     Runtime --> SB["session-state/user-b-..."]
 
     API -. "mode: empty" .-> Runtime
-    API -. "per-session gitHubToken" .-> Runtime
+    API -. "per-session github.token" .-> Runtime
 
     style API fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
     style Runtime fill:#0d1117,stroke:#3fb950,color:#c9d1d9
@@ -661,7 +661,7 @@ Use these rules:
 - Always start the client or runtime in `mode: "empty"`.
 - Use unique session IDs and store ownership metadata in your application database.
 - Check ownership before `resumeSession`, `deleteSession`, or any UI action that references a session ID.
-- Pass `gitHubToken` per session when requests should run as the user.
+- Pass `github.token` per session when requests should run as the user.
 - Register only the tools the session needs, and prefer source-qualified allowlists such as `custom:*` or `mcp:search_docs`.
 - Set an idle timeout (`sessionIdleTimeoutSeconds` on an SDK-owned runtime, or `--session-idle-timeout` on a runtime server) and delete completed workflow sessions explicitly.
 
@@ -669,7 +669,7 @@ Use these rules:
 
 - Selecting `mode: "coding-agent"` instead of `mode: "empty"`. Coding-agent mode exposes CLI-style behavior and may expose the host filesystem through ambient tools.
 - Not setting an idle timeout (`sessionIdleTimeoutSeconds`, or `--session-idle-timeout` on a runtime server). Long-running servers can accumulate idle sessions if they do not clean them up.
-- Sharing one `gitHubToken` across users instead of passing a per-session token.
+- Sharing one `github.token` across users instead of passing a per-session token.
 - Trusting client-provided session IDs without checking ownership in your backend.
 - Setting runtime startup options, such as `baseDirectory` or a client-level `github.token`, on a client attached to an existing runtime. Attached clients don't accept them; configure the runtime server instead.
 - Allowing broad tool patterns such as `builtin:*` without reviewing whether each tool is appropriate for your users.

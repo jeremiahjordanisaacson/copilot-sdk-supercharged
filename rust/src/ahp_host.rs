@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_util::FutureExt;
@@ -27,8 +27,8 @@ use crate::generated::api_types::{
 };
 use crate::session::Session;
 use crate::{
-    Client, ClientInner, CreateSessionOptions, Error, ErrorKind, ProtocolErrorKind,
-    ResumeSessionOptions,
+    Client, CreateSessionOptions, Error, ErrorKind, ProtocolErrorKind, ResumeSessionOptions,
+    WeakClientInner,
 };
 
 /// Experimental local callback for a host's exit or owner disconnection.
@@ -434,7 +434,7 @@ pub struct AhpHost {
     pub pid: Option<i64>,
     /// Connection token, absent when token authentication is disabled.
     pub token: Option<String>,
-    client: Weak<ClientInner>,
+    client: WeakClientInner,
 }
 
 impl std::fmt::Debug for AhpHost {
@@ -557,7 +557,7 @@ struct PendingStart {
     sessions: Arc<HostSessions>,
     host_id: Option<String>,
     start: Option<tokio::task::JoinHandle<Result<HostStartResult, Error>>>,
-    client: Weak<ClientInner>,
+    client: WeakClientInner,
 }
 
 impl Drop for PendingStart {
@@ -595,6 +595,7 @@ impl Client {
         self.ahp_host_sessions
             .clone()
             .or_else(|| self.inner.ahp_host_sessions.upgrade())
+            .map(|owner| owner.into_sessions())
             .ok_or_else(|| handoff_error("AHP owning client has been dropped"))
     }
 
@@ -638,7 +639,7 @@ impl Client {
             sessions: self.host_sessions()?,
             host_id: Some(host_id.clone()),
             start: None,
-            client: Arc::downgrade(&self.inner),
+            client: WeakClientInner::downgrade(&self.inner),
         };
         if let AhpHostAuthentication::Custom { authenticate, .. } = &authentication {
             pending
@@ -709,7 +710,7 @@ impl Client {
             environment_id: result.environment_id,
             pid: result.pid,
             token: result.token,
-            client: Arc::downgrade(&self.inner),
+            client: WeakClientInner::downgrade(&self.inner),
         })
     }
 
@@ -741,7 +742,7 @@ impl Client {
                             }
                         };
                         if let Some(sessions) = sessions.upgrade() {
-                            sessions.release_host(&exit.host_id);
+                            sessions.into_sessions().release_host(&exit.host_id);
                         }
                         let callback = callbacks.lock().remove(&exit.host_id);
                         if let Some(callback) = callback {
@@ -754,7 +755,9 @@ impl Client {
                                 serde_json::from_value::<HostSessionReleasedNotification>(params)
                             && let Some(sessions) = sessions.upgrade()
                         {
-                            sessions.release(&released.host_id, &released.handoff_id);
+                            sessions
+                                .into_sessions()
+                                .release(&released.host_id, &released.handoff_id);
                         }
                     }
                     Some(notification) if notification.method == "host.authenticationCancelled" => {
@@ -765,6 +768,7 @@ impl Client {
                             && let Some(sessions) = sessions.upgrade()
                         {
                             sessions
+                                .into_sessions()
                                 .cancel_authentication(&cancelled.host_id, &cancelled.request_id);
                         }
                     }
@@ -773,7 +777,7 @@ impl Client {
                 }
             }
             if let Some(sessions) = sessions.upgrade() {
-                sessions.release_all();
+                sessions.into_sessions().release_all();
             }
             let callbacks = std::mem::take(&mut *callbacks.lock());
             for (host_id, callback) in callbacks {
@@ -869,9 +873,21 @@ impl Drop for HostSessionState {
     }
 }
 
+// Retained sessions contain Client handles. Hide this ownership edge from
+// recursive auto-trait proofs while retaining the same allocation and lifetime.
+pub(crate) trait HostSessionOwner: Send + Sync {
+    fn into_sessions(self: Arc<Self>) -> Arc<HostSessions>;
+}
+
+impl HostSessionOwner for HostSessions {
+    fn into_sessions(self: Arc<Self>) -> Arc<HostSessions> {
+        self
+    }
+}
+
 pub(crate) struct HostSessions(
     Mutex<HostSessionState>,
-    Mutex<Weak<ClientInner>>,
+    Mutex<WeakClientInner>,
     tokio::runtime::Handle,
 );
 
@@ -990,7 +1006,7 @@ impl HostSessions {
         )
     }
 
-    pub(crate) fn set_owner(&self, owner: Weak<ClientInner>) {
+    pub(crate) fn set_owner(&self, owner: WeakClientInner) {
         *self.1.lock() = owner;
     }
 
@@ -1073,7 +1089,7 @@ fn handoff_error(message: &'static str) -> Error {
 
 impl Client {
     fn register_ahp_authenticator(&self) -> Result<(), Error> {
-        let client = Arc::downgrade(&self.inner);
+        let client = WeakClientInner::downgrade(&self.inner);
         self.inner.rpc.register_request_handler(
             "host.validateAuthentication",
             Arc::new(move |params| {
@@ -1135,7 +1151,7 @@ impl Client {
 
     pub(crate) fn register_ahp_session_factory(&self) -> Result<(), Error> {
         self.register_ahp_authenticator()?;
-        let client = Arc::downgrade(&self.inner);
+        let client = WeakClientInner::downgrade(&self.inner);
         self.inner.rpc.register_request_handler(
             "host.materializeSession",
             Arc::new(move |params| {
@@ -1275,7 +1291,9 @@ impl Client {
         if result.is_err()
             && let Some(sessions) = self.inner.ahp_host_sessions.upgrade()
         {
-            sessions.release(&params.host_id, &params.handoff_id);
+            sessions
+                .into_sessions()
+                .release(&params.host_id, &params.handoff_id);
         }
         result
     }

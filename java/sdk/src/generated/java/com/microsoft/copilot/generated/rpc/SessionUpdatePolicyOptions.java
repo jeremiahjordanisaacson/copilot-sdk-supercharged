@@ -23,6 +23,8 @@ import javax.annotation.processing.Generated;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record SessionUpdatePolicyOptions(
+    /** Managed-setting paths this trusted SDK host enforces externally or does not support. Omitted values retain current exclusions; an empty list restores full enforcement. Exact dotted paths include descendants; wildcards and array indices are not supported. Applies to fetched, device, and policy-helper settings, not host-injected managedSettings or policy availability checks. Exclusions are not persisted; supply them again on resume. */
+    @JsonProperty("excludedManagedSettings") List<String> excludedManagedSettings,
     /** Additional content-exclusion policies to merge into the session's policy set. */
     @CopilotExperimental
     @JsonProperty("additionalContentExclusionPolicies") List<OptionsUpdateAdditionalContentExclusionPolicy> additionalContentExclusionPolicies
@@ -47,7 +49,19 @@ public record SessionUpdatePolicyOptions(
      */
     public static final class Builder {
         private Builder() {}
+        private List<String> excludedManagedSettings;
         private List<OptionsUpdateAdditionalContentExclusionPolicy> additionalContentExclusionPolicies;
+
+        /**
+         * Sets the {@code excludedManagedSettings} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder excludedManagedSettings(List<String> value) {
+            this.excludedManagedSettings = value;
+            return this;
+        }
 
         /**
          * Sets the {@code additionalContentExclusionPolicies} property.
@@ -68,7 +82,7 @@ public record SessionUpdatePolicyOptions(
          * @since 2.0.0
          */
         public SessionUpdatePolicyOptions build() {
-            return new SessionUpdatePolicyOptions(additionalContentExclusionPolicies);
+            return new SessionUpdatePolicyOptions(excludedManagedSettings, additionalContentExclusionPolicies);
         }
     }
 }

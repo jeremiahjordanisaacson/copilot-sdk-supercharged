@@ -10,6 +10,7 @@ package com.microsoft.copilot.generated.rpc;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
 import javax.annotation.processing.Generated;
 
 /**
@@ -33,6 +34,8 @@ public record PluginUpdateAllEntry(
     @JsonProperty("newVersion") String newVersion,
     /** Number of skills installed after the update (success only) */
     @JsonProperty("skillsInstalled") Long skillsInstalled,
+    /** Warnings from the updated plugin's manifest, including ignored fields or the reason the loader rejects the plugin. Callers should surface these to end users. Absent when the manifest raised none. */
+    @JsonProperty("warnings") List<String> warnings,
     /** Error message (failure only) */
     @JsonProperty("error") String error
 ) {
@@ -62,6 +65,7 @@ public record PluginUpdateAllEntry(
         private String previousVersion;
         private String newVersion;
         private Long skillsInstalled;
+        private List<String> warnings;
         private String error;
 
         /**
@@ -131,6 +135,17 @@ public record PluginUpdateAllEntry(
         }
 
         /**
+         * Sets the {@code warnings} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder warnings(List<String> value) {
+            this.warnings = value;
+            return this;
+        }
+
+        /**
          * Sets the {@code error} property.
          * @param value the property value
          * @return this builder
@@ -151,7 +166,7 @@ public record PluginUpdateAllEntry(
             if (name == null) throw new IllegalStateException("Missing required property: name");
             if (marketplace == null) throw new IllegalStateException("Missing required property: marketplace");
             if (success == null) throw new IllegalStateException("Missing required property: success");
-            return new PluginUpdateAllEntry(name, marketplace, success, previousVersion, newVersion, skillsInstalled, error);
+            return new PluginUpdateAllEntry(name, marketplace, success, previousVersion, newVersion, skillsInstalled, warnings, error);
         }
     }
 }

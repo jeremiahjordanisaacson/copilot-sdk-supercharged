@@ -33,6 +33,8 @@ record ManagedSettingsLoadRemoteControlParams(
     @JsonProperty("selfFetch") Boolean selfFetch,
     /** The authenticated identity to resolve policy for. Omitted before sign-in, in which case no server layer is fetched. */
     @JsonProperty("authInfo") Object authInfo,
+    /** The environment variable selected by the host for explicit-token authentication. Its value comes from this request's environment; session credentials keep their owner. */
+    @JsonProperty("authTokenEnvVar") String authTokenEnvVar,
     /** A device layer supplied by the host instead of discovered from the machine. Pair it with `hasDeviceResponse` so an explicit absence is distinguishable from an omitted override. */
     @JsonProperty("deviceResponse") Object deviceResponse,
     /** Whether `deviceResponse` is an override at all. True with a null `deviceResponse` asserts the device layer is empty; false discovers it from the machine. */
@@ -77,14 +79,15 @@ record ManagedSettingsLoadRemoteControlParams(
         private Boolean selfFetch;
         private Object authInfo;
         private boolean $presence3;
+        private String authTokenEnvVar;
         private Object deviceResponse;
-        private boolean $presence4;
+        private boolean $presence5;
         private Boolean hasDeviceResponse;
         private Boolean policyHelperEnabled;
         private String userAgent;
         private String clientName;
         private Object environment;
-        private boolean $presence9;
+        private boolean $presence10;
         private String platform;
         private String homeDirectory;
 
@@ -134,6 +137,17 @@ record ManagedSettingsLoadRemoteControlParams(
         }
 
         /**
+         * Sets the {@code authTokenEnvVar} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder authTokenEnvVar(String value) {
+            this.authTokenEnvVar = value;
+            return this;
+        }
+
+        /**
          * Sets the {@code deviceResponse} property.
          * @param value the property value
          * @return this builder
@@ -141,7 +155,7 @@ record ManagedSettingsLoadRemoteControlParams(
          */
         public Builder deviceResponse(Object value) {
             this.deviceResponse = value;
-            this.$presence4 = true;
+            this.$presence5 = true;
             return this;
         }
 
@@ -197,7 +211,7 @@ record ManagedSettingsLoadRemoteControlParams(
          */
         public Builder environment(Object value) {
             this.environment = value;
-            this.$presence9 = true;
+            this.$presence10 = true;
             return this;
         }
 
@@ -231,13 +245,13 @@ record ManagedSettingsLoadRemoteControlParams(
          */
         public ManagedSettingsLoadRemoteControlParams build() {
             if (userAgent == null) throw new IllegalStateException("Missing required property: userAgent");
-            if (!$presence9) throw new IllegalStateException("Missing required property: environment");
+            if (!$presence10) throw new IllegalStateException("Missing required property: environment");
             if (platform == null) throw new IllegalStateException("Missing required property: platform");
             if (homeDirectory == null) throw new IllegalStateException("Missing required property: homeDirectory");
             java.util.Set<String> $explicitNulls = new java.util.LinkedHashSet<>();
             if ($presence3 && authInfo == null) $explicitNulls.add("authInfo");
-            if ($presence4 && deviceResponse == null) $explicitNulls.add("deviceResponse");
-            return new ManagedSettingsLoadRemoteControlParams(policyHelperClientName, policyHelperReason, selfFetch, authInfo, deviceResponse, hasDeviceResponse, policyHelperEnabled, userAgent, clientName, environment, platform, homeDirectory, $explicitNulls);
+            if ($presence5 && deviceResponse == null) $explicitNulls.add("deviceResponse");
+            return new ManagedSettingsLoadRemoteControlParams(policyHelperClientName, policyHelperReason, selfFetch, authInfo, authTokenEnvVar, deviceResponse, hasDeviceResponse, policyHelperEnabled, userAgent, clientName, environment, platform, homeDirectory, $explicitNulls);
         }
     }
 
@@ -259,7 +273,7 @@ record ManagedSettingsLoadRemoteControlParams(
             java.util.Set<String> $explicitNulls = new java.util.LinkedHashSet<>();
             if (tree.has("authInfo") && tree.get("authInfo").isNull()) $explicitNulls.add("authInfo");
             if (tree.has("deviceResponse") && tree.get("deviceResponse").isNull()) $explicitNulls.add("deviceResponse");
-            return new ManagedSettingsLoadRemoteControlParams(readProperty(context, tree, "policyHelperClientName", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "policyHelperReason", new com.fasterxml.jackson.core.type.TypeReference<ManagedSettingsPolicyHelperReason>() {}), readProperty(context, tree, "selfFetch", new com.fasterxml.jackson.core.type.TypeReference<Boolean>() {}), readProperty(context, tree, "authInfo", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), readProperty(context, tree, "deviceResponse", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), readProperty(context, tree, "hasDeviceResponse", new com.fasterxml.jackson.core.type.TypeReference<Boolean>() {}), readProperty(context, tree, "policyHelperEnabled", new com.fasterxml.jackson.core.type.TypeReference<Boolean>() {}), readProperty(context, tree, "userAgent", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "clientName", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "environment", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), readProperty(context, tree, "platform", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "homeDirectory", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), $explicitNulls);
+            return new ManagedSettingsLoadRemoteControlParams(readProperty(context, tree, "policyHelperClientName", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "policyHelperReason", new com.fasterxml.jackson.core.type.TypeReference<ManagedSettingsPolicyHelperReason>() {}), readProperty(context, tree, "selfFetch", new com.fasterxml.jackson.core.type.TypeReference<Boolean>() {}), readProperty(context, tree, "authInfo", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), readProperty(context, tree, "authTokenEnvVar", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "deviceResponse", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), readProperty(context, tree, "hasDeviceResponse", new com.fasterxml.jackson.core.type.TypeReference<Boolean>() {}), readProperty(context, tree, "policyHelperEnabled", new com.fasterxml.jackson.core.type.TypeReference<Boolean>() {}), readProperty(context, tree, "userAgent", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "clientName", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "environment", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), readProperty(context, tree, "platform", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "homeDirectory", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), $explicitNulls);
         }
 
         private static <T> T readProperty(com.fasterxml.jackson.databind.DeserializationContext context,

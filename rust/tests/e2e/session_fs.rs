@@ -309,13 +309,25 @@ async fn should_view_an_image_that_exists_only_in_the_binary_session_fs_provider
                 );
                 let events = session.get_events().await.expect("get session events");
                 assert!(
+                    events.iter().all(|event| event.event_type != "session.binary_asset"),
+                    "internal binary asset event escaped public session history"
+                );
+                assert!(
                     events.iter().any(|event| {
-                        event.event_type == "session.binary_asset"
-                            && event.data["mimeType"] == "image/png"
-                            && event.data["data"]
-                                == base64::engine::general_purpose::STANDARD.encode(&image_bytes)
+                        event.event_type == "tool.execution_complete"
+                            && event.data["success"] == true
+                            && event.data["result"]["binaryResultsForLlm"]
+                                .as_array()
+                                .is_some_and(|results| results.iter().any(|result| {
+                                    result["type"] == "image"
+                                        && result["mimeType"] == "image/png"
+                                        && result["data"]
+                                            == base64::engine::general_purpose::STANDARD.encode(&image_bytes)
+                                        && result.get("assetId").is_none()
+                                        && result.get("byteLength").is_none()
+                                }))
                     }),
-                    "missing image asset with exact provider bytes"
+                    "missing inline tool result with exact provider image bytes"
                 );
                 session.disconnect().await.expect("disconnect session");
                 client.stop().await.expect("stop client");

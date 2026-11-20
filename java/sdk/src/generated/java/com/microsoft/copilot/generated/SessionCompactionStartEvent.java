@@ -57,7 +57,11 @@ public final class SessionCompactionStartEvent extends SessionEvent {
         /** How the compaction ran relative to the conversation: "background" (alongside the turn), "turn_blocking" (the turn waited for it), "pre_prompt" (a non-interactive run waited before recording its prompt), or "direct" (an explicit compaction request). Open set; readers must tolerate other values. */
         @JsonProperty("execution") String execution,
         /** Number of trailing conversation messages (the turn's not-yet-answered input) kept verbatim after the summary instead of being compacted. Omitted when every message at compaction start is summarized. */
-        @JsonProperty("retainedInputMessages") Long retainedInputMessages
+        @JsonProperty("retainedInputMessages") Long retainedInputMessages,
+        /** For a context_limit_retry compaction, how the provider rejected the request that forced it: "payload_too_large" (HTTP 413) or "context_window_exceeded" (a context-limit error message). Open set; readers must tolerate other values. */
+        @JsonProperty("rejectionKind") String rejectionKind,
+        /** For a context_limit_retry compaction, the client's estimate of the prompt tokens in the rejected request that forced it, when known */
+        @JsonProperty("rejectedRequestTokens") Long rejectedRequestTokens
     ) {
 
         /**
@@ -91,6 +95,8 @@ public final class SessionCompactionStartEvent extends SessionEvent {
             private CompactionTrigger trigger;
             private String execution;
             private Long retainedInputMessages;
+            private String rejectionKind;
+            private Long rejectedRequestTokens;
 
             /**
              * Sets the {@code compactionAttemptId} property.
@@ -225,13 +231,35 @@ public final class SessionCompactionStartEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code rejectionKind} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder rejectionKind(String value) {
+                this.rejectionKind = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code rejectedRequestTokens} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder rejectedRequestTokens(Long value) {
+                this.rejectedRequestTokens = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
              * @since 2.0.0
              */
             public SessionCompactionStartEventData build() {
-                return new SessionCompactionStartEventData(compactionAttemptId, model, systemTokens, conversationTokens, toolDefinitionsTokens, currentTokens, tokenLimit, targetPromptTokenLimit, switchTargetModel, trigger, execution, retainedInputMessages);
+                return new SessionCompactionStartEventData(compactionAttemptId, model, systemTokens, conversationTokens, toolDefinitionsTokens, currentTokens, tokenLimit, targetPromptTokenLimit, switchTargetModel, trigger, execution, retainedInputMessages, rejectionKind, rejectedRequestTokens);
             }
         }
     }

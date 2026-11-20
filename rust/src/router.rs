@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
 
 use indexmap::{IndexMap, IndexSet};
 use parking_lot::Mutex;
@@ -147,6 +147,36 @@ impl Drop for SessionRpcCallbackGuard {
     }
 }
 
+type SessionInitializations = Arc<Mutex<HashMap<SessionId, Arc<tokio::sync::RwLock<bool>>>>>;
+
+pub(crate) struct SessionInitializationEntry {
+    initializations: SessionInitializations,
+    session_id: SessionId,
+    lock: Option<Arc<tokio::sync::RwLock<bool>>>,
+}
+
+impl SessionInitializationEntry {
+    pub(crate) fn lock(&self) -> &Arc<tokio::sync::RwLock<bool>> {
+        self.lock.as_ref().expect("initialization entry is live")
+    }
+}
+
+impl Drop for SessionInitializationEntry {
+    fn drop(&mut self) {
+        let mut initializations = self.initializations.lock();
+        drop(self.lock.take());
+        // Lookup and reclamation share this mutex: an acquirer that already
+        // cloned the lock keeps it alive, so no same-ID locks can split.
+        if initializations
+            .get_mut(&self.session_id)
+            .and_then(Arc::get_mut)
+            .is_some_and(|lock| !*lock.get_mut())
+        {
+            initializations.remove(&self.session_id);
+        }
+    }
+}
+
 /// Most events held for session IDs that are not registered yet.
 ///
 /// Every session this client creates or resumes registers before its RPC is
@@ -158,9 +188,18 @@ impl Drop for SessionRpcCallbackGuard {
 /// even if its session registers later. Registered sessions never wait on it.
 const MAX_UNCLAIMED_EVENTS: usize = 8192;
 
+/// Most bytes, by estimate, held for session IDs that are not registered yet.
+///
+/// The event bound alone does not bound memory: a model call's events carry
+/// its whole request, so thousands of held events can retain hundreds of
+/// megabytes. Past this budget the IDs seen first are dropped exactly as past
+/// [`MAX_UNCLAIMED_EVENTS`]. An arriving event is always held, even when it
+/// alone exceeds the budget.
+const MAX_UNCLAIMED_BYTES: usize = 16 * 1024 * 1024;
+
 /// Most ended registrations remembered so their trailing events are dropped.
 /// Past it, the oldest are forgotten and their late events count against
-/// [`MAX_UNCLAIMED_EVENTS`] instead.
+/// [`MAX_UNCLAIMED_EVENTS`] and [`MAX_UNCLAIMED_BYTES`] instead.
 const MAX_RETIRED_SESSIONS: usize = 4096;
 
 /// Routing table shared by the router and the client's notification dispatcher.
@@ -170,14 +209,22 @@ struct RouterState {
     /// Events for IDs not registered yet, in arrival order, keyed in the
     /// order the IDs were first seen. Registering the ID delivers them ahead
     /// of any later event.
-    unclaimed: IndexMap<SessionId, Vec<SessionEventNotification>>,
+    unclaimed: IndexMap<SessionId, HeldEvents>,
     unclaimed_events: usize,
+    unclaimed_bytes: usize,
     /// IDs whose registration ended, oldest first. Their trailing events are
     /// dropped rather than held for a registration that will not come.
     retired: IndexSet<SessionId>,
     /// Registered IDs whose [`DispatcherInput::Claim`] the dispatcher has not
     /// reached yet, with their events so far in arrival order.
     claiming: HashMap<SessionId, Vec<SessionEventNotification>>,
+}
+
+/// Events held for one unregistered ID, with their estimated size.
+#[derive(Default)]
+struct HeldEvents {
+    events: Vec<SessionEventNotification>,
+    estimated_bytes: usize,
 }
 
 impl RouterState {
@@ -195,11 +242,12 @@ impl RouterState {
             .unclaimed
             .shift_remove(session_id.as_str())
             .unwrap_or_default();
-        self.unclaimed_events -= held.len();
+        self.unclaimed_events -= held.events.len();
+        self.unclaimed_bytes -= held.estimated_bytes;
         self.claiming
             .entry(session_id.clone())
             .or_default()
-            .splice(0..0, held);
+            .splice(0..0, held.events);
         let token = senders.token;
         let replaced = self.sessions.insert(session_id.clone(), senders);
         let claimed = dispatcher.is_some_and(|tx| {
@@ -279,22 +327,61 @@ impl RouterState {
         } else if self.retired.contains(notification.session_id.as_str()) {
             log_dropped(&notification, "session is no longer registered");
         } else {
-            while self.unclaimed_events >= MAX_UNCLAIMED_EVENTS
-                && let Some((session_id, events)) = self.unclaimed.shift_remove_index(0)
+            let estimated_bytes = estimated_notification_bytes(&notification);
+            while (self.unclaimed_events >= MAX_UNCLAIMED_EVENTS
+                || self.unclaimed_bytes + estimated_bytes > MAX_UNCLAIMED_BYTES)
+                && let Some((session_id, held)) = self.unclaimed.shift_remove_index(0)
             {
-                self.unclaimed_events -= events.len();
+                self.unclaimed_events -= held.events.len();
+                self.unclaimed_bytes -= held.estimated_bytes;
                 warn!(
                     %session_id,
-                    dropped = events.len(),
-                    request_ids = ?events.iter().filter(|event| settling_event(event).is_some()).filter_map(request_id).collect::<Vec<_>>(),
-                    "dropped events held for an unregistered session: too many events for unregistered sessions"
+                    dropped = held.events.len(),
+                    dropped_bytes = held.estimated_bytes,
+                    request_ids = ?held.events.iter().filter(|event| settling_event(event).is_some()).filter_map(request_id).collect::<Vec<_>>(),
+                    "dropped events held for an unregistered session: too many events or bytes held for unregistered sessions"
                 );
             }
             self.unclaimed_events += 1;
-            self.unclaimed
+            self.unclaimed_bytes += estimated_bytes;
+            let held = self
+                .unclaimed
                 .entry(notification.session_id.clone())
-                .or_default()
-                .push(notification);
+                .or_default();
+            held.events.push(notification);
+            held.estimated_bytes += estimated_bytes;
+        }
+    }
+}
+
+/// Approximate serialized size of a notification, for [`MAX_UNCLAIMED_BYTES`].
+fn estimated_notification_bytes(notification: &SessionEventNotification) -> usize {
+    // Envelope keys, quotes and separators around the fields below.
+    const ENVELOPE_BYTES: usize = 128;
+    let event = &notification.event;
+    ENVELOPE_BYTES
+        + notification.session_id.as_str().len()
+        + event.id.len()
+        + event.timestamp.len()
+        + event.event_type.len()
+        + event.parent_id.as_deref().map_or(0, str::len)
+        + event.agent_id.as_deref().map_or(0, str::len)
+        + estimated_json_bytes(&event.data)
+}
+
+fn estimated_json_bytes(value: &Value) -> usize {
+    match value {
+        Value::Null | Value::Bool(_) => 5,
+        Value::Number(_) => 8,
+        Value::String(text) => text.len() + 2,
+        Value::Array(items) => {
+            2 + items.len() + items.iter().map(estimated_json_bytes).sum::<usize>()
+        }
+        Value::Object(entries) => {
+            2 + entries
+                .iter()
+                .map(|(key, entry)| key.len() + 4 + estimated_json_bytes(entry))
+                .sum::<usize>()
         }
     }
 }
@@ -381,7 +468,7 @@ pub(crate) struct SessionRouter {
     /// Recovery and rejected-enrollment cleanup require exclusive initialization
     /// ownership; ordinary initializations share it until all setup settles.
     /// A true value fences the ID after failed cleanup on this connection.
-    initializations: Mutex<HashMap<SessionId, Arc<tokio::sync::RwLock<bool>>>>,
+    initializations: SessionInitializations,
     active_rpc_callbacks: Arc<Mutex<HashMap<SessionId, usize>>>,
     next_token: AtomicU64,
     started: Mutex<bool>,
@@ -392,19 +479,25 @@ impl SessionRouter {
         Self {
             state: Arc::default(),
             dispatcher: std::sync::OnceLock::new(),
-            initializations: Mutex::new(HashMap::new()),
+            initializations: Arc::default(),
             active_rpc_callbacks: Arc::default(),
             next_token: AtomicU64::new(0),
             started: Mutex::new(false),
         }
     }
 
-    pub(crate) fn initialization(&self, session_id: &SessionId) -> Arc<tokio::sync::RwLock<bool>> {
-        self.initializations
+    pub(crate) fn initialization(&self, session_id: &SessionId) -> SessionInitializationEntry {
+        let lock = self
+            .initializations
             .lock()
             .entry(session_id.clone())
             .or_default()
-            .clone()
+            .clone();
+        SessionInitializationEntry {
+            initializations: self.initializations.clone(),
+            session_id: session_id.clone(),
+            lock: Some(lock),
+        }
     }
 
     pub(crate) fn track_rpc_callback(&self, session_id: &SessionId) -> SessionRpcCallbackGuard {
@@ -577,7 +670,7 @@ impl SessionRouter {
             return;
         }
         *started = true;
-        let weak_client = Arc::downgrade(client);
+        let weak_client = crate::WeakClientInner::downgrade(client);
         let extension_launch_provider = client.extension_launch_provider.clone();
         let github_token_registry = client.github_token_registry.clone();
         let installation_confirmation = client.installation_confirmation.clone();
@@ -693,7 +786,7 @@ impl SessionRouter {
 }
 
 fn send_error(
-    client: &Weak<crate::ClientInner>,
+    client: &crate::WeakClientInner,
     request_id: u64,
     code: i32,
     message: String,

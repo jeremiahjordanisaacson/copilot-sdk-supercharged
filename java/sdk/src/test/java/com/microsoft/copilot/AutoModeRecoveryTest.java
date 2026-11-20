@@ -826,6 +826,40 @@ class AutoModeRecoveryTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void abandonedPrefixRecoveryReleasesItsAdmissionWhileTheLookupIsUnanswered(boolean timeout) throws Exception {
+        var canonical = "abcdef01-2345-4567-89ab-cdef01234567";
+        try (var runtime = new Runtime(true);
+                var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+                        .setRuntime(RuntimeConnection.forTcp("127.0.0.1", runtime.port())))) {
+            runtime.findByPrefixReply = new CompletableFuture<>();
+            var recovery = openWithId(client, true, "ABCDEF01", true);
+            try {
+                runtime.findByPrefixRequested.get(5, TimeUnit.SECONDS);
+                var next = openWithId(client, true, canonical, false);
+                assertFalse(next.isDone(), "The prefix recovery must hold the canonical admission");
+                if (timeout) {
+                    recovery.orTimeout(1, TimeUnit.MILLISECONDS);
+                } else {
+                    assertTrue(recovery.cancel(true));
+                }
+                try (var resumed = next.get(5, TimeUnit.SECONDS)) {
+                    assertEquals(canonical, resumed.getSessionId());
+                    assertThrows(Exception.class, () -> recovery.get(5, TimeUnit.SECONDS));
+                    runtime.findByPrefixReply.complete(Map.of("sessionId", canonical));
+                    // Drain the late lookup reply before closing the client connection.
+                    runtime.eventAndDrain(resumed, "capabilities.changed", Map.of("ui", Map.of("elicitation", false)));
+                    // The abandoned recovery never sends its resume.
+                    assertEquals(1, runtime.requests.stream()
+                            .filter(request -> "session.resume".equals(request.path("method").asText())).count());
+                }
+            } finally {
+                runtime.findByPrefixReply.complete(Map.of("sessionId", canonical));
+            }
+        }
+    }
+
     @Test
     void residentCallbacksStayWithTheOldOwnerDuringLocalSetupTrace() throws Exception {
         var canonical = UUID.randomUUID().toString();

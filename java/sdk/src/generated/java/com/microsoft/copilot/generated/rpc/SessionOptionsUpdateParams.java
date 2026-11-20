@@ -27,6 +27,8 @@ import javax.annotation.processing.Generated;
 public record SessionOptionsUpdateParams(
     /** Target session identifier */
     @JsonProperty("sessionId") String sessionId,
+    /** Whether ambient configuration discovery is enabled. Changing this option reconciles repository plugin contributions; omission leaves the current value unchanged. */
+    @JsonProperty("enableConfigDiscovery") Boolean enableConfigDiscovery,
     /** Session-only user preferences. Omitted preferences keep their current values. */
     @JsonProperty("settings") SessionSettingsPatch settings,
     /** The model ID to use for assistant turns. */
@@ -99,6 +101,7 @@ public record SessionOptionsUpdateParams(
     public static final class Builder {
         private Builder() {}
         private String sessionId;
+        private Boolean enableConfigDiscovery;
         private SessionSettingsPatch settings;
         private String model;
         private String clientName;
@@ -133,6 +136,18 @@ public record SessionOptionsUpdateParams(
         @com.microsoft.copilot.CopilotExperimental
         public Builder sessionId(String value) {
             this.sessionId = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code enableConfigDiscovery} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder enableConfigDiscovery(Boolean value) {
+            this.enableConfigDiscovery = value;
             return this;
         }
 
@@ -431,7 +446,7 @@ public record SessionOptionsUpdateParams(
          * @since 2.0.0
          */
         public SessionOptionsUpdateParams build() {
-            return new SessionOptionsUpdateParams(sessionId, settings, model, clientName, lspClientName, integrationId, workingDirectory, sessionCapabilities, tools, inference, experiments, gitHub, agents, permissions, mcp, skills, instructions, hooks, plugins, git, state, events, interaction, execution, policy);
+            return new SessionOptionsUpdateParams(sessionId, enableConfigDiscovery, settings, model, clientName, lspClientName, integrationId, workingDirectory, sessionCapabilities, tools, inference, experiments, gitHub, agents, permissions, mcp, skills, instructions, hooks, plugins, git, state, events, interaction, execution, policy);
         }
     }
 }

@@ -4,7 +4,6 @@
 
 package com.microsoft.copilot;
 
-import com.microsoft.copilot.rpc.CopilotClientMode;
 import com.microsoft.copilot.rpc.SessionEventOptions;
 import com.microsoft.copilot.rpc.SessionGitHubOptions;
 import com.microsoft.copilot.rpc.SessionGitOptions;
@@ -31,6 +30,7 @@ import static org.mockito.Mockito.when;
 import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -39,9 +39,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -61,6 +63,7 @@ import com.microsoft.copilot.generated.SessionEvent;
 import com.microsoft.copilot.generated.SessionIdleEvent;
 import com.microsoft.copilot.rpc.AutoModeSwitchResponse;
 import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.CopilotClientMode;
 import com.microsoft.copilot.rpc.GitHubTokenProviderResult;
 import com.microsoft.copilot.rpc.MessageOptions;
 import com.microsoft.copilot.rpc.PermissionHandler;
@@ -71,6 +74,15 @@ import com.microsoft.copilot.rpc.SessionHooks;
 import com.microsoft.copilot.rpc.ToolDefinition;
 
 class ForceStopSessionTest {
+
+    public static void main(String[] args) throws Exception {
+        var tests = new ForceStopSessionTest();
+        tests.commonPoolExecutorDeliversCompletionEvents();
+        tests.admittedHandlerCanWaitForForceStopWithTheDefaultExecutor();
+        if (Runtime.version().feature() >= 25) {
+            tests.forceStopEventuallyInterruptsOwnedHandlers();
+        }
+    }
 
     @CopilotResponse
     public record Answer(int value) {
@@ -348,8 +360,7 @@ class ForceStopSessionTest {
                         assertThrows(ExecutionException.class,
                                 () -> creating.get(5, TimeUnit.SECONDS).get(5, TimeUnit.SECONDS));
                         server.emitIdle(replacement.getSessionId());
-                        client.ping("replacement routing barrier").get(5, TimeUnit.SECONDS);
-                        assertEquals(1, events.get(), "A stale create must preserve replacement events");
+                        awaitCount(events, 1, "A stale create must preserve replacement events");
                         server.invokeSessionEnd(replacement.getSessionId());
                     }
                     client.forceStop().get(5, TimeUnit.SECONDS);
@@ -400,8 +411,7 @@ class ForceStopSessionTest {
                         assertThrows(ExecutionException.class,
                                 () -> creating.get(5, TimeUnit.SECONDS).get(5, TimeUnit.SECONDS));
                         server.emitIdle(replacement.getSessionId());
-                        client.ping("replacement options rollback barrier").get(5, TimeUnit.SECONDS);
-                        assertEquals(1, events.get(), "An old options failure must preserve replacement events");
+                        awaitCount(events, 1, "An old options failure must preserve replacement events");
                         server.invokeSessionEnd(replacement.getSessionId());
                     }
                     client.forceStop().get(5, TimeUnit.SECONDS);
@@ -483,8 +493,7 @@ class ForceStopSessionTest {
                             Map.of("code", -32603, "message", "controlled resume rejection")));
                     assertThrows(ExecutionException.class, () -> resuming.get(5, TimeUnit.SECONDS));
                     server.emitIdle(resident.getSessionId());
-                    client.ping("failed resume callback barrier").get(5, TimeUnit.SECONDS);
-                    assertEquals(1, events.get(), "The resident must receive terminal events while detach drains");
+                    awaitCount(events, 1, "The resident must receive terminal events while detach drains");
                     server.invokeSessionEnd(resident.getSessionId());
                     assertEquals(1, hooks.get(), "The resident's session-end hook must remain routed");
                 } finally {
@@ -497,8 +506,1117 @@ class ForceStopSessionTest {
     }
 
     @Test
+    void correlatedCompletionPrecedesLaterForceStopListener() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var stopped = new CompletableFuture<Void>();
+        try (var server = new Server(); var client = server.createClient()) {
+            server.completionSupported = true;
+            var session = createSession(client);
+            try (var first = session.on(SessionIdleEvent.class, event -> {
+                entered.countDown();
+                awaitRelease(release);
+            })) {
+                var waiting = session.sendAndWait(new MessageOptions().setPrompt("question"), 0);
+                var request = server.completions.poll(5, TimeUnit.SECONDS);
+                assertNotNull(request);
+                try (var later = session.on(SessionIdleEvent.class, event -> {
+                    try {
+                        client.forceStop().join();
+                        stopped.complete(null);
+                    } catch (Throwable failure) {
+                        stopped.completeExceptionally(failure);
+                    }
+                })) {
+                    try {
+                        var idle = server.emitEvent(session.getSessionId(), "session.idle", Map.of());
+                        assertTrue(entered.await(5, TimeUnit.SECONDS));
+                        server.writeMessage(Map.of("jsonrpc", "2.0", "id", request.get("id"), "result", Map.of(
+                                "messageId", "owned-request", "aborted", false, "completionEventId", idle.get("id"))));
+                        client.ping("completion response read barrier").get(5, TimeUnit.SECONDS);
+                        release.countDown();
+                        stopped.get(5, TimeUnit.SECONDS);
+                        assertNull(waiting.get(5, TimeUnit.SECONDS),
+                                "A later shutdown listener must preserve the successful completion");
+                    } finally {
+                        release.countDown();
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void forceStopAfterGracefulStopRetiresDrainingSession() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var deliveries = Executors.newCachedThreadPool();
+        var laterCalls = new AtomicInteger();
+        try (var server = new Server(); var client = server.createClient(deliveries)) {
+            var session = createSession(client);
+            try (var first = session.on(event -> {
+                entered.countDown();
+                awaitRelease(release);
+            }); var second = session.on(event -> laterCalls.incrementAndGet())) {
+                try {
+                    server.emitIdle(session.getSessionId());
+                    assertTrue(entered.await(5, TimeUnit.SECONDS));
+                    client.stop().get(5, TimeUnit.SECONDS);
+                    client.forceStop().get(5, TimeUnit.SECONDS);
+                    assertEquals(1, release.getCount(), "Shutdown must not join an admitted handler");
+                } finally {
+                    release.countDown();
+                    awaitDeliveries(deliveries, "The draining handler must finish after its release");
+                }
+                assertEquals(0, laterCalls.get(), "Force stop must retire sessions removed by graceful stop");
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"resume", "create", "delete"})
+    void forceStopRetiresDrainingSessionsRemovedFromTheMap(String operation) throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var deliveries = Executors.newCachedThreadPool();
+        var laterCalls = new AtomicInteger();
+        try (var server = new Server(); var client = server.createClient(deliveries)) {
+            var session = createSession(client);
+            try (var first = session.on(event -> {
+                entered.countDown();
+                awaitRelease(release);
+            }); var second = session.on(event -> laterCalls.incrementAndGet())) {
+                try {
+                    server.emitIdle(session.getSessionId());
+                    assertTrue(entered.await(5, TimeUnit.SECONDS));
+                    server.emitIdle(session.getSessionId());
+                    closeOnOwnThread(session).get(5, TimeUnit.SECONDS);
+                    switch (operation) {
+                        case "resume" -> client
+                                .resumeSession(session.getSessionId(), new ResumeSessionOptions().setPermissions(
+                                        new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)))
+                                .get(5, TimeUnit.SECONDS);
+                        case "create" -> client
+                                .createSession(
+                                        new CreateSessionOptions().setSessionId(session.getSessionId())
+                                                .setPermissions(new SessionPermissionOptions()
+                                                        .setOnRequest(PermissionHandler.APPROVE_ALL)))
+                                .get(5, TimeUnit.SECONDS);
+                        case "delete" -> client.deleteSession(session.getSessionId()).get(5, TimeUnit.SECONDS);
+                        default -> throw new IllegalArgumentException("Unexpected operation: " + operation);
+                    }
+                    client.forceStop().get(5, TimeUnit.SECONDS);
+                    assertEquals(1, release.getCount(), "Force stop must not join an admitted handler");
+                } finally {
+                    release.countDown();
+                    awaitDeliveries(deliveries, "The displaced session's handler must finish after its release");
+                }
+                assertEquals(0, laterCalls.get(),
+                        "Force stop must retire the displaced session's remaining subscribers and queued events");
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"create", "resume", "empty"})
+    void rejectedSessionAttemptsReleaseConfiguredHandlers(String operation) throws Exception {
+        try (var server = new Server();
+                var client = new CopilotClient(new CopilotClientOptions()
+                        .setRuntime(RuntimeConnection.forTcp("127.0.0.1", server.listener.getLocalPort()))
+                        .setMode(operation.equals("empty")
+                                ? CopilotClientMode.EMPTY
+                                : CopilotClientMode.CODING_AGENT))) {
+            server.rejectSessionRequests = true;
+            var handler = rejectedSessionHandler(client, operation);
+            awaitCollected(handler, "A rejected " + operation + " must release its configured handler");
+            assertNotNull(client.ping("client remains reachable").get(5, TimeUnit.SECONDS));
+            assertEquals(0, server.detaches.get(), "Abandoned attempts must retire without a detach RPC");
+        }
+    }
+
+    private static WeakReference<Consumer<SessionEvent>> rejectedSessionHandler(CopilotClient client, String operation)
+            throws Exception {
+        Consumer<SessionEvent> handler = new Consumer<>() {
+            @Override
+            public void accept(SessionEvent event) {
+                fail("A rejected session must not receive events");
+            }
+        };
+        var reference = new WeakReference<>(handler);
+        var attempt = operation.equals("resume")
+                ? client.resumeSession("rejected-session", new ResumeSessionOptions()
+                        .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                        .setEvents(new SessionEventOptions().setOnEvent(handler)))
+                : client.createSession(new CreateSessionOptions().setSessionId("rejected-session")
+                        .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                        .setEvents(new SessionEventOptions().setOnEvent(handler)));
+        var failure = assertThrows(ExecutionException.class, () -> attempt.get(5, TimeUnit.SECONDS));
+        assertTrue(
+                failure.getCause().getMessage()
+                        .contains(operation.equals("empty") ? "availableTools" : "controlled session rejection"),
+                failure.toString());
+        return reference;
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void resumeRetiresDisplacedHandleOnlyAfterSuccess(boolean succeeds) throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var drained = new CompletableFuture<Void>();
+        var deliveries = Executors.newSingleThreadExecutor();
+        var calls = new AtomicInteger();
+        try (var server = new Server(); var client = server.createClient(deliveries)) {
+            var original = createSession(client);
+            try (var subscription = original.on(event -> {
+                if (calls.incrementAndGet() == 1) {
+                    entered.countDown();
+                    awaitRelease(release);
+                } else {
+                    drained.complete(null);
+                }
+            })) {
+                try {
+                    server.emitIdle(original.getSessionId());
+                    assertTrue(entered.await(5, TimeUnit.SECONDS));
+                    server.emitIdle(original.getSessionId());
+                    client.ping("queued event read barrier").get(5, TimeUnit.SECONDS);
+                    server.holdResumeResponse = true;
+                    var resuming = client.resumeSession(original.getSessionId(),
+                            new ResumeSessionOptions().setPermissions(
+                                    new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)));
+                    var request = server.heldResumes.poll(5, TimeUnit.SECONDS);
+                    assertNotNull(request, "Resume must displace the original before its outcome is decided");
+                    if (succeeds) {
+                        server.writeMessage(Map.of("jsonrpc", "2.0", "id", request.get("id"), "result",
+                                Map.of("sessionId", original.getSessionId())));
+                        var replacement = resuming.get(5, TimeUnit.SECONDS);
+                        assertEquals(1, release.getCount(), "Resume must not wait for an admitted callback");
+                        assertThrows(IllegalStateException.class, () -> original.send("displaced handle"));
+                        original.close();
+                        assertEquals(0, server.detaches.get(), "Local retirement must not detach the replacement");
+                        var delivered = new CountDownLatch(1);
+                        try (var replacementSubscription = replacement.on(event -> delivered.countDown())) {
+                            server.emitIdle(replacement.getSessionId());
+                            client.ping("replacement event read barrier").get(5, TimeUnit.SECONDS);
+                            release.countDown();
+                            drained.get(5, TimeUnit.SECONDS);
+                            assertTrue(delivered.await(5, TimeUnit.SECONDS), "The replacement must remain registered");
+                            assertNotNull(replacement.send("replacement still attached").get(5, TimeUnit.SECONDS));
+                        }
+                    } else {
+                        server.writeMessage(Map.of("jsonrpc", "2.0", "id", request.get("id"), "error",
+                                Map.of("code", -32603, "message", "controlled resume failure")));
+                        var failure = assertThrows(ExecutionException.class, () -> resuming.get(5, TimeUnit.SECONDS));
+                        assertTrue(failure.getCause().getMessage().contains("controlled resume failure"),
+                                failure.toString());
+                        assertNotNull(original.send("restored handle").get(5, TimeUnit.SECONDS));
+                        release.countDown();
+                        drained.get(5, TimeUnit.SECONDS);
+                    }
+                } finally {
+                    release.countDown();
+                    awaitDeliveries(deliveries, "Accepted callbacks must finish after their release");
+                }
+                assertEquals(2, calls.get(), "Retirement must drain both accepted callbacks");
+                if (succeeds) {
+                    assertThrows(IllegalStateException.class, () -> original.on(event -> fail("Retired callback")));
+                } else {
+                    try (var restoredSubscription = original.on(event -> {
+                    })) {
+                        assertEquals(0, server.detaches.get(), "A failed resume must leave the original attached");
+                    }
+                }
+            }
+        } finally {
+            deliveries.shutdownNow();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void cancelledResumeLetsTheRuntimeDecideRollback(boolean runtimeCommits, boolean timeout) throws Exception {
+        try (var server = new Server(); var client = server.createClient()) {
+            var original = createSession(client);
+            server.holdResumeResponse = true;
+            var resuming = client.resumeSession(original.getSessionId(), new ResumeSessionOptions()
+                    .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)));
+            var request = server.heldResumes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(request, "The resume must be pending when it is abandoned");
+            if (timeout) {
+                resuming.orTimeout(1, TimeUnit.MILLISECONDS);
+            } else {
+                assertTrue(resuming.cancel(true));
+            }
+            assertEquals(request.get("id"), server.cancellations.poll(5, TimeUnit.SECONDS),
+                    "Abandoning the caller's future must ask the runtime to cancel the resume");
+            try (var pending = original.on(event -> {
+            })) {
+                // Displacement alone must not terminate the original before the runtime
+                // answers.
+            }
+            if (runtimeCommits) {
+                // The runtime finished the resume anyway, so the client must commit it and
+                // retire the original.
+                server.writeMessage(Map.of("jsonrpc", "2.0", "id", request.get("id"), "result",
+                        Map.of("sessionId", original.getSessionId())));
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (true) {
+                    try (var probe = original.on(event -> {
+                    })) {
+                        assertTrue(System.nanoTime() < deadline, "A committed resume must retire the original");
+                    } catch (IllegalStateException retired) {
+                        break;
+                    }
+                    TimeUnit.MILLISECONDS.sleep(10);
+                }
+                assertEquals(0, server.detaches.get(), "Committing a cancelled resume must not detach it");
+            } else {
+                server.writeMessage(Map.of("jsonrpc", "2.0", "id", request.get("id"), "error",
+                        Map.of("code", -32800, "message", "Session resume was cancelled")));
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (true) {
+                    try {
+                        assertNotNull(original.send("restored handle").get(5, TimeUnit.SECONDS));
+                        break;
+                    } catch (IllegalStateException stillDisplaced) {
+                        assertTrue(System.nanoTime() < deadline, "A cancelled resume must restore the original");
+                    }
+                    TimeUnit.MILLISECONDS.sleep(10);
+                }
+                var delivered = new CountDownLatch(1);
+                try (var subscription = original.on(event -> delivered.countDown())) {
+                    server.emitIdle(original.getSessionId());
+                    assertTrue(delivered.await(5, TimeUnit.SECONDS),
+                            "Rollback must route the session's events to the original again");
+                }
+                assertEquals(0, server.detaches.get(), "A cancelled resume must leave the original attached");
+            }
+        }
+    }
+
+    @Test
+    void overlappingResumeRetiresTheFullDisplacedChainBeforeTheEarlierAttemptFails() throws Exception {
+        try (var server = new Server(); var client = server.createClient()) {
+            var original = createSession(client);
+            server.holdOptions = true;
+            var earlier = client.resumeSession(original.getSessionId(),
+                    new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setGit(new SessionGitOptions().setCoauthorEnabled(true)));
+            var options = server.heldOptions.poll(5, TimeUnit.SECONDS);
+            assertNotNull(options, "The earlier resume must wait for its option update");
+            var current = client
+                    .resumeSession(original.getSessionId(),
+                            new ResumeSessionOptions().setPermissions(
+                                    new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)))
+                    .get(5, TimeUnit.SECONDS);
+
+            assertThrows(IllegalStateException.class, () -> original.send("displaced original"));
+            assertThrows(IllegalStateException.class, () -> original.on(event -> fail("Retired callback")));
+            original.close();
+            assertEquals(0, server.detaches.get(), "Closing the original must not detach the successful replacement");
+
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", options.get("id"), "error",
+                    Map.of("code", -32603, "message", "controlled option update failure")));
+            var failure = assertThrows(ExecutionException.class, () -> earlier.get(5, TimeUnit.SECONDS));
+            assertTrue(failure.getCause().getMessage().contains("controlled option update failure"),
+                    failure.toString());
+            assertEquals(0, server.detaches.get(), "The earlier failure must not detach the successful replacement");
+            var delivered = new CountDownLatch(1);
+            try (var subscription = current.on(event -> delivered.countDown())) {
+                server.emitIdle(current.getSessionId());
+                assertTrue(delivered.await(5, TimeUnit.SECONDS),
+                        "The earlier attempt's rollback must preserve the successful registration");
+                assertNotNull(current.send("current handle remains attached").get(5, TimeUnit.SECONDS));
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void overlappingPrefixResumesKeepTheCanonicalOwnerUsable(boolean publishBeforeRetirement) throws Exception {
+        try (var server = new Server(); var client = server.createClient()) {
+            var original = createSession(client);
+            String canonicalId = original.getSessionId();
+            String prefix = canonicalId.substring(0, 7);
+            server.holdResumeResponse = true;
+            server.holdOptions = true;
+            var first = client.resumeSession(prefix,
+                    new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setGit(new SessionGitOptions().setCoauthorEnabled(true)));
+            var firstRequest = server.heldResumes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(firstRequest);
+            var middle = client.resumeSession(prefix, new ResumeSessionOptions()
+                    .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)));
+            var middleRequest = server.heldResumes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(middleRequest);
+            var last = client.resumeSession(prefix,
+                    new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setGit(new SessionGitOptions().setCoauthorEnabled(true)));
+            var lastRequest = server.heldResumes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(lastRequest);
+
+            server.writeMessage(
+                    Map.of("jsonrpc", "2.0", "id", lastRequest.get("id"), "result", Map.of("sessionId", canonicalId)));
+            var lastOptions = server.heldOptions.poll(5, TimeUnit.SECONDS);
+            assertNotNull(lastOptions, "The last attempt must publish before the first reclaims the canonical ID");
+            JsonNode firstOptions = null;
+            if (publishBeforeRetirement) {
+                server.writeMessage(Map.of("jsonrpc", "2.0", "id", firstRequest.get("id"), "result",
+                        Map.of("sessionId", canonicalId)));
+                firstOptions = server.heldOptions.poll(5, TimeUnit.SECONDS);
+                assertNotNull(firstOptions, "The first attempt must reclaim ownership before retirement starts");
+            }
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", lastOptions.get("id"), "result", Map.of()));
+            var lastHandle = last.get(5, TimeUnit.SECONDS);
+            if (!publishBeforeRetirement) {
+                server.writeMessage(Map.of("jsonrpc", "2.0", "id", firstRequest.get("id"), "result",
+                        Map.of("sessionId", canonicalId)));
+                firstOptions = server.heldOptions.poll(5, TimeUnit.SECONDS);
+                assertNotNull(firstOptions, "The first attempt must receive its canonical ID after retirement");
+            }
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", firstOptions.get("id"), "result", Map.of()));
+            var firstHandle = first.get(5, TimeUnit.SECONDS);
+            var owner = publishBeforeRetirement ? firstHandle : lastHandle;
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", middleRequest.get("id"), "error",
+                    Map.of("code", -32603, "message", "controlled superseded resume failure")));
+            assertThrows(ExecutionException.class, () -> middle.get(5, TimeUnit.SECONDS));
+
+            assertNotNull(owner.send("canonical owner remains usable").get(5, TimeUnit.SECONDS));
+            var delivered = new CountDownLatch(1);
+            try (var subscription = owner.on(event -> delivered.countDown())) {
+                server.emitIdle(canonicalId);
+                assertTrue(delivered.await(5, TimeUnit.SECONDS), "Canonical events must route to the surviving owner");
+            }
+            assertEquals(0, server.detaches.get(), "Displaced cleanup must not detach the canonical owner");
+        }
+    }
+
+    @Test
+    void failedCanonicalResumeRestoresTheSuccessfulOverlappingPrefixResume() throws Exception {
+        try (var server = new Server(); var client = server.createClient()) {
+            var original = createSession(client);
+            String canonicalId = original.getSessionId();
+            String prefix = canonicalId.substring(0, 7);
+            server.holdResumeResponse = true;
+            server.holdOptions = true;
+            var earlier = client.resumeSession(prefix,
+                    new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setGit(new SessionGitOptions().setCoauthorEnabled(true)));
+            var earlierRequest = server.heldResumes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(earlierRequest);
+            var later = client.resumeSession(prefix,
+                    new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setGit(new SessionGitOptions().setCoauthorEnabled(true)));
+            var laterRequest = server.heldResumes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(laterRequest);
+
+            server.writeMessage(
+                    Map.of("jsonrpc", "2.0", "id", laterRequest.get("id"), "result", Map.of("sessionId", canonicalId)));
+            var laterOptions = server.heldOptions.poll(5, TimeUnit.SECONDS);
+            assertNotNull(laterOptions);
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", earlierRequest.get("id"), "result",
+                    Map.of("sessionId", canonicalId)));
+            var earlierOptions = server.heldOptions.poll(5, TimeUnit.SECONDS);
+            assertNotNull(earlierOptions, "The earlier attempt must reclaim the canonical ID before retirement");
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", laterOptions.get("id"), "result", Map.of()));
+            var successful = later.get(5, TimeUnit.SECONDS);
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", earlierOptions.get("id"), "error",
+                    Map.of("code", -32603, "message", "controlled canonical options failure")));
+            var failure = assertThrows(ExecutionException.class,
+                    () -> earlier.get(CopilotSession.DETACH_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS));
+            assertTrue(failure.getCause().getMessage().contains("controlled canonical options failure"),
+                    failure.toString());
+            assertEquals(0, server.detaches.get(), "A failed canonical owner must not detach its successful fallback");
+            var delivered = new CountDownLatch(1);
+            try (var subscription = successful.on(event -> delivered.countDown())) {
+                server.emitIdle(canonicalId);
+                assertTrue(delivered.await(5, TimeUnit.SECONDS), "Rollback must restore the successful event owner");
+                assertNotNull(successful.send("successful fallback remains attached").get(5, TimeUnit.SECONDS));
+            }
+        }
+    }
+
+    @Test
+    void failedOptionsUpdatePreservesAnAcceptedResumeAwaitingOptions() throws Exception {
+        try (var server = new Server(); var client = server.createClient()) {
+            server.holdResumeResponse = true;
+            server.holdOptions = true;
+            String sessionId = "accepted-resume";
+            var earlier = client.resumeSession(sessionId,
+                    new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setGit(new SessionGitOptions().setCoauthorEnabled(true)));
+            var earlierRequest = server.heldResumes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(earlierRequest);
+            server.writeMessage(
+                    Map.of("jsonrpc", "2.0", "id", earlierRequest.get("id"), "result", Map.of("sessionId", sessionId)));
+            var earlierOptions = server.heldOptions.poll(5, TimeUnit.SECONDS);
+            assertNotNull(earlierOptions, "The accepted predecessor must still be awaiting its options update");
+
+            var later = client.resumeSession(sessionId,
+                    new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setGit(new SessionGitOptions().setCoauthorEnabled(true)));
+            var laterRequest = server.heldResumes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(laterRequest);
+            server.writeMessage(
+                    Map.of("jsonrpc", "2.0", "id", laterRequest.get("id"), "result", Map.of("sessionId", sessionId)));
+            var laterOptions = server.heldOptions.poll(5, TimeUnit.SECONDS);
+            assertNotNull(laterOptions);
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", laterOptions.get("id"), "error",
+                    Map.of("code", -32603, "message", "controlled options failure")));
+            var failure = assertThrows(ExecutionException.class,
+                    () -> later.get(CopilotSession.DETACH_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS));
+            assertTrue(failure.getCause().getMessage().contains("controlled options failure"), failure.toString());
+            assertEquals(0, server.detaches.get(), "Rollback must not detach the accepted predecessor");
+
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", earlierOptions.get("id"), "result", Map.of()));
+            var successful = earlier.get(5, TimeUnit.SECONDS);
+            assertNotNull(successful.send("accepted predecessor remains attached").get(5, TimeUnit.SECONDS));
+            var delivered = new CountDownLatch(1);
+            try (var subscription = successful.on(event -> delivered.countDown())) {
+                server.emitIdle(sessionId);
+                assertTrue(delivered.await(5, TimeUnit.SECONDS), "Rollback must restore the accepted event owner");
+            }
+            successful.close();
+            assertEquals(1, server.detaches.get(), "The surviving owner must eventually detach its attachment");
+        }
+    }
+
+    @Test
+    void failedOptionsUpdateDetachesInsteadOfRestoringAnUnfinishedResume() throws Exception {
+        try (var server = new Server(); var client = server.createClient()) {
+            server.holdResumeResponse = true;
+            server.holdOptions = true;
+            String sessionId = "unfinished-resume";
+            var earlier = client.resumeSession(sessionId, new ResumeSessionOptions()
+                    .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)));
+            var earlierRequest = server.heldResumes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(earlierRequest);
+            var later = client.resumeSession(sessionId,
+                    new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setGit(new SessionGitOptions().setCoauthorEnabled(true)));
+            var laterRequest = server.heldResumes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(laterRequest);
+            server.writeMessage(
+                    Map.of("jsonrpc", "2.0", "id", laterRequest.get("id"), "result", Map.of("sessionId", sessionId)));
+            var options = server.heldOptions.poll(5, TimeUnit.SECONDS);
+            assertNotNull(options);
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", options.get("id"), "error",
+                    Map.of("code", -32603, "message", "controlled options failure")));
+            var laterFailure = assertThrows(ExecutionException.class,
+                    () -> later.get(CopilotSession.DETACH_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS));
+            assertTrue(laterFailure.getCause().getMessage().contains("controlled options failure"),
+                    laterFailure.toString());
+            assertEquals(1, server.detaches.get(),
+                    "An unfinished fallback cannot own cleanup of an accepted attachment");
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", earlierRequest.get("id"), "error",
+                    Map.of("code", -32603, "message", "controlled resume failure")));
+            var earlierFailure = assertThrows(ExecutionException.class, () -> earlier.get(5, TimeUnit.SECONDS));
+            assertTrue(earlierFailure.getCause().getMessage().contains("controlled resume failure"),
+                    earlierFailure.toString());
+            assertEquals(1, server.detaches.get(), "The rejected attempt must not detach again");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void failedOptionsUpdatePreservesAdmittedToolResponses(boolean toolFails) throws Exception {
+        var started = new CountDownLatch(1);
+        var toolFuture = new CompletableFuture<Object>();
+        try (var server = new Server(); var client = server.createClient()) {
+            var original = createSession(client);
+            server.holdOptions = true;
+            server.holdToolReplies = true;
+            var resuming = client.resumeSession(original.getSessionId(), new ResumeSessionOptions()
+                    .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                    .setGit(new SessionGitOptions().setCoauthorEnabled(true))
+                    .setTools(new SessionToolOptions().setDefinitions(List
+                            .of(ToolDefinition.create("pending_tool", "Waits for a result", Map.of(), invocation -> {
+                                started.countDown();
+                                return toolFuture;
+                            })))));
+            var options = server.heldOptions.poll(5, TimeUnit.SECONDS);
+            assertNotNull(options);
+            server.emitEvent(original.getSessionId(), "external_tool.requested",
+                    Map.of("requestId", "rollback-tool", "sessionId", original.getSessionId(), "toolCallId", "call",
+                            "toolName", "pending_tool", "arguments", Map.of()));
+            assertTrue(started.await(5, TimeUnit.SECONDS), "The provisional owner must admit the tool request");
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", options.get("id"), "error",
+                    Map.of("code", -32603, "message", "controlled options failure")));
+            var failure = assertThrows(ExecutionException.class, () -> resuming.get(5, TimeUnit.SECONDS));
+            assertTrue(failure.getCause().getMessage().contains("controlled options failure"), failure.toString());
+            assertEquals(0, server.detaches.get(), "Rollback must keep the original attached");
+            assertFalse(toolFuture.isCancelled(), "Non-detaching rollback must preserve the admitted tool future");
+            if (toolFails) {
+                toolFuture.completeExceptionally(new IllegalStateException("controlled tool failure"));
+            } else {
+                toolFuture.complete("completed after rollback");
+            }
+            var reply = server.toolReplies.poll(5, TimeUnit.SECONDS);
+            assertNotNull(reply, "The provisional owner's admitted tool must still answer the runtime");
+            assertEquals("rollback-tool", reply.path("params").path("requestId").asText());
+            if (toolFails) {
+                assertTrue(reply.path("params").path("error").asText().contains("controlled tool failure"),
+                        reply.toString());
+            } else {
+                assertEquals("completed after rollback",
+                        reply.path("params").path("result").path("textResultForLlm").asText());
+            }
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", reply.get("id"), "result", Map.of()));
+            assertNotNull(original.send("original remains attached").get(5, TimeUnit.SECONDS));
+            var delivered = new CountDownLatch(1);
+            try (var subscription = original.on(event -> delivered.countDown())) {
+                server.emitIdle(original.getSessionId());
+                assertTrue(delivered.await(5, TimeUnit.SECONDS), "Rollback must restore event routing");
+            }
+        }
+    }
+
+    @Test
+    void lateResumeCompletionPreservesTheCurrentTokenProvider() throws Exception {
+        try (var server = new Server(); var client = server.createClient()) {
+            var original = createSession(client);
+            assertNotNull(server.creates.poll(5, TimeUnit.SECONDS));
+            server.holdOptions = true;
+            var first = client.resumeSession(original.getSessionId(),
+                    new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setGit(new SessionGitOptions().setCoauthorEnabled(true))
+                            .setGitHub(new SessionGitHubOptions().setTokenProvider(args -> CompletableFuture
+                                    .completedFuture(GitHubTokenProviderResult.token("first-token", 3600)))));
+            var options = server.heldOptions.poll(5, TimeUnit.SECONDS);
+            assertNotNull(options, "The first resume must wait for its option update");
+            assertNotNull(server.creates.poll(5, TimeUnit.SECONDS));
+            var current = client
+                    .resumeSession(original.getSessionId(), new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setGitHub(new SessionGitHubOptions().setTokenProvider(args -> CompletableFuture
+                                    .completedFuture(GitHubTokenProviderResult.token("current-token", 3600)))))
+                    .get(5, TimeUnit.SECONDS);
+            var request = server.creates.poll(5, TimeUnit.SECONDS);
+            assertNotNull(request);
+            String registrationId = request.path("params").path("github").path("tokenProviderRegistrationId").asText();
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", options.get("id"), "result", Map.of()));
+            first.get(5, TimeUnit.SECONDS);
+
+            var reply = server.invokeToken(registrationId, current.getSessionId());
+            assertFalse(reply.has("error"), "An obsolete resume must not remove the current provider: " + reply);
+            assertEquals("current-token", reply.path("result").path("accessToken").asText());
+            assertNotNull(current.send("current handle remains usable").get(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"success", "failure", "delivery-failure"})
+    void resumePreservesAdmittedExternalToolResponses(String outcome) throws Exception {
+        var deliveries = Executors.newSingleThreadExecutor();
+        var started = new CountDownLatch(1);
+        var toolFuture = new CompletableFuture<Object>();
+        try (var server = new Server(); var client = server.createClient(deliveries)) {
+            server.holdToolReplies = true;
+            var original = client.createSession(new CreateSessionOptions()
+                    .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                    .setTools(new SessionToolOptions().setDefinitions(List
+                            .of(ToolDefinition.create("pending_tool", "Waits for a result", Map.of(), invocation -> {
+                                started.countDown();
+                                return toolFuture;
+                            })))))
+                    .get(5, TimeUnit.SECONDS);
+            server.emitEvent(original.getSessionId(), "external_tool.requested",
+                    Map.of("requestId", "resumed-tool", "sessionId", original.getSessionId(), "toolCallId", "call",
+                            "toolName", "pending_tool", "arguments", Map.of()));
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            deliveries.submit(() -> {
+            }).get(5, TimeUnit.SECONDS);
+
+            var replacement = client.resumeSession(original.getSessionId(),
+                    new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setContinuePendingWork(true))
+                    .get(5, TimeUnit.SECONDS);
+            assertFalse(toolFuture.isCancelled(), "Resume must preserve the admitted tool future");
+            assertThrows(IllegalStateException.class, () -> original.send("displaced handle"));
+            if (outcome.equals("failure")) {
+                toolFuture.completeExceptionally(new IllegalStateException("controlled tool failure"));
+            } else {
+                toolFuture.complete("completed after resume");
+            }
+            var reply = server.toolReplies.poll(5, TimeUnit.SECONDS);
+            assertNotNull(reply, "The admitted handler must still answer the runtime after resume");
+            assertEquals(original.getSessionId(), reply.path("params").path("sessionId").asText());
+            assertEquals("resumed-tool", reply.path("params").path("requestId").asText());
+            if (outcome.equals("failure")) {
+                assertEquals("controlled tool failure", reply.path("params").path("error").asText());
+            } else {
+                assertEquals("completed after resume",
+                        reply.path("params").path("result").path("textResultForLlm").asText());
+            }
+            if (outcome.equals("delivery-failure")) {
+                server.writeMessage(Map.of("jsonrpc", "2.0", "id", reply.get("id"), "error",
+                        Map.of("code", -32603, "message", "controlled delivery failure")));
+                reply = server.toolReplies.poll(5, TimeUnit.SECONDS);
+                assertNotNull(reply, "An undelivered result must still answer with an error after resume");
+                assertEquals("resumed-tool", reply.path("params").path("requestId").asText());
+                assertEquals("controlled delivery failure", reply.path("params").path("error").asText());
+            }
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", reply.get("id"), "result", Map.of()));
+            assertNotNull(replacement.send("replacement remains usable").get(5, TimeUnit.SECONDS));
+        } finally {
+            awaitDeliveries(deliveries, "The admitted tool worker must finish");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"stop", "force", "completion", "connection-close", "close", "close-after-second-resume"})
+    void cancellationAfterResumeReachesTheDisplacedHandlesPendingTools(String cancellation) throws Exception {
+        var deliveries = Executors.newSingleThreadExecutor();
+        var started = new CountDownLatch(1);
+        var toolFuture = new CompletableFuture<Object>();
+        try (var server = new Server(); var client = server.createClient(deliveries)) {
+            var original = client.createSession(new CreateSessionOptions()
+                    .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                    .setTools(new SessionToolOptions().setDefinitions(List
+                            .of(ToolDefinition.create("pending_tool", "Waits for a result", Map.of(), invocation -> {
+                                started.countDown();
+                                return toolFuture;
+                            })))))
+                    .get(5, TimeUnit.SECONDS);
+            server.emitEvent(original.getSessionId(), "external_tool.requested",
+                    Map.of("requestId", "resumed-tool", "sessionId", original.getSessionId(), "toolCallId", "call",
+                            "toolName", "pending_tool", "arguments", Map.of()));
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            deliveries.submit(() -> {
+            }).get(5, TimeUnit.SECONDS);
+            var replacement = client.resumeSession(original.getSessionId(),
+                    new ResumeSessionOptions()
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setContinuePendingWork(true))
+                    .get(5, TimeUnit.SECONDS);
+            original.close();
+            assertFalse(toolFuture.isCancelled(), "Resume must not cancel the admitted handler");
+            if (cancellation.equals("close-after-second-resume")) {
+                replacement = client.resumeSession(original.getSessionId(),
+                        new ResumeSessionOptions()
+                                .setPermissions(
+                                        new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                                .setContinuePendingWork(true))
+                        .get(5, TimeUnit.SECONDS);
+            }
+
+            switch (cancellation) {
+                case "stop" -> client.stop().get(5, TimeUnit.SECONDS);
+                case "force" -> client.forceStop().get(5, TimeUnit.SECONDS);
+                case "close", "close-after-second-resume" -> closeOnOwnThread(replacement).get(5, TimeUnit.SECONDS);
+                case "completion" -> server.emitEvent(original.getSessionId(), "external_tool.completed",
+                        Map.of("requestId", "resumed-tool"));
+                case "connection-close" -> server.socket.shutdownOutput();
+                default -> throw new IllegalArgumentException(cancellation);
+            }
+            assertThrows(CancellationException.class, () -> toolFuture.get(5, TimeUnit.SECONDS));
+            assertEquals(cancellation.equals("stop") || cancellation.startsWith("close") ? 1 : 0, server.detaches.get(),
+                    "Only graceful stop or close of the current handle may detach");
+        } finally {
+            awaitDeliveries(deliveries, "The admitted tool worker must finish");
+        }
+    }
+
+    @Test
+    void deletingSessionRetiresItsHandleWithoutDetachingAReplacement() throws Exception {
+        try (var server = new Server(); var client = server.createClient()) {
+            var session = createSession(client);
+            String sessionId = session.getSessionId();
+            client.deleteSession(sessionId).get(5, TimeUnit.SECONDS);
+            assertThrows(IllegalStateException.class, () -> session.on(event -> fail("Deleted session callback")));
+            var replacement = client
+                    .resumeSession(sessionId,
+                            new ResumeSessionOptions().setPermissions(
+                                    new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)))
+                    .get(5, TimeUnit.SECONDS);
+            session.close();
+            assertNotNull(replacement.send("replacement still attached").get(5, TimeUnit.SECONDS));
+            assertEquals(0, server.detaches.get(), "Closing a deleted handle must not detach its replacement");
+        }
+    }
+
+    @Test
+    void deletingSessionAllowsToolCancellationCleanupToCallRpc() throws Exception {
+        var deliveries = Executors.newSingleThreadExecutor();
+        var started = new CountDownLatch(1);
+        var cleanup = new CompletableFuture<Void>();
+        var toolFuture = new CompletableFuture<Object>();
+        try (var server = new Server(); var client = server.createClient(deliveries)) {
+            toolFuture.whenComplete((result, error) -> {
+                try {
+                    client.ping("tool cancellation cleanup").get(5, TimeUnit.SECONDS);
+                    cleanup.complete(null);
+                } catch (Exception failure) {
+                    cleanup.completeExceptionally(failure);
+                }
+            });
+            var session = client.createSession(new CreateSessionOptions().setSessionId("delete-pending-tool")
+                    .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                    .setTools(new SessionToolOptions().setDefinitions(
+                            List.of(ToolDefinition.create("blocked_tool", "Blocks", Map.of(), invocation -> {
+                                started.countDown();
+                                return toolFuture;
+                            })))))
+                    .get(5, TimeUnit.SECONDS);
+            server.emitEvent(session.getSessionId(), "external_tool.requested",
+                    Map.of("requestId", "pending-tool", "sessionId", session.getSessionId(), "toolCallId", "call",
+                            "toolName", "blocked_tool", "arguments", Map.of()));
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            // The single worker's barrier runs after the tool future has been attached.
+            deliveries.submit(() -> {
+            }).get(5, TimeUnit.SECONDS);
+
+            var deletion = client.deleteSession(session.getSessionId());
+            cleanup.get(5, TimeUnit.SECONDS);
+            deletion.get(5, TimeUnit.SECONDS);
+            assertTrue(toolFuture.isCancelled());
+            assertNotNull(client.ping("reader remains reachable").get(5, TimeUnit.SECONDS));
+        } finally {
+            awaitDeliveries(deliveries, "The tool worker must finish");
+        }
+    }
+
+    @Test
+    void deletingSessionDoesNotRetireOrUnregisterConcurrentReplacement() throws Exception {
+        try (var server = new Server(); var client = server.createClient()) {
+            var session = createSession(client);
+            String sessionId = session.getSessionId();
+            server.holdDeleteResponse = true;
+            var deletion = client.deleteSession(sessionId);
+            var request = server.heldDeletes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(request, "Deletion must be pending before creating the replacement");
+            var replacement = client
+                    .createSession(new CreateSessionOptions().setSessionId(sessionId)
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)))
+                    .get(5, TimeUnit.SECONDS);
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", request.get("id"), "result", Map.of("success", true)));
+            deletion.get(5, TimeUnit.SECONDS);
+
+            var delivered = new CountDownLatch(1);
+            try (var subscription = replacement.on(SessionIdleEvent.class, event -> delivered.countDown())) {
+                assertNotNull(replacement.send("replacement still attached").get(5, TimeUnit.SECONDS));
+                server.emitIdle(sessionId);
+                assertTrue(delivered.await(5, TimeUnit.SECONDS), "The replacement must remain registered");
+            }
+            assertThrows(IllegalStateException.class, () -> session.on(event -> fail("Deleted session callback")));
+            session.close();
+            assertEquals(0, server.detaches.get(), "Retiring the deleted handle must not detach its replacement");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"before-delete", "after-delete", "replacement"})
+    void deletingSessionRetiresResidentDisplacedByFailedResume(String ordering) throws Exception {
+        try (var server = new Server(); var client = server.createClient()) {
+            var resident = createSession(client);
+            String sessionId = resident.getSessionId();
+            server.holdResumeResponse = true;
+            var resuming = client.resumeSession(sessionId, new ResumeSessionOptions()
+                    .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)));
+            var resumeRequest = server.heldResumes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(resumeRequest, "Resume must displace the resident before deletion starts");
+            server.holdDeleteResponse = true;
+            var deletion = client.deleteSession(sessionId);
+            var deleteRequest = server.heldDeletes.poll(5, TimeUnit.SECONDS);
+            assertNotNull(deleteRequest, "Deletion must capture the provisional resume handle");
+
+            CopilotSession replacement = ordering.equals("replacement")
+                    ? client.createSession(new CreateSessionOptions().setSessionId(sessionId)
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)))
+                            .get(5, TimeUnit.SECONDS)
+                    : null;
+            if (!ordering.equals("before-delete")) {
+                server.writeMessage(
+                        Map.of("jsonrpc", "2.0", "id", deleteRequest.get("id"), "result", Map.of("success", true)));
+                deletion.get(5, TimeUnit.SECONDS);
+            }
+            server.writeMessage(Map.of("jsonrpc", "2.0", "id", resumeRequest.get("id"), "error",
+                    Map.of("code", -32603, "message", "controlled resume failure")));
+            var failure = assertThrows(ExecutionException.class, () -> resuming.get(5, TimeUnit.SECONDS));
+            assertTrue(failure.getCause().getMessage().contains("controlled resume failure"), failure.toString());
+            if (ordering.equals("before-delete")) {
+                server.writeMessage(
+                        Map.of("jsonrpc", "2.0", "id", deleteRequest.get("id"), "result", Map.of("success", true)));
+                deletion.get(5, TimeUnit.SECONDS);
+            }
+
+            assertThrows(IllegalStateException.class, () -> resident.on(event -> fail("Deleted resident callback")));
+            if (replacement != null) {
+                var delivered = new CountDownLatch(1);
+                try (var subscription = replacement.on(SessionIdleEvent.class, event -> delivered.countDown())) {
+                    server.emitIdle(sessionId);
+                    assertTrue(delivered.await(5, TimeUnit.SECONDS), "A newer replacement must remain registered");
+                }
+            } else {
+                server.writeMessage(Map.of("jsonrpc", "2.0", "id", 9_000_001L, "method", "hooks.invoke", "params",
+                        Map.of("sessionId", sessionId, "hookType", "sessionEnd", "input",
+                                Map.of("sessionId", sessionId, "timestamp", 0, "cwd", ".", "reason", "user_exit"))));
+                var reply = server.hookReplies.poll(5, TimeUnit.SECONDS);
+                assertNotNull(reply, "The SDK must acknowledge the session-end hook");
+                assertEquals("Unknown session " + sessionId, reply.path("error").path("message").asText(),
+                        "A failed resume must not restore a deleted registration");
+            }
+            assertEquals(0, server.detaches.get(), "Local retirement must not detach a newer handle");
+        }
+    }
+
+    private static void awaitCollected(WeakReference<?> reference, String message) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (reference.get() != null && System.nanoTime() < deadline) {
+            System.gc();
+            Thread.sleep(10);
+        }
+        assertNull(reference.get(), message);
+    }
+
+    void forceStopEventuallyInterruptsOwnedHandlers() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var interrupted = new CountDownLatch(1);
+        var finished = new CountDownLatch(1);
+        try (var server = new Server(); var client = server.createClient()) {
+            var session = createSession(client);
+            try (var subscription = session.on(event -> {
+                entered.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException error) {
+                    interrupted.countDown();
+                    Thread.currentThread().interrupt();
+                } finally {
+                    finished.countDown();
+                }
+            })) {
+                try {
+                    server.emitIdle(session.getSessionId());
+                    assertTrue(entered.await(5, TimeUnit.SECONDS));
+                    client.forceStop().get(5, TimeUnit.SECONDS);
+                    assertEquals(1, release.getCount(), "Force stop must not join the owned handler");
+                    assertTrue(interrupted.await(CopilotClient.AUTOCLOSEABLE_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS),
+                            "Forced shutdown must eventually interrupt a stuck SDK-owned handler");
+                } finally {
+                    release.countDown();
+                    assertTrue(finished.await(5, TimeUnit.SECONDS), "The owned handler must finish");
+                }
+            }
+        }
+    }
+
+    @Test
+    void handlerErrorDoesNotStrandCorrelatedCompletionWithoutTimeout() throws Exception {
+        try (var server = new Server(); var client = server.createClient()) {
+            server.completionSupported = true;
+            try (var session = createSession(client); var subscription = session.on(SessionIdleEvent.class, event -> {
+                throw new AssertionError("terminal handler failed");
+            })) {
+                var waiting = session.sendAndWait(new MessageOptions().setPrompt("question"), 0);
+                var request = server.completions.poll(5, TimeUnit.SECONDS);
+                assertNotNull(request);
+                var idle = server.emitEvent(session.getSessionId(), "session.idle", Map.of());
+                server.writeMessage(Map.of("jsonrpc", "2.0", "id", request.get("id"), "result",
+                        Map.of("messageId", "owned-request", "aborted", false, "completionEventId", idle.get("id"))));
+                assertNull(waiting.get(5, TimeUnit.SECONDS),
+                        "A failed user handler must not strand the internal completion boundary");
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void handlerFailureDoesNotStrandLegacyCompletionWithoutTimeout(boolean typed, boolean fatal) throws Exception {
+        var failures = new AtomicInteger();
+        try (var server = new Server();
+                var client = server.createClient();
+                var session = createSession(client);
+                var subscription = session.on(event -> {
+                    if (event instanceof com.microsoft.copilot.generated.AssistantMessageEvent
+                            || event instanceof SessionIdleEvent) {
+                        failures.incrementAndGet();
+                        if (fatal) {
+                            throw new AssertionError("response handler failed");
+                        }
+                        throw new IllegalStateException("response handler failed");
+                    }
+                })) {
+            var options = new MessageOptions().setPrompt("question");
+            CompletableFuture<?> waiting = typed
+                    ? session.sendAndWait(options, Answer.class, 0)
+                    : session.sendAndWait(options, 0);
+            assertEquals("question", server.sends.poll(5, TimeUnit.SECONDS),
+                    "The unsupported completion RPC must fall back to a legacy send");
+            server.emitEvent(session.getSessionId(), "assistant.message",
+                    Map.of("messageId", "answer", "content", "{\"value\":42}", "originatingMessageId", "question"));
+            server.emitIdle(session.getSessionId());
+
+            var response = waiting.get(5, TimeUnit.SECONDS);
+            if (typed) {
+                assertEquals(new Answer(42), response);
+            } else {
+                assertEquals("{\"value\":42}",
+                        assertInstanceOf(com.microsoft.copilot.generated.AssistantMessageEvent.class, response)
+                                .getData().content());
+            }
+            assertEquals(2, failures.get(),
+                    "Both response tracking and terminal observers must survive handler failures");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void gracefulCloseDrainsAcceptedEventsWithoutJoiningTheBusyHandler(boolean stopClient) throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var delivered = new java.util.concurrent.LinkedBlockingQueue<String>();
+        try (var server = new Server(); var client = server.createClient()) {
+            var session = createSession(client);
+            try (var first = session.on(event -> {
+                entered.countDown();
+                awaitRelease(release);
+            }); var second = session.on(event -> delivered.add(event.getId().toString()))) {
+                try {
+                    var a = server.emitEvent(session.getSessionId(), "session.idle", Map.of());
+                    assertTrue(entered.await(5, TimeUnit.SECONDS));
+                    var b = server.emitEvent(session.getSessionId(), "session.idle", Map.of());
+                    if (stopClient) {
+                        client.stop().get(5, TimeUnit.SECONDS);
+                    } else {
+                        closeOnOwnThread(session).get(5, TimeUnit.SECONDS);
+                    }
+                    assertEquals(1, release.getCount(), "Close must not join an admitted event handler");
+                    release.countDown();
+                    assertEquals(a.get("id"), delivered.poll(5, TimeUnit.SECONDS));
+                    assertEquals(b.get("id"), delivered.poll(5, TimeUnit.SECONDS),
+                            "Events accepted before the detach ACK must reach every subscriber");
+                } finally {
+                    release.countDown();
+                }
+            }
+        }
+    }
+
+    @Test
+    void admittedHandlerCanWaitForForceStopWithTheDefaultExecutor() throws Exception {
+        var stopped = new CompletableFuture<Void>();
+        try (var server = new Server(); var client = server.createClient()) {
+            var session = createSession(client);
+            try (var subscription = session.on(event -> {
+                try {
+                    client.forceStop().join();
+                    stopped.complete(null);
+                } catch (Throwable failure) {
+                    stopped.completeExceptionally(failure);
+                }
+            })) {
+                server.emitIdle(session.getSessionId());
+                stopped.get(5, TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void admittedHandlerCanWaitForGracefulStopWithInlineExecutors(boolean rejected) throws Exception {
+        var reject = new AtomicBoolean();
+        Executor executor = task -> {
+            if (reject.get()) {
+                throw new java.util.concurrent.RejectedExecutionException("Controlled executor rejection");
+            }
+            task.run();
+        };
+        var stopped = new CompletableFuture<Void>();
+        try (var server = new Server(); var client = server.createClient(executor)) {
+            var session = createSession(client);
+            try (var subscription = session.on(event -> {
+                try {
+                    client.stop().get(5, TimeUnit.SECONDS);
+                    stopped.complete(null);
+                } catch (Exception failure) {
+                    stopped.completeExceptionally(failure);
+                }
+            })) {
+                reject.set(rejected);
+                server.emitIdle(session.getSessionId());
+                stopped.get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    @Test
+    void commonPoolExecutorDeliversCompletionEvents() throws Exception {
+        try (var server = new Server();
+                var client = server.createClient(java.util.concurrent.ForkJoinPool.commonPool())) {
+            server.completionSupported = true;
+            try (var session = createSession(client)) {
+                var waiting = session.sendAndWait(new MessageOptions().setPrompt("question"), 0);
+                var request = server.completions.poll(5, TimeUnit.SECONDS);
+                assertNotNull(request);
+                var idle = server.emitEvent(session.getSessionId(), "session.idle", Map.of());
+                server.writeMessage(Map.of("jsonrpc", "2.0", "id", request.get("id"), "result",
+                        Map.of("messageId", "owned-request", "aborted", false, "completionEventId", idle.get("id"))));
+                assertNull(waiting.get(5, TimeUnit.SECONDS));
+            }
+        }
+    }
+
+    @Test
+    void failedResumePreservesClosingResidentBeforeDetach() throws Exception {
+        var deliveries = Executors.newSingleThreadExecutor();
+        var delivered = new CountDownLatch(1);
+        var hooks = new AtomicInteger();
+        try (var server = new Server(); var client = server.createClient(deliveries)) {
+            server.holdDetachResponse = true;
+            var session = client.createSession(new CreateSessionOptions().setSessionId("closing-resident")
+                    .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL))
+                    .setHooks(new SessionHookOptions()
+                            .setHandlers(new SessionHooks().setOnSessionEnd((input, invocation) -> {
+                                hooks.incrementAndGet();
+                                return CompletableFuture.completedFuture(null);
+                            }))))
+                    .get(5, TimeUnit.SECONDS);
+            try (var subscription = session.on(SessionIdleEvent.class, event -> delivered.countDown())) {
+                var closing = closeOnOwnThread(session);
+                var detach = server.heldDetaches.poll(5, TimeUnit.SECONDS);
+                assertNotNull(detach, "Close must reach detach before resume");
+                try {
+                    server.rejectSessionRequests = true;
+                    var resuming = client.resumeSession(session.getSessionId(),
+                            new ResumeSessionOptions().setPermissions(
+                                    new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)));
+                    var failure = assertThrows(ExecutionException.class, () -> resuming.get(5, TimeUnit.SECONDS));
+                    assertTrue(failure.getCause().getMessage().contains("controlled session rejection"),
+                            failure.toString());
+
+                    server.invokeSessionEnd(session.getSessionId());
+                    assertEquals(1, hooks.get(), "Failed resume must preserve the closing resident's hooks");
+                    server.emitIdle(session.getSessionId());
+                    assertTrue(delivered.await(5, TimeUnit.SECONDS),
+                            "Failed resume must preserve event routing until detach completes");
+                } finally {
+                    server.completeDetach(detach, "success");
+                    closing.get(5, TimeUnit.SECONDS);
+                }
+                assertEquals(1, server.detaches.get(), "Graceful close must still detach once");
+            }
+        } finally {
+            awaitDeliveries(deliveries, "The event worker must finish");
+        }
+    }
+
+    @Test
     void gracefulClosePreservesEventsAndSessionEndHooksUntilDetachCompletes() throws Exception {
         var events = new AtomicInteger();
+        var delivered = new java.util.concurrent.LinkedBlockingQueue<Integer>();
         var hooks = new AtomicInteger();
         try (var server = new Server(); var client = server.createClient()) {
             server.emitDetachCallbacks = true;
@@ -511,11 +1629,12 @@ class ForceStopSessionTest {
                                 return CompletableFuture.completedFuture(null);
                             }))))
                     .get(5, TimeUnit.SECONDS);
-            try (var subscription = session.on(event -> events.incrementAndGet())) {
+            try (var subscription = session.on(event -> delivered.add(events.incrementAndGet()))) {
                 session.close();
                 assertEquals(1, server.detaches.get());
                 assertEquals(1, hooks.get(), "Ordinary detach must still invoke the session-end hook");
-                assertEquals(1, events.get(), "Ordinary detach must deliver events before callback retirement");
+                assertEquals(1, delivered.poll(5, TimeUnit.SECONDS),
+                        "Ordinary detach must deliver events before callback retirement");
                 server.emitIdle(session.getSessionId());
                 client.ping("retired detach callbacks barrier").get(5, TimeUnit.SECONDS);
                 assertEquals(1, events.get(), "Detach completion must retire subsequent callbacks");
@@ -598,16 +1717,22 @@ class ForceStopSessionTest {
                     }
 
                     server.emitIdle(sessionId);
+                    // Delivery is asynchronous; wait for the owner that must receive the event.
+                    awaitCount(unsupportedRecovery ? resumedEvents : events, 1,
+                            "An accepted resume must keep its callbacks even without recovery support");
                     server.invokeSessionEnd(sessionId);
                     assertEquals(unsupportedRecovery ? 0 : 1, hooks.get());
                     assertEquals(unsupportedRecovery ? 0 : 1, events.get());
                     assertEquals(unsupportedRecovery ? 1 : 0, resumedHooks.get());
-                    assertEquals(unsupportedRecovery ? 1 : 0, resumedEvents.get(),
-                            "An accepted resume must keep its callbacks even without recovery support");
+                    assertEquals(unsupportedRecovery ? 1 : 0, resumedEvents.get());
                     assertFalse(closing.isDone(), "Callbacks must complete before detach is acknowledged");
                 }
                 server.emitIdle(sessionId);
                 client.ping("restored resident callback retirement barrier").get(5, TimeUnit.SECONDS);
+                if (unsupportedRecovery) {
+                    awaitCount(resumedEvents, 2,
+                            "The retired resident must not remove an accepted resume's callback owner");
+                }
                 assertEquals(unsupportedRecovery ? 0 : 1, events.get(),
                         "Detach acknowledgement must still retire the resident callbacks");
                 assertEquals(unsupportedRecovery ? 2 : 0, resumedEvents.get(),
@@ -621,6 +1746,7 @@ class ForceStopSessionTest {
     @ValueSource(strings = {"success", "rejected", "rpc-error"})
     void timedOutClosePreservesEventsUntilDetachAcknowledgement(String outcome) throws Exception {
         var events = new AtomicInteger();
+        var delivered = new java.util.concurrent.LinkedBlockingQueue<Integer>();
         var hooks = new AtomicInteger();
         try (var server = new Server(); var client = server.createClient()) {
             server.holdDetachResponse = true;
@@ -633,8 +1759,8 @@ class ForceStopSessionTest {
                                 return CompletableFuture.completedFuture(null);
                             }))))
                     .get(5, TimeUnit.SECONDS);
-            try (var subscription = session.on(event -> events.incrementAndGet())) {
-                var closing = CompletableFuture.runAsync(session::close);
+            try (var subscription = session.on(event -> delivered.add(events.incrementAndGet()))) {
+                var closing = closeOnOwnThread(session);
                 var detach = server.heldDetaches.poll(5, TimeUnit.SECONDS);
                 assertNotNull(detach, "The peer must receive the actual detach request");
                 try (var acknowledgement = (AutoCloseable) () -> {
@@ -642,16 +1768,15 @@ class ForceStopSessionTest {
                     client.ping("detach acknowledgement barrier").get(5, TimeUnit.SECONDS);
                 }) {
                     server.emitIdle(session.getSessionId());
-                    client.ping("before close timeout barrier").get(5, TimeUnit.SECONDS);
-                    assertEquals(1, events.get());
+                    assertEquals(1, delivered.poll(5, TimeUnit.SECONDS));
                     var error = assertThrows(ExecutionException.class, () -> closing.get(10, TimeUnit.SECONDS));
                     var closeError = assertInstanceOf(IllegalStateException.class, error.getCause());
                     assertEquals("Failed to detach session " + session.getSessionId(), closeError.getMessage());
                     assertInstanceOf(TimeoutException.class, closeError.getCause());
 
                     server.emitIdle(session.getSessionId());
-                    client.ping("after close timeout barrier").get(5, TimeUnit.SECONDS);
-                    assertEquals(2, events.get(), "A caller timeout must not retire callbacks before the detach ACK");
+                    assertEquals(2, delivered.poll(5, TimeUnit.SECONDS),
+                            "A caller timeout must not retire callbacks before the detach ACK");
                     server.invokeSessionEnd(session.getSessionId());
                     assertEquals(1, hooks.get(), "The session-end hook must survive the caller's timeout too");
                     session.close();
@@ -668,6 +1793,8 @@ class ForceStopSessionTest {
     void interruptedCloseKeepsCallbacksAndLateAcknowledgementDoesNotRetireReplacement() throws Exception {
         var events = new AtomicInteger();
         var replacementEvents = new AtomicInteger();
+        var delivered = new java.util.concurrent.LinkedBlockingQueue<Integer>();
+        var replacementDelivered = new java.util.concurrent.LinkedBlockingQueue<Integer>();
         var closeFailure = new AtomicReference<RuntimeException>();
         var interrupted = new AtomicBoolean();
         try (var server = new Server(); var client = server.createClient()) {
@@ -681,7 +1808,7 @@ class ForceStopSessionTest {
                     interrupted.set(Thread.currentThread().isInterrupted());
                 }
             }, "interrupted-session-close");
-            try (var subscription = session.on(event -> events.incrementAndGet())) {
+            try (var subscription = session.on(event -> delivered.add(events.incrementAndGet()))) {
                 var detach = new AtomicReference<JsonNode>();
                 try (var join = (AutoCloseable) () -> {
                     closing.join(10000);
@@ -702,23 +1829,22 @@ class ForceStopSessionTest {
                     assertInstanceOf(InterruptedException.class, error.getCause());
                     assertTrue(interrupted.get(), "Close must restore the caller's interrupt flag");
                     server.emitIdle(session.getSessionId());
-                    client.ping("interrupted close callback barrier").get(5, TimeUnit.SECONDS);
-                    assertEquals(1, events.get(), "Interrupting the caller must not retire pending detach callbacks");
+                    assertEquals(1, delivered.poll(5, TimeUnit.SECONDS),
+                            "Interrupting the caller must not retire pending detach callbacks");
 
                     var replacement = client
                             .resumeSession(session.getSessionId(),
                                     new ResumeSessionOptions().setPermissions(
                                             new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)))
                             .get(5, TimeUnit.SECONDS);
-                    try (var replacementSubscription = replacement.on(event -> replacementEvents.incrementAndGet())) {
+                    try (var replacementSubscription = replacement
+                            .on(event -> replacementDelivered.add(replacementEvents.incrementAndGet()))) {
                         server.emitIdle(replacement.getSessionId());
-                        client.ping("replacement callback barrier").get(5, TimeUnit.SECONDS);
-                        assertEquals(1, replacementEvents.get());
+                        assertEquals(1, replacementDelivered.poll(5, TimeUnit.SECONDS));
                         server.completeDetach(detach.get(), "success");
                         detach.set(null);
                         server.emitIdle(replacement.getSessionId());
-                        client.ping("old detach settled barrier").get(5, TimeUnit.SECONDS);
-                        assertEquals(2, replacementEvents.get(),
+                        assertEquals(2, replacementDelivered.poll(5, TimeUnit.SECONDS),
                                 "An old detach completion must not retire the replacement's callbacks");
                         assertEquals(1, events.get(), "New-generation events must not reach old subscriptions");
                         client.forceStop().get(5, TimeUnit.SECONDS);
@@ -734,7 +1860,7 @@ class ForceStopSessionTest {
         try (var server = new Server(); var client = server.createClient()) {
             server.holdDetachResponse = true;
             var session = createSession(client);
-            var closing = CompletableFuture.runAsync(session::close);
+            var closing = closeOnOwnThread(session);
             assertNotNull(server.heldDetaches.poll(5, TimeUnit.SECONDS), "Detach must be pending on the real peer");
             if (timeoutFirst) {
                 var error = assertThrows(ExecutionException.class, () -> closing.get(10, TimeUnit.SECONDS));
@@ -762,30 +1888,25 @@ class ForceStopSessionTest {
     void forceStopAfterCloseTimeoutDropsUnadmittedCallbacks() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var dispatchThread = new AtomicReference<Thread>();
+        var deliveries = Executors.newCachedThreadPool();
         var laterCalls = new AtomicInteger();
         var errorCalls = new AtomicInteger();
-        try (var server = new Server(); var client = server.createClient()) {
+        try (var server = new Server(); var client = server.createClient(deliveries)) {
             server.holdDetachResponse = true;
             var session = createSession(client);
             session.setEventErrorHandler((event, error) -> errorCalls.incrementAndGet());
             try (var first = session.on(event -> {
-                dispatchThread.set(Thread.currentThread());
                 entered.countDown();
                 awaitRelease(release);
                 throw new IllegalStateException("Admitted callback failed after forced retirement");
             }); var second = session.on(event -> laterCalls.incrementAndGet())) {
-                var closing = CompletableFuture.runAsync(session::close);
+                var closing = closeOnOwnThread(session);
                 assertNotNull(server.heldDetaches.poll(5, TimeUnit.SECONDS));
                 var error = assertThrows(ExecutionException.class, () -> closing.get(10, TimeUnit.SECONDS));
                 assertInstanceOf(TimeoutException.class, error.getCause().getCause());
                 try (var gate = (AutoCloseable) () -> {
                     release.countDown();
-                    var thread = dispatchThread.get();
-                    if (thread != null) {
-                        thread.join(5000);
-                        assertFalse(thread.isAlive(), "The owned reader must exit after callback release");
-                    }
+                    awaitDeliveries(deliveries, "The admitted callback must finish after its release");
                 }) {
                     server.emitIdle(session.getSessionId());
                     assertTrue(entered.await(5, TimeUnit.SECONDS), "Post-timeout callback must still be admitted");
@@ -819,12 +1940,11 @@ class ForceStopSessionTest {
     void forceStopDropsRemainingSnapshotHandlersWithoutJoiningAnAdmittedHandler() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var dispatchThread = new AtomicReference<Thread>();
+        var deliveries = Executors.newCachedThreadPool();
         var laterCalls = new AtomicInteger();
-        try (var server = new Server(); var client = server.createClient()) {
+        try (var server = new Server(); var client = server.createClient(deliveries)) {
             var session = createSession(client);
             try (var first = session.on(event -> {
-                dispatchThread.set(Thread.currentThread());
                 entered.countDown();
                 awaitRelease(release);
             }); var second = session.on(event -> laterCalls.incrementAndGet())) {
@@ -835,11 +1955,7 @@ class ForceStopSessionTest {
                     assertEquals(1, release.getCount(), "Force stop must not require releasing the user handler");
                 } finally {
                     release.countDown();
-                    Thread thread = dispatchThread.get();
-                    if (thread != null) {
-                        thread.join(5000);
-                        assertFalse(thread.isAlive(), "The stopped event reader must finish after its handler");
-                    }
+                    awaitDeliveries(deliveries, "The admitted handler must finish after its release");
                 }
                 assertEquals(0, laterCalls.get(), "Retirement must discard the retained dispatch snapshot");
             }
@@ -850,14 +1966,13 @@ class ForceStopSessionTest {
     void forceStopRetiresErrorCallbacksWhileGracefulCloseAwaitsDetach() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var dispatchThread = new AtomicReference<Thread>();
+        var deliveries = Executors.newCachedThreadPool();
         var errorCalls = new AtomicInteger();
-        try (var server = new Server(); var client = server.createClient()) {
+        try (var server = new Server(); var client = server.createClient(deliveries)) {
             server.holdDetachResponse = true;
             var session = createSession(client);
             session.setEventErrorHandler((event, error) -> errorCalls.incrementAndGet());
             try (var first = session.on(event -> {
-                dispatchThread.set(Thread.currentThread());
                 entered.countDown();
                 awaitRelease(release);
                 throw new IllegalStateException("Admitted handler failed after forced retirement");
@@ -865,27 +1980,18 @@ class ForceStopSessionTest {
                 try {
                     server.emitIdle(session.getSessionId());
                     assertTrue(entered.await(5, TimeUnit.SECONDS), "The first snapshot handler must be admitted");
-                    var closing = CompletableFuture.runAsync(session::close);
+                    var closing = closeOnOwnThread(session);
                     assertTrue(server.detachEntered.await(5, TimeUnit.SECONDS), "Graceful close must await detach");
-                    // Prevent graceful close's final retirement from masking force escalation.
-                    synchronized (session) {
-                        client.forceStop().get(5, TimeUnit.SECONDS);
-                        assertFalse(closing.isDone(), "Graceful close must still await its final retirement");
-                        release.countDown();
-                        Thread thread = dispatchThread.get();
-                        thread.join(5000);
-                        assertFalse(thread.isAlive(), "The stopped reader must finish its admitted handler");
-                        assertEquals(0, errorCalls.get(), "Force stop must discard the unadmitted error callback");
-                    }
+                    client.forceStop().get(5, TimeUnit.SECONDS);
                     var detachError = assertThrows(ExecutionException.class, () -> closing.get(5, TimeUnit.SECONDS));
                     assertInstanceOf(IllegalStateException.class, detachError.getCause());
+                    assertEquals(1, release.getCount(), "Shutdown must not join the admitted callback");
+                    release.countDown();
+                    awaitDeliveries(deliveries, "The admitted handler must finish after its release");
+                    assertEquals(0, errorCalls.get(), "Force stop must discard the unadmitted error callback");
                 } finally {
                     release.countDown();
-                    Thread thread = dispatchThread.get();
-                    if (thread != null) {
-                        thread.join(5000);
-                        assertFalse(thread.isAlive(), "The event reader must finish after forced cleanup");
-                    }
+                    awaitDeliveries(deliveries, "The admitted handler must finish after forced cleanup");
                 }
             }
         }
@@ -927,22 +2033,30 @@ class ForceStopSessionTest {
                             "The first fallback must admit its legacy wait before the terminal event");
                 }
                 client.ping("second send acknowledgment").get(5, TimeUnit.SECONDS);
-                if (terminalError) {
-                    server.emitEvent(session.getSessionId(), "session.error",
-                            Map.of("errorType", "query", "message", "original terminal failure"));
-                } else {
-                    server.emitEvent(session.getSessionId(), "assistant.message",
-                            Map.of("messageId", "terminal-message", "content", "completed before retirement",
-                                    "originatingMessageId", "completed terminal"));
-                    server.emitIdle(session.getSessionId());
+                var terminalDelivered = new CompletableFuture<Void>();
+                try (var subscription = session.on(event -> {
+                    if (event instanceof SessionIdleEvent
+                            || event instanceof com.microsoft.copilot.generated.SessionErrorEvent) {
+                        terminalDelivered.complete(null);
+                    }
+                })) {
+                    if (terminalError) {
+                        server.emitEvent(session.getSessionId(), "session.error",
+                                Map.of("errorType", "query", "message", "original terminal failure"));
+                    } else {
+                        server.emitEvent(session.getSessionId(), "assistant.message",
+                                Map.of("messageId", "terminal-message", "content", "completed before retirement",
+                                        "originatingMessageId", "completed terminal"));
+                        server.emitIdle(session.getSessionId());
+                    }
+                    terminalDelivered.get(5, TimeUnit.SECONDS);
                 }
-                client.ping("terminal dispatch acknowledgment").get(5, TimeUnit.SECONDS);
                 assertFalse(completed.isDone(), "The received terminal outcome must still await scheduler handoff");
 
                 if (force) {
                     client.forceStop().get(5, TimeUnit.SECONDS);
                 } else {
-                    CompletableFuture.runAsync(session::close).get(5, TimeUnit.SECONDS);
+                    closeOnOwnThread(session).get(5, TimeUnit.SECONDS);
                 }
                 if (terminalError) {
                     var error = assertThrows(ExecutionException.class, () -> completed.get(5, TimeUnit.SECONDS));
@@ -1017,7 +2131,7 @@ class ForceStopSessionTest {
                 awaitRelease(release);
             });
             try (var gate = (AutoCloseable) release::countDown) {
-                CompletableFuture.runAsync(session::close).get(5, TimeUnit.SECONDS);
+                closeOnOwnThread(session).get(5, TimeUnit.SECONDS);
                 assertTrue(entered.await(5, TimeUnit.SECONDS), "Retirement must admit both blocked continuations");
                 var plainError = assertThrows(ExecutionException.class, () -> plain.get(5, TimeUnit.SECONDS));
                 var structuredError = assertThrows(ExecutionException.class, () -> structured.get(5, TimeUnit.SECONDS));
@@ -1037,17 +2151,21 @@ class ForceStopSessionTest {
     @Test
     void duplicateUntypedSubscriptionsStillDispatchOnceAndShareUnsubscription() throws Exception {
         var calls = new AtomicInteger();
+        var delivered = new java.util.concurrent.LinkedBlockingQueue<Integer>();
         try (var server = new Server(); var client = server.createClient()) {
             var session = createSession(client);
-            Consumer<SessionEvent> handler = event -> calls.incrementAndGet();
+            Consumer<SessionEvent> handler = event -> delivered.add(calls.incrementAndGet());
             try (var first = session.on(handler); var second = session.on(handler)) {
                 server.emitIdle(session.getSessionId());
-                client.ping("first dispatch barrier").get(5, TimeUnit.SECONDS);
+                assertEquals(1, delivered.poll(5, TimeUnit.SECONDS));
                 assertEquals(1, calls.get());
 
                 first.close();
-                server.emitIdle(session.getSessionId());
-                client.ping("unsubscription barrier").get(5, TimeUnit.SECONDS);
+                var afterUnsubscribe = new CompletableFuture<Void>();
+                try (var observer = session.on(event -> afterUnsubscribe.complete(null))) {
+                    server.emitIdle(session.getSessionId());
+                    afterUnsubscribe.get(5, TimeUnit.SECONDS);
+                }
                 assertEquals(1, calls.get());
                 client.forceStop().get(5, TimeUnit.SECONDS);
             }
@@ -1055,7 +2173,84 @@ class ForceStopSessionTest {
     }
 
     @Test
-    void stopRetiresSessionsEvenWhenTheCallersExecutorNeverStartsDetach() throws Exception {
+    void queuedEventsRetainTheirOriginalSubscribersButHonorUnsubscription() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var deliveries = Executors.newCachedThreadPool();
+        var removedCalls = new AtomicInteger();
+        var received = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        var delivered = new CompletableFuture<Void>();
+        try (var server = new Server();
+                var client = server.createClient(deliveries);
+                var session = createSession(client);
+                var first = session.on(SessionIdleEvent.class, event -> {
+                    entered.countDown();
+                    awaitRelease(release);
+                });
+                var removed = session.on(event -> removedCalls.incrementAndGet())) {
+            try {
+                server.emitIdle(session.getSessionId());
+                assertTrue(entered.await(5, TimeUnit.SECONDS), "The first handler must be running");
+                server.emitIdle(session.getSessionId());
+                client.ping("queued event read barrier").get(5, TimeUnit.SECONDS);
+                removed.close();
+                try (var later = session.on(event -> {
+                    received.add(event.getId().toString());
+                    delivered.complete(null);
+                })) {
+                    var fresh = server.emitEvent(session.getSessionId(), "session.idle", Map.of());
+                    release.countDown();
+                    delivered.get(5, TimeUnit.SECONDS);
+                    assertEquals(List.of(fresh.get("id")), received,
+                            "A new subscriber must not receive events accepted before registration");
+                    assertEquals(0, removedCalls.get(), "Unsubscription must still suppress queued callbacks");
+                }
+            } finally {
+                release.countDown();
+            }
+        } finally {
+            awaitDeliveries(deliveries, "The event executor must stop");
+        }
+    }
+
+    @Test
+    void legacyWaitIgnoresErrorsQueuedBeforeItsSubscription() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var deliveries = Executors.newCachedThreadPool();
+        try (var server = new Server();
+                var client = server.createClient(deliveries);
+                var session = createSession(client);
+                var first = session.on(SessionIdleEvent.class, event -> {
+                    entered.countDown();
+                    awaitRelease(release);
+                })) {
+            try {
+                server.emitIdle(session.getSessionId());
+                assertTrue(entered.await(5, TimeUnit.SECONDS), "The first handler must be running");
+                server.emitEvent(session.getSessionId(), "session.error",
+                        Map.of("errorType", "query", "message", "stale failure"));
+                client.ping("stale error read barrier").get(5, TimeUnit.SECONDS);
+
+                var waiting = session.sendAndWait(new MessageOptions().setPrompt("new request"), 0);
+                assertEquals("new request", server.sends.poll(5, TimeUnit.SECONDS),
+                        "The legacy wait must subscribe before its response events arrive");
+                server.emitEvent(session.getSessionId(), "assistant.message", Map.of("messageId", "new response",
+                        "content", "{\"value\":42}", "originatingMessageId", "new request"));
+                server.emitIdle(session.getSessionId());
+                release.countDown();
+
+                assertEquals("{\"value\":42}", waiting.get(5, TimeUnit.SECONDS).getData().content());
+            } finally {
+                release.countDown();
+            }
+        } finally {
+            awaitDeliveries(deliveries, "The event executor must stop");
+        }
+    }
+
+    @Test
+    void stopDetachesSessionsEvenWhenTheCallersExecutorIsOccupied() throws Exception {
         var executor = Executors.newSingleThreadExecutor();
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
@@ -1075,7 +2270,7 @@ class ForceStopSessionTest {
             assertThrows(IllegalStateException.class, () -> session.send("after stop"));
             var error = assertThrows(ExecutionException.class, () -> waiting.get(5, TimeUnit.SECONDS));
             assertEquals("Session closed before response completed", error.getCause().getMessage());
-            assertEquals(0, server.detaches.get(), "The blocked executor must not have sent detach");
+            assertEquals(1, server.detaches.get(), "Detach must not wait for the blocked executor");
         } finally {
             release.countDown();
             executor.shutdownNow();
@@ -1174,7 +2369,7 @@ class ForceStopSessionTest {
     void oldStopDoesNotClearSessionsOrTokenProvidersFromANewConnection() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var events = new AtomicInteger();
+        var delivered = new CountDownLatch(1);
         var toolEntered = new CountDownLatch(1);
         try (var server = new Server(); var client = server.createClient()) {
             var oldSession = createSession(client);
@@ -1202,13 +2397,13 @@ class ForceStopSessionTest {
                             .get(5, TimeUnit.SECONDS);
                     var request = nextServer.creates.poll(5, TimeUnit.SECONDS);
                     assertNotNull(request);
-                    try (var subscription = replacement.on(event -> events.incrementAndGet())) {
+                    try (var subscription = replacement.on(event -> delivered.countDown())) {
                         release.countDown();
                         stopping.get(5, TimeUnit.SECONDS);
                         assertThrows(ExecutionException.class, () -> continuation.get(5, TimeUnit.SECONDS));
                         nextServer.emitIdle(replacement.getSessionId());
-                        client.ping("replacement routing barrier").get(5, TimeUnit.SECONDS);
-                        assertEquals(1, events.get(), "An old stop must preserve the new session's routing");
+                        assertTrue(delivered.await(5, TimeUnit.SECONDS),
+                                "An old stop must preserve the new session's routing");
                         var tokenReply = nextServer.invokeToken(
                                 request.path("params").path("github").path("tokenProviderRegistrationId").asText(),
                                 replacement.getSessionId());
@@ -1234,23 +2429,13 @@ class ForceStopSessionTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void callerCompletionOfStopCannotSuppressRegistryCleanup(boolean timeout) throws Exception {
-        var queueTasks = new AtomicBoolean();
-        var queued = new CountDownLatch(1);
-        var tasks = new java.util.concurrent.ConcurrentLinkedQueue<Runnable>();
-        Executor executor = task -> {
-            if (queueTasks.get()) {
-                tasks.add(task);
-                queued.countDown();
-            } else {
-                task.run();
-            }
-        };
-        try (var server = new Server(); var client = server.createClient(executor)) {
+        try (var server = new Server(); var client = server.createClient()) {
+            server.holdDetachResponse = true;
             var session = createSession(client);
             try (var nextServer = new Server(server.listener)) {
-                queueTasks.set(true);
                 var stopping = client.stop();
-                assertTrue(queued.await(5, TimeUnit.SECONDS), "The caller-owned executor must accept queued detach");
+                assertNotNull(server.heldDetaches.poll(5, TimeUnit.SECONDS),
+                        "The server must hold detach before caller completion");
                 if (timeout) {
                     var error = assertThrows(ExecutionException.class,
                             () -> stopping.orTimeout(1, TimeUnit.MILLISECONDS).get(5, TimeUnit.SECONDS));
@@ -1259,8 +2444,6 @@ class ForceStopSessionTest {
                     assertTrue(stopping.cancel(false));
                 }
                 assertTrue(server.peerClosed.await(8, TimeUnit.SECONDS), "Private shutdown must still close transport");
-                tasks.clear();
-                queueTasks.set(false);
                 client.start().get(5, TimeUnit.SECONDS);
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 JsonNode reply = null;
@@ -1279,8 +2462,6 @@ class ForceStopSessionTest {
                 assertEquals("Unknown session " + session.getSessionId(), reply.path("error").path("message").asText(),
                         "Caller completion must not retain old session registrations: " + reply);
                 client.stop().get(5, TimeUnit.SECONDS);
-            } finally {
-                queueTasks.set(false);
             }
         }
     }
@@ -1296,6 +2477,7 @@ class ForceStopSessionTest {
             task.run();
         };
         var events = new AtomicInteger();
+        var eventDelivered = new CountDownLatch(1);
         var hooks = new AtomicInteger();
         try (var server = new Server(); var client = server.createClient(executor)) {
             server.holdDetachResponse = true;
@@ -1307,14 +2489,19 @@ class ForceStopSessionTest {
                                 return CompletableFuture.completedFuture(null);
                             }))))
                     .get(5, TimeUnit.SECONDS);
-            try (var subscription = session.on(event -> events.incrementAndGet())) {
+            try (var subscription = session.on(event -> {
+                events.incrementAndGet();
+                eventDelivered.countDown();
+            })) {
                 reject.set(rejected);
                 var stopping = client.stop();
                 var detach = server.heldDetaches.poll(5, TimeUnit.SECONDS);
                 assertNotNull(detach, "The peer must receive detach before emitting its final callbacks");
                 server.emitIdle(session.getSessionId());
                 client.ping("stop callback routing barrier").get(5, TimeUnit.SECONDS);
-                assertEquals(1, events.get(), "Stop must retain event routing until detach settles");
+                assertTrue(eventDelivered.await(5, TimeUnit.SECONDS),
+                        "Stop must retain event routing until detach settles");
+                assertEquals(1, events.get(), "Stop must deliver the event exactly once");
                 server.invokeSessionEnd(session.getSessionId());
                 assertEquals(1, hooks.get(), "Stop must retain hook routing until detach settles");
                 server.completeDetach(detach, "success");
@@ -1477,6 +2664,47 @@ class ForceStopSessionTest {
         }
     }
 
+    /**
+     * Waits for event delivery on the client's executor to finish once its handler
+     * is released.
+     */
+    /**
+     * Waits for an asynchronously delivered handler count. An RPC round trip orders
+     * reads on the connection, not handler completion on the delivery executor.
+     */
+    private static void awaitCount(AtomicInteger count, int expected, String message) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (count.get() < expected && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(expected, count.get(), message);
+    }
+
+    private static void awaitDeliveries(ExecutorService deliveries, String message) throws InterruptedException {
+        deliveries.shutdown();
+        assertTrue(deliveries.awaitTermination(5, TimeUnit.SECONDS), message);
+    }
+
+    /**
+     * Closes the session from a caller thread of its own. On JDK 25 the default
+     * async pool is the common pool even when it is one worker wide, and an
+     * admitted handler may be holding that worker.
+     */
+    private static CompletableFuture<Void> closeOnOwnThread(CopilotSession session) {
+        var closing = new CompletableFuture<Void>();
+        var thread = new Thread(() -> {
+            try {
+                session.close();
+                closing.complete(null);
+            } catch (Throwable failure) {
+                closing.completeExceptionally(failure);
+            }
+        }, "force-stop-session-close");
+        thread.setDaemon(true);
+        thread.start();
+        return closing;
+    }
+
     private static void awaitRelease(CountDownLatch release) {
         boolean interrupted = false;
         try {
@@ -1557,18 +2785,23 @@ class ForceStopSessionTest {
         private final CountDownLatch detachEntered = new CountDownLatch(1);
         private final CountDownLatch peerClosed = new CountDownLatch(1);
         private final java.util.concurrent.BlockingQueue<JsonNode> heldDetaches = new java.util.concurrent.LinkedBlockingQueue<>();
+        private final java.util.concurrent.BlockingQueue<JsonNode> heldDeletes = new java.util.concurrent.LinkedBlockingQueue<>();
+        private final java.util.concurrent.BlockingQueue<JsonNode> heldResumes = new java.util.concurrent.LinkedBlockingQueue<>();
+        private final java.util.concurrent.BlockingQueue<JsonNode> heldOptions = new java.util.concurrent.LinkedBlockingQueue<>();
         private final java.util.concurrent.BlockingQueue<JsonNode> hookReplies = new java.util.concurrent.LinkedBlockingQueue<>();
         private final java.util.concurrent.BlockingQueue<JsonNode> creates = new java.util.concurrent.LinkedBlockingQueue<>();
         private final java.util.concurrent.BlockingQueue<JsonNode> heldPings = new java.util.concurrent.LinkedBlockingQueue<>();
-        private final java.util.concurrent.BlockingQueue<JsonNode> heldResumes = new java.util.concurrent.LinkedBlockingQueue<>();
         private final java.util.concurrent.BlockingQueue<JsonNode> heldConnects = new java.util.concurrent.LinkedBlockingQueue<>();
         private final java.util.concurrent.BlockingQueue<JsonNode> toolReplies = new java.util.concurrent.LinkedBlockingQueue<>();
         private volatile Socket socket;
         private volatile boolean closed;
         private volatile boolean emitDetachCallbacks;
         private volatile boolean holdDetachResponse;
+        private volatile boolean holdDeleteResponse;
         private volatile boolean holdResumeResponse;
+        private volatile boolean holdOptions;
         private volatile boolean completionSupported;
+        private volatile boolean rejectSessionRequests;
         private volatile boolean holdPing;
         private volatile boolean holdResume;
         private volatile boolean holdConnect;
@@ -1684,16 +2917,27 @@ class ForceStopSessionTest {
                         cancellations.add(params.get("id"));
                         continue;
                     }
+                    if (rejectSessionRequests && (request.path("method").asText().equals("session.create")
+                            || request.path("method").asText().equals("session.resume"))) {
+                        writeMessage(Map.of("jsonrpc", "2.0", "id", request.get("id"), "error",
+                                Map.of("code", -32603, "message", "controlled session rejection")));
+                        continue;
+                    }
                     if (holdConnect && request.path("method").asText().equals("connect")) {
                         heldConnects.add(request);
                         continue;
                     }
                     if (holdResumeResponse && request.path("method").asText().equals("session.resume")) {
                         resumes.add(request);
+                        heldResumes.add(request);
                         continue;
                     }
                     if (holdResume && request.path("method").asText().equals("session.resume")) {
                         heldResumes.add(request);
+                        continue;
+                    }
+                    if (holdOptions && request.path("method").asText().equals("session.options.update")) {
+                        heldOptions.add(request);
                         continue;
                     }
                     if (holdPing && request.path("method").asText().equals("ping")) {
@@ -1709,6 +2953,10 @@ class ForceStopSessionTest {
                         detaches.incrementAndGet();
                         heldDetaches.add(request);
                         detachEntered.countDown();
+                        continue;
+                    }
+                    if (holdDeleteResponse && request.path("method").asText().equals("session.delete")) {
+                        heldDeletes.add(request);
                         continue;
                     }
                     if (!request.has("method") && request.path("id").asLong() == 9_000_000L) {
@@ -1747,6 +2995,7 @@ class ForceStopSessionTest {
                             detaches.incrementAndGet();
                             yield Map.of("success", true);
                         }
+                        case "session.delete" -> Map.of("success", true);
                         case "session.options.update" -> Map.of();
                         case "ping" -> Map.of("message", params.path("message").asText(), "protocolVersion",
                                 SdkProtocolVersion.get());

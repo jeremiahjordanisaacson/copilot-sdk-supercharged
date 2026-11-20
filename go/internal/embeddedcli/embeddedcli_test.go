@@ -548,8 +548,8 @@ func TestInstallAtExistingBinaryHashMismatch(t *testing.T) {
 	}
 
 	_, err := installAt(tempDir)
-	if err == nil || !strings.Contains(err.Error(), "hash mismatch") {
-		t.Fatalf("expected hash mismatch error, got %v", err)
+	if err == nil || err.Error() != "existing binary hash mismatch" {
+		t.Fatalf("expected existing binary hash mismatch error, got %v", err)
 	}
 }
 

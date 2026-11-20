@@ -13,7 +13,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import javax.annotation.processing.Generated;
 
 /**
- * Session event "session.error". Session error details for timeline display. Request-correlated completion RPC failures carry the terminal error's same fields in their error data, with stack and completionEventId.
+ * Session event "session.error". Session error details for timeline display. Request-correlated completion RPC failures carry the terminal error's same fields in their error data, with stack and completionEventId. errorCode is an optional runtime or Copilot API classification, not a closed enum; clients must tolerate unknown values. CAPI HTTP 429 normalizes missing or unknown codes to rate_limited, while HTTP 402 forwards upstream codes or omits an absent code. Direct BYOK provider codes use the separate providerErrorCode field. A code alone does not define remediation or retry policy.
  * @since 1.0.0
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -38,9 +38,9 @@ public final class SessionErrorEvent extends SessionEvent {
         @JsonProperty("originatingMessageId") String originatingMessageId,
         /** Category of error (e.g., "authentication", "authorization", "policy", "quota", "rate_limit", "context_limit", "query") */
         @JsonProperty("errorType") String errorType,
-        /** Fine-grained error code from the upstream provider, when available. For `errorType: "rate_limit"`, this is one of the `RateLimitErrorCode` values (e.g., `"user_weekly_rate_limited"`, `"user_global_rate_limited"`, `"rate_limited"`, `"user_model_rate_limited"`, `"integration_rate_limited"`). For `errorType: "quota"`, this is the CAPI quota error code (e.g., `"quota_exceeded"`, `"session_quota_exceeded"`, `"billing_not_configured"`). */
+        /** Optional fine-grained runtime or Copilot API classification; an extensible string, not a closed enum. May be absent; clients must tolerate unknown values. Runtime-local codes include `ai_credit_soft_cap_exhausted` (`errorType: "session_limits"`) and `no_account` (`errorType: "authentication"`): the session has no account, or no credential resolves for its account, so no request was sent. Session RPC rejections for the same state carry `no_account` in their error data. Policy codes include `misalignment_policy_violation` and `cyber_policy`. CAPI rate limits normalize missing or unknown codes to `rate_limited`; recognized codes also include `user_model_rate_limited`, `user_global_rate_limited`, `user_weekly_rate_limited`, and `integration_rate_limited`. HTTP 402 quota failures forward upstream codes, including unknown values, or omit the field if no code is available. Other terminal CAPI query failures expose only reviewed codes. Direct BYOK provider codes use providerErrorCode instead. A code alone does not define remediation or retry policy. */
         @JsonProperty("errorCode") String errorCode,
-        /** Provider-defined error code, when available; unset otherwise. Unlike errorCode, this is not a runtime or Copilot API classification and does not imply a remediation or retry policy. */
+        /** Exact error code from the model endpoint's structured error envelope (Copilot API, BYOK, or another provider), preserved verbatim when available; unset otherwise. Unlike errorCode, this is not a runtime or Copilot API classification and does not imply a remediation or retry policy. */
         @JsonProperty("providerErrorCode") String providerErrorCode,
         /** Provider-defined error type preserved from a structured upstream error envelope, when available (for example, `invalid_request_error`). */
         @JsonProperty("providerErrorType") String providerErrorType,
@@ -61,7 +61,11 @@ public final class SessionErrorEvent extends SessionEvent {
         /** Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation */
         @JsonProperty("serviceRequestId") String serviceRequestId,
         /** Optional URL associated with this error that the user can open in a browser */
-        @JsonProperty("url") String url
+        @JsonProperty("url") String url,
+        /** Identifier of the agent-loop turn whose model call failed, matching that turn's assistant.turn_start turnId within the request named by originatingMessageId. Absent when the failure happened outside a model turn. */
+        @JsonProperty("turnId") String turnId,
+        /** Typed DLP block, set only when providerErrorCode is a known DLP code. Classified from the exact code, never from the message or HTTP status. Other provider codes remain in providerErrorCode. */
+        @JsonProperty("dlpBlock") DlpBlockKind dlpBlock
     ) {
 
         /**
@@ -97,6 +101,8 @@ public final class SessionErrorEvent extends SessionEvent {
             private String providerCallId;
             private String serviceRequestId;
             private String url;
+            private String turnId;
+            private DlpBlockKind dlpBlock;
 
             /**
              * Sets the {@code originatingMessageId} property.
@@ -253,6 +259,28 @@ public final class SessionErrorEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code turnId} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder turnId(String value) {
+                this.turnId = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code dlpBlock} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder dlpBlock(DlpBlockKind value) {
+                this.dlpBlock = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
@@ -261,7 +289,7 @@ public final class SessionErrorEvent extends SessionEvent {
             public SessionErrorEventData build() {
                 if (errorType == null) throw new IllegalStateException("Missing required property: errorType");
                 if (message == null) throw new IllegalStateException("Missing required property: message");
-                return new SessionErrorEventData(originatingMessageId, errorType, errorCode, providerErrorCode, providerErrorType, providerErrorParam, eligibleForAutoSwitch, message, remediation, stack, statusCode, providerCallId, serviceRequestId, url);
+                return new SessionErrorEventData(originatingMessageId, errorType, errorCode, providerErrorCode, providerErrorType, providerErrorParam, eligibleForAutoSwitch, message, remediation, stack, statusCode, providerCallId, serviceRequestId, url, turnId, dlpBlock);
             }
         }
     }

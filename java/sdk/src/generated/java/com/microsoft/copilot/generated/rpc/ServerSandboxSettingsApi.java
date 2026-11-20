@@ -38,4 +38,48 @@ final class ServerSandboxSettingsApi {
         return caller.invoke("sandbox.settings.applyDefaults", params, JsonNode.class);
     }
 
+    /**
+     * Resolves the settings file for an explicit host context. Editors can capture their file baseline before an asynchronous settings read.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<String> getPath(SandboxSettingsGetPathParams params) {
+        return caller.invoke("sandbox.settings.getPath", params, String.class);
+    }
+
+    /**
+     * Reads sandbox settings from the supplied host context and applies runtime defaults. Editors and other local hosts can inspect both the resolved settings and the sparse stored override.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SandboxSettingsLoadResult> load(SandboxSettingsLoadParams params) {
+        return caller.invoke("sandbox.settings.load", params, SandboxSettingsLoadResult.class);
+    }
+
+    /**
+     * Merges and persists a sandbox settings patch under the runtime settings transaction. Filesystem, network, and seatbelt patches update userPolicy without replacing unrelated settings.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<Void> update(SandboxSettingsUpdateParams params) {
+        return caller.invoke("sandbox.settings.update", params, Void.class);
+    }
+
+    /**
+     * Saves an accepted sandbox path grant for future sessions. Grants remain literal, duplicate entries are not added, and reported read-only entries are removed only by their exact stored spelling.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<Void> persistPathGrant(SandboxSettingsPersistPathGrantParams params) {
+        return caller.invoke("sandbox.settings.persistPathGrant", params, Void.class);
+    }
+
 }

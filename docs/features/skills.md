@@ -126,6 +126,7 @@ func main() {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
 using Microsoft.Copilot;
 using Microsoft.Copilot.Rpc;
 
@@ -344,7 +345,7 @@ skills/
     └── SKILL.md
 ```
 
-The `skillDirectories` option points to the parent directory (e.g., `./skills`). The runtime searches that directory recursively and loads the topmost `SKILL.md` on each path, so skills grouped in category folders (for example `skills/testing/coverage/SKILL.md`) are found too. It does not look inside a directory that already holds a `SKILL.md`: files nested in a skill's folder are that skill's resources, not separate skills. Directories whose names start with `.` are skipped.
+The `skills.directories` option points to the parent directory (e.g., `./skills`). The runtime searches that directory recursively and loads the topmost `SKILL.md` on each path, so skills grouped in category folders (for example `skills/testing/coverage/SKILL.md`) are found too. It does not look inside a directory that already holds a `SKILL.md`: files nested in a skill's folder are that skill's resources, not separate skills. Directories whose names start with `.` are skipped.
 
 ### SKILL.md format
 
@@ -369,7 +370,7 @@ Provide specific line-number references and suggested fixes.
 ```
 
 The frontmatter fields:
-* **`name`**: The skill's identifier (used with `disabledSkills` to selectively disable it). If omitted, the directory name is used.
+* **`name`**: The skill's identifier (used with `skills.disabledSkills` to selectively disable it). If omitted, the directory name is used.
 * **`description`**: A short description of what the skill does.
 
 Both fields are optional, but the frontmatter block itself is required: a `SKILL.md` without the `---` lines is skipped.
@@ -727,7 +728,7 @@ The runtime lists the folder after read skill returns, so you can create the fol
 
 #### Access
 
-* **Local disk.** From the time skills are listed, the runtime treats each enabled provider skill's `directory` like a configured `skillDirectories` folder: reads under it skip the outside-workspace path prompt, and sandboxed processes get read-only access to it. Reads still go to your permission handler, as they do for file-based skills. Don't return a broad directory, such as your home folder or a folder that holds every tenant's files.
+* **Local disk.** From the time skills are listed, the runtime treats each enabled provider skill's `directory` like a configured `skills.directories` folder: reads under it skip the outside-workspace path prompt, and sandboxed processes get read-only access to it. Reads still go to your permission handler, as they do for file-based skills. Don't return a broad directory, such as your home folder or a folder that holds every tenant's files.
 * **Session filesystem.** The runtime adds no access for the folder. Have your permission handler approve reads under it, and when the sandbox is on, add the folder to the sandbox's `readonlyPaths`.
 
 Your application owns the folder: where it lives, how long it exists, cleaning it up, and keeping the model from changing it. The read-only access covers only sandboxed processes. Outside the sandbox, or when the folder is inside the workspace, the model can write to it unless your permission handler, or your `sessionFs` handler, refuses.
@@ -784,7 +785,7 @@ If listing fails or returns an invalid catalog, the runtime reports the problem 
 
 A provider is bound to one session:
 
-* A provider enables skills unless you set `enableSkills` to `false`, which keeps the provider bound but never called. In `mode: "empty"`, skills stay disabled until you set `enableSkills` to `true`.
+* A provider enables skills unless you set `skills.enabled` to `false`, which keeps the provider bound but never called. In `mode: "empty"`, skills stay disabled until you set `skills.enabled` to `true`.
 * The provider is never persisted. Pass it again when you resume a session. Resuming without a provider removes it from the session. Extensions that join the session don't change it.
 * A provider skill with the same name as a file-based skill replaces the file-based skill, and `skills.reload` reports a warning.
 * Sub-agents use their parent session's provider.
@@ -793,24 +794,24 @@ A provider is bound to one session:
 
 ## Configuration options
 
-### SessionConfig skill fields
+### SessionSkillOptions fields
 
 | Language | Field | Type | Description |
 |----------|-------|------|-------------|
-| Node.js | `skillDirectories` | `string[]` | Directories to load skills from |
-| Node.js | `disabledSkills` | `string[]` | Skills to disable |
-| Node.js | `skillProvider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
-| Python | `skill_directories` | `list[str]` | Directories to load skills from |
-| Python | `disabled_skills` | `list[str]` | Skills to disable |
-| Python | `skill_provider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
-| Go | `SkillDirectories` | `[]string` | Directories to load skills from |
-| Go | `DisabledSkills` | `[]string` | Skills to disable |
-| Go | `SkillProvider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
-| .NET | `SkillDirectories` | `List<string>` | Directories to load skills from |
-| .NET | `DisabledSkills` | `List<string>` | Skills to disable |
-| .NET | `SkillProvider` | `ISkillProvider` | Experimental provider for SDK-supplied skills |
-| Java | `setSkillProvider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
-| Rust | `with_skill_provider` | `Arc<dyn SkillProvider>` | Experimental provider for SDK-supplied skills |
+| Node.js | `skills.directories` | `string[]` | Directories to load skills from |
+| Node.js | `skills.disabledSkills` | `string[]` | Skills to disable |
+| Node.js | `skills.provider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
+| Python | `skills={"directories": ...}` | `list[str]` | Directories to load skills from |
+| Python | `skills={"disabled_skills": ...}` | `list[str]` | Skills to disable |
+| Python | `skills={"provider": ...}` | `SkillProvider` | Experimental provider for SDK-supplied skills |
+| Go | `Skills.Directories` | `[]string` | Directories to load skills from |
+| Go | `Skills.DisabledSkills` | `[]string` | Skills to disable |
+| Go | `Skills.Provider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
+| .NET | `Skills.Directories` | `IList<string>` | Directories to load skills from |
+| .NET | `Skills.DisabledSkills` | `IList<string>` | Skills to disable |
+| .NET | `Skills.Provider` | `ISkillProvider` | Experimental provider for SDK-supplied skills |
+| Java | `setSkills(new SessionSkillOptions().setProvider(...))` | `SkillProvider` | Experimental provider for SDK-supplied skills |
+| Rust | `with_skills(\|skills\| skills.with_provider(...))` | `Arc<dyn SkillProvider>` | Experimental provider for SDK-supplied skills |
 
 ### Built-in skills and `mode: "empty"`
 
@@ -822,9 +823,9 @@ the post-create and post-resume options patch, alongside the empty
 `installedPlugins` list.
 
 This exclusion is the default, not a permanent restriction. To allow selected
-runtime-bundled skills, set `includedBuiltinSkills` (or the language-specific
+runtime-bundled skills, set `skills.includedBuiltinSkills` (or the language-specific
 casing) to their names. You can also opt into your **own** custom skills under
-`mode: "empty"`—enable skills and pass your own `skillDirectories`—and those
+`mode: "empty"`—enable skills and pass your own `skills.directories`—and those
 remain fully usable, including a custom skill that shares a name with a built-in.
 Under `mode: "coding-agent"` the field is omitted unless you set the option.
 
@@ -860,7 +861,7 @@ Changing the configured skill directories also refreshes the catalog.
 
 ### Skills + custom agents
 
-Skills listed in an agent's `skills` field are **eagerly preloaded**—their full content is injected into the agent's context at startup, so the agent has access to the skill instructions immediately without needing to invoke a skill tool. Skill names are resolved from the session-level `skillDirectories`.
+Skills listed in an agent's `skills` field are **eagerly preloaded**—their full content is injected into the agent's context at startup, so the agent has access to the skill instructions immediately without needing to invoke a skill tool. Skill names are resolved from the session-level `skills.directories`.
 
 ```typescript
 const session = await client.createSession({
@@ -923,7 +924,7 @@ const session = await client.createSession({
 ### Skill conflicts
 
 If multiple skills provide conflicting instructions:
-* Use `disabledSkills` to exclude conflicting skills
+* Use `skills.disabledSkills` to exclude conflicting skills
 * Reorganize skill directories to avoid overlaps
 
 ## See also

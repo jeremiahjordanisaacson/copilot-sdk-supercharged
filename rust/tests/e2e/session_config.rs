@@ -66,22 +66,59 @@ async fn assert_session_limits_applied(
     );
 }
 
+/// The agents the request's `task` tool dispatches to: its `agent_type` enum,
+/// or under the stable prompt prefix the latest `agents` state note, the `task`
+/// tool itself then being fixed text that names no agent.
 fn task_agent_types(exchange: &Value) -> Vec<String> {
     let tools = exchange["request"]["tools"]
         .as_array()
         .expect("request tools");
-    for tool in tools {
-        if tool["function"]["name"] != "task" {
-            continue;
+    if std::env::var("COPILOT_EXP_COPILOT_CLI_STABLE_PROMPT_PREFIX").as_deref() != Ok("true") {
+        for tool in tools {
+            if tool["function"]["name"] != "task" {
+                continue;
+            }
+            return tool["function"]["parameters"]["properties"]["agent_type"]["enum"]
+                .as_array()
+                .expect("agent type enum")
+                .iter()
+                .map(|value| value.as_str().expect("agent type").to_string())
+                .collect();
         }
-        return tool["function"]["parameters"]["properties"]["agent_type"]["enum"]
-            .as_array()
-            .expect("agent type enum")
-            .iter()
-            .map(|value| value.as_str().expect("agent type").to_string())
-            .collect();
+        panic!("expected task tool in request");
     }
-    panic!("expected task tool in request");
+    assert!(
+        tools.iter().any(|tool| tool["function"]["name"] == "task"),
+        "expected task tool in request"
+    );
+    let messages = exchange["request"]["messages"]
+        .as_array()
+        .expect("request messages");
+    let note = messages
+        .iter()
+        .rev()
+        .filter(|message| message["role"] == "user")
+        .filter_map(|message| match &message["content"] {
+            Value::String(text) => Some(text.clone()),
+            Value::Array(parts) => Some(
+                parts
+                    .iter()
+                    .filter_map(|part| part["text"].as_str())
+                    .collect::<String>(),
+            ),
+            _ => None,
+        })
+        .find(|content| content.contains("<agents>\n"))
+        .expect("agents state note in request");
+    let start =
+        note.find("<available_agents>\n").expect("agent list") + "<available_agents>\n".len();
+    let end = note.find("\n</available_agents>").expect("agent list end");
+    note[start..end]
+        .lines()
+        .filter_map(|line| line.strip_prefix("- **"))
+        .filter_map(|line| line.split_once("**:"))
+        .map(|(name, _)| name.to_string())
+        .collect()
 }
 
 #[tokio::test]

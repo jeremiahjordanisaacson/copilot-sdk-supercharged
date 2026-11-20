@@ -42,6 +42,71 @@ public final class SessionSandboxApi {
     }
 
     /**
+     * Reads this runtime's cached enforcement latch without contacting a remote owner or probing a sandbox backend. Hosts use this to answer owner-status callbacks without re-entering the remote status request.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SandboxEnforcementStatus> getCachedEnforcementStatus() {
+        return caller.invoke("session.sandbox.getCachedEnforcementStatus", java.util.Map.of("sessionId", this.sessionId), SandboxEnforcementStatus.class);
+    }
+
+    /**
+     * Reads authoritative effective sandbox policy, source attribution and temporary choices for one live session.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SessionSandboxGetStateResult> getState() {
+        return caller.invoke("session.sandbox.getState", java.util.Map.of("sessionId", this.sessionId), SessionSandboxGetStateResult.class);
+    }
+
+    /**
+     * Registers the live session's configured sandbox credentials with the runtime's process secret filter. Resolves credentials inside the runtime and returns no secret values. Local hosts call this after sandbox option updates so later logs redact the current proxy credentials.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<Void> registerProxySecrets() {
+        return caller.invoke("session.sandbox.registerProxySecrets", java.util.Map.of("sessionId", this.sessionId), Void.class);
+    }
+
+    /**
+     * Clears temporary sandbox choices for one session and adopts the supplied preference under the current managed policy.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SessionSandboxResetSessionChoicesResult> resetSessionChoices(SessionSandboxResetSessionChoicesParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.sandbox.resetSessionChoices", _p, SessionSandboxResetSessionChoicesResult.class);
+    }
+
+    /**
+     * Invokes a closed sandbox operation through the session's original authenticated attachment or AHP owner. Requires a trusted in-process host and a matching runtime-owned session binding. Never falls back to the local presentation session.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SandboxInvokeOwnedResult> invokeOwned(SessionSandboxInvokeOwnedParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.sandbox.invokeOwned", _p, SandboxInvokeOwnedResult.class);
+    }
+
+    /**
      * Lists possible secret-bearing environment variables available to new sandboxed shells that are not already covered by credential masking. Uses local name rules and known-provider host suggestions, never returns secret values, and changes no settings or network permissions. Returns no suggestions while the session is not sandboxed.
      *
      * @apiNote This method is experimental and may change in a future version.

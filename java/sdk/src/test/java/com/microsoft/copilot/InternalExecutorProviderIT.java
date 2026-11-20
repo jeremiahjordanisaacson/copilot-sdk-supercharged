@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Failsafe integration test that asserts the multi-release behaviour of
@@ -31,6 +32,35 @@ import org.junit.jupiter.api.Test;
  * that the executor selected for the current runtime matches expectations.
  */
 class InternalExecutorProviderIT {
+
+    @Test
+    void packagedSessionCallbacksSupportForceStopAndDisabledCommonPool(@TempDir Path tempDir) throws Exception {
+        String testClasspath = System.getProperty("surefire.test.class.path");
+        assertNotNull(testClasspath, "Failsafe must supply the test dependency classpath");
+        String classpath = locatePackagedJar() + File.pathSeparator + locateTestClassesDir() + File.pathSeparator
+                + testClasspath;
+        String modulePath = System.getProperty("jdk.module.path");
+        if (modulePath != null) {
+            classpath += File.pathSeparator + modulePath;
+        }
+        Path log = tempDir.resolve("session-callbacks.log");
+        Process process = new ProcessBuilder(locateJavaBinary(),
+                "-Djava.util.concurrent.ForkJoinPool.common.parallelism=0", "-cp", classpath,
+                "com.microsoft.copilot.ForceStopSessionTest").redirectErrorStream(true).redirectOutput(log.toFile())
+                .start();
+        boolean exited;
+        try {
+            exited = process.waitFor(30, TimeUnit.SECONDS);
+        } finally {
+            if (process.isAlive()) {
+                process.destroyForcibly();
+                assertTrue(process.waitFor(5, TimeUnit.SECONDS), "The callback probe must stop");
+            }
+        }
+        String output = Files.readString(log);
+        assertTrue(exited, "Session callback probe did not exit. Output:\n" + output);
+        assertEquals(0, process.exitValue(), "Session callback probe failed. Output:\n" + output);
+    }
 
     @Test
     void packagedJarSelectsExecutorPerRuntimeVersion() throws Exception {

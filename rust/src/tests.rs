@@ -7,6 +7,9 @@
 use super::*;
 use crate::entra::{EntraTokenProviderArgs, EntraTokenProviderContext, EntraTokenProviderResult};
 
+#[cfg(unix)]
+mod process_lifecycle;
+
 #[cfg(feature = "runtime")]
 #[tokio::test]
 async fn stderr_stream_logs_unterminated_output_before_eof_in_bounded_chunks() {
@@ -72,11 +75,12 @@ printf 'listening on port 12345\n'
 exec sleep 60"#,
         "--",
     ]);
-    let (mut child, _tree, port, _, _) =
+    let (mut process, port, _, _) =
         Client::spawn_tcp(Path::new("/bin/sh"), &options, &process, temp.path(), 0)
             .await
             .expect("startup must drain stderr before waiting for the port");
-    child.kill().await.unwrap();
+    process.terminate_tree().unwrap();
+    process.child.wait().await.unwrap();
     assert_eq!(port, 12345);
 }
 
@@ -228,7 +232,7 @@ async fn entra_router_observes_an_inference_dispatcher_installed_later() {
         ),
     );
     let dispatcher = Arc::new(CopilotRequestDispatcher::new(Arc::new(NoNetwork)));
-    dispatcher.set_client(Arc::downgrade(&client.inner));
+    dispatcher.set_client(WeakClientInner::downgrade(&client.inner));
     assert!(client.inner.llm_inference.set(dispatcher).is_ok());
     client.inner.router.ensure_started(&client.inner);
     let response = tokio::time::timeout(
@@ -273,7 +277,6 @@ async fn connect_forwards_optional_entra_configuration() {
         let client = Client::from_transport(
             client_read,
             jsonrpc::MessageWriter::stream(client_write),
-            None,
             None,
             temp.path().to_owned(),
             None,
@@ -1606,8 +1609,7 @@ async fn dropping_last_client_kills_spawned_cli() {
     let client = Client::from_transport(
         client_read,
         jsonrpc::MessageWriter::stream(client_write),
-        Some(child),
-        None,
+        Some(process_tree::OwnedProcess::new(child, None)),
         temp.path().to_path_buf(),
         None,
         None,
@@ -1708,11 +1710,10 @@ fn client_with_list_models_handler(handler: Arc<dyn ListModelsHandler>) -> Clien
         ahp_host_sessions: None,
         inner: Arc::new(ClientInner {
             ahp_host_callbacks: Arc::new(ahp_host::ExitCallbacks::default()),
-            ahp_host_sessions: std::sync::Weak::new(),
+            ahp_host_sessions: std::sync::Weak::<ahp_host::HostSessions>::new(),
             child: parking_lot::Mutex::new(None),
             owns_stdio: false,
             force_stop_requested: tokio_util::sync::CancellationToken::new(),
-            process_tree: parking_lot::Mutex::new(None),
             #[cfg(feature = "in-process")]
             ffi_host: parking_lot::Mutex::new(None),
             rpc: {

@@ -63,7 +63,7 @@ public sealed partial class ClientSessionLifetimeTests
         }
         catch (InvalidOperationException) when (shape != "dictionary" && !JsonSerializer.IsReflectionEnabledByDefault)
         {
-            // Without reflection (NativeAOT, or this suite's net8.0 configuration), a user type that no
+            // Without reflection (NativeAOT, or this suite's net10.0 configuration), a user type that no
             // source-generated context knows cannot be serialized, so the response is a JSON-RPC error.
             return null;
         }

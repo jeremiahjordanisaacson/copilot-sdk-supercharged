@@ -85,10 +85,27 @@
     <_CopilotCliBinaryPath Condition="'$(CopilotCliBinaryPath)' != ''">$(CopilotCliBinaryPath)</_CopilotCliBinaryPath>
   </PropertyGroup>
 
+  <!-- The unpublished development placeholder version has no release to download.
+       Contributor builds supply a same-checkout CLI through CopilotCliBinaryPath or,
+       at runtime, COPILOT_CLI_PATH; without one, acquisition is skipped as if
+       CopilotSkipCliDownload=true. The version may only be known after
+       $(_CopilotCliVersionTarget) runs, so the acquisition targets below are thin
+       wrappers whose work runs in conditioned targets after this check. -->
+  <Target Name="_DetectCopilotCliDevPlaceholder" DependsOnTargets="$(_CopilotCliVersionTarget)">
+    <PropertyGroup>
+      <_CopilotCliDevPlaceholder Condition="'$(CopilotCliBinaryPath)' == '' And '$(CopilotCliVersion)' == '0.0.0-dev'">true</_CopilotCliDevPlaceholder>
+    </PropertyGroup>
+    <Message Importance="high" Condition="'$(_CopilotCliDevPlaceholder)' == 'true'"
+             Text="CopilotCliVersion is the development placeholder '0.0.0-dev', which has no published release; skipping the Copilot CLI download. Set CopilotCliBinaryPath to a built CLI to bundle it, or set COPILOT_CLI_PATH when running the SDK." />
+  </Target>
+
   <!-- Download and extract the CLI runtime bundle.
-       Skipped when CopilotCliBinaryPath is set (consumer supplied the binary)
-       or when CopilotSkipCliDownload=true (consumer opted out entirely). -->
-  <Target Name="_DownloadCopilotCli" DependsOnTargets="$(_CopilotCliVersionTarget)" BeforeTargets="BeforeBuild" Condition="'$(TargetFramework)' != '' And '$(CopilotCliBinaryPath)' == '' And '$(CopilotSkipCliDownload)' != 'true' And '$(_CopilotPlatform)' != ''">
+       Skipped when CopilotCliBinaryPath is set (consumer supplied the binary),
+       when CopilotSkipCliDownload=true (consumer opted out entirely), or when
+       CopilotCliVersion is the 0.0.0-dev placeholder. -->
+  <Target Name="_DownloadCopilotCli" DependsOnTargets="_DetectCopilotCliDevPlaceholder;_DownloadCopilotCliRelease" BeforeTargets="BeforeBuild" Condition="'$(TargetFramework)' != '' And '$(CopilotCliBinaryPath)' == '' And '$(CopilotSkipCliDownload)' != 'true' And '$(_CopilotPlatform)' != ''" />
+
+  <Target Name="_DownloadCopilotCliRelease" Condition="'$(_CopilotCliDevPlaceholder)' != 'true'">
     <Error Condition="'$(CopilotCliVersion)' == ''" Text="CopilotCliVersion is not set. The $(MSBuildThisFileName).props file may be missing from the NuGet package." />
 
     <!-- Compute paths using version (now available) -->
@@ -172,8 +189,11 @@
   <!-- Copy the compatibility CLI entrypoint to output and register it for transitive
        copy. Release bundles use copilot-runtime[.exe] as the source and retain the
        copilot[.exe] output alias; explicit CopilotCliBinaryPath values are unchanged.
-       Skipped only when CopilotSkipCliDownload=true and no path was supplied. -->
-  <Target Name="_CopyCopilotCliToOutput" AfterTargets="Build" DependsOnTargets="_DownloadCopilotCli" Condition="'$(TargetFramework)' != '' And ('$(CopilotCliBinaryPath)' != '' Or '$(CopilotSkipCliDownload)' != 'true') And '$(_CopilotPlatform)' != ''">
+       Skipped only when no path was supplied and CopilotSkipCliDownload=true or
+       CopilotCliVersion is the 0.0.0-dev placeholder. -->
+  <Target Name="_CopyCopilotCliToOutput" AfterTargets="Build" DependsOnTargets="_DownloadCopilotCli;_DetectCopilotCliDevPlaceholder;_CopyCopilotCliToOutputCore" Condition="'$(TargetFramework)' != '' And ('$(CopilotCliBinaryPath)' != '' Or '$(CopilotSkipCliDownload)' != 'true') And '$(_CopilotPlatform)' != ''" />
+
+  <Target Name="_CopyCopilotCliToOutputCore" Condition="'$(_CopilotCliDevPlaceholder)' != 'true'">
     <PropertyGroup>
       <_CopilotCacheDir Condition="'$(_CopilotCacheDir)' == ''">$(IntermediateOutputPath)copilot-cli\$(CopilotCliVersion)\$(_CopilotPlatform)</_CopilotCacheDir>
       <_CopilotCliBinaryPath Condition="'$(_CopilotCliBinaryPath)' == ''">$(_CopilotCacheDir)\prebuilds\$(_CopilotPlatform)\$(_CopilotRuntimeWrapper)</_CopilotCliBinaryPath>
@@ -227,7 +247,9 @@
        and publish output. Tool packages (PackAsTool) are built from the publish layout, so the
        runtime assets must be registered for publish as well as build output.
        Same gating semantics as _CopyCopilotCliToOutput. -->
-  <Target Name="_RegisterCopilotCliForCopy" BeforeTargets="GetCopyToOutputDirectoryItems;GetCopyToPublishDirectoryItems" DependsOnTargets="_DownloadCopilotCli" Condition="'$(TargetFramework)' != '' And ('$(CopilotCliBinaryPath)' != '' Or '$(CopilotSkipCliDownload)' != 'true') And '$(_CopilotPlatform)' != ''">
+  <Target Name="_RegisterCopilotCliForCopy" BeforeTargets="GetCopyToOutputDirectoryItems;GetCopyToPublishDirectoryItems" DependsOnTargets="_DownloadCopilotCli;_DetectCopilotCliDevPlaceholder;_RegisterCopilotCliForCopyCore" Condition="'$(TargetFramework)' != '' And ('$(CopilotCliBinaryPath)' != '' Or '$(CopilotSkipCliDownload)' != 'true') And '$(_CopilotPlatform)' != ''" />
+
+  <Target Name="_RegisterCopilotCliForCopyCore" Condition="'$(_CopilotCliDevPlaceholder)' != 'true'">
     <PropertyGroup>
       <_CopilotCacheDir Condition="'$(_CopilotCacheDir)' == ''">$(IntermediateOutputPath)copilot-cli\$(CopilotCliVersion)\$(_CopilotPlatform)</_CopilotCacheDir>
       <_CopilotCliBinaryPath Condition="'$(_CopilotCliBinaryPath)' == ''">$(_CopilotCacheDir)\prebuilds\$(_CopilotPlatform)\$(_CopilotRuntimeWrapper)</_CopilotCliBinaryPath>

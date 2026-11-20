@@ -44,6 +44,7 @@ func (r *sessionEventRequest) UnmarshalJSON(data []byte) error {
 				Data struct {
 					PermissionRequest json.RawMessage `json:"permissionRequest"`
 					HasHandler        *bool           `json:"hasHandler"`
+					Arguments         json.RawMessage `json:"arguments"`
 				} `json:"data"`
 			} `json:"event"`
 		}
@@ -52,6 +53,7 @@ func (r *sessionEventRequest) UnmarshalJSON(data []byte) error {
 		}
 		if isExternalTool {
 			decoded.sdkHasHandler = raw.Event.Data.HasHandler
+			decoded.sdkToolArguments = raw.Event.Data.Arguments
 		}
 		if isPermission && raw.Event.Data.PermissionRequest != nil {
 			var envelope PermissionRequestEnvelope

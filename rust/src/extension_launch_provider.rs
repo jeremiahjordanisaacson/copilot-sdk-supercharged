@@ -1,6 +1,6 @@
 //! Connection-level extension launch profile resolution.
 
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use futures_util::FutureExt;
@@ -14,7 +14,7 @@ pub use crate::rpc::{
     ExtensionLaunchProviderResolveResult,
 };
 use crate::{
-    Client, ClientInner, JsonRpcError, JsonRpcRequest, JsonRpcResponse, Result, error_codes,
+    Client, JsonRpcError, JsonRpcRequest, JsonRpcResponse, Result, WeakClientInner, error_codes,
 };
 
 pub(crate) const RESOLVE_METHOD: &str = "extensionLaunchProvider.resolve";
@@ -45,7 +45,7 @@ pub trait ExtensionLaunchProvider: Send + Sync + 'static {
 
 pub(crate) struct ExtensionLaunchProviderDispatcher {
     handler: RwLock<Option<Arc<dyn ExtensionLaunchProvider>>>,
-    client: OnceLock<Weak<ClientInner>>,
+    client: OnceLock<WeakClientInner>,
 }
 
 impl ExtensionLaunchProviderDispatcher {
@@ -56,7 +56,7 @@ impl ExtensionLaunchProviderDispatcher {
         }
     }
 
-    pub(crate) fn set_client(&self, client: Weak<ClientInner>) {
+    pub(crate) fn set_client(&self, client: WeakClientInner) {
         let _ = self.client.set(client);
     }
 
@@ -122,7 +122,7 @@ impl ExtensionLaunchProviderDispatcher {
     fn client(&self) -> Option<Client> {
         self.client
             .get()
-            .and_then(Weak::upgrade)
+            .and_then(WeakClientInner::upgrade)
             .map(Client::from_inner)
     }
 

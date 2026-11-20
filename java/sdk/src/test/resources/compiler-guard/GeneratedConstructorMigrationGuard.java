@@ -69,7 +69,35 @@ public final class GeneratedConstructorMigrationGuard {
                                     + "Lcom/microsoft/copilot/generated/ToolExecutionStartToolDescription;"
                                     + "Lcom/microsoft/copilot/generated/FusionAttribution;Ljava/lang/String;Ljava/util/Set;)V",
                             "new"),
-                    "Canonical serialization probe verifies normalization of null optional arguments and presence set."));
+                    "Canonical serialization probe verifies normalization of null optional arguments and presence set."),
+            new CompatibilityConstruction(
+                    new Construction(
+                            "src/test/java/com/microsoft/copilot/ClientTurnIdCompatibilityTest.java",
+                            "com.microsoft.copilot.ClientTurnIdCompatibilityTest"
+                                    + "#userMessageConstructorWithClientTurnIdKeepsArgumentMeaning()V",
+                            "com.microsoft.copilot.generated.UserMessageEvent$UserMessageEventData",
+                            "(Ljava/util/List;Ljava/lang/String;Lcom/microsoft/copilot/generated/ResponsesReasoning;"
+                                    + "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;"
+                                    + "Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/lang/String;"
+                                    + "Lcom/microsoft/copilot/generated/UserMessageDelivery;"
+                                    + "Lcom/microsoft/copilot/generated/UserMessageAgentMode;Ljava/lang/Boolean;"
+                                    + "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+                            "new"),
+                    "Canonical event constructor preserves clientTurnId and neighboring argument meanings."),
+            new CompatibilityConstruction(
+                    new Construction(
+                            "src/test/java/com/microsoft/copilot/PluginWireCompatibilityTest.java",
+                            "com.microsoft.copilot.PluginWireCompatibilityTest"
+                                    + "#canonicalConstructorPreservesTeamWithoutVerifiedSource()V",
+                            "com.microsoft.copilot.generated.rpc.Plugin",
+                            "(Lcom/microsoft/copilot/generated/rpc/ManagedPluginAssignment;"
+                                    + "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;"
+                                    + "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
+                                    + "Lcom/microsoft/copilot/generated/rpc/InstalledPluginVerifiedSource;"
+                                    + "Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;"
+                                    + "Ljava/lang/String;)V",
+                            "new"),
+                    "Canonical plugin constructor preserves team and neighboring arguments when verifiedSource is absent."));
 
     private record Construction(String source, String enclosing, String target, String descriptor, String kind) {}
 

@@ -8,6 +8,7 @@
 package com.microsoft.copilot.generated.rpc;
 
 import com.microsoft.copilot.CopilotExperimental;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import javax.annotation.processing.Generated;
 
@@ -28,6 +29,22 @@ public final class SessionAccountsLoginApi {
     SessionAccountsLoginApi(RpcCaller caller, String sessionId) {
         this.caller = caller;
         this.sessionId = sessionId;
+    }
+
+    /**
+     * Lists cached base identities reusable by a login provider, with the active identity first. Pass an accountId to login.begin to reuse an identity.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<List<AuthLoginIdentity>> list(SessionAccountsLoginListParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.accounts.login.list", _p, RpcMapper.INSTANCE.getTypeFactory().constructCollectionType(List.class, AuthLoginIdentity.class));
     }
 
     /**

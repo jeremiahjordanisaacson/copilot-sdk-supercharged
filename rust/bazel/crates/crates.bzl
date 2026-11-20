@@ -338,8 +338,8 @@ _NORMAL_DEPENDENCIES = {
             "tokio-tungstenite": Label("@sdk_vendor//tokio-tungstenite-0.30.0"),
             "tokio-util": Label("@sdk_vendor//tokio-util-0.7.20"),
             "tracing": Label("@sdk_vendor//tracing-0.1.44"),
-            "uuid": Label("@sdk_vendor//uuid-1.29.1"),
-            "zip": Label("@sdk_vendor//zip-9.4.2"),
+            "uuid": Label("@sdk_vendor//uuid-1.29.2"),
+            "zip": Label("@sdk_vendor//zip-9.5.1"),
         },
         "aarch64-apple-darwin": {
             "rustls-platform-verifier": Label("@sdk_vendor//rustls-platform-verifier-0.7.1"),
@@ -351,6 +351,9 @@ _NORMAL_DEPENDENCIES = {
         "aarch64-unknown-linux-gnu": {
             "native-tls": Label("@sdk_vendor//native-tls-0.2.18"),
             "openssl-sys": Label("@sdk_vendor//openssl-sys-0.9.118"),
+        },
+        "cfg(unix)": {
+            "libc": Label("@sdk_vendor//libc-0.2.191"),
         },
         "cfg(windows)": {
             "windows-sys": Label("@sdk_vendor//windows-sys-0.61.2"),
@@ -379,6 +382,8 @@ _NORMAL_ALIASES = {
         },
         "aarch64-unknown-linux-gnu": {
         },
+        "cfg(unix)": {
+        },
         "cfg(windows)": {
         },
         "x86_64-apple-darwin": {
@@ -397,24 +402,24 @@ _NORMAL_DEV_DEPENDENCIES = {
             "ahp-types": Label("@sdk_vendor//ahp-types-1.0.0"),
             "ahp-ws": Label("@sdk_vendor//ahp-ws-1.0.0"),
             "hpke": Label("@sdk_vendor//hpke-0.15.1"),
-            "libloading": Label("@sdk_vendor//libloading-0.9.0"),
+            "libloading": Label("@sdk_vendor//libloading-0.9.1"),
             "rand_chacha": Label("@sdk_vendor//rand_chacha-0.10.0"),
             "rand_core": Label("@sdk_vendor//rand_core-0.6.4"),
-            "rusqlite": Label("@sdk_vendor//rusqlite-0.42.0"),
+            "rusqlite": Label("@sdk_vendor//rusqlite-0.43.0"),
             "schemars": Label("@sdk_vendor//schemars-1.2.3"),
             "serial_test": Label("@sdk_vendor//serial_test-4.0.1"),
             "sha2": Label("@sdk_vendor//sha2-0.11.1"),
             "tempfile": Label("@sdk_vendor//tempfile-3.27.0"),
         },
         "cfg(not(target_os = \"macos\"))": {
-            "ureq": Label("@sdk_vendor//ureq-3.5.1"),
+            "ureq": Label("@sdk_vendor//ureq-3.5.2"),
         },
         "cfg(target_os = \"linux\")": {
             "openssl": Label("@sdk_vendor//openssl-0.10.82"),
         },
         "cfg(target_os = \"macos\")": {
             "rustls": Label("@sdk_vendor//rustls-0.23.46"),
-            "ureq": Label("@sdk_vendor//ureq-3.5.1"),
+            "ureq": Label("@sdk_vendor//ureq-3.5.2"),
         },
     },
 }
@@ -469,7 +474,7 @@ _BUILD_DEPENDENCIES = {
             "flate2": Label("@sdk_vendor//flate2-1.1.11"),
             "serde_json": Label("@sdk_vendor//serde_json-1.0.154"),
             "tar": Label("@sdk_vendor//tar-0.4.46"),
-            "zip": Label("@sdk_vendor//zip-9.4.2"),
+            "zip": Label("@sdk_vendor//zip-9.5.1"),
         },
         "cfg(windows)": {
             "windows-sys": Label("@sdk_vendor//windows-sys-0.61.2"),
@@ -538,6 +543,7 @@ _CONDITIONS = {
     "cfg(any(target_os = \"macos\", target_os = \"openbsd\", target_os = \"vita\", target_os = \"emscripten\"))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:x86_64-apple-darwin"],
     "cfg(any(target_vendor = \"apple\"))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:x86_64-apple-darwin"],
     "cfg(any(unix, target_os = \"hermit\", target_os = \"wasi\"))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:aarch64-unknown-linux-gnu", "@rules_rust//rust/platform:x86_64-apple-darwin", "@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
+    "cfg(any(unix, target_os = \"motor\"))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:aarch64-unknown-linux-gnu", "@rules_rust//rust/platform:x86_64-apple-darwin", "@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
     "cfg(any(unix, target_os = \"wasi\"))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:aarch64-unknown-linux-gnu", "@rules_rust//rust/platform:x86_64-apple-darwin", "@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
     "cfg(curve25519_dalek_backend = \"fiat\")": [],
     "cfg(not(all(target_arch = \"wasm32\", any(target_os = \"unknown\", target_os = \"none\"))))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:aarch64-pc-windows-msvc", "@rules_rust//rust/platform:aarch64-unknown-linux-gnu", "@rules_rust//rust/platform:x86_64-apple-darwin", "@rules_rust//rust/platform:x86_64-pc-windows-msvc", "@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
@@ -761,12 +767,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__bumpalo-3.20.3",
-        sha256 = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649",
+        name = "sdk_vendor__bumpalo-3.20.4",
+        sha256 = "87a0cf66fd1eb2fb7b822cb78370d82303750809bc6ba855f3f58e517d3238db",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/bumpalo/3.20.3/download"],
-        strip_prefix = "bumpalo-3.20.3",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.bumpalo-3.20.3.bazel"),
+        urls = ["https://static.crates.io/crates/bumpalo/3.20.4/download"],
+        strip_prefix = "bumpalo-3.20.4",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.bumpalo-3.20.4.bazel"),
     )
 
     maybe(
@@ -781,12 +787,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__cc-1.11.1",
-        sha256 = "4ff2a8126fff0f8c839080d619675a585e61720bb12d2baceae45769fd66f155",
+        name = "sdk_vendor__cc-1.11.2",
+        sha256 = "33ef9e3e8154a45c7a95cff4c1299702106ad94062d7bb85fdc5d3a5afd91d45",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/cc/1.11.1/download"],
-        strip_prefix = "cc-1.11.1",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.cc-1.11.1.bazel"),
+        urls = ["https://static.crates.io/crates/cc/1.11.2/download"],
+        strip_prefix = "cc-1.11.2",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.cc-1.11.2.bazel"),
     )
 
     maybe(
@@ -861,12 +867,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__const-oid-0.10.2",
-        sha256 = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c",
+        name = "sdk_vendor__const-oid-0.10.3",
+        sha256 = "be95d4a884358a21a199689323c29e9256b4a1b315e22f183d155422041d3a9a",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/const-oid/0.10.2/download"],
-        strip_prefix = "const-oid-0.10.2",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.const-oid-0.10.2.bazel"),
+        urls = ["https://static.crates.io/crates/const-oid/0.10.3/download"],
+        strip_prefix = "const-oid-0.10.3",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.const-oid-0.10.3.bazel"),
     )
 
     maybe(
@@ -931,12 +937,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__crc32fast-1.5.4",
-        sha256 = "5f97d3416d5337d15c4b0d78c8c91df922ca143f57ec20e2d1c188333047ef04",
+        name = "sdk_vendor__crc32fast-1.5.5",
+        sha256 = "2b929dd2a135771f40afabd1073f85eed59c800b7c61901e5c254270497dad64",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/crc32fast/1.5.4/download"],
-        strip_prefix = "crc32fast-1.5.4",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.crc32fast-1.5.4.bazel"),
+        urls = ["https://static.crates.io/crates/crc32fast/1.5.5/download"],
+        strip_prefix = "crc32fast-1.5.5",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.crc32fast-1.5.5.bazel"),
     )
 
     maybe(
@@ -1081,12 +1087,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__errno-0.3.14",
-        sha256 = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb",
+        name = "sdk_vendor__errno-0.3.15",
+        sha256 = "e35d6e78f4cebb90e51d543db8fe41528851d6deeef6ef21ebd4bfdc1e784776",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/errno/0.3.14/download"],
-        strip_prefix = "errno-0.3.14",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.errno-0.3.14.bazel"),
+        urls = ["https://static.crates.io/crates/errno/0.3.15/download"],
+        strip_prefix = "errno-0.3.15",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.errno-0.3.15.bazel"),
     )
 
     maybe(
@@ -1621,42 +1627,42 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__itoa-1.0.18",
-        sha256 = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682",
+        name = "sdk_vendor__itoa-1.0.19",
+        sha256 = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/itoa/1.0.18/download"],
-        strip_prefix = "itoa-1.0.18",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.itoa-1.0.18.bazel"),
+        urls = ["https://static.crates.io/crates/itoa/1.0.19/download"],
+        strip_prefix = "itoa-1.0.19",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.itoa-1.0.19.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "sdk_vendor__jiff-0.2.40",
-        sha256 = "14ed8250fe4472173a765b89fea4b46f2c4aa12adc12a3e310f1dc6c108e041b",
+        name = "sdk_vendor__jiff-0.2.45",
+        sha256 = "34e6d07feb763c647199bd9072192b9639da3b5ffde49afd73c08b1d5ceb1469",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/jiff/0.2.40/download"],
-        strip_prefix = "jiff-0.2.40",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.jiff-0.2.40.bazel"),
+        urls = ["https://static.crates.io/crates/jiff/0.2.45/download"],
+        strip_prefix = "jiff-0.2.45",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.jiff-0.2.45.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "sdk_vendor__jiff-core-0.1.3",
-        sha256 = "ecfc96f3a325d3a9b0ee6db9a81a83b40b94e781021c044a0a7f4c4630a1e482",
+        name = "sdk_vendor__jiff-core-0.1.7",
+        sha256 = "3c0dfb57e3485bee979b355302992ea9c38331a94f6ccce72c2bf0077d6c9310",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/jiff-core/0.1.3/download"],
-        strip_prefix = "jiff-core-0.1.3",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.jiff-core-0.1.3.bazel"),
+        urls = ["https://static.crates.io/crates/jiff-core/0.1.7/download"],
+        strip_prefix = "jiff-core-0.1.7",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.jiff-core-0.1.7.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "sdk_vendor__jiff-static-0.2.40",
-        sha256 = "e9522de39a5298859d9e844b660eb7d5e6fd1b63b9953f51535408a62f2d31b3",
+        name = "sdk_vendor__jiff-static-0.2.45",
+        sha256 = "d93b8289f811027d18f228ae410cbadc766419d50b79185fa0084b10cc172d03",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/jiff-static/0.2.40/download"],
-        strip_prefix = "jiff-static-0.2.40",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.jiff-static-0.2.40.bazel"),
+        urls = ["https://static.crates.io/crates/jiff-static/0.2.45/download"],
+        strip_prefix = "jiff-static-0.2.45",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.jiff-static-0.2.45.bazel"),
     )
 
     maybe(
@@ -1731,12 +1737,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__libloading-0.9.0",
-        sha256 = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60",
+        name = "sdk_vendor__libloading-0.9.1",
+        sha256 = "a1832accd5a4ca2795ace4d05d15c4039be15b62d3b950eff99746a990e3cc10",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/libloading/0.9.0/download"],
-        strip_prefix = "libloading-0.9.0",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.libloading-0.9.0.bazel"),
+        urls = ["https://static.crates.io/crates/libloading/0.9.1/download"],
+        strip_prefix = "libloading-0.9.1",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.libloading-0.9.1.bazel"),
     )
 
     maybe(
@@ -1811,12 +1817,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__mio-1.2.4",
-        sha256 = "1788edb87fdc09c7e26304471e2f5be8cdefb1b6930d6e3985fc02ff53bf86ee",
+        name = "sdk_vendor__mio-1.2.5",
+        sha256 = "20521a903f02b0a573cd6840e9d0a5a0cc043d361fe924092cd70f8556cc9c4a",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/mio/1.2.4/download"],
-        strip_prefix = "mio-1.2.4",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.mio-1.2.4.bazel"),
+        urls = ["https://static.crates.io/crates/mio/1.2.5/download"],
+        strip_prefix = "mio-1.2.5",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.mio-1.2.5.bazel"),
     )
 
     maybe(
@@ -2041,12 +2047,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__rand-0.10.3",
-        sha256 = "65c9fb96cbc91e3478eaae79a69fcd3f1ae4ad052e471fe6732fff548984b4af",
+        name = "sdk_vendor__rand-0.10.4",
+        sha256 = "8f6fa277c67e6ea590466f04c3fe82cb509f0864fe470643e5570de9514a9b11",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/rand/0.10.3/download"],
-        strip_prefix = "rand-0.10.3",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.rand-0.10.3.bazel"),
+        urls = ["https://static.crates.io/crates/rand/0.10.4/download"],
+        strip_prefix = "rand-0.10.4",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.rand-0.10.4.bazel"),
     )
 
     maybe(
@@ -2201,12 +2207,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__rusqlite-0.42.0",
-        sha256 = "a4edff0039f148731aee2fd80f76dbfeb12d204ab3d1c544838d34e02151049b",
+        name = "sdk_vendor__rusqlite-0.43.0",
+        sha256 = "f172c4812a19b26d1c23cdb0070e69db335503dfa378b910eb857386e5b8beba",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/rusqlite/0.42.0/download"],
-        strip_prefix = "rusqlite-0.42.0",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.rusqlite-0.42.0.bazel"),
+        urls = ["https://static.crates.io/crates/rusqlite/0.43.0/download"],
+        strip_prefix = "rusqlite-0.43.0",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.rusqlite-0.43.0.bazel"),
     )
 
     maybe(
@@ -2251,12 +2257,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__rustls-pki-types-1.15.1",
-        sha256 = "2f4925028c7eb5d1fcdaf196971378ed9d2c1c4efc7dc5d011256f76c99c0a96",
+        name = "sdk_vendor__rustls-pki-types-1.16.0",
+        sha256 = "102f35f7de7b06d8c61f1cff6592f5253e0dea431c74867aad5dfd70f44663fb",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/rustls-pki-types/1.15.1/download"],
-        strip_prefix = "rustls-pki-types-1.15.1",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.rustls-pki-types-1.15.1.bazel"),
+        urls = ["https://static.crates.io/crates/rustls-pki-types/1.16.0/download"],
+        strip_prefix = "rustls-pki-types-1.16.0",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.rustls-pki-types-1.16.0.bazel"),
     )
 
     maybe(
@@ -2281,12 +2287,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__rustls-webpki-0.103.16",
-        sha256 = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281",
+        name = "sdk_vendor__rustls-webpki-0.103.17",
+        sha256 = "e3a0760a887c14823fca5a1c970b01d47c328c696c0c64829d1df50e8f853fd5",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/rustls-webpki/0.103.16/download"],
-        strip_prefix = "rustls-webpki-0.103.16",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.rustls-webpki-0.103.16.bazel"),
+        urls = ["https://static.crates.io/crates/rustls-webpki/0.103.17/download"],
+        strip_prefix = "rustls-webpki-0.103.17",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.rustls-webpki-0.103.17.bazel"),
     )
 
     maybe(
@@ -2611,12 +2617,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__syn-3.0.9",
-        sha256 = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b",
+        name = "sdk_vendor__syn-3.0.10",
+        sha256 = "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/syn/3.0.9/download"],
-        strip_prefix = "syn-3.0.9",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.syn-3.0.9.bazel"),
+        urls = ["https://static.crates.io/crates/syn/3.0.10/download"],
+        strip_prefix = "syn-3.0.10",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.syn-3.0.10.bazel"),
     )
 
     maybe(
@@ -2921,12 +2927,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__ureq-3.5.1",
-        sha256 = "e7be76686bdf7198002062423ca0d8cf9b75a27c8e1de804513b97e97b555d9d",
+        name = "sdk_vendor__ureq-3.5.2",
+        sha256 = "3ac5cecf619ca81f66a96482db09687c9f7465af65f4300a8c30cca05bd5a59d",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/ureq/3.5.1/download"],
-        strip_prefix = "ureq-3.5.1",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.ureq-3.5.1.bazel"),
+        urls = ["https://static.crates.io/crates/ureq/3.5.2/download"],
+        strip_prefix = "ureq-3.5.2",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.ureq-3.5.2.bazel"),
     )
 
     maybe(
@@ -2981,12 +2987,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__uuid-1.29.1",
-        sha256 = "4a06f08a856b009bc7bbaf7d3e79808595d032dd19074c0c2ef26e49e03e6bdc",
+        name = "sdk_vendor__uuid-1.29.2",
+        sha256 = "bed99139f7dac9b5cfe5f17be4d66dc7079a34dee1d74bcc77217119240e267c",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/uuid/1.29.1/download"],
-        strip_prefix = "uuid-1.29.1",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.uuid-1.29.1.bazel"),
+        urls = ["https://static.crates.io/crates/uuid/1.29.2/download"],
+        strip_prefix = "uuid-1.29.2",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.uuid-1.29.2.bazel"),
     )
 
     maybe(
@@ -3121,12 +3127,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__webpki-root-certs-1.0.11",
-        sha256 = "e49d0e65abc00c142e8f9428da991da9f1a250c39be97459901eb12b9b49f62a",
+        name = "sdk_vendor__webpki-root-certs-1.0.12",
+        sha256 = "293198dcebfb821155b5092ab94b5a82ff180eddd7241df3bd6e66a4ffd1a585",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/webpki-root-certs/1.0.11/download"],
-        strip_prefix = "webpki-root-certs-1.0.11",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.webpki-root-certs-1.0.11.bazel"),
+        urls = ["https://static.crates.io/crates/webpki-root-certs/1.0.12/download"],
+        strip_prefix = "webpki-root-certs-1.0.12",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.webpki-root-certs-1.0.12.bazel"),
     )
 
     maybe(
@@ -3411,12 +3417,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "sdk_vendor__zip-9.4.2",
-        sha256 = "df3845f734baabdd02de353a20580e30ceccd03897def44a4eb8e9654992e294",
+        name = "sdk_vendor__zip-9.5.1",
+        sha256 = "e3476fd497ac8af5b1ec7b51acab7bef380f7e8dd8e0487595bafd839417a302",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/zip/9.4.2/download"],
-        strip_prefix = "zip-9.4.2",
-        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.zip-9.4.2.bazel"),
+        urls = ["https://static.crates.io/crates/zip/9.5.1/download"],
+        strip_prefix = "zip-9.5.1",
+        build_file = Label("//src/sdk/rust/bazel/crates:BUILD.zip-9.5.1.bazel"),
     )
 
     maybe(
@@ -3449,6 +3455,7 @@ def crate_repositories():
         struct(repo = "sdk_vendor__getrandom-0.4.3", is_dev_dep = False),
         struct(repo = "sdk_vendor__http-1.5.0", is_dev_dep = False),
         struct(repo = "sdk_vendor__indexmap-2.14.2", is_dev_dep = False),
+        struct(repo = "sdk_vendor__libc-0.2.191", is_dev_dep = False),
         struct(repo = "sdk_vendor__native-tls-0.2.18", is_dev_dep = False),
         struct(repo = "sdk_vendor__openssl-sys-0.9.118", is_dev_dep = False),
         struct(repo = "sdk_vendor__parking_lot-0.12.5", is_dev_dep = False),
@@ -3464,22 +3471,22 @@ def crate_repositories():
         struct(repo = "sdk_vendor__tokio-tungstenite-0.30.0", is_dev_dep = False),
         struct(repo = "sdk_vendor__tokio-util-0.7.20", is_dev_dep = False),
         struct(repo = "sdk_vendor__tracing-0.1.44", is_dev_dep = False),
-        struct(repo = "sdk_vendor__uuid-1.29.1", is_dev_dep = False),
+        struct(repo = "sdk_vendor__uuid-1.29.2", is_dev_dep = False),
         struct(repo = "sdk_vendor__windows-sys-0.61.2", is_dev_dep = False),
-        struct(repo = "sdk_vendor__zip-9.4.2", is_dev_dep = False),
+        struct(repo = "sdk_vendor__zip-9.5.1", is_dev_dep = False),
         struct(repo = "sdk_vendor__ahp-1.0.0", is_dev_dep = True),
         struct(repo = "sdk_vendor__ahp-types-1.0.0", is_dev_dep = True),
         struct(repo = "sdk_vendor__ahp-ws-1.0.0", is_dev_dep = True),
         struct(repo = "sdk_vendor__hpke-0.15.1", is_dev_dep = True),
-        struct(repo = "sdk_vendor__libloading-0.9.0", is_dev_dep = True),
+        struct(repo = "sdk_vendor__libloading-0.9.1", is_dev_dep = True),
         struct(repo = "sdk_vendor__openssl-0.10.82", is_dev_dep = True),
         struct(repo = "sdk_vendor__rand_chacha-0.10.0", is_dev_dep = True),
         struct(repo = "sdk_vendor__rand_core-0.6.4", is_dev_dep = True),
-        struct(repo = "sdk_vendor__rusqlite-0.42.0", is_dev_dep = True),
+        struct(repo = "sdk_vendor__rusqlite-0.43.0", is_dev_dep = True),
         struct(repo = "sdk_vendor__rustls-0.23.46", is_dev_dep = True),
         struct(repo = "sdk_vendor__schemars-1.2.3", is_dev_dep = True),
         struct(repo = "sdk_vendor__serial_test-4.0.1", is_dev_dep = True),
         struct(repo = "sdk_vendor__sha2-0.11.1", is_dev_dep = True),
         struct(repo = "sdk_vendor__tempfile-3.27.0", is_dev_dep = True),
-        struct(repo = "sdk_vendor__ureq-3.5.1", is_dev_dep = True),
+        struct(repo = "sdk_vendor__ureq-3.5.2", is_dev_dep = True),
     ]

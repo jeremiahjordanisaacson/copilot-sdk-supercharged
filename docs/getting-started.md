@@ -74,6 +74,15 @@ go get -tool github.com/microsoft/copilot-sdk/go/v2/cmd/bundler
 go tool bundler
 ```
 
+The Go SDK does not find the Copilot CLI on `PATH`. Embed the CLI in your application with the bundler, running `go tool bundler` again before each build:
+
+```bash
+go get -tool github.com/microsoft/copilot-sdk/go/v2/cmd/bundler
+go tool bundler
+```
+
+Alternatively, set `COPILOT_CLI_PATH` to the path of an installed Copilot CLI. If you skip both steps, starting the client fails with `managed Copilot runtime unavailable: the embedded bundle does not contain copilot-runtime`.
+
 </details>
 
 <details>
@@ -2141,7 +2150,7 @@ const session = await client.createSession({
 ```
 
 > [!TIP]
-> You can also set `agent: "pr-reviewer"` in the session config to pre-select this agent from the start. See the [Custom Agents guide](./features/custom-agents.md#selecting-an-agent-at-session-creation) for details.
+> You can also set `agents.selected` to `"pr-reviewer"` in the session config to pre-select this agent from the start. See the [Custom Agents guide](./features/custom-agents.md#selecting-an-agent-at-session-creation) for details.
 
 ### Customize the system message
 
@@ -2409,11 +2418,11 @@ An attached client doesn't own the runtime, so configure runtime-wide settings w
 
 ## Telemetry and observability
 
-The Copilot SDK supports [OpenTelemetry](https://opentelemetry.io/) for distributed tracing. Provide a `telemetry` configuration to the client to enable trace export from the runtime and automatic [W3C Trace Context](https://www.w3.org/TR/trace-context/) propagation between the SDK and runtime.
+The Copilot SDK supports [OpenTelemetry](https://opentelemetry.io/) for distributed tracing. Provide an `observability.telemetry` configuration to the client to enable trace export from the runtime and automatic [W3C Trace Context](https://www.w3.org/TR/trace-context/) propagation between the SDK and runtime.
 
 ### Enabling telemetry
 
-Pass a `telemetry` (or `Telemetry`) config when creating the client. This is the opt-in—no separate "enabled" flag is needed.
+Set `observability.telemetry` (or `Observability.Telemetry`) when creating the client. This is the opt-in—no separate "enabled" flag is needed.
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
@@ -2433,7 +2442,7 @@ const client = new CopilotClient({
 });
 ```
 
-Optional peer dependency: `@opentelemetry/api`
+No extra dependencies—the runtime owns the exporter pipeline.
 
 </details>
 
@@ -2553,7 +2562,7 @@ var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientM
                         .setOtlpEndpoint("http://localhost:4318"))));
 ```
 
-Dependency: `io.opentelemetry:opentelemetry-api`
+No extra dependencies—the runtime owns the exporter pipeline.
 
 </details>
 
@@ -2592,7 +2601,7 @@ const client = new CopilotClient({
 
 ### Trace context propagation
 
-Trace context is propagated automatically—no manual instrumentation is needed:
+In Python, Go, and .NET, trace context is propagated automatically—no manual instrumentation is needed. Node.js and Rust inject it on outbound calls through an `onGetTraceContext` (`on_get_trace_context`) callback and pass the raw `traceparent` and `tracestate` to tool handlers. Java does not propagate trace context.
 
 - **SDK → runtime**: `traceparent` and `tracestate` headers from the current span/activity are included in `session.create`, `session.resume`, and `session.send` RPC calls.
 - **Runtime → SDK**: When the runtime invokes tool handlers, the trace context from the runtime's span is propagated so your tool code runs under the correct parent span.

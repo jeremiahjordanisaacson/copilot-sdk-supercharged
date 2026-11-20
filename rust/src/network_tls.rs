@@ -11,7 +11,7 @@
 //!
 //! Platform certificate verification does not make the record/key-exchange
 //! crypto OS-backed: this config still uses AWS-LC. The standalone SDK has no
-//! dependency on the in-tree copilot-platform-crypto provider; adopting a
+//! dependency on the in-tree copilot-rt-platform-crypto provider; adopting a
 //! distributable provider would be separate packaging and compatibility work.
 //! That provider retains Rustls and lacks PQ/QUIC, with custom Windows crypto
 //! exceptions; those are not proof that a macOS-only migration is impossible.

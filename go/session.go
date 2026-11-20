@@ -169,6 +169,10 @@ func (s *Session) PermissionModeResult() *rpc.PermissionsSetModeResult {
 		return nil
 	}
 	result := *s.permissionModeResult
+	if result.Reason != nil {
+		reason := *result.Reason
+		result.Reason = &reason
+	}
 	return &result
 }
 
@@ -1426,7 +1430,13 @@ func (s *Session) handleHooksInvoke(hookType string, rawInput json.RawMessage) (
 		if err := json.Unmarshal(rawInput, &input); err != nil {
 			return nil, fmt.Errorf("invalid hook input: %w", err)
 		}
-		return hooks.OnPostToolUse(input, invocation)
+		output, err := hooks.OnPostToolUse(input, invocation)
+		if err != nil || output == nil {
+			return output, err
+		}
+		withDefault := *output
+		withDefault.ModifiedResult = postToolUseModifiedResult(output.ModifiedResult, input.ToolResult)
+		return &withDefault, nil
 
 	case "postToolUseFailure":
 		if hooks.OnPostToolUseFailure == nil {
@@ -2155,7 +2165,7 @@ func fromRPCElicitationRequestedSchema(schema *rpc.ElicitationRequestedSchema) *
 // goroutine so it does not block the JSON-RPC read loop. User event handlers
 // are delivered by a single consumer goroutine (processEvents), guaranteeing
 // serial, FIFO dispatch without blocking the read loop.
-func (s *Session) dispatchEventWithPermissionEnvelope(event SessionEvent, envelope *PermissionRequestEnvelope, sdkHasHandler *bool) {
+func (s *Session) dispatchEventWithPermissionEnvelope(event SessionEvent, envelope *PermissionRequestEnvelope, sdkHasHandler *bool, toolArguments json.RawMessage) {
 	subscriberEvent := event
 	if data, ok := event.Data.(*PermissionRequestedDataWithEnvelope); ok {
 		event.Data = data.PermissionRequestedData
@@ -2176,7 +2186,7 @@ func (s *Session) dispatchEventWithPermissionEnvelope(event SessionEvent, envelo
 			agentID = *event.AgentID
 		}
 		if sdkHasHandler == nil || *sdkHasHandler {
-			s.startExternalTool(data, agentID)
+			s.startExternalTool(data, agentID, toolArguments)
 		}
 		broadcastHandled = true
 	case *ExternalToolCompletedData:
@@ -2454,7 +2464,7 @@ func (s *Session) handleBroadcastEvent(event SessionEvent, envelope *PermissionR
 	}
 }
 
-func (s *Session) startExternalTool(data *ExternalToolRequestedData, agentID string) {
+func (s *Session) startExternalTool(data *ExternalToolRequestedData, agentID string, rawArguments json.RawMessage) {
 	handler, ok := s.getToolHandler(data.ToolName)
 	if !ok {
 		return
@@ -2488,7 +2498,13 @@ func (s *Session) startExternalTool(data *ExternalToolRequestedData, agentID str
 	s.pendingExternalTools[data.RequestID] = pending
 	s.pendingExternalToolsM.Unlock()
 
-	go s.executeToolAndRespond(data.RequestID, data.ToolName, data.ToolCallID, agentID, data.Arguments, handler, pending)
+	// Record the delivered objects and arrays here, before the tool goroutine
+	// starts and before subscribers receive the same Arguments to edit.
+	var deliveredContainers []any
+	if len(rawArguments) > 0 {
+		deliveredContainers = argumentContainers(data.Arguments)
+	}
+	go s.executeToolAndRespond(data.RequestID, data.ToolName, data.ToolCallID, agentID, data.Arguments, rawArguments, deliveredContainers, handler, pending)
 }
 
 func (s *Session) cancelExternalTool(requestID string) {
@@ -2564,8 +2580,42 @@ func toolResultTypeOrDefault(result ToolResult) string {
 	return "success"
 }
 
+// postToolUseModifiedResult gives a ToolResult returned as a postToolUse
+// hook's ModifiedResult the ResultType the tool's result already has, or
+// "success" when it has none, the default a tool handler's result gets when
+// neither ResultType nor Error is set. The runtime applies the modified
+// result over the tool's result field by field, so an empty ResultType would
+// record a successful call as failed, and a hard-coded "success" would
+// overwrite a failure an earlier postToolUse hook set. current is the tool
+// result the runtime passed to this hook. Every other value is returned as it
+// is.
+func postToolUseModifiedResult(result any, current any) any {
+	var toolResult ToolResult
+	switch r := result.(type) {
+	case ToolResult:
+		toolResult = r
+	case *ToolResult:
+		if r == nil {
+			return result
+		}
+		toolResult = *r
+	default:
+		return result
+	}
+	if toolResult.ResultType != "" || toolResult.Error != "" {
+		return result
+	}
+	toolResult.ResultType = "success"
+	if fields, ok := current.(map[string]any); ok {
+		if resultType, ok := fields["resultType"].(string); ok && resultType != "" {
+			toolResult.ResultType = resultType
+		}
+	}
+	return toolResult
+}
+
 // executeToolAndRespond executes a tool handler and sends the result back via RPC.
-func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID string, arguments any, handler ToolHandler, pending *pendingExternalTool) {
+func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID string, arguments any, rawArguments json.RawMessage, deliveredContainers []any, handler ToolHandler, pending *pendingExternalTool) {
 	ctx := pending.ctx
 	defer func() {
 		s.pendingExternalToolsM.Lock()
@@ -2596,7 +2646,9 @@ func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID
 		TraceContext: ctx,
 		AgentID:      agentID,
 		RequestID:    requestID,
+		rawArguments: rawArguments,
 	}
+	invocation.deliveredContainers = deliveredContainers
 
 	// The built-in tool-search tool receives a snapshot of the session's
 	// currently initialized tools so an override can filter the live catalog
@@ -2646,10 +2698,11 @@ func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID
 	effectiveResultType := toolResultTypeOrDefault(result)
 
 	rpcResult := &rpc.ExternalToolTextResultForLlm{
-		TextResultForLlm: result.TextResultForLLM,
-		ToolTelemetry:    telemetry,
-		ResultType:       &effectiveResultType,
-		ToolReferences:   result.ToolReferences,
+		TextResultForLlm:          result.TextResultForLLM,
+		ToolTelemetry:             telemetry,
+		ResultType:                &effectiveResultType,
+		ToolReferences:            result.ToolReferences,
+		SkipLargeOutputProcessing: result.SkipLargeOutputProcessing,
 	}
 	if result.Error != "" {
 		rpcResult.Error = &result.Error

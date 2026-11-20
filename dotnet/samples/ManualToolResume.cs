@@ -8,7 +8,7 @@ using Microsoft.Extensions.AI;
 var tool = ManualToolDeclaration();
 
 // 1. Create a session with a declaration-only tool, then stop after the permission prompt.
-await using CopilotClient client1 = new();
+await using var client1 = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
 await using var session1 = await client1.CreateSessionAsync(new() { Tools = new SessionToolOptions { Definitions = [tool] } });
 
 // Subscribe before sending so the permission event cannot be missed.
@@ -24,7 +24,7 @@ await client1.ForceStopAsync();
 await PauseAsync();
 
 // 2. Resume pending work and grant permission to invoke the tool.
-await using CopilotClient client2 = new();
+await using var client2 = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
 await using var session2 = await client2.ResumeSessionAsync(session1.SessionId, new()
 { ContinuePendingWork = true, Tools = new SessionToolOptions { Definitions = [tool] } });
 
@@ -33,11 +33,11 @@ var toolRequested = WaitForEventAsync<ExternalToolRequestedEvent>(
     session2,
     evt => evt.Data.ToolName == "manual_resume_status");
 
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
 await session2.Rpc.Permissions.HandlePendingPermissionRequestAsync(
     permissionEvent.Data.RequestId,
     PermissionDecision.ApproveOnce());
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 
 var toolEvent = await toolRequested;
 await client2.ForceStopAsync();

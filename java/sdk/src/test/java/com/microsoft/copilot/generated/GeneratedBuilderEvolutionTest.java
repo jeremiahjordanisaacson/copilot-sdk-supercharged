@@ -103,7 +103,7 @@ class GeneratedBuilderEvolutionTest {
                 Path.of(com.microsoft.copilot.generated.rpc.TaskBlocker.class.getProtectionDomain().getCodeSource()
                         .getLocation().toURI()))
                 .strip().split("\\R");
-        assertEquals(7, output.length);
+        assertEquals(6, output.length);
         JsonNode skill = JSON.readTree(output[0]);
         assertEquals("example", skill.path("name").asText());
         assertEquals("content", skill.path("content").asText());
@@ -128,15 +128,11 @@ class GeneratedBuilderEvolutionTest {
         assertTrue(metadata.path("isDetached").asBoolean());
         assertEquals("task", metadata.path("mcTaskId").asText());
         assertFalse(metadata.has("lastClientName"));
-        JsonNode account = JSON.readTree(output[4]);
-        assertEquals("session", account.path("sessionId").asText());
-        assertEquals("switchActive", account.path("command").path("kind").asText());
-        assertEquals("selected", account.path("command").path("selectionId").asText());
-        JsonNode command = JSON.readTree(output[5]);
+        JsonNode command = JSON.readTree(output[4]);
         assertEquals("legacy-request", command.path("requestId").asText());
         assertEquals("/help", command.path("command").asText());
         assertFalse(command.has("scheduled"));
-        JsonNode marketplace = JSON.readTree(output[6]);
+        JsonNode marketplace = JSON.readTree(output[5]);
         assertEquals("market", marketplace.path("name").asText());
         assertEquals("source", marketplace.path("source").asText());
         assertEquals(JSON.readTree("false"), marketplace.get("isDefault"));
@@ -367,9 +363,7 @@ class GeneratedBuilderEvolutionTest {
         assertTrue(callerCompilation.success(), callerCompilation.diagnostics());
         String[] output = run("fixture.BuilderEventValidationCaller", caller, api).strip().split("\\R");
         assertEquals("Missing required property: message", output[0]);
-        assertEquals("present", JSON.readTree(output[1]).path("message").asText());
-        assertTrue(JSON.readTree(output[1]).has("requiredNullable"));
-        assertTrue(JSON.readTree(output[1]).get("requiredNullable").isNull());
+        assertEquals(JSON.readTree("{\"message\":\"present\",\"requiredNullable\":null}"), JSON.readTree(output[1]));
     }
 
     @Test

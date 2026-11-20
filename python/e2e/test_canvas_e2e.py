@@ -19,6 +19,7 @@ from copilot.rpc import (
     CanvasProviderOpenResult,
 )
 from copilot.session import CopilotSession, PermissionHandler
+from copilot.tools import ToolResult
 
 from .testharness import E2ETestContext
 
@@ -143,6 +144,37 @@ class TestCanvasRpc:
             assert handler.action_calls[0].instance_id == "counter-2"
             assert handler.action_calls[0].action_name == "increment"
             assert handler.action_calls[0].input == {"amount": 5}
+        finally:
+            await session.disconnect()
+
+    async def test_should_invoke_canvas_action_returning_a_tool_result(self, ctx: E2ETestContext):
+        class _ToolResultCanvasHandler(_CounterCanvasHandler):
+            async def on_action(self, ctx: CanvasProviderInvokeActionRequest) -> ToolResult:
+                self.action_calls.append(ctx)
+                return ToolResult(text_result_for_llm="count is 42")
+
+        handler = _ToolResultCanvasHandler()
+        session = await ctx.client.create_session(
+            permissions={"on_request": PermissionHandler.approve_all},
+            canvases={"definitions": [_counter_canvas()], "handler": handler},
+        )
+        try:
+            await session.rpc.canvas.open(
+                CanvasOpenRequest(canvas_id="counter", instance_id="counter-3", input={})
+            )
+
+            result = await session.rpc.canvas.action.invoke(
+                CanvasActionInvokeRequest(
+                    action_name="increment",
+                    instance_id="counter-3",
+                    input={"amount": 5},
+                )
+            )
+
+            assert result == {
+                "result": {"textResultForLlm": "count is 42", "resultType": "success"}
+            }
+            assert len(handler.action_calls) == 1
         finally:
             await session.disconnect()
 

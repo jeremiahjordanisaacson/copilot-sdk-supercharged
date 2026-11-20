@@ -14,7 +14,7 @@ import com.microsoft.copilot.CopilotExperimental;
 import javax.annotation.processing.Generated;
 
 /**
- * Session event "session.fusion_completed". Experimental durable aggregate outcome of a HydraFusion turn.
+ * Session event "session.fusion_completed". Experimental durable aggregate outcome of a HydraFusion turn. Phase-free Single reports completed, failed, or cancelled; staged patterns emit this event only on successful or degraded completion.
  *
  * @apiNote This event type is experimental and may change in a future version.
  * @since 1.0.0
@@ -41,7 +41,7 @@ public final class SessionFusionCompletedEvent extends SessionEvent {
     public record SessionFusionCompletedEventData(
         /** Stable identifier for the completed HydraFusion turn. */
         @JsonProperty("fusionId") String fusionId,
-        /** Idempotency identifier for the authoritative final commit. */
+        /** Idempotency identifier for completion; a phase-free Single has no commit replay. */
         @JsonProperty("commitId") String commitId,
         /** Identifier of the session turn associated with the completion. */
         @JsonProperty("turnId") String turnId,
@@ -49,9 +49,9 @@ public final class SessionFusionCompletedEvent extends SessionEvent {
         @JsonProperty("syntheticModel") String syntheticModel,
         /** HydraFusion orchestration pattern executed for the turn. */
         @JsonProperty("pattern") FusionPattern pattern,
-        /** Stable aggregate outcome of the HydraFusion turn. */
+        /** Stable aggregate outcome. Phase-free Single reports completed, failed, or cancelled; staged patterns emit this event only on successful or degraded completion. */
         @JsonProperty("outcome") String outcome,
-        /** Phase whose output supplied the authoritative final content. */
+        /** Phase whose output supplied the final content, or null for a phase-free Single. */
         @JsonInclude(JsonInclude.Include.ALWAYS)
         @JsonProperty("finalSourcePhaseId") String finalSourcePhaseId,
         /** Concrete model that supplied the authoritative final content. */
@@ -64,23 +64,32 @@ public final class SessionFusionCompletedEvent extends SessionEvent {
         @JsonProperty("degradedReason") String degradedReason,
         /** Number of concrete phases attempted by the turn. */
         @JsonProperty("phaseCount") Long phaseCount,
-        /** Total concrete model requests made across all phases. */
+        /** Total concrete model requests made by the turn. */
         @JsonProperty("requestCount") Long requestCount,
-        /** Total input tokens consumed across all phases. */
+        /** Total input tokens consumed by the turn. */
         @JsonProperty("inputTokens") Long inputTokens,
-        /** Total output tokens produced across all phases. */
+        /** Total output tokens produced by the turn. */
         @JsonProperty("outputTokens") Long outputTokens,
-        /** Total cached input tokens reported across all phases. */
+        /** Total cached input tokens reported by the turn. */
         @JsonProperty("cachedTokens") Long cachedTokens,
-        /** Total tokens written to prompt cache across all phases. */
+        /** Total tokens written to prompt cache by the turn. */
         @JsonProperty("cacheWriteTokens") Long cacheWriteTokens,
-        /** Total normalized AI-unit cost reported across all phases, in nano-AIU. */
+        /** Total normalized AI-unit cost reported by the turn, in nano-AIU. */
         @JsonProperty("totalNanoAiu") Double totalNanoAiu,
         /** Total elapsed execution time for the HydraFusion turn in milliseconds. */
         @JsonProperty("durationMs") Double durationMs,
         /** True when the committed first pass ended with background work outstanding, so that work's completion notifications continue the conversation; absent otherwise. */
         @CopilotExperimental
-        @JsonProperty("awaitingBackgroundWork") Boolean awaitingBackgroundWork
+        @JsonProperty("awaitingBackgroundWork") Boolean awaitingBackgroundWork,
+        /** Planned reasoning effort of an ordinary Single turn, which has no phase record. */
+        @CopilotExperimental
+        @JsonProperty("reasoningEffort") String reasoningEffort,
+        /** Failure category of an ordinary Single turn, which has no phase failure record. */
+        @CopilotExperimental
+        @JsonProperty("failureReason") String failureReason,
+        /** Error reported by a failed ordinary Single turn, when available. */
+        @CopilotExperimental
+        @JsonProperty("errorMessage") String errorMessage
     ) {
 
         /**
@@ -126,6 +135,9 @@ public final class SessionFusionCompletedEvent extends SessionEvent {
             private Double totalNanoAiu;
             private Double durationMs;
             private Boolean awaitingBackgroundWork;
+            private String reasoningEffort;
+            private String failureReason;
+            private String errorMessage;
 
             /**
              * Sets the {@code fusionId} property.
@@ -359,6 +371,42 @@ public final class SessionFusionCompletedEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code reasoningEffort} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            @com.microsoft.copilot.CopilotExperimental
+            public Builder reasoningEffort(String value) {
+                this.reasoningEffort = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code failureReason} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            @com.microsoft.copilot.CopilotExperimental
+            public Builder failureReason(String value) {
+                this.failureReason = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code errorMessage} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            @com.microsoft.copilot.CopilotExperimental
+            public Builder errorMessage(String value) {
+                this.errorMessage = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
@@ -382,7 +430,7 @@ public final class SessionFusionCompletedEvent extends SessionEvent {
                 if (cachedTokens == null) throw new IllegalStateException("Missing required property: cachedTokens");
                 if (totalNanoAiu == null) throw new IllegalStateException("Missing required property: totalNanoAiu");
                 if (durationMs == null) throw new IllegalStateException("Missing required property: durationMs");
-                return new SessionFusionCompletedEventData(fusionId, commitId, turnId, syntheticModel, pattern, outcome, finalSourcePhaseId, finalSourceModel, followUpModel, degradedReason, phaseCount, requestCount, inputTokens, outputTokens, cachedTokens, cacheWriteTokens, totalNanoAiu, durationMs, awaitingBackgroundWork);
+                return new SessionFusionCompletedEventData(fusionId, commitId, turnId, syntheticModel, pattern, outcome, finalSourcePhaseId, finalSourceModel, followUpModel, degradedReason, phaseCount, requestCount, inputTokens, outputTokens, cachedTokens, cacheWriteTokens, totalNanoAiu, durationMs, awaitingBackgroundWork, reasoningEffort, failureReason, errorMessage);
             }
         }
     }

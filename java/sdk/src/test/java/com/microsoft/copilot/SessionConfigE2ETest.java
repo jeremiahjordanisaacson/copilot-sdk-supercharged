@@ -15,6 +15,7 @@ import com.microsoft.copilot.rpc.SessionPermissionOptions;
 import org.junit.jupiter.api.Tag;
 
 import static com.microsoft.copilot.CopilotRequestTestSupport.SYNTHETIC_TEXT;
+import static com.microsoft.copilot.CopilotRequestTestSupport.isInferenceUrl;
 import static com.microsoft.copilot.CopilotRequestTestSupport.newLlmClient;
 import static com.microsoft.copilot.CopilotRequestTestSupport.setupCapiAuth;
 import static org.junit.jupiter.api.Assertions.*;
@@ -22,11 +23,16 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -48,6 +54,7 @@ import com.microsoft.copilot.rpc.ResumeSessionOptions;
 public class SessionConfigE2ETest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
 
     private static E2ETestContext ctx;
 
@@ -368,7 +375,7 @@ public class SessionConfigE2ETest {
         assertEquals(maxAiCredits, limits.maxAiCredits());
     }
 
-    private static List<String> getTaskAgentTypes(Map<String, Object> exchange) {
+    private static List<String> getTaskAgentTypes(Map<String, Object> exchange) throws Exception {
         Object toolsObj = getRequest(exchange).get("tools");
         assertInstanceOf(List.class, toolsObj, "Expected request tools");
 
@@ -382,16 +389,65 @@ public class SessionConfigE2ETest {
         }
 
         assertNotNull(parameters, "Expected task tool parameters");
-        JsonNode enumValues = parameters.path("properties").path("agent_type").path("enum");
-        assertTrue(enumValues.isArray(), "Expected task agent_type enum");
+        JsonNode agentType = parameters.path("properties").path("agent_type");
+        if (!"true".equals(System.getenv("COPILOT_EXP_COPILOT_CLI_STABLE_PROMPT_PREFIX"))) {
+            JsonNode enumValues = agentType.path("enum");
+            assertTrue(enumValues.isArray(), "Expected task agent_type enum");
+            List<String> values = new ArrayList<>();
+            enumValues.forEach(value -> {
+                if (value.isTextual()) {
+                    values.add(value.asText());
+                }
+            });
+            return values;
+        }
 
-        List<String> values = new ArrayList<>();
-        enumValues.forEach(value -> {
-            if (value.isTextual()) {
-                values.add(value.asText());
+        // Under the stable prompt prefix the agents state note lists the agents.
+        assertEquals("string", agentType.path("type").asText());
+        assertFalse(agentType.has("enum"), "Expected a fixed task agent_type without an enum");
+
+        // Read raw requests; normalized exchanges omit runtime reminders.
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(ctx.getProxyUrl() + "/requests")).GET().build();
+        HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode());
+        JsonNode latest = null;
+        for (JsonNode captured : MAPPER.readTree(response.body())) {
+            if (isInferenceUrl(captured.path("url").asText())) {
+                latest = captured;
             }
-        });
-        return values;
+        }
+        assertNotNull(latest, "Expected a captured provider request");
+        JsonNode body = MAPPER.readTree(latest.path("body").asText());
+        JsonNode messages = body.has("messages") ? body.get("messages") : body.path("input");
+        assertTrue(messages.isArray(), "Expected provider request messages");
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            JsonNode message = messages.get(i);
+            if (!"user".equals(message.path("role").asText())) {
+                continue;
+            }
+            JsonNode content = message.path("content");
+            StringBuilder text = new StringBuilder();
+            if (content.isTextual()) {
+                text.append(content.asText());
+            } else {
+                for (JsonNode part : content) {
+                    text.append(part.path("text").asText(""));
+                }
+            }
+            if (!text.toString().contains("<system_reminder>\n<agents>\n")) {
+                continue;
+            }
+            var catalog = Pattern.compile("<available_agents>\\n([\\s\\S]*?)\\n</available_agents>").matcher(text);
+            assertTrue(catalog.find(), "Expected available agents in state note");
+            var names = Pattern.compile("^- \\*\\*([^*]+)\\*\\*:", Pattern.MULTILINE).matcher(catalog.group(1));
+            List<String> values = new ArrayList<>();
+            while (names.find()) {
+                values.add(names.group(1));
+            }
+            return values;
+        }
+        fail("Expected agents state note in the latest provider request");
+        return List.of();
     }
 
     private static Map<?, ?> getRequest(Map<String, Object> exchange) {

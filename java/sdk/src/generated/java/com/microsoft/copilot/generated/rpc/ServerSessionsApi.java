@@ -22,9 +22,13 @@ public final class ServerSessionsApi {
 
     private final RpcCaller caller;
 
+    /** API methods for the {@code sessions.forgeProposals} sub-namespace. */
+    final ServerSessionsForgeProposalsApi forgeProposals;
+
     /** @param caller the RPC transport function */
     ServerSessionsApi(RpcCaller caller) {
         this.caller = caller;
+        this.forgeProposals = new ServerSessionsForgeProposalsApi(caller);
     }
 
     /**
@@ -93,6 +97,17 @@ public final class ServerSessionsApi {
     @CopilotExperimental
     CompletableFuture<SessionsGetMetadataResult> getMetadata(SessionsGetMetadataParams params) {
         return caller.invoke("sessions.getMetadata", params, SessionsGetMetadataResult.class);
+    }
+
+    /**
+     * Lists one step of the signed-in user's Mission Control tasks, including archived tasks, as remote session metadata. Each step follows the task list's `Link: rel="next"` header (falling back to the next page number when there is none) for up to one active and one archived page, and returns a continuation for the next step. HTTP failures are reported in `failure` rather than as an RPC error so callers keep the status, payload and `retryAfterMs`.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SessionsListRemotePageResult> listRemotePage(SessionsListRemotePageParams params) {
+        return caller.invoke("sessions.listRemotePage", params, SessionsListRemotePageResult.class);
     }
 
     /**

@@ -163,7 +163,7 @@ async fn secure_websocket_rejects_a_plaintext_endpoint_without_panicking() {
     let address = listener.local_addr().unwrap();
     let response = CopilotWebSocketResponse::new(Arc::new(CopilotRequestExchange::new(
         "secure-websocket".to_string(),
-        Weak::new(),
+        WeakClientInner::default(),
     )));
     let server = async {
         let (mut socket, _) = listener.accept().await.unwrap();

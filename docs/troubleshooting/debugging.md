@@ -322,6 +322,8 @@ var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientM
 
 **Cause:** The runtime has no GitHub credentials to use.
 
+Sending a message on such a session produces a `session.error` event with `errorType: "authentication"`, `errorCode: "no_account"`, the message `This session is not signed in.`, and `remediation: "sign_in"`. Session calls that reject with `Not authenticated`, such as `session.model.list`, carry the same fields in their JSON-RPC error data. Use `errorCode` to detect this state instead of matching the message text.
+
 **Solution:**
 
 1. Sign in once with the [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli); the runtime can use the stored credentials:

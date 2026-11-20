@@ -108,6 +108,17 @@ public final class ServerManagedSettingsApi {
     }
 
     /**
+     * Resolves managed policy and retains its complete authoritative layers and fail-closed decisions for a trusted host that owns process startup policy. Unlike a separate ingest followed by retainPolicy, this keeps typed network restrictions, permission floors, helper authority, and source provenance inside the runtime. One-shot plugin hosts use the returned effective policy before guarded mutations. Session-owning hosts should use normal session policy resolution instead.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<ManagedSettingsIngestAndRetainResult> ingestAndRetain(ManagedSettingsIngestAndRetainParams params) {
+        return caller.invoke("managedSettings.ingestAndRetain", params, ManagedSettingsIngestAndRetainResult.class);
+    }
+
+    /**
      * Resolves the managed (enterprise policy) settings a host must enforce from startup, and judges the account against the enterprise sign-in pin in the same pass. This composes the layers the way `managedSettings.ingest` does and then answers the two questions a host cannot answer for itself: which fail-closed floors apply when a layer could not be confirmed, and whether this credential is allowed to sign in at all. The sign-in verdict is the reason a host must not assemble this itself from `managedSettings.ingest` — a pinned organization is an access control, and a host that composed the layers but skipped the pin would let a developer sign in with a personal or another enterprise's account and escape every control that keys off the signed-in identity. The verdict is computed on every resolution, including one that is not retained, so declining to apply policy never widens access. Set `retainAndApply` to keep the resolved policy as this runtime process's startup policy; leave it false to resolve without side effects.
      *
      * @apiNote This method is experimental and may change in a future version.

@@ -11,6 +11,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.microsoft.copilot.CopilotExperimental;
+import java.util.Map;
 import javax.annotation.processing.Generated;
 
 /**
@@ -29,6 +30,8 @@ record UserSettingsUpdateParams(
     /** Value to store for `key`. When both the stored value and this value are objects, their fields are shallow-merged and fields this object does not name are preserved. Otherwise this value replaces the stored value. */
     @JsonInclude(JsonInclude.Include.ALWAYS)
     @JsonProperty("value") Object value,
+    /** Optional shallow field precondition checked against the stored object under the same cross-process transaction as the update. Missing fields compare as JSON null. Field values compare recursively; integer and floating-point representations of the same number compare equally without rounding integers to floating point. A mismatch leaves the file unchanged. Omit this object for an unconditional update. */
+    @JsonProperty("ifFieldsMatch") Map<String, Object> ifFieldsMatch,
     /** Copilot configuration directory to write the settings document in, taking precedence over the server's own `COPILOT_HOME` and default home. Omit it, or pass an empty string, to use the directory the server resolved for itself. */
     @JsonProperty("configDir") String configDir,
     /** Single-component name for the settings document at `&lt;configDir>/settings/&lt;subDir>.json`; path separators, `.` and `..` are rejected. Omit it, or pass an empty string, to use the main settings document. */
@@ -57,6 +60,7 @@ record UserSettingsUpdateParams(
         private String key;
         private Object value;
         private boolean $presence1;
+        private Map<String, Object> ifFieldsMatch;
         private String configDir;
         private String subDir;
 
@@ -80,6 +84,17 @@ record UserSettingsUpdateParams(
         public Builder value(Object value) {
             this.value = value;
             this.$presence1 = true;
+            return this;
+        }
+
+        /**
+         * Sets the {@code ifFieldsMatch} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder ifFieldsMatch(Map<String, Object> value) {
+            this.ifFieldsMatch = value;
             return this;
         }
 
@@ -114,7 +129,7 @@ record UserSettingsUpdateParams(
         public UserSettingsUpdateParams build() {
             if (key == null) throw new IllegalStateException("Missing required property: key");
             if (!$presence1) throw new IllegalStateException("Missing required property: value");
-            return new UserSettingsUpdateParams(key, value, configDir, subDir);
+            return new UserSettingsUpdateParams(key, value, ifFieldsMatch, configDir, subDir);
         }
     }
 }

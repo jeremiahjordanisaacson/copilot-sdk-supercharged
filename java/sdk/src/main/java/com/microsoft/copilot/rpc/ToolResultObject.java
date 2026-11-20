@@ -48,6 +48,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *            the tool telemetry data
  * @param toolReferences
  *            names of tools returned by a tool-search tool
+ * @param skipLargeOutputProcessing
+ *            when true, bypasses spill-to-file processing for this result;
+ *            false or null uses the session's normal large-output policy
  * @see ToolHandler
  * @see ToolBinaryResult
  * @since 1.0.0
@@ -58,7 +61,34 @@ public record ToolResultObject(@JsonProperty("resultType") String resultType,
         @JsonProperty("binaryResultsForLlm") List<ToolBinaryResult> binaryResultsForLlm,
         @JsonProperty("error") String error, @JsonProperty("sessionLog") String sessionLog,
         @JsonProperty("toolTelemetry") Map<String, Object> toolTelemetry,
-        @JsonProperty("toolReferences") List<String> toolReferences) {
+        @JsonProperty("toolReferences") List<String> toolReferences,
+        @JsonProperty("skipLargeOutputProcessing") Boolean skipLargeOutputProcessing) {
+
+    /**
+     * Creates a result without overriding the large-output policy.
+     * <p>
+     * Preserves source and binary compatibility with the seven-argument
+     * constructor.
+     *
+     * @param resultType
+     *            the result type
+     * @param textResultForLlm
+     *            the text result to be sent to the LLM
+     * @param binaryResultsForLlm
+     *            the list of binary results to be sent to the LLM
+     * @param error
+     *            the error message, or {@code null} if successful
+     * @param sessionLog
+     *            the session log text
+     * @param toolTelemetry
+     *            the tool telemetry data
+     * @param toolReferences
+     *            names of tools returned by a tool-search tool
+     */
+    public ToolResultObject(String resultType, String textResultForLlm, List<ToolBinaryResult> binaryResultsForLlm,
+            String error, String sessionLog, Map<String, Object> toolTelemetry, List<String> toolReferences) {
+        this(resultType, textResultForLlm, binaryResultsForLlm, error, sessionLog, toolTelemetry, toolReferences, null);
+    }
 
     /**
      * Creates a result without tool references.

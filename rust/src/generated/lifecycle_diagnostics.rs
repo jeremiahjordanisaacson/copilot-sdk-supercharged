@@ -12,7 +12,7 @@ use crate::types::SessionId;
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) enum RuntimeLifecycleDisposition {
     /// The work completed.
     #[serde(rename = "succeeded")]
@@ -37,6 +37,33 @@ pub(crate) enum RuntimeLifecycleDisposition {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for RuntimeLifecycleDisposition {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RuntimeLifecycleDisposition",
+            &[
+                "succeeded",
+                "failed",
+                "cancelled",
+                "timed_out",
+                "superseded",
+                "abandoned",
+                "Unknown",
+            ],
+            Some(6),
+        )?;
+        Ok(match index {
+            0 => Self::Succeeded,
+            1 => Self::Failed,
+            2 => Self::Cancelled,
+            3 => Self::TimedOut,
+            4 => Self::Superseded,
+            5 => Self::Abandoned,
+            _ => Self::Unknown,
+        })
+    }
+}
 /// Timing of one real dependency wait.
 ///
 /// <div class="warning">
@@ -45,12 +72,14 @@ pub(crate) enum RuntimeLifecycleDisposition {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct RuntimeLifecycleBlockerTiming {
     /// ISO 8601 timestamp when this dependency began blocking its owner.
     pub blocking_since: String,
 }
+crate::record_serde::wire_record!(RuntimeLifecycleBlockerTiming {
+    blocking_since: "blockingSince"
+});
 /// Exact lifecycle operation awaited by a real dependency wait.
 ///
 /// <div class="warning">
@@ -90,8 +119,7 @@ pub(crate) struct RuntimeLifecycleBlocker {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct RuntimeLifecycleOperationTiming {
     /// ISO 8601 timestamp when the operation began.
     pub started_at: String,
@@ -100,6 +128,11 @@ pub(crate) struct RuntimeLifecycleOperationTiming {
     /// ISO 8601 timestamp when this operation revision was recorded.
     pub transitioned_at: String,
 }
+crate::record_serde::wire_record!(RuntimeLifecycleOperationTiming {
+    started_at: "startedAt",
+    phase_started_at: "phaseStartedAt",
+    transitioned_at: "transitionedAt"
+});
 /// Observed state of one readiness or convergence operation.
 ///
 /// <div class="warning">
@@ -108,8 +141,7 @@ pub(crate) struct RuntimeLifecycleOperationTiming {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct RuntimeLifecycleOperation {
     /// Opaque operation identifier, unique within the lifecycle incarnation and system.
     pub operation_id: String,
@@ -122,13 +154,13 @@ pub(crate) struct RuntimeLifecycleOperation {
     /// System-owned production boundary within the phase.
     pub step: String,
     /// How the operation ended. Absent while the operation remains active.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub disposition: Option<RuntimeLifecycleDisposition>,
     /// Timestamps recorded by the lifecycle service for this operation revision.
     pub timing: RuntimeLifecycleOperationTiming,
     /// Complete dependency blocker set after this operation change.
     pub blockers: Vec<RuntimeLifecycleBlocker>,
 }
+crate::record_serde::wire_record!(RuntimeLifecycleOperation { operation_id: "operationId", operation_revision: "operationRevision", trigger: "trigger", phase: "phase", step: "step", disposition: "disposition" if is_none, timing: "timing", blockers: "blockers" });
 /// Immutable causal origin of a progress record with independent identity and settlement.
 ///
 /// <div class="warning">
@@ -137,14 +169,17 @@ pub(crate) struct RuntimeLifecycleOperation {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct RuntimeLifecycleProgressOrigin {
     /// Kind of the originating progress record.
     pub kind: String,
     /// Identifier of the originating progress record.
     pub progress_id: String,
 }
+crate::record_serde::wire_record!(RuntimeLifecycleProgressOrigin {
+    kind: "kind",
+    progress_id: "progressId"
+});
 /// Fixed timestamps for one observed progress revision.
 ///
 /// <div class="warning">
@@ -153,8 +188,7 @@ pub(crate) struct RuntimeLifecycleProgressOrigin {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct RuntimeLifecycleProgressTiming {
     /// ISO 8601 timestamp when the progress record began.
     pub started_at: String,
@@ -163,6 +197,11 @@ pub(crate) struct RuntimeLifecycleProgressTiming {
     /// ISO 8601 timestamp when this progress revision was recorded.
     pub transitioned_at: String,
 }
+crate::record_serde::wire_record!(RuntimeLifecycleProgressTiming {
+    started_at: "startedAt",
+    phase_started_at: "phaseStartedAt",
+    transitioned_at: "transitionedAt"
+});
 /// Experimental, observational-only state of runtime progress and the lifecycle operations that block it. Observation and delivery never control runtime or model behavior. Process death, diagnostic projection loss, transport loss, or serialization failure can prevent external delivery.
 ///
 /// <div class="warning">
@@ -208,8 +247,7 @@ pub(crate) struct RuntimeLifecycleProgressStateData {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct RuntimeLifecycleSystemStateData {
     /// Session whose lifecycle owns this system.
     pub session_id: SessionId,
@@ -220,13 +258,13 @@ pub(crate) struct RuntimeLifecycleSystemStateData {
     /// Orders every observed change to this system in the incarnation.
     pub system_revision: i64,
     /// Authoritative condition retained after this change. Initial shared values are `current`, `disabled`, `degraded`, and `quiescent`; integrations can add bounded values as the contract matures.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub condition: Option<String>,
     /// Operation transition that produced this system revision.
     pub changed_operation: RuntimeLifecycleOperation,
     /// Complete active operation set after applying the change.
     pub active_operations: Vec<RuntimeLifecycleOperation>,
 }
+crate::record_serde::wire_record!(RuntimeLifecycleSystemStateData { session_id: "sessionId", incarnation_id: "incarnationId", system: "system", system_revision: "systemRevision", condition: "condition" if is_none, changed_operation: "changedOperation", active_operations: "activeOperations" });
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 enum RuntimeLifecycleSystemStateDiagnosticEventType {
     #[serde(rename = "runtime.lifecycle.system_state")]

@@ -26,7 +26,9 @@ import javax.annotation.processing.Generated;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record McpDiscoverResult(
     /** MCP servers discovered from all sources */
-    @JsonProperty("servers") List<DiscoveredMcpServer> servers
+    @JsonProperty("servers") List<DiscoveredMcpServer> servers,
+    /** Discovery warnings, present only when includeConfiguration is true. Empty when discovery has no warnings. */
+    @JsonProperty("diagnostics") List<McpDiscoveryDiagnostic> diagnostics
 ) {
 
     /**
@@ -49,6 +51,7 @@ public record McpDiscoverResult(
     public static final class Builder {
         private Builder() {}
         private List<DiscoveredMcpServer> servers;
+        private List<McpDiscoveryDiagnostic> diagnostics;
 
         /**
          * Sets the {@code servers} property.
@@ -62,6 +65,17 @@ public record McpDiscoverResult(
         }
 
         /**
+         * Sets the {@code diagnostics} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder diagnostics(List<McpDiscoveryDiagnostic> value) {
+            this.diagnostics = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
@@ -69,7 +83,7 @@ public record McpDiscoverResult(
          */
         public McpDiscoverResult build() {
             if (servers == null) throw new IllegalStateException("Missing required property: servers");
-            return new McpDiscoverResult(servers);
+            return new McpDiscoverResult(servers, diagnostics);
         }
     }
 }

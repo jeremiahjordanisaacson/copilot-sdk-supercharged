@@ -25,6 +25,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.logging.Level;
@@ -226,6 +227,10 @@ public final class CopilotSession implements AutoCloseable {
     private final JsonRpcClient rpc;
     private volatile SessionRpc sessionRpc;
     private final Set<EventSubscription> eventHandlers = new CopyOnWriteArraySet<>();
+    private final CompletableFuture<Void> callbacksRetirement = new CompletableFuture<>();
+    private final Object eventDeliveryLock = new Object();
+    private CompletableFuture<Void> eventDeliveryTail = CompletableFuture.completedFuture(null);
+    private boolean eventDeliveryClosed;
     private final AtomicReference<Map<String, ToolDefinition>> toolHandlers = new AtomicReference<>(Map.of());
     private final Object setToolsLock = new Object();
     private CompletableFuture<Void> setToolsTail = CompletableFuture.completedFuture(null);
@@ -253,18 +258,29 @@ public final class CopilotSession implements AutoCloseable {
     private final ScheduledExecutorService timeoutScheduler;
     private volatile Executor executor;
     private volatile GitHubTokenProviderRegistry.Registration gitHubTokenProviderRegistration;
+    private volatile Runnable closeHandler = () -> {
+    };
 
     /** Tracks whether this session instance has been closed or force-stopped. */
     private volatile boolean isTerminated = false;
+    // Graceful close keeps routing live until detach acknowledgement.
+    private volatile boolean registrationRetired = false;
+    private volatile boolean registrationAccepted;
     private volatile boolean detached;
     private volatile boolean completionRpcUnsupported;
     private volatile boolean callbacksRetired = false;
 
     private static final class EventSubscription {
         private final AtomicReference<Consumer<SessionEvent>> handler;
+        private final boolean completion;
 
         EventSubscription(Consumer<SessionEvent> handler) {
+            this(handler, false);
+        }
+
+        EventSubscription(Consumer<SessionEvent> handler, boolean completion) {
             this.handler = new AtomicReference<>(handler);
+            this.completion = completion;
         }
     }
 
@@ -762,7 +778,8 @@ public final class CopilotSession implements AutoCloseable {
         var delivery = new Delivery();
         Closeable subscription;
         synchronized (this) {
-            subscription = on(delivery::event);
+            ensureNotTerminated();
+            subscription = onCompletion(delivery::event);
             plainWaits.put(result, () -> {
                 outcome.completeExceptionally(new IllegalStateException("Session closed before response completed"));
                 outcome.whenComplete((value, error) -> {
@@ -998,11 +1015,10 @@ public final class CopilotSession implements AutoCloseable {
             }
         }
         var state = new State();
-        Consumer<SessionEvent> handler = state::event;
 
         Closeable subscription;
         synchronized (this) {
-            subscription = on(handler);
+            subscription = onCompletion(state::event);
             plainWaits.put(result, state::retire);
         }
         result.whenComplete((value, error) -> plainWaits.remove(result));
@@ -1347,7 +1363,7 @@ public final class CopilotSession implements AutoCloseable {
         var state = new State();
         Closeable subscription;
         synchronized (this) {
-            subscription = on(event -> {
+            subscription = onCompletion(event -> {
                 if (event instanceof AssistantMessageEvent || event instanceof SessionIdleEvent
                         || event instanceof SessionAutopilotStoppedEvent || event instanceof SessionErrorEvent
                         || event instanceof com.microsoft.copilot.generated.UserMessageEvent) {
@@ -1407,7 +1423,22 @@ public final class CopilotSession implements AutoCloseable {
      * assistant messages, tool calls, and session state changes. For type-safe
      * handling of specific event types, prefer {@link #on(Class, Consumer)}
      * instead. A handler registered from an event handler does not receive the
-     * event currently being delivered.
+     * event currently being delivered or events already queued for delivery.
+     *
+     * <p>
+     * <b>Threading:</b> Handlers run on an executor thread, not on the thread that
+     * reads the connection: the client's executor if one is configured, otherwise
+     * the SDK default. A session's handlers receive its events one at a time and in
+     * order. Handlers for different sessions on the same client can run
+     * concurrently; shared callback state may need synchronization. Completion of
+     * an ordinary RPC does not mean handlers have observed events received before
+     * its response. A handler can wait for an ordinary RPC response, but must not
+     * wait for a later event of its own session, such as the one that completes
+     * {@link #sendAndWait(MessageOptions)}. A busy handler also delays other
+     * sessions when the shared executor has no free workers, including a
+     * single-thread executor or a one-worker default common pool. Waiting for
+     * another session's events requires enough executor capacity for that session
+     * to make progress.
      *
      * <p>
      * <b>Exception handling:</b> If a handler throws an exception, the error is
@@ -1448,6 +1479,20 @@ public final class CopilotSession implements AutoCloseable {
                 eventHandlers.remove(subscription);
             }
         };
+    }
+
+    private Closeable onCompletion(Consumer<SessionEvent> handler) {
+        synchronized (this) {
+            ensureNotTerminated();
+            var subscription = new EventSubscription(handler, true);
+            eventHandlers.add(subscription);
+            return () -> {
+                synchronized (this) {
+                    subscription.handler.set(null);
+                    eventHandlers.remove(subscription);
+                }
+            };
+        }
     }
 
     /**
@@ -1507,12 +1552,74 @@ public final class CopilotSession implements AutoCloseable {
     }
 
     /**
-     * Dispatches an event to all registered handlers.
+     * Accepts an event read from the connection.
      * <p>
-     * This is called internally when events are received from the server. Each
-     * handler is invoked in its own try/catch block. Errors are always logged at
-     * {@link Level#WARNING}. Whether dispatch continues after a handler error
-     * depends on the configured {@link EventErrorPolicy}:
+     * Called on the connection's reader thread. Request events and in-memory state
+     * updates are handled at once, as in {@link #dispatchEvent(SessionEvent)}.
+     * Registered handlers then receive the event on an executor thread, after
+     * earlier events have reached every handler. A busy handler delays this
+     * session's later events, and may delay other sessions if the shared executor
+     * is saturated, but the connection keeps reading.
+     *
+     * @param event
+     *            the event read from the connection
+     */
+    void enqueueEvent(SessionEvent event) {
+        synchronized (eventDeliveryLock) {
+            if (callbacksRetired || eventDeliveryClosed) {
+                return;
+            }
+            var subscriptions = eventHandlers.iterator();
+            handleBroadcastEventAsync(event);
+            // handleAsync, not thenRunAsync: a handler that threw an Error for the
+            // previous event must not stop delivery of this one.
+            eventDeliveryTail = eventDeliveryTail.<Void>handleAsync((ignored, previousFailure) -> {
+                deliverToHandlers(event, subscriptions);
+                return null;
+            }, this::executeEventDelivery).whenComplete((ignored, failure) -> {
+                if (failure != null) {
+                    LOG.log(Level.SEVERE, "Error delivering session event", failure);
+                }
+            });
+        }
+    }
+
+    private void executeEventDelivery(Runnable delivery) {
+        try {
+            Executor target = executor;
+            if (target != null) {
+                Thread submittingThread = Thread.currentThread();
+                var submitting = new AtomicBoolean(true);
+                try {
+                    CompletableFuture.runAsync(() -> {
+                        // Only inline execution needs a different thread; queued work
+                        // may legitimately return to the submitting executor thread.
+                        if (Thread.currentThread() == submittingThread && submitting.get()) {
+                            CLEANUP_DISPATCHER.execute(delivery);
+                        } else {
+                            delivery.run();
+                        }
+                    }, target);
+                } finally {
+                    submitting.set(false);
+                }
+            } else {
+                CompletableFuture.runAsync(delivery);
+            }
+        } catch (RejectedExecutionException e) {
+            LOG.log(Level.WARNING, "Executor rejected session event delivery; delivering on cleanup thread", e);
+            CLEANUP_DISPATCHER.execute(delivery);
+        }
+    }
+
+    /**
+     * Dispatches an event to all registered handlers on the calling thread.
+     * <p>
+     * Events read from the connection go through
+     * {@link #enqueueEvent(SessionEvent)}, which delivers them the same way from an
+     * executor thread. Each handler is invoked in its own try/catch block. Errors
+     * are always logged at {@link Level#WARNING}. Whether dispatch continues after
+     * a handler error depends on the configured {@link EventErrorPolicy}:
      * <ul>
      * <li>{@link EventErrorPolicy#PROPAGATE_AND_LOG_ERRORS} (default) — dispatch
      * stops after the first error</li>
@@ -1537,8 +1644,28 @@ public final class CopilotSession implements AutoCloseable {
         // updates (capabilities, open-canvases snapshot) before dispatching to user
         // handlers. Fire-and-forget: any RPC response is sent asynchronously.
         handleBroadcastEventAsync(event);
+        deliverToHandlers(event, eventHandlers.iterator());
+    }
 
-        for (EventSubscription subscription : eventHandlers) {
+    private void deliverToHandlers(SessionEvent event, java.util.Iterator<EventSubscription> subscriptions) {
+        try {
+            invokeHandlers(event, subscriptions);
+        } finally {
+            // Completion boundaries must still be observed when a user handler aborts
+            // delivery.
+            while (subscriptions.hasNext() && !callbacksRetired) {
+                var subscription = subscriptions.next();
+                var handler = subscription.handler.get();
+                if (subscription.completion && handler != null) {
+                    handler.accept(event);
+                }
+            }
+        }
+    }
+
+    private void invokeHandlers(SessionEvent event, java.util.Iterator<EventSubscription> subscriptions) {
+        while (subscriptions.hasNext()) {
+            EventSubscription subscription = subscriptions.next();
             Consumer<SessionEvent> handler;
             synchronized (this) {
                 if (callbacksRetired) {
@@ -1547,6 +1674,10 @@ public final class CopilotSession implements AutoCloseable {
                 handler = subscription.handler.get();
             }
             if (handler == null) {
+                continue;
+            }
+            if (subscription.completion) {
+                handler.accept(event);
                 continue;
             }
             try {
@@ -1606,10 +1737,7 @@ public final class CopilotSession implements AutoCloseable {
         } else if (event instanceof ExternalToolCompletedEvent completedEvent) {
             var data = completedEvent.getData();
             if (data != null && data.requestId() != null) {
-                PendingExternalTool pending = pendingExternalTools.remove(data.requestId());
-                if (pending != null) {
-                    pending.cancel();
-                }
+                cancelPendingExternalTool(data.requestId());
             }
         } else if (event instanceof PermissionRequestedEvent permEvent) {
             var data = permEvent.getData();
@@ -1752,7 +1880,7 @@ public final class CopilotSession implements AutoCloseable {
             return ToolResultObject.success(s);
         }
         try {
-            return ToolResultObject.success(MAPPER.writeValueAsString(result));
+            return ToolResultObject.success(JsonRpcClient.getToolResultMapper().writeValueAsString(result));
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new java.util.concurrent.CompletionException(e);
         }
@@ -1813,13 +1941,18 @@ public final class CopilotSession implements AutoCloseable {
                     }
                     sendToolResponse(requestId, toolName, null, handlerErrorMessage(ex));
                     return null;
-                }).whenComplete((result, error) -> pendingExternalTools.remove(requestId, pending));
+                }).whenComplete((result, error) -> {
+                    pendingExternalTools.remove(requestId, pending);
+                    completeCallbacksRetirement();
+                });
             } catch (Exception e) {
                 if (!pendingExternalTools.remove(requestId, pending)) {
                     return;
                 }
                 LOG.log(Level.WARNING, "Error executing tool for requestId=" + requestId, e);
                 sendToolResponse(requestId, toolName, null, handlerErrorMessage(e));
+            } finally {
+                completeCallbacksRetirement();
             }
         };
         try {
@@ -1859,9 +1992,9 @@ public final class CopilotSession implements AutoCloseable {
      * caller already owns the request.
      */
     private void answerUndeliveredToolResult(String requestId, String toolName, Throwable error) {
-        // Both flags are volatile: this can run where taking the session monitor
+        // The flag is volatile: this can run where taking the session monitor
         // could deadlock against the transport's close lock.
-        if (isTerminated || externalToolsClosed) {
+        if (externalToolsClosed) {
             return;
         }
         LOG.log(Level.SEVERE, "External tool result delivery failed. sessionId=" + sessionId + ", requestId="
@@ -1880,6 +2013,14 @@ public final class CopilotSession implements AutoCloseable {
         }
     }
 
+    void cancelPendingExternalTool(String requestId) {
+        PendingExternalTool pending = pendingExternalTools.remove(requestId);
+        if (pending != null) {
+            pending.cancel();
+            completeCallbacksRetirement();
+        }
+    }
+
     void cancelPendingExternalTools() {
         List<PendingExternalTool> pending;
         synchronized (this) {
@@ -1888,6 +2029,7 @@ public final class CopilotSession implements AutoCloseable {
             pendingExternalTools.clear();
         }
         pending.forEach(PendingExternalTool::cancel);
+        completeCallbacksRetirement();
     }
 
     /**
@@ -1945,7 +2087,11 @@ public final class CopilotSession implements AutoCloseable {
                     }
                     return null;
                 });
-            } catch (Exception e) {
+            } catch (Throwable e) {
+                // A handler that throws an Error (an AssertionError, say) is denied like one
+                // that throws an exception; otherwise the request stays pending until the
+                // turn is aborted. Only a fatal error is rethrown.
+                CopilotRequestHandler.rethrowFatalError(e);
                 LOG.log(Level.WARNING, "Error executing permission handler for requestId=" + requestId, e);
                 try {
                     PermissionRequestResult denied = new PermissionRequestResult();
@@ -1984,7 +2130,10 @@ public final class CopilotSession implements AutoCloseable {
                                     runtimeRefreshSupported);
                             return null;
                         });
-            } catch (Exception e) {
+            } catch (Throwable e) {
+                // A handler that throws an Error (an AssertionError, say) must still be
+                // answered: the runtime puts no deadline on a pending MCP OAuth request.
+                CopilotRequestHandler.rethrowFatalError(e);
                 LOG.log(Level.WARNING, "Error executing MCP auth handler for requestId=" + request.requestId(), e);
                 sendMcpAuthResponse(request, McpAuthResponse.legacy(McpAuthResult.cancelled()),
                         runtimeRefreshSupported);
@@ -2881,14 +3030,16 @@ public final class CopilotSession implements AutoCloseable {
     /**
      * Calls a section transform callback. A callback that throws or returns no
      * future keeps the section, as a failed future does, so the runtime always gets
-     * an answer.
+     * an answer. A fatal error ({@code VirtualMachineError}, {@code ThreadDeath} or
+     * {@code LinkageError}) is still rethrown.
      */
     private static CompletableFuture<String> applyTransform(
             java.util.function.Function<String, CompletableFuture<String>> cb, String content) {
         try {
             CompletableFuture<String> transform = cb.apply(content);
             return transform != null ? transform : CompletableFuture.completedFuture(content);
-        } catch (Exception ex) {
+        } catch (Throwable ex) {
+            CopilotRequestHandler.rethrowFatalError(ex);
             return CompletableFuture.failedFuture(ex);
         }
     }
@@ -3030,7 +3181,10 @@ public final class CopilotSession implements AutoCloseable {
                 default :
                     LOG.fine("Unhandled hook type: " + hookType);
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // An Error the hook throws (an AssertionError, say) is answered too, so the
+            // runtime is not left waiting; only a fatal error is rethrown.
+            CopilotRequestHandler.rethrowFatalError(e);
             LOG.log(Level.SEVERE, "Failed to process hook invocation", e);
             return CompletableFuture.failedFuture(e);
         }
@@ -3117,7 +3271,10 @@ public final class CopilotSession implements AutoCloseable {
      * @param reasoningEffort
      *            reasoning effort level (e.g., {@code "low"}, {@code "medium"},
      *            {@code "high"}, {@code "xhigh"}, {@code "max"}); {@code null} to
-     *            use default
+     *            keep the session's current reasoning effort. To clear it and use
+     *            the model's default, call
+     *            {@link #setModel(com.github.copilot.rpc.SetModelOptions)} with
+     *            {@code setReasoningEffort(null)}.
      * @return a future that completes when the model switch is acknowledged
      * @throws IllegalStateException
      *             if this session has been terminated
@@ -3146,7 +3303,10 @@ public final class CopilotSession implements AutoCloseable {
      * @param reasoningEffort
      *            reasoning effort level (e.g., {@code "low"}, {@code "medium"},
      *            {@code "high"}, {@code "xhigh"}, {@code "max"}); {@code null} to
-     *            use default
+     *            keep the session's current reasoning effort. To clear it and use
+     *            the model's default, call
+     *            {@link #setModel(com.github.copilot.rpc.SetModelOptions)} with
+     *            {@code setReasoningEffort(null)}.
      * @param modelCapabilities
      *            per-property overrides for model capabilities; {@code null} to use
      *            runtime defaults
@@ -3170,12 +3330,15 @@ public final class CopilotSession implements AutoCloseable {
      * @param model
      *            the model ID to switch to (e.g., {@code "gpt-5.4"})
      * @param reasoningEffort
-     *            reasoning effort level; {@code null} to use default
+     *            reasoning effort level; {@code null} to keep the session's current
+     *            reasoning effort. To clear it and use the model's default, call
+     *            {@link #setModel(com.github.copilot.rpc.SetModelOptions)} with
+     *            {@code setReasoningEffort(null)}.
      * @param reasoningSummary
      *            reasoning summary mode ({@code "none"}, {@code "concise"}, or
-     *            {@code "detailed"}); {@code null} to use default. Use
-     *            {@code "none"} to suppress summary output regardless of whether
-     *            reasoning is enabled.
+     *            {@code "detailed"}); {@code null} to keep the session's current
+     *            summary mode. Use {@code "none"} to suppress summary output
+     *            regardless of whether reasoning is enabled.
      * @param modelCapabilities
      *            per-property overrides for model capabilities; {@code null} to use
      *            runtime defaults
@@ -3602,14 +3765,26 @@ public final class CopilotSession implements AutoCloseable {
      * releases tool and permission handlers. After calling this method, the session
      * cannot be used again. Subsequent calls to this method have no effect. Pending
      * response waits fail when the session retires; ordinary callbacks remain
-     * active until the detach request completes, even if this method's wait times
-     * out or is interrupted. Forced client shutdown retires callbacks immediately.
+     * active until detach completes and queued event deliveries drain, even if this
+     * method's wait times out or is interrupted. This method does not wait for that
+     * drain: queued callbacks can start after it returns. Unlike Go's
+     * {@code Disconnect} and .NET's {@code DisposeAsync}, Java does not discard
+     * queued event deliveries during normal session close.
+     * <p>
+     * Before releasing callback-owned resources, close the event subscriptions
+     * returned by {@link #on(Consumer)} or {@link #on(Class, Consumer)} to suppress
+     * deliveries that have not acquired their handler. Unsubscribing does not wait
+     * for already admitted callbacks. To prevent those callbacks from accessing
+     * released resources, guard a closed flag, callback resource access, and
+     * resource disposal with the same application lock. Forced client shutdown
+     * retires callbacks immediately but does not wait for admitted callbacks.
      */
     @Override
     public void close() {
         if (!retire(false)) {
             return;
         }
+        closeHandler.run();
 
         RuntimeException detachFailure = null;
         CompletableFuture<SessionDetachResponse> detach = null;
@@ -3624,7 +3799,7 @@ public final class CopilotSession implements AutoCloseable {
             detachFailure = new IllegalStateException("Failed to detach session " + sessionId, e);
         } finally {
             if (detach == null || detach.isDone()) {
-                retireCallbacks();
+                drainAndRetireCallbacks();
             }
         }
 
@@ -3638,21 +3813,17 @@ public final class CopilotSession implements AutoCloseable {
      * waiting for it, so client stop can bound every session's detach together.
      * Retirement and detach submission run on a cleanup thread: retirement waits
      * for this session's monitor, which a legacy send holds while it writes, and
-     * inline or rejecting executors would otherwise send on the caller. Only the
-     * detach itself uses the session executor. The returned future fails when the
-     * detach does.
+     * inline or rejecting executors would otherwise send on the caller. Detach must
+     * not wait for an executor thread occupied by a user handler. The returned
+     * future fails when the detach does.
      */
     CompletableFuture<Void> closeAsync() {
         var started = CompletableFuture.supplyAsync(() -> {
             if (!retire(false)) {
                 return CompletableFuture.<Void>completedFuture(null);
             }
-            try {
-                return CompletableFuture.supplyAsync(this::detachAsync, executor).thenCompose(detach -> detach);
-            } catch (RejectedExecutionException e) {
-                LOG.log(Level.WARNING, "Executor rejected session detach task; detaching on cleanup thread", e);
-                return detachAsync();
-            }
+            closeHandler.run();
+            return detachAsync();
         }, CLEANUP_DISPATCHER);
         return started.thenCompose(detach -> detach);
     }
@@ -3662,7 +3833,7 @@ public final class CopilotSession implements AutoCloseable {
         try {
             detach = sendDetach();
         } catch (RuntimeException e) {
-            retireCallbacks();
+            drainAndRetireCallbacks();
             return CompletableFuture
                     .failedFuture(new IllegalStateException("Failed to detach session " + sessionId, e));
         }
@@ -3677,16 +3848,17 @@ public final class CopilotSession implements AutoCloseable {
     private CompletableFuture<SessionDetachResponse> sendDetach() {
         return rpc.invoke("session.detach", Map.of("sessionId", sessionId), SessionDetachResponse.class)
                 .whenComplete((response, error) -> {
-                    if (!callbacksRetired) {
-                        retireCallbacks();
-                    }
                     if (error == null && detachRejection(response) == null) {
+                        retireResumeRegistration();
                         detached = true;
                         Runnable release = releaseFromClient;
                         releaseFromClient = null;
                         if (release != null) {
                             release.run();
                         }
+                    }
+                    if (!callbacksRetired) {
+                        drainAndRetireCallbacks();
                     }
                 });
     }
@@ -3706,6 +3878,36 @@ public final class CopilotSession implements AutoCloseable {
         retire(true);
     }
 
+    void closeLocally() {
+        registrationRetired = true;
+        retire(false);
+        cancelPendingExternalTools();
+        drainAndRetireCallbacks();
+    }
+
+    void closeAfterResume() {
+        retireResumeRegistration();
+        // Same-connection resume does not replay admitted tool requests.
+        retire(false, true);
+        drainAndRetireCallbacks();
+    }
+
+    void retireResumeRegistration() {
+        registrationRetired = true;
+    }
+
+    boolean isRegistrationRetired() {
+        return registrationRetired;
+    }
+
+    void onCallbacksRetired(Runnable callback) {
+        callbacksRetirement.thenRun(callback);
+    }
+
+    void setCloseHandler(Runnable handler) {
+        closeHandler = handler;
+    }
+
     void recordResumeFallback(String id, CopilotSession previous) {
         if (previous != null) {
             resumeFallbacks.put(id, previous);
@@ -3714,22 +3916,44 @@ public final class CopilotSession implements AutoCloseable {
 
     void commitResumeRegistration() {
         resumeFallbacks.clear();
+        acceptResumeRegistration();
+    }
+
+    void acceptResumeRegistration() {
+        registrationAccepted = true;
+    }
+
+    CopilotSession liveResumeFallback(String id) {
+        var owner = resumeFallbacks.get(id);
+        // Acceptance owns the attachment even while post-resume setup is pending.
+        while (owner != null && (owner.isRegistrationRetired() || !owner.registrationAccepted)) {
+            owner = owner.resumeFallbacks.get(id);
+        }
+        return owner != null && owner != this && owner.usesConnection(rpc) ? owner : null;
     }
 
     CopilotSession liveResumeOwner(String id) {
         CopilotSession owner = this;
         // Graceful close keeps callbacks live until detach is acknowledged.
-        while (owner != null && owner.callbacksRetired) {
+        while (owner != null && owner.isRegistrationRetired()) {
             owner = owner.resumeFallbacks.get(id);
         }
         return owner;
     }
 
     private boolean retire(boolean force) {
+        return retire(force, false);
+    }
+
+    private boolean retire(boolean force, boolean preservePendingTools) {
+        if (force) {
+            retireResumeRegistration();
+        }
         List<Runnable> waitCompletions = new ArrayList<>();
         synchronized (this) {
             if (isTerminated) {
                 if (force) {
+                    cancelPendingExternalTools();
                     retireCallbacks();
                 }
                 return false;
@@ -3745,13 +3969,25 @@ public final class CopilotSession implements AutoCloseable {
             plainWaits.clear();
         }
 
-        cancelPendingExternalTools();
+        if (!preservePendingTools) {
+            cancelPendingExternalTools();
+        }
         cancelPendingShellAuthenticationRequests();
         clearSkillProvider();
         timeoutScheduler.shutdownNow();
         releaseGitHubTokenProviderRegistration();
         waitCompletions.forEach(CLEANUP_DISPATCHER::execute);
         return true;
+    }
+
+    private void drainAndRetireCallbacks() {
+        synchronized (eventDeliveryLock) {
+            if (eventDeliveryClosed) {
+                return;
+            }
+            eventDeliveryClosed = true;
+            eventDeliveryTail.whenComplete((ignored, error) -> retireCallbacks());
+        }
     }
 
     private synchronized void retireCallbacks() {
@@ -3773,6 +4009,14 @@ public final class CopilotSession implements AutoCloseable {
         memoryStoreHandler.set(null);
         eventErrorHandler = null;
         transformCallbacks = null;
+        completeCallbacksRetirement();
+    }
+
+    private void completeCallbacksRetirement() {
+        // Keep displaced handles tracked while admitted tool responses are pending.
+        if (callbacksRetired && pendingExternalTools.isEmpty()) {
+            callbacksRetirement.complete(null);
+        }
     }
 
     // ===== Internal response types for agent API =====

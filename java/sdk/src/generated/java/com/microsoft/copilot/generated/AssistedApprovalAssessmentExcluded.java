@@ -32,7 +32,7 @@ public final class AssistedApprovalAssessmentExcluded extends AssistedApprovalAs
     @Override
     public String getStatus() { return status; }
 
-    /** Machine-readable exclusion reason. Current runtimes emit `managed-approval-required`, `sandbox-bypass`, `extension-permission-access`, `action-too-long`, `authorization-history-incomplete`, `path-not-authorized`, or `content-excluded`; consumers must tolerate future strings. */
+    /** Machine-readable exclusion reason. Current runtimes emit `managed-approval-required`, `sandbox-bypass`, `extension-permission-access`, `action-too-long`, `credential-minting`, `credential-exposure`, `authorization-history-incomplete`, `path-not-authorized`, or `content-excluded`; consumers must tolerate future strings. */
     @JsonProperty("reason")
     private String reason;
 

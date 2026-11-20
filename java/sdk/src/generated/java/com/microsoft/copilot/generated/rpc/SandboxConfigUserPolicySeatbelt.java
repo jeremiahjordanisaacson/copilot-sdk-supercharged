@@ -10,6 +10,7 @@ package com.microsoft.copilot.generated.rpc;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
 import javax.annotation.processing.Generated;
 
 /**
@@ -22,7 +23,9 @@ import javax.annotation.processing.Generated;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record SandboxConfigUserPolicySeatbelt(
     /** Whether the macOS seatbelt profile may access the keychain. */
-    @JsonProperty("keychainAccess") Boolean keychainAccess
+    @JsonProperty("keychainAccess") Boolean keychainAccess,
+    /** Exact macOS Mach service names that sandboxed processes may look up. Patterns are not supported. */
+    @JsonProperty("extraMachLookups") List<String> extraMachLookups
 ) {
 
     /**
@@ -45,6 +48,7 @@ public record SandboxConfigUserPolicySeatbelt(
     public static final class Builder {
         private Builder() {}
         private Boolean keychainAccess;
+        private List<String> extraMachLookups;
 
         /**
          * Sets the {@code keychainAccess} property.
@@ -58,13 +62,24 @@ public record SandboxConfigUserPolicySeatbelt(
         }
 
         /**
+         * Sets the {@code extraMachLookups} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder extraMachLookups(List<String> value) {
+            this.extraMachLookups = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
          * @since 2.0.0
          */
         public SandboxConfigUserPolicySeatbelt build() {
-            return new SandboxConfigUserPolicySeatbelt(keychainAccess);
+            return new SandboxConfigUserPolicySeatbelt(keychainAccess, extraMachLookups);
         }
     }
 }

@@ -22,9 +22,11 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import com.microsoft.copilot.generated.AssistantMessageEvent;
+import com.microsoft.copilot.generated.rpc.SessionToolsExecuteParams;
 import com.microsoft.copilot.rpc.MessageOptions;
 import com.microsoft.copilot.rpc.PermissionHandler;
 import com.microsoft.copilot.rpc.ResumeSessionOptions;
+import com.microsoft.copilot.rpc.SessionExperimentOptions;
 import com.microsoft.copilot.rpc.ToolDefinition;
 
 @AllowCopilotExperimental
@@ -33,6 +35,9 @@ class SetToolsIT {
     private static final String FRUIT_PROMPT = "Use lookup_fruit to find the fruit for code 42.";
     private static final String FRUIT_AND_VEGETABLE_PROMPT = "Use lookup_fruit to find the fruit for code 42 again, and use lookup_vegetable to find the vegetable for code 7.";
     private static final String VEGETABLE_PROMPT = "Use lookup_vegetable to find the vegetable for code 7.";
+    // Replacement cases use the default control arm. Node.js SDK treatment tests
+    // cover the shared runtime's retention of previously sent definitions.
+    private static final Map<String, Boolean> CONTROL_ARM = Map.of("STABLE_PROMPT_PREFIX", false);
 
     private static E2ETestContext ctx;
 
@@ -58,6 +63,7 @@ class SetToolsIT {
 
         try (CopilotClient client = ctx.createClient()) {
             CopilotSession session = client.createSession(ctx.newSessionConfig()
+                    .setExperiments(new SessionExperimentOptions().setFlags(CONTROL_ARM))
                     .setTools(ctx.newSessionConfig().getTools()
                             .setDefinitions(List.of(lookupFruit("apple", originalLookups), retiredLookup())))
                     .setPermissions(
@@ -103,12 +109,12 @@ class SetToolsIT {
 
         try (CopilotClient client = ctx.createClient()) {
             var createdLookups = new CopyOnWriteArrayList<Integer>();
-            CopilotSession created = client
-                    .createSession(ctx.newSessionConfig()
-                            .setTools(ctx.newSessionConfig().getTools()
-                                    .setDefinitions(List.of(lookupFruit("apple", createdLookups))))
-                            .setPermissions(ctx.newSessionConfig().getPermissions()
-                                    .setOnRequest(PermissionHandler.APPROVE_ALL)))
+            CopilotSession created = client.createSession(ctx.newSessionConfig()
+                    .setExperiments(new SessionExperimentOptions().setFlags(CONTROL_ARM))
+                    .setTools(ctx.newSessionConfig().getTools()
+                            .setDefinitions(List.of(lookupFruit("apple", createdLookups))))
+                    .setPermissions(
+                            ctx.newSessionConfig().getPermissions().setOnRequest(PermissionHandler.APPROVE_ALL)))
                     .get(30, TimeUnit.SECONDS);
             String sessionId = created.getSessionId();
             AssistantMessageEvent first = created.sendAndWait(new MessageOptions().setPrompt(FRUIT_PROMPT), 0).get(90,
@@ -121,12 +127,11 @@ class SetToolsIT {
             var fruitLookups = new CopyOnWriteArrayList<Integer>();
             var vegetableLookups = new CopyOnWriteArrayList<Integer>();
             CopilotSession resumed = client
-                    .resumeSession(sessionId,
-                            new ResumeSessionOptions()
-                                    .setTools(new SessionToolOptions()
-                                            .setDefinitions(List.of(lookupFruit("apple", fruitLookups))))
-                                    .setPermissions(
-                                            new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)))
+                    .resumeSession(sessionId, new ResumeSessionOptions()
+                            .setExperiments(new SessionExperimentOptions().setFlags(CONTROL_ARM))
+                            .setTools(new SessionToolOptions()
+                                    .setDefinitions(List.of(lookupFruit("apple", fruitLookups))))
+                            .setPermissions(new SessionPermissionOptions().setOnRequest(PermissionHandler.APPROVE_ALL)))
                     .get(30, TimeUnit.SECONDS);
             try {
                 resumed.setTools(List.of(lookupVegetable(vegetableLookups))).get(30, TimeUnit.SECONDS);
@@ -143,6 +148,12 @@ class SetToolsIT {
                 assertTrue(replacedFrom > 0, "Expected model requests before and after the replacement");
                 assertOffered(exchanges.subList(replacedFrom, exchanges.size()), List.of("lookup_vegetable"),
                         List.of("lookup_fruit"));
+
+                resumed.getRpc().tools.execute(
+                        SessionToolsExecuteParams.builder().name("lookup_fruit").arguments(Map.of("code", 42)).build())
+                        .get(30, TimeUnit.SECONDS);
+                assertEquals(List.of(42), createdLookups);
+                assertEquals(List.of(), fruitLookups);
             } finally {
                 resumed.close();
             }

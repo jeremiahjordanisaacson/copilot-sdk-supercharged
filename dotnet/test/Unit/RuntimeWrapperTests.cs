@@ -3,6 +3,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 using Microsoft.Copilot.Rpc;
+using System.Diagnostics;
+using System.Globalization;
+using System.Reflection;
 using Xunit;
 
 namespace Microsoft.Copilot.Test.Unit;
@@ -128,6 +131,153 @@ public sealed class RuntimeWrapperTests
     }
 
 #if !NETFRAMEWORK
+    [Fact]
+    public async Task ForceStop_Terminates_Descendants_Without_Pgrep()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var directory = Directory.CreateTempSubdirectory("copilot-process-tree-");
+        var scriptPath = Path.Combine(directory.FullName, "runtime.cjs");
+        var childPidPath = Path.Combine(directory.FullName, "child.pid");
+        var script = (string)typeof(E2E.ScenarioTestingRuntimeE2ETests)
+            .GetField("FakeRuntimeScript", BindingFlags.NonPublic | BindingFlags.Static)!.GetRawConstantValue()!;
+        Process? descendant = null;
+        try
+        {
+            await File.WriteAllTextAsync(scriptPath, """
+                const child = require("child_process").spawn(process.execPath,
+                  ["-e", "process.stdout.write('ready'); setInterval(() => {}, 1000)"],
+                  { stdio: ["ignore", "pipe", "ignore"] });
+                child.stdout.once("data", () => {
+                  require("fs").writeFileSync(process.argv[process.argv.indexOf("--child-pid-file") + 1], String(child.pid));
+                """ + script + "\n});");
+            await using var client = new CopilotClient(new CopilotClientOptions
+            {
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = RuntimeConnection.ForSpawnedStdio(path: "node", args:
+                [
+                    scriptPath,
+                    "--child-pid-file", childPidPath,
+                    "--pid-file", Path.Combine(directory.FullName, "runtime.pid"),
+                    "--capture-file", Path.Combine(directory.FullName, "capture.json"),
+                ]),
+                GitHub = new ClientGitHubOptions { UseLoggedInUser = false },
+            });
+            await client.StartAsync();
+            descendant = Process.GetProcessById(
+                int.Parse(await File.ReadAllTextAsync(childPidPath), CultureInfo.InvariantCulture));
+            _ = descendant.Handle;
+            Assert.False(descendant.HasExited);
+            var originalPath = System.Environment.GetEnvironmentVariable("PATH");
+            try
+            {
+                System.Environment.SetEnvironmentVariable("PATH", directory.FullName);
+                await client.ForceStopAsync();
+            }
+            finally
+            {
+                System.Environment.SetEnvironmentVariable("PATH", originalPath);
+            }
+
+            await descendant.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(descendant.HasExited, "Force-stop left a runtime descendant running without pgrep.");
+        }
+        finally
+        {
+            if (descendant is not null)
+            {
+                using (descendant)
+                {
+                    if (!descendant.HasExited)
+                    {
+                        descendant.Kill(entireProcessTree: true);
+                        await descendant.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                }
+            }
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Bundled_Runtime_Repairs_Missing_Unix_Execute_Bits(bool repairDenied)
+    {
+        // macOS user-immutable files reject chmod without requiring elevated fixture privileges.
+        if (OperatingSystem.IsWindows() || (repairDenied && !OperatingSystem.IsMacOS()))
+        {
+            return;
+        }
+
+        var originalBaseDirectory = AppContext.GetData("APP_CONTEXT_BASE_DIRECTORY");
+        var baseDirectory = Path.Combine(Path.GetTempPath(), $"nonexecutable-runtime-{Guid.NewGuid():N}");
+        var nativeDirectory = Path.Combine(baseDirectory, "runtimes", GetPortableRid(), "native");
+        Directory.CreateDirectory(nativeDirectory);
+        var wrapper = Path.Combine(nativeDirectory, "copilot-runtime");
+        var immutable = false;
+
+        try
+        {
+            File.Copy("/bin/sh", wrapper);
+            await File.WriteAllTextAsync(Path.Combine(nativeDirectory, "runtime.node"), "unused");
+            const UnixFileMode originalMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            File.SetUnixFileMode(wrapper, originalMode);
+            if (repairDenied)
+            {
+                await SetImmutableAsync(true);
+                immutable = true;
+            }
+            AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", baseDirectory);
+            var connection = RuntimeConnection.ForSpawnedStdio();
+            connection.Environment = new Dictionary<string, string>();
+            await using var client = new CopilotClient(new CopilotClientOptions
+            {
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = connection,
+            });
+
+            var exception = await Assert.ThrowsAnyAsync<Exception>(() => client.StartAsync());
+
+            if (repairDenied)
+            {
+                Assert.IsType<UnauthorizedAccessException>(exception);
+                Assert.Equal(originalMode, File.GetUnixFileMode(wrapper));
+            }
+            else
+            {
+                // The shell rejects runtime arguments, but must first launch successfully.
+                Assert.IsNotType<System.ComponentModel.Win32Exception>(exception);
+                Assert.Equal(
+                    originalMode | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute,
+                    File.GetUnixFileMode(wrapper));
+            }
+        }
+        finally
+        {
+            AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", originalBaseDirectory);
+            if (immutable)
+            {
+                await SetImmutableAsync(false);
+            }
+            Directory.Delete(baseDirectory, recursive: true);
+        }
+
+        async Task SetImmutableAsync(bool value)
+        {
+            using var process = Process.Start(new ProcessStartInfo("/usr/bin/chflags")
+            {
+                UseShellExecute = false,
+                ArgumentList = { value ? "uchg" : "nouchg", wrapper },
+            })!;
+            await process.WaitForExitAsync();
+            Assert.Equal(0, process.ExitCode);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

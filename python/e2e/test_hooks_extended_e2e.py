@@ -250,6 +250,42 @@ class TestHooksExtended:
         finally:
             await session.disconnect()
 
+    async def test_should_allow_posttooluse_to_return_a_toolresult_as_modifiedresult(
+        self, ctx: E2ETestContext
+    ):
+        # The same exchange as the wire-form dict above.
+        await ctx.configure_for_test(
+            "hooks_extended", "should_allow_posttooluse_to_return_modifiedresult"
+        )
+        inputs: list[dict] = []
+
+        async def on_post_tool_use(input_data, invocation):
+            inputs.append(input_data)
+            if input_data.get("toolName") != "view":
+                return None
+            return {"modifiedResult": ToolResult(text_result_for_llm="modified by post hook")}
+
+        session = await ctx.client.create_session(
+            permissions={"on_request": PermissionHandler.approve_all},
+            hooks={"handlers": {"on_post_tool_use": on_post_tool_use}},
+        )
+        try:
+            response = await session.send_and_wait(
+                "Call the view tool to read the current directory, then reply done."
+            )
+            assert any(inp.get("toolName") == "view" for inp in inputs)
+            tool_messages = [
+                message
+                for exchange in await ctx.get_exchanges()
+                for message in exchange["request"]["messages"]
+                if message["role"] == "tool"
+            ]
+            assert tool_messages
+            assert all(message["content"] == "modified by post hook" for message in tool_messages)
+            assert "done" in (response.data.content or "").lower()
+        finally:
+            await session.disconnect()
+
     @pytest.mark.skip(
         reason="Fails with 1.0.64-0 runtime: built-in tools are not available when hooks "
         "restrict availableTools, so the failure path cannot be exercised. "

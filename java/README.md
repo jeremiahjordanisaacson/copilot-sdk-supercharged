@@ -61,7 +61,31 @@ runtimeOnly 'com.microsoft:copilot-sdk-runtime:1.0.28:linux-x64'
 
 ### Snapshot builds
 
-Java previews are published three times per weekday, at 10:00, 13:00, and 15:00 Pacific, through the matched SDK release pipeline. Previews with the same base SDK version update one rolling Maven coordinate: SDK `1.0.15-preview.1`, `1.0.15-preview.2`, and later `1.0.15` previews all publish Java `1.0.15-SNAPSHOT`. To use them, add the snapshot repository and depend on that version:
+Java previews are published three times per weekday, at 10:00, 13:00, and 15:00 Pacific, through the matched SDK release pipeline. Previews with the same base SDK version update one rolling Maven coordinate: SDK `1.0.15-preview.1`, `1.0.15-preview.2`, and later `1.0.15` previews all publish Java `1.0.15-SNAPSHOT`.
+
+The publisher best-effort retains pre-upload metadata and deployed JAR checksums.
+After publishing and Java documentation dispatch complete, the independent
+`sdk-starter-post-publish.yml` verifies Sonatype's checksum sidecars and dispatches
+starter tests with the immutable Java snapshot, exact C# package version and Python
+wheel version. Unverified snapshots never become test inputs; receivers await packages.
+`PER_LANGUAGE_SYSTEM_TESTS_REF` selects the receiver ref for preview releases
+(including SDK-only previews), defaulting to `main`; stable releases do not dispatch tests.
+Supplemental evidence/dispatch failures produce warnings without failing publication
+or gating documentation. Receiver results cannot change the completed publisher.
+For existing-artifact tests without publication, use `sdk-starter-system-tests.yml`.
+
+For an isolated end-to-end trial, manually dispatch
+`sdk-java-preview-system-tests.yml` with a completed successful `publish.yml` run ID
+and the receiver branch. It verifies and reuses that public preview's retained source,
+runtime inputs and existing Java source tag, then publishes **only Java** to a new
+timestamped snapshot. It does not publish CLI, Node.js, Python, Go, .NET or Rust
+releases or create new source tags. Push events only register the preview workflow;
+publication requires an explicit manual dispatch. All remote dispatches reuse
+`JAVA_RELEASE_GITHUB_TOKEN`, the existing Java documentation credential, which must
+allow Actions write access to both receiver repositories. The release App is not
+installed on `copilot-sdk-starters`; no default Actions token or new credential is used.
+
+To use snapshots, add the snapshot repository and depend on the rolling version:
 
 #### Maven
 
@@ -618,7 +642,7 @@ Cancellation and timeout stop waiting without aborting the agent.
 
 ## Permission Handling
 
-`PermissionHandler.APPROVE_ALL` approves requests when managed settings are disabled. When `enableManagedSettings` is true, it completes exceptionally. Custom handlers can inspect `request.getManagedApprovalRequired()` for human-facing confirmation logic.
+`PermissionHandler.APPROVE_ALL` approves requests when managed settings are disabled. When the session sets `SessionGitHubOptions.setFetchManagedSettings(true)`, it completes exceptionally. Custom handlers can inspect `request.getManagedApprovalRequired()` for human-facing confirmation logic.
 
 When handling `PermissionRequestedEvent` directly, convert its generated event values with `PermissionRequest.fromJsonValue(...)` to access the typed metadata:
 
@@ -673,16 +697,18 @@ When a person answers a prompt in your UI, label the result with a `PermissionDe
 ```java
 import java.util.concurrent.CompletableFuture;
 
-import com.github.copilot.generated.rpc.PermissionDecisionContext;
-import com.github.copilot.generated.rpc.PermissionDecisionOutcome;
-import com.github.copilot.generated.rpc.PermissionDecisionSource;
-import com.github.copilot.generated.rpc.PermissionDecisionSurface;
-import com.github.copilot.generated.rpc.PermissionResponseCapability;
-import com.github.copilot.rpc.ElicitationResult;
-import com.github.copilot.rpc.ElicitationResultAction;
-import com.github.copilot.rpc.ExitPlanModeResult;
-import com.github.copilot.rpc.SessionConfig;
-import com.github.copilot.rpc.UserInputResponse;
+import com.microsoft.copilot.generated.rpc.PermissionDecisionContext;
+import com.microsoft.copilot.generated.rpc.PermissionDecisionOutcome;
+import com.microsoft.copilot.generated.rpc.PermissionDecisionSource;
+import com.microsoft.copilot.generated.rpc.PermissionDecisionSurface;
+import com.microsoft.copilot.generated.rpc.PermissionResponseCapability;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
+import com.microsoft.copilot.rpc.ElicitationResult;
+import com.microsoft.copilot.rpc.ElicitationResultAction;
+import com.microsoft.copilot.rpc.ExitPlanModeResult;
+import com.microsoft.copilot.rpc.SessionInteractionOptions;
+import com.microsoft.copilot.rpc.SessionPermissionOptions;
+import com.microsoft.copilot.rpc.UserInputResponse;
 
 var personAnswered = PermissionDecisionContext.builder()
         .source(PermissionDecisionSource.HUMAN_RESPONSE)
@@ -691,17 +717,18 @@ var personAnswered = PermissionDecisionContext.builder()
         .outcome(PermissionDecisionOutcome.PROMPTED_USER)
         .build();
 
-var config = new SessionConfig()
-        .setOnPermissionRequest(handler)
-        .setOnUserInputRequest((request, invocation) -> CompletableFuture.completedFuture(
-                new UserInputResponse().setAnswer("Only src/app.ts").setWasFreeform(true)
-                        .setDecisionContext(personAnswered)))
-        .setOnExitPlanMode((request, invocation) -> CompletableFuture.completedFuture(
-                new ExitPlanModeResult().setApproved(true).setSelectedAction("interactive")
-                        .setDecisionContext(personAnswered)))
-        .setOnElicitationRequest(context -> CompletableFuture.completedFuture(
-                new ElicitationResult().setAction(ElicitationResultAction.DECLINE)
-                        .setDecisionContext(personAnswered)));
+var config = new CreateSessionOptions()
+        .setPermissions(new SessionPermissionOptions().setOnRequest(handler))
+        .setInteraction(new SessionInteractionOptions()
+                .setOnUserInputRequest((request, invocation) -> CompletableFuture.completedFuture(
+                        new UserInputResponse().setAnswer("Only src/app.ts").setWasFreeform(true)
+                                .setDecisionContext(personAnswered)))
+                .setOnExitPlanModeRequest((request, invocation) -> CompletableFuture.completedFuture(
+                        new ExitPlanModeResult().setApproved(true).setSelectedAction("interactive")
+                                .setDecisionContext(personAnswered)))
+                .setOnElicitationRequest(context -> CompletableFuture.completedFuture(
+                        new ElicitationResult().setAction(ElicitationResultAction.DECLINE)
+                                .setDecisionContext(personAnswered))));
 ```
 
 Label a person's declines and dismissals too; the runtime decides which answers carry authority. It accepts the label only from the connection that owns the session, so other connections' answers still settle, without it. Leave automated answers unlabeled: the SDK then sends no `decisionContext`.
@@ -955,7 +982,7 @@ session.setAutoTier(null).get();
 
 `setModel(SetModelOptions)` accepts the same preference through `SetModelOptions.setAutoTier(...)`, which stages the tier atomically with selecting `auto`. Call `setResetAutoTier(true)` instead to return to provider-default routing; the two options are mutually exclusive.
 
-For Copilot Fusion, use the CLI's names: model `"fusion"` with `CapiSessionOptions.setFusionTier(...)` on create or resume, `SetModelOptions.setFusionTier(...)` on `setModel`, or `session.setFusionTier(...)`. The tiers are `FusionTier.STANDARD`, `FusionTier.HIGH`, and `FusionTier.MAX` (`com.github.copilot.generated.rpc.FusionTier`). The routing identifiers these replace (`balance`, `hydrafusion`, and `hydrafusion-max`, and the `hydrafusion` and `hydrafusion-max` model IDs) remain accepted but are deprecated. See [Copilot Fusion names](../docs/features/session-persistence.md#copilot-fusion-names).
+For Copilot Fusion, use the CLI's names: model `"fusion"` with `CapiSessionOptions.setFusionTier(...)` on create or resume, `SetModelOptions.setFusionTier(...)` on `setModel`, or `session.setFusionTier(...)`. The tiers are `FusionTier.STANDARD`, `FusionTier.HIGH`, and `FusionTier.MAX` (`com.microsoft.copilot.generated.rpc.FusionTier`). The routing identifiers these replace (`balance`, `hydrafusion`, and `hydrafusion-max`, and the `hydrafusion` and `hydrafusion-max` model IDs) remain accepted but are deprecated. See [Copilot Fusion names](../docs/features/session-persistence.md#copilot-fusion-names).
 
 ## Named construction and compatibility
 

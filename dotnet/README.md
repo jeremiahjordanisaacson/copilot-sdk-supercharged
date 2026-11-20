@@ -96,8 +96,8 @@ await done.Task;
 When targeting MCP tools configured through `Mcp.Servers`, remember the runtime
 tool name is `<server-key>-<tool-name>`. For `Tools.AvailableTools` and
 `Tools.ExcludedTools`, prefer the source-qualified form
-`mcp:<server-key>-<tool-name>`. For `CustomAgents[].Tools` and
-`DefaultAgent.ExcludedTools`, use `<server-key>-<tool-name>` directly.
+`mcp:<server-key>-<tool-name>`. For `Agents.Definitions[].Tools` and
+`Agents.Default.ExcludedTools`, use `<server-key>-<tool-name>` directly.
 
 To mask preview and hidden model display names and related text when listing
 models, use `await client.Rpc.Models.ListAsync(new Microsoft.Copilot.Rpc.ModelsListRequest { StreamerMode = true })`.
@@ -1069,7 +1069,7 @@ await session.SendAsync(new MessageOptions
 await done.Task; // Wait for streaming to complete
 ```
 
-When `Streaming = true`:
+When `Events.Streaming = true`:
 
 - `AssistantMessageDeltaEvent` events are sent with `DeltaContent` containing incremental text
 - `AssistantReasoningDeltaEvent` events are sent with `DeltaContent` for reasoning/chain-of-thought (model-dependent)

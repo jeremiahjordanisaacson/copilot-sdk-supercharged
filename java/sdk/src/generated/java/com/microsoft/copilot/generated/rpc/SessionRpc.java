@@ -29,6 +29,12 @@ public final class SessionRpc {
     private final RpcCaller caller;
     private final String sessionId;
 
+    /** API methods for the {@code mcp} namespace. */
+    public final SessionMcpApi mcp;
+    /** API methods for the {@code eventLog} namespace. */
+    public final SessionEventLogApi eventLog;
+    /** API methods for the {@code remote} namespace. */
+    public final SessionRemoteApi remote;
     /** API methods for the {@code management} namespace. */
     public final SessionManagementApi management;
     /** API methods for the {@code providers} namespace. */
@@ -39,6 +45,8 @@ public final class SessionRpc {
     public final SessionGitHubAuthApi gitHubAuth;
     /** API methods for the {@code accounts} namespace. */
     public final SessionAccountsApi accounts;
+    /** API methods for the {@code authProviders} namespace. */
+    public final SessionAuthProvidersApi authProviders;
     /** API methods for the {@code debug} namespace. */
     public final SessionDebugApi debug;
     /** API methods for the {@code canvas} namespace. */
@@ -79,8 +87,6 @@ public final class SessionRpc {
     public final SessionTasksApi tasks;
     /** API methods for the {@code skills} namespace. */
     public final SessionSkillsApi skills;
-    /** API methods for the {@code mcp} namespace. */
-    public final SessionMcpApi mcp;
     /** API methods for the {@code diagnostics} namespace. */
     public final SessionDiagnosticsApi diagnostics;
     /** API methods for the {@code connectors} namespace. */
@@ -119,16 +125,12 @@ public final class SessionRpc {
     public final SessionHistoryApi history;
     /** API methods for the {@code queue} namespace. */
     public final SessionQueueApi queue;
-    /** API methods for the {@code eventLog} namespace. */
-    public final SessionEventLogApi eventLog;
     /** API methods for the {@code usage} namespace. */
     public final SessionUsageApi usage;
     /** API methods for the {@code quota} namespace. */
     public final SessionQuotaApi quota;
     /** API methods for the {@code limitPrediction} namespace. */
     public final SessionLimitPredictionApi limitPrediction;
-    /** API methods for the {@code remote} namespace. */
-    public final SessionRemoteApi remote;
     /** API methods for the {@code visibility} namespace. */
     public final SessionVisibilityApi visibility;
     /** API methods for the {@code schedule} namespace. */
@@ -145,11 +147,15 @@ public final class SessionRpc {
     public SessionRpc(RpcCaller caller, String sessionId) {
         this.caller = caller;
         this.sessionId = sessionId;
+        this.mcp = new SessionMcpApi(caller, sessionId);
+        this.eventLog = new SessionEventLogApi(caller, sessionId);
+        this.remote = new SessionRemoteApi(caller, sessionId);
         this.management = new SessionManagementApi(caller, sessionId);
         this.providers = new SessionProvidersApi(caller, sessionId);
         this.sandbox = new SessionSandboxApi(caller, sessionId);
         this.gitHubAuth = new SessionGitHubAuthApi(caller, sessionId);
         this.accounts = new SessionAccountsApi(caller, sessionId);
+        this.authProviders = new SessionAuthProvidersApi(caller, sessionId);
         this.debug = new SessionDebugApi(caller, sessionId);
         this.canvas = new SessionCanvasApi(caller, sessionId);
         this.canvasSource = new SessionCanvasSourceApi(caller, sessionId);
@@ -170,7 +176,6 @@ public final class SessionRpc {
         this.agent = new SessionAgentApi(caller, sessionId);
         this.tasks = new SessionTasksApi(caller, sessionId);
         this.skills = new SessionSkillsApi(caller, sessionId);
-        this.mcp = new SessionMcpApi(caller, sessionId);
         this.diagnostics = new SessionDiagnosticsApi(caller, sessionId);
         this.connectors = new SessionConnectorsApi(caller, sessionId);
         this.managedSettings = new SessionManagedSettingsApi(caller, sessionId);
@@ -190,11 +195,9 @@ public final class SessionRpc {
         this.shell = new SessionShellApi(caller, sessionId);
         this.history = new SessionHistoryApi(caller, sessionId);
         this.queue = new SessionQueueApi(caller, sessionId);
-        this.eventLog = new SessionEventLogApi(caller, sessionId);
         this.usage = new SessionUsageApi(caller, sessionId);
         this.quota = new SessionQuotaApi(caller, sessionId);
         this.limitPrediction = new SessionLimitPredictionApi(caller, sessionId);
-        this.remote = new SessionRemoteApi(caller, sessionId);
         this.visibility = new SessionVisibilityApi(caller, sessionId);
         this.schedule = new SessionScheduleApi(caller, sessionId);
         this.cafeMetrics = new SessionCafeMetricsApi(caller, sessionId);
@@ -308,7 +311,7 @@ public final class SessionRpc {
     }
 
     /**
-     * Cancels every running background agent (task-registry subagents plus sidekick agents) without interrupting the main agent loop. Promoted attached shells are left running.
+     * Cancels every running background agent (task-registry subagents plus sidekick agents) without interrupting the main agent loop. Stops attached background shells, including promoted shells, started by cancelled task-registry agents or their descendants. Detached shells and shells belonging to unrelated agents are left running.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0

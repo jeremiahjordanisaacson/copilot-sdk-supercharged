@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net8.0</TargetFrameworks>
-    <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('Windows'))">net8.0;net472</TargetFrameworks>
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('Windows'))">net10.0;net472</TargetFrameworks>
     <RootNamespace>Microsoft.Copilot.Test</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
@@ -13,10 +13,10 @@
     <!--
       Disable STJ reflection-based serialization to help validate NativeAOT.
       -->
-    <JsonSerializerIsReflectionEnabledByDefault Condition="'$(TargetFramework)' == 'net8.0'">false</JsonSerializerIsReflectionEnabledByDefault>
+    <JsonSerializerIsReflectionEnabledByDefault Condition="'$(TargetFramework)' == 'net10.0'">false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <!-- Restore the RID packs used by the offline MSBuild tool-package fixtures during setup. -->
     <RuntimeIdentifiers Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</RuntimeIdentifiers>
     <RuntimeIdentifiers Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkPortableRuntimeIdentifier)</RuntimeIdentifiers>

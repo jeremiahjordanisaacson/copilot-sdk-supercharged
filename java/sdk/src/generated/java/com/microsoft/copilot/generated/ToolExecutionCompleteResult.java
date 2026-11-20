@@ -29,6 +29,8 @@ public record ToolExecutionCompleteResult(
     @JsonProperty("content") String content,
     /** Detailed tool result for UI/timeline display, preserving complete content such as diffs for most tools. Successful skill invocations intentionally use the concise model-facing content here; the authoritative skill body is carried by the corresponding skill invocation event. Falls back to content when absent. */
     @JsonProperty("detailedContent") String detailedContent,
+    /** Tool names discovered by client-side tool search, preserved so replay restores the original tool-reference content. References do not grant execution permission. */
+    @JsonProperty("toolReferences") List<String> toolReferences,
     /** Structured content blocks (text, images, audio, resources) returned by the tool in their native format */
     @JsonProperty("contents") List<Object> contents,
     /** Model-facing binary results (base64 inline or size-omitted markers) sent to the LLM for this tool call */
@@ -72,15 +74,16 @@ public record ToolExecutionCompleteResult(
         private Builder() {}
         private String content;
         private String detailedContent;
+        private List<String> toolReferences;
         private List<Object> contents;
         private List<Object> binaryResultsForLlm;
         private ToolExecutionCompleteUIResource uiResource;
         private Object structuredContent;
-        private boolean $presence5;
+        private boolean $presence6;
         private Map<String, Object> mcpResultMeta;
         private List<CitableSource> citableSources;
         private Object mcpMeta;
-        private boolean $presence8;
+        private boolean $presence9;
 
         /**
          * Sets the {@code content} property.
@@ -101,6 +104,17 @@ public record ToolExecutionCompleteResult(
          */
         public Builder detailedContent(String value) {
             this.detailedContent = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code toolReferences} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder toolReferences(List<String> value) {
+            this.toolReferences = value;
             return this;
         }
 
@@ -146,7 +160,7 @@ public record ToolExecutionCompleteResult(
          */
         public Builder structuredContent(Object value) {
             this.structuredContent = value;
-            this.$presence5 = true;
+            this.$presence6 = true;
             return this;
         }
 
@@ -183,7 +197,7 @@ public record ToolExecutionCompleteResult(
         @com.microsoft.copilot.CopilotExperimental
         public Builder mcpMeta(Object value) {
             this.mcpMeta = value;
-            this.$presence8 = true;
+            this.$presence9 = true;
             return this;
         }
 
@@ -196,9 +210,9 @@ public record ToolExecutionCompleteResult(
         public ToolExecutionCompleteResult build() {
             if (content == null) throw new IllegalStateException("Missing required property: content");
             java.util.Set<String> $explicitNulls = new java.util.LinkedHashSet<>();
-            if ($presence5 && structuredContent == null) $explicitNulls.add("structuredContent");
-            if ($presence8 && mcpMeta == null) $explicitNulls.add("mcpMeta");
-            return new ToolExecutionCompleteResult(content, detailedContent, contents, binaryResultsForLlm, uiResource, structuredContent, mcpResultMeta, citableSources, mcpMeta, $explicitNulls);
+            if ($presence6 && structuredContent == null) $explicitNulls.add("structuredContent");
+            if ($presence9 && mcpMeta == null) $explicitNulls.add("mcpMeta");
+            return new ToolExecutionCompleteResult(content, detailedContent, toolReferences, contents, binaryResultsForLlm, uiResource, structuredContent, mcpResultMeta, citableSources, mcpMeta, $explicitNulls);
         }
     }
 
@@ -220,7 +234,7 @@ public record ToolExecutionCompleteResult(
             java.util.Set<String> $explicitNulls = new java.util.LinkedHashSet<>();
             if (tree.has("structuredContent") && tree.get("structuredContent").isNull()) $explicitNulls.add("structuredContent");
             if (tree.has("mcpMeta") && tree.get("mcpMeta").isNull()) $explicitNulls.add("mcpMeta");
-            return new ToolExecutionCompleteResult(readProperty(context, tree, "content", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "detailedContent", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "contents", new com.fasterxml.jackson.core.type.TypeReference<List<Object>>() {}), readProperty(context, tree, "binaryResultsForLlm", new com.fasterxml.jackson.core.type.TypeReference<List<Object>>() {}), readProperty(context, tree, "uiResource", new com.fasterxml.jackson.core.type.TypeReference<ToolExecutionCompleteUIResource>() {}), readProperty(context, tree, "structuredContent", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), readProperty(context, tree, "mcpResultMeta", new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}), readProperty(context, tree, "citableSources", new com.fasterxml.jackson.core.type.TypeReference<List<CitableSource>>() {}), readProperty(context, tree, "mcpMeta", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), $explicitNulls);
+            return new ToolExecutionCompleteResult(readProperty(context, tree, "content", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "detailedContent", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "toolReferences", new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {}), readProperty(context, tree, "contents", new com.fasterxml.jackson.core.type.TypeReference<List<Object>>() {}), readProperty(context, tree, "binaryResultsForLlm", new com.fasterxml.jackson.core.type.TypeReference<List<Object>>() {}), readProperty(context, tree, "uiResource", new com.fasterxml.jackson.core.type.TypeReference<ToolExecutionCompleteUIResource>() {}), readProperty(context, tree, "structuredContent", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), readProperty(context, tree, "mcpResultMeta", new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}), readProperty(context, tree, "citableSources", new com.fasterxml.jackson.core.type.TypeReference<List<CitableSource>>() {}), readProperty(context, tree, "mcpMeta", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), $explicitNulls);
         }
 
         private static <T> T readProperty(com.fasterxml.jackson.databind.DeserializationContext context,

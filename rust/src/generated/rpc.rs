@@ -15,6 +15,1043 @@ use super::session_events::{SessionMode, UsageGetMetricsResult};
 use crate::session::Session;
 use crate::{Client, Error};
 
+/// Session method paths for in-process host adapters.
+#[doc(hidden)]
+pub const SESSION_METHOD_PATHS: &[(&str, &[&str])] = &[
+    (
+        "session.mcp.externalClient.exchange",
+        &["mcp", "externalClient", "exchange"],
+    ),
+    ("session.mcp.ide.state", &["mcp", "ide", "state"]),
+    ("session.mcp.callTool", &["mcp", "callTool"]),
+    (
+        "session.mcp.setConnectedIdeInfo",
+        &["mcp", "setConnectedIdeInfo"],
+    ),
+    ("session.mcp.list", &["mcp", "list"]),
+    ("session.mcp.listConfigured", &["mcp", "listConfigured"]),
+    ("session.mcp.listTools", &["mcp", "listTools"]),
+    ("session.mcp.enable", &["mcp", "enable"]),
+    ("session.mcp.disable", &["mcp", "disable"]),
+    ("session.mcp.reload", &["mcp", "reload"]),
+    (
+        "session.mcp.moveLoadingToBackground",
+        &["mcp", "moveLoadingToBackground"],
+    ),
+    ("session.mcp.reloadWithConfig", &["mcp", "reloadWithConfig"]),
+    ("session.mcp.executeSampling", &["mcp", "executeSampling"]),
+    (
+        "session.mcp.cancelSamplingExecution",
+        &["mcp", "cancelSamplingExecution"],
+    ),
+    ("session.mcp.setEnvValueMode", &["mcp", "setEnvValueMode"]),
+    ("session.mcp.removeGitHub", &["mcp", "removeGitHub"]),
+    ("session.mcp.configureGitHub", &["mcp", "configureGitHub"]),
+    ("session.mcp.startServer", &["mcp", "startServer"]),
+    ("session.mcp.restartServer", &["mcp", "restartServer"]),
+    ("session.mcp.stopServer", &["mcp", "stopServer"]),
+    (
+        "session.mcp.registerExternalClient",
+        &["mcp", "registerExternalClient"],
+    ),
+    (
+        "session.mcp.unregisterExternalClient",
+        &["mcp", "unregisterExternalClient"],
+    ),
+    ("session.mcp.isServerRunning", &["mcp", "isServerRunning"]),
+    (
+        "session.mcp.getToolTokenBreakdown",
+        &["mcp", "getToolTokenBreakdown"],
+    ),
+    (
+        "session.mcp.oauth.handlePendingRequest",
+        &["mcp", "oauth", "handlePendingRequest"],
+    ),
+    (
+        "session.mcp.oauth.authenticationStateChanged",
+        &["mcp", "oauth", "authenticationStateChanged"],
+    ),
+    (
+        "session.mcp.oauth.prepareLogin",
+        &["mcp", "oauth", "prepareLogin"],
+    ),
+    (
+        "session.mcp.oauth.prepareFlow",
+        &["mcp", "oauth", "prepareFlow"],
+    ),
+    (
+        "session.mcp.oauth.cancelFlow",
+        &["mcp", "oauth", "cancelFlow"],
+    ),
+    (
+        "session.mcp.oauth.authenticate",
+        &["mcp", "oauth", "authenticate"],
+    ),
+    (
+        "session.mcp.oauth.hasValidTokens",
+        &["mcp", "oauth", "hasValidTokens"],
+    ),
+    (
+        "session.mcp.oauth.tryRefreshTokens",
+        &["mcp", "oauth", "tryRefreshTokens"],
+    ),
+    (
+        "session.mcp.oauth.saveStaticClientSecret",
+        &["mcp", "oauth", "saveStaticClientSecret"],
+    ),
+    (
+        "session.mcp.oauth.disposeStore",
+        &["mcp", "oauth", "disposeStore"],
+    ),
+    (
+        "session.mcp.oauth.testConnection",
+        &["mcp", "oauth", "testConnection"],
+    ),
+    ("session.mcp.oauth.storeKey", &["mcp", "oauth", "storeKey"]),
+    ("session.mcp.oauth.login", &["mcp", "oauth", "login"]),
+    ("session.mcp.oauth.complete", &["mcp", "oauth", "complete"]),
+    ("session.mcp.oauth.probe", &["mcp", "oauth", "probe"]),
+    (
+        "session.mcp.oauth.cancelLogin",
+        &["mcp", "oauth", "cancelLogin"],
+    ),
+    ("session.mcp.oauth.respond", &["mcp", "oauth", "respond"]),
+    (
+        "session.mcp.headers.handlePendingHeadersRefreshRequest",
+        &["mcp", "headers", "handlePendingHeadersRefreshRequest"],
+    ),
+    (
+        "session.mcp.apps.readResource",
+        &["mcp", "apps", "readResource"],
+    ),
+    ("session.mcp.apps.listTools", &["mcp", "apps", "listTools"]),
+    ("session.mcp.apps.callTool", &["mcp", "apps", "callTool"]),
+    (
+        "session.mcp.apps.setHostContext",
+        &["mcp", "apps", "setHostContext"],
+    ),
+    (
+        "session.mcp.apps.getHostContext",
+        &["mcp", "apps", "getHostContext"],
+    ),
+    ("session.mcp.apps.diagnose", &["mcp", "apps", "diagnose"]),
+    ("session.mcp.resources.read", &["mcp", "resources", "read"]),
+    ("session.mcp.resources.list", &["mcp", "resources", "list"]),
+    (
+        "session.mcp.resources.listTemplates",
+        &["mcp", "resources", "listTemplates"],
+    ),
+    ("session.mcp.prompts.list", &["mcp", "prompts", "list"]),
+    ("session.mcp.prompts.get", &["mcp", "prompts", "get"]),
+    ("session.eventLog.publish", &["eventLog", "publish"]),
+    ("session.eventLog.read", &["eventLog", "read"]),
+    ("session.eventLog.tail", &["eventLog", "tail"]),
+    (
+        "session.eventLog.registerInterest",
+        &["eventLog", "registerInterest"],
+    ),
+    (
+        "session.eventLog.releaseInterest",
+        &["eventLog", "releaseInterest"],
+    ),
+    ("session.remote.reattach", &["remote", "reattach"]),
+    (
+        "session.remote.readProjection",
+        &["remote", "readProjection"],
+    ),
+    (
+        "session.remote.sendWithAdmission",
+        &["remote", "sendWithAdmission"],
+    ),
+    ("session.remote.publishState", &["remote", "publishState"]),
+    ("session.remote.enable", &["remote", "enable"]),
+    ("session.remote.disable", &["remote", "disable"]),
+    (
+        "session.remote.notifySteerableChanged",
+        &["remote", "notifySteerableChanged"],
+    ),
+    ("session.management.configure", &["management", "configure"]),
+    ("session.management.list", &["management", "list"]),
+    ("session.management.message", &["management", "message"]),
+    ("session.management.create", &["management", "create"]),
+    ("session.management.close", &["management", "close"]),
+    ("session.providers.getCatalog", &["providers", "getCatalog"]),
+    ("session.providers.discover", &["providers", "discover"]),
+    ("session.providers.getStatus", &["providers", "getStatus"]),
+    (
+        "session.providers.models.list",
+        &["providers", "models", "list"],
+    ),
+    (
+        "session.providers.models.prepareConfiguration",
+        &["providers", "models", "prepareConfiguration"],
+    ),
+    (
+        "session.providers.models.diagnose",
+        &["providers", "models", "diagnose"],
+    ),
+    ("session.suspend", &["suspend"]),
+    ("session.send", &["send"]),
+    ("session.sendAndWait", &["sendAndWait"]),
+    ("session.sendMessages", &["sendMessages"]),
+    (
+        "session.sandbox.getEnforcementStatus",
+        &["sandbox", "getEnforcementStatus"],
+    ),
+    (
+        "session.sandbox.getCachedEnforcementStatus",
+        &["sandbox", "getCachedEnforcementStatus"],
+    ),
+    ("session.sandbox.getState", &["sandbox", "getState"]),
+    (
+        "session.sandbox.registerProxySecrets",
+        &["sandbox", "registerProxySecrets"],
+    ),
+    (
+        "session.sandbox.resetSessionChoices",
+        &["sandbox", "resetSessionChoices"],
+    ),
+    ("session.sandbox.invokeOwned", &["sandbox", "invokeOwned"]),
+    (
+        "session.sandbox.getCredentialSuggestions",
+        &["sandbox", "getCredentialSuggestions"],
+    ),
+    (
+        "session.sandbox.disableForSession",
+        &["sandbox", "disableForSession"],
+    ),
+    (
+        "session.sandbox.grantPathForRequest",
+        &["sandbox", "grantPathForRequest"],
+    ),
+    (
+        "session.sandbox.ensureEnforcementAvailable",
+        &["sandbox", "ensureEnforcementAvailable"],
+    ),
+    (
+        "session.sandbox.getRemoteMcpEgress",
+        &["sandbox", "getRemoteMcpEgress"],
+    ),
+    (
+        "session.sendSystemNotification",
+        &["sendSystemNotification"],
+    ),
+    ("session.abort", &["abort"]),
+    ("session.interruptMainTurn", &["interruptMainTurn"]),
+    (
+        "session.cancelAllBackgroundAgents",
+        &["cancelAllBackgroundAgents"],
+    ),
+    ("session.shutdown", &["shutdown"]),
+    ("session.gitHubAuth.getStatus", &["gitHubAuth", "getStatus"]),
+    (
+        "session.gitHubAuth.setCredentials",
+        &["gitHubAuth", "setCredentials"],
+    ),
+    (
+        "session.gitHubAuth.getCurrentAuthInfo",
+        &["gitHubAuth", "getCurrentAuthInfo"],
+    ),
+    (
+        "session.gitHubAuth.resolveCurrentAuthInfo",
+        &["gitHubAuth", "resolveCurrentAuthInfo"],
+    ),
+    (
+        "session.gitHubAuth.getAllAuthAvailable",
+        &["gitHubAuth", "getAllAuthAvailable"],
+    ),
+    (
+        "session.gitHubAuth.refreshCopilotUser",
+        &["gitHubAuth", "refreshCopilotUser"],
+    ),
+    ("session.gitHubAuth.login", &["gitHubAuth", "login"]),
+    (
+        "session.gitHubAuth.switchToAuth",
+        &["gitHubAuth", "switchToAuth"],
+    ),
+    ("session.gitHubAuth.logout", &["gitHubAuth", "logout"]),
+    (
+        "session.gitHubAuth.logoutUser",
+        &["gitHubAuth", "logoutUser"],
+    ),
+    (
+        "session.gitHubAuth.lastAuthErrors",
+        &["gitHubAuth", "lastAuthErrors"],
+    ),
+    ("session.accounts.list", &["accounts", "list"]),
+    ("session.accounts.getActive", &["accounts", "getActive"]),
+    ("session.accounts.lastErrors", &["accounts", "lastErrors"]),
+    (
+        "session.accounts.switchActive",
+        &["accounts", "switchActive"],
+    ),
+    ("session.accounts.logout", &["accounts", "logout"]),
+    (
+        "session.accounts.setCredentials",
+        &["accounts", "setCredentials"],
+    ),
+    (
+        "session.accounts.login.list",
+        &["accounts", "login", "list"],
+    ),
+    (
+        "session.accounts.login.begin",
+        &["accounts", "login", "begin"],
+    ),
+    (
+        "session.accounts.login.advance",
+        &["accounts", "login", "advance"],
+    ),
+    (
+        "session.accounts.login.cancel",
+        &["accounts", "login", "cancel"],
+    ),
+    ("session.authProviders.list", &["authProviders", "list"]),
+    ("session.debug.collectLogs", &["debug", "collectLogs"]),
+    ("session.canvas.list", &["canvas", "list"]),
+    ("session.canvas.listOpen", &["canvas", "listOpen"]),
+    ("session.canvas.open", &["canvas", "open"]),
+    ("session.canvas.close", &["canvas", "close"]),
+    (
+        "session.canvas.action.invoke",
+        &["canvas", "action", "invoke"],
+    ),
+    (
+        "session.canvas.provider.register",
+        &["canvas", "provider", "register"],
+    ),
+    (
+        "session.canvas.provider.unregister",
+        &["canvas", "provider", "unregister"],
+    ),
+    ("session.canvasSource.close", &["canvasSource", "close"]),
+    ("session.workflow.run", &["workflow", "run"]),
+    ("session.workflow.resume", &["workflow", "resume"]),
+    ("session.workflow.runFromTool", &["workflow", "runFromTool"]),
+    (
+        "session.workflow.resumeFromTool",
+        &["workflow", "resumeFromTool"],
+    ),
+    ("session.workflow.getRun", &["workflow", "getRun"]),
+    ("session.workflow.listRuns", &["workflow", "listRuns"]),
+    (
+        "session.workflow.getRunDetail",
+        &["workflow", "getRunDetail"],
+    ),
+    (
+        "session.workflow.getRunProgress",
+        &["workflow", "getRunProgress"],
+    ),
+    ("session.workflow.cancel", &["workflow", "cancel"]),
+    ("session.workflow.pause", &["workflow", "pause"]),
+    (
+        "session.workflow.pauseAtCheckpoint",
+        &["workflow", "pauseAtCheckpoint"],
+    ),
+    ("session.workflow.log", &["workflow", "log"]),
+    ("session.workflow.agent", &["workflow", "agent"]),
+    (
+        "session.workflow.journal.get",
+        &["workflow", "journal", "get"],
+    ),
+    (
+        "session.workflow.journal.put",
+        &["workflow", "journal", "put"],
+    ),
+    ("session.model.getCurrent", &["model", "getCurrent"]),
+    (
+        "session.model.startupAdmission",
+        &["model", "startupAdmission"],
+    ),
+    (
+        "session.model.describeLoadError",
+        &["model", "describeLoadError"],
+    ),
+    ("session.model.switchTo", &["model", "switchTo"]),
+    ("session.model.switchAutoTier", &["model", "switchAutoTier"]),
+    (
+        "session.model.switchFusionTier",
+        &["model", "switchFusionTier"],
+    ),
+    (
+        "session.model.applyStartupOverlay",
+        &["model", "applyStartupOverlay"],
+    ),
+    (
+        "session.model.clearStartupSeed",
+        &["model", "clearStartupSeed"],
+    ),
+    (
+        "session.model.setAllowedModels",
+        &["model", "setAllowedModels"],
+    ),
+    (
+        "session.model.setReasoningEffort",
+        &["model", "setReasoningEffort"],
+    ),
+    (
+        "session.model.getReasoningSummaries",
+        &["model", "getReasoningSummaries"],
+    ),
+    ("session.model.list", &["model", "list"]),
+    (
+        "session.featureFlags.configure",
+        &["featureFlags", "configure"],
+    ),
+    ("session.featureFlags.read", &["featureFlags", "read"]),
+    ("session.featureFlags.update", &["featureFlags", "update"]),
+    (
+        "session.dynamicContext.getConfig",
+        &["dynamicContext", "getConfig"],
+    ),
+    (
+        "session.dynamicContext.setConfig",
+        &["dynamicContext", "setConfig"],
+    ),
+    ("session.mode.get", &["mode", "get"]),
+    ("session.mode.set", &["mode", "set"]),
+    ("session.name.get", &["name", "get"]),
+    ("session.name.set", &["name", "set"]),
+    ("session.name.setAuto", &["name", "setAuto"]),
+    ("session.plan.read", &["plan", "read"]),
+    ("session.plan.update", &["plan", "update"]),
+    ("session.plan.delete", &["plan", "delete"]),
+    ("session.plan.readSqlTodos", &["plan", "readSqlTodos"]),
+    (
+        "session.plan.readSqlTodosWithDependencies",
+        &["plan", "readSqlTodosWithDependencies"],
+    ),
+    (
+        "session.workspaces.getWorkspace",
+        &["workspaces", "getWorkspace"],
+    ),
+    (
+        "session.workspaces.updateMetadata",
+        &["workspaces", "updateMetadata"],
+    ),
+    ("session.workspaces.ensure", &["workspaces", "ensure"]),
+    ("session.workspaces.listFiles", &["workspaces", "listFiles"]),
+    ("session.workspaces.readFile", &["workspaces", "readFile"]),
+    (
+        "session.workspaces.createFile",
+        &["workspaces", "createFile"],
+    ),
+    ("session.workspaces.statFile", &["workspaces", "statFile"]),
+    (
+        "session.workspaces.createDirectory",
+        &["workspaces", "createDirectory"],
+    ),
+    (
+        "session.workspaces.removePath",
+        &["workspaces", "removePath"],
+    ),
+    (
+        "session.workspaces.renamePath",
+        &["workspaces", "renamePath"],
+    ),
+    (
+        "session.workspaces.listCheckpoints",
+        &["workspaces", "listCheckpoints"],
+    ),
+    (
+        "session.workspaces.readCheckpoint",
+        &["workspaces", "readCheckpoint"],
+    ),
+    (
+        "session.workspaces.addSummary",
+        &["workspaces", "addSummary"],
+    ),
+    (
+        "session.workspaces.truncateSummaries",
+        &["workspaces", "truncateSummaries"],
+    ),
+    (
+        "session.workspaces.readAutopilotObjective",
+        &["workspaces", "readAutopilotObjective"],
+    ),
+    (
+        "session.workspaces.writeAutopilotObjective",
+        &["workspaces", "writeAutopilotObjective"],
+    ),
+    (
+        "session.workspaces.deleteAutopilotObjective",
+        &["workspaces", "deleteAutopilotObjective"],
+    ),
+    (
+        "session.workspaces.autopilotObjectiveExists",
+        &["workspaces", "autopilotObjectiveExists"],
+    ),
+    (
+        "session.workspaces.saveLargePaste",
+        &["workspaces", "saveLargePaste"],
+    ),
+    ("session.workspaces.diff", &["workspaces", "diff"]),
+    (
+        "session.autopilotObjective.getState",
+        &["autopilotObjective", "getState"],
+    ),
+    (
+        "session.autopilotObjective.setStayInAutopilot",
+        &["autopilotObjective", "setStayInAutopilot"],
+    ),
+    (
+        "session.autopilot.evaluateIdleContinuation",
+        &["autopilot", "evaluateIdleContinuation"],
+    ),
+    (
+        "session.completions.getTriggerCharacters",
+        &["completions", "getTriggerCharacters"],
+    ),
+    ("session.completions.request", &["completions", "request"]),
+    (
+        "session.instructions.getSources",
+        &["instructions", "getSources"],
+    ),
+    ("session.instructions.reload", &["instructions", "reload"]),
+    (
+        "session.customizations.reload",
+        &["customizations", "reload"],
+    ),
+    ("session.fleet.start", &["fleet", "start"]),
+    ("session.agent.list", &["agent", "list"]),
+    ("session.agent.setPrompt", &["agent", "setPrompt"]),
+    ("session.agent.getCurrent", &["agent", "getCurrent"]),
+    ("session.agent.select", &["agent", "select"]),
+    ("session.agent.deselect", &["agent", "deselect"]),
+    ("session.agent.reload", &["agent", "reload"]),
+    ("session.tasks.startAgent", &["tasks", "startAgent"]),
+    ("session.tasks.list", &["tasks", "list"]),
+    ("session.tasks.register", &["tasks", "register"]),
+    ("session.tasks.update", &["tasks", "update"]),
+    ("session.tasks.refresh", &["tasks", "refresh"]),
+    ("session.tasks.waitForPending", &["tasks", "waitForPending"]),
+    ("session.tasks.getProgress", &["tasks", "getProgress"]),
+    ("session.tasks.readOutput", &["tasks", "readOutput"]),
+    (
+        "session.tasks.getCurrentPromotable",
+        &["tasks", "getCurrentPromotable"],
+    ),
+    (
+        "session.tasks.promoteToBackground",
+        &["tasks", "promoteToBackground"],
+    ),
+    (
+        "session.tasks.promoteCurrentToBackground",
+        &["tasks", "promoteCurrentToBackground"],
+    ),
+    ("session.tasks.cancel", &["tasks", "cancel"]),
+    ("session.tasks.remove", &["tasks", "remove"]),
+    ("session.tasks.sendMessage", &["tasks", "sendMessage"]),
+    ("session.skills.list", &["skills", "list"]),
+    ("session.skills.getInvoked", &["skills", "getInvoked"]),
+    ("session.skills.enable", &["skills", "enable"]),
+    ("session.skills.disable", &["skills", "disable"]),
+    ("session.skills.reload", &["skills", "reload"]),
+    ("session.skills.ensureLoaded", &["skills", "ensureLoaded"]),
+    (
+        "session.diagnostics.configure",
+        &["diagnostics", "configure"],
+    ),
+    ("session.diagnostics.read", &["diagnostics", "read"]),
+    (
+        "session.diagnostics.lifecycle.read",
+        &["diagnostics", "lifecycle", "read"],
+    ),
+    (
+        "session.connectors.getCapabilities",
+        &["connectors", "getCapabilities"],
+    ),
+    (
+        "session.connectors.getAccount",
+        &["connectors", "getAccount"],
+    ),
+    ("session.connectors.getStatus", &["connectors", "getStatus"]),
+    ("session.connectors.list", &["connectors", "list"]),
+    ("session.connectors.refresh", &["connectors", "refresh"]),
+    ("session.connectors.connect", &["connectors", "connect"]),
+    ("session.connectors.reconnect", &["connectors", "reconnect"]),
+    (
+        "session.connectors.continueConnection",
+        &["connectors", "continueConnection"],
+    ),
+    (
+        "session.connectors.disconnect",
+        &["connectors", "disconnect"],
+    ),
+    ("session.connectors.reconcile", &["connectors", "reconcile"]),
+    (
+        "session.connectors.reconcileForStartup",
+        &["connectors", "reconcileForStartup"],
+    ),
+    (
+        "session.connectors.withdrawProjection",
+        &["connectors", "withdrawProjection"],
+    ),
+    (
+        "session.managedSettings.getCurrentSnapshot",
+        &["managedSettings", "getCurrentSnapshot"],
+    ),
+    (
+        "session.managedSettings.awaitApplied",
+        &["managedSettings", "awaitApplied"],
+    ),
+    (
+        "session.managedSettings.awaitPublished",
+        &["managedSettings", "awaitPublished"],
+    ),
+    ("session.managedSettings.get", &["managedSettings", "get"]),
+    (
+        "session.managedSettings.refresh",
+        &["managedSettings", "refresh"],
+    ),
+    (
+        "session.managedSettings.recheckPolicyHelper",
+        &["managedSettings", "recheckPolicyHelper"],
+    ),
+    ("session.plugins.list", &["plugins", "list"]),
+    ("session.plugins.install", &["plugins", "install"]),
+    ("session.plugins.uninstall", &["plugins", "uninstall"]),
+    ("session.plugins.update", &["plugins", "update"]),
+    ("session.plugins.enable", &["plugins", "enable"]),
+    ("session.plugins.disable", &["plugins", "disable"]),
+    (
+        "session.plugins.marketplaces.list",
+        &["plugins", "marketplaces", "list"],
+    ),
+    (
+        "session.plugins.marketplaces.add",
+        &["plugins", "marketplaces", "add"],
+    ),
+    (
+        "session.plugins.marketplaces.remove",
+        &["plugins", "marketplaces", "remove"],
+    ),
+    (
+        "session.plugins.marketplaces.browse",
+        &["plugins", "marketplaces", "browse"],
+    ),
+    (
+        "session.plugins.marketplaces.refresh",
+        &["plugins", "marketplaces", "refresh"],
+    ),
+    (
+        "session.plugins.marketplaces.search",
+        &["plugins", "marketplaces", "search"],
+    ),
+    (
+        "session.plugins.marketplaces.checkUpdate",
+        &["plugins", "marketplaces", "checkUpdate"],
+    ),
+    ("session.plugins.getDefaults", &["plugins", "getDefaults"]),
+    ("session.plugins.checkUpdate", &["plugins", "checkUpdate"]),
+    ("session.plugins.reload", &["plugins", "reload"]),
+    ("session.plugins.retryManaged", &["plugins", "retryManaged"]),
+    ("session.provider.getEndpoint", &["provider", "getEndpoint"]),
+    ("session.provider.add", &["provider", "add"]),
+    (
+        "session.provider.updateProvider",
+        &["provider", "updateProvider"],
+    ),
+    ("session.provider.updateModel", &["provider", "updateModel"]),
+    ("session.provider.sync", &["provider", "sync"]),
+    ("session.provider.getStatus", &["provider", "getStatus"]),
+    ("session.provider.withdraw", &["provider", "withdraw"]),
+    ("session.options.update", &["options", "update"]),
+    ("session.lsp.initialize", &["lsp", "initialize"]),
+    ("session.lsp.list", &["lsp", "list"]),
+    ("session.lsp.start", &["lsp", "start"]),
+    ("session.lsp.stop", &["lsp", "stop"]),
+    ("session.lsp.diagnose", &["lsp", "diagnose"]),
+    ("session.lsp.set", &["lsp", "set"]),
+    ("session.extensions.getPolicy", &["extensions", "getPolicy"]),
+    ("session.extensions.list", &["extensions", "list"]),
+    ("session.extensions.enable", &["extensions", "enable"]),
+    ("session.extensions.disable", &["extensions", "disable"]),
+    ("session.extensions.reload", &["extensions", "reload"]),
+    ("session.extensions.reconcile", &["extensions", "reconcile"]),
+    (
+        "session.extensions.sendAttachmentsToMessage",
+        &["extensions", "sendAttachmentsToMessage"],
+    ),
+    ("session.tools.execute", &["tools", "execute"]),
+    (
+        "session.tools.getBuiltinDescriptors",
+        &["tools", "getBuiltinDescriptors"],
+    ),
+    (
+        "session.tools.getBuiltinAgentFlagOverrides",
+        &["tools", "getBuiltinAgentFlagOverrides"],
+    ),
+    (
+        "session.tools.taskCompleteEventData",
+        &["tools", "taskCompleteEventData"],
+    ),
+    (
+        "session.tools.handlePendingToolCall",
+        &["tools", "handlePendingToolCall"],
+    ),
+    (
+        "session.tools.listPendingRequests",
+        &["tools", "listPendingRequests"],
+    ),
+    (
+        "session.tools.initializeAndValidate",
+        &["tools", "initializeAndValidate"],
+    ),
+    (
+        "session.tools.getCurrentMetadata",
+        &["tools", "getCurrentMetadata"],
+    ),
+    ("session.tools.set", &["tools", "set"]),
+    (
+        "session.tools.getSubagentSettings",
+        &["tools", "getSubagentSettings"],
+    ),
+    (
+        "session.tools.updateSubagentSettings",
+        &["tools", "updateSubagentSettings"],
+    ),
+    ("session.commands.list", &["commands", "list"]),
+    ("session.commands.invoke", &["commands", "invoke"]),
+    (
+        "session.commands.finalizeInvocationEffect",
+        &["commands", "finalizeInvocationEffect"],
+    ),
+    (
+        "session.commands.handlePendingCommand",
+        &["commands", "handlePendingCommand"],
+    ),
+    ("session.commands.execute", &["commands", "execute"]),
+    ("session.commands.enqueue", &["commands", "enqueue"]),
+    (
+        "session.commands.respondToQueuedCommand",
+        &["commands", "respondToQueuedCommand"],
+    ),
+    (
+        "session.commands.reportQueuedCommandWait",
+        &["commands", "reportQueuedCommandWait"],
+    ),
+    (
+        "session.telemetry.getEngagementId",
+        &["telemetry", "getEngagementId"],
+    ),
+    (
+        "session.telemetry.setFeatureOverrides",
+        &["telemetry", "setFeatureOverrides"],
+    ),
+    ("session.ui.ephemeralQuery", &["ui", "ephemeralQuery"]),
+    ("session.ui.elicitation", &["ui", "elicitation"]),
+    (
+        "session.ui.handlePendingElicitation",
+        &["ui", "handlePendingElicitation"],
+    ),
+    (
+        "session.ui.handleHumanAskUser",
+        &["ui", "handleHumanAskUser"],
+    ),
+    (
+        "session.ui.handlePendingUserInput",
+        &["ui", "handlePendingUserInput"],
+    ),
+    (
+        "session.ui.handleHumanUserInput",
+        &["ui", "handleHumanUserInput"],
+    ),
+    (
+        "session.ui.handlePendingSampling",
+        &["ui", "handlePendingSampling"],
+    ),
+    (
+        "session.ui.handlePendingAutoModeSwitch",
+        &["ui", "handlePendingAutoModeSwitch"],
+    ),
+    (
+        "session.ui.handlePendingSessionLimitsExhausted",
+        &["ui", "handlePendingSessionLimitsExhausted"],
+    ),
+    (
+        "session.ui.handlePendingExitPlanMode",
+        &["ui", "handlePendingExitPlanMode"],
+    ),
+    (
+        "session.ui.handleHumanExitPlanMode",
+        &["ui", "handleHumanExitPlanMode"],
+    ),
+    (
+        "session.ui.registerDirectAutoModeSwitchHandler",
+        &["ui", "registerDirectAutoModeSwitchHandler"],
+    ),
+    (
+        "session.ui.unregisterDirectAutoModeSwitchHandler",
+        &["ui", "unregisterDirectAutoModeSwitchHandler"],
+    ),
+    (
+        "session.permissions.configure",
+        &["permissions", "configure"],
+    ),
+    (
+        "session.permissions.handlePendingPermissionRequest",
+        &["permissions", "handlePendingPermissionRequest"],
+    ),
+    (
+        "session.permissions.pendingRequests",
+        &["permissions", "pendingRequests"],
+    ),
+    (
+        "session.permissions.setApproveAll",
+        &["permissions", "setApproveAll"],
+    ),
+    ("session.permissions.setMode", &["permissions", "setMode"]),
+    ("session.permissions.getMode", &["permissions", "getMode"]),
+    (
+        "session.permissions.getCapabilities",
+        &["permissions", "getCapabilities"],
+    ),
+    (
+        "session.permissions.modifyRules",
+        &["permissions", "modifyRules"],
+    ),
+    (
+        "session.permissions.getAllowAll",
+        &["permissions", "getAllowAll"],
+    ),
+    (
+        "session.permissions.managedReviewRequired",
+        &["permissions", "managedReviewRequired"],
+    ),
+    (
+        "session.permissions.getRequired",
+        &["permissions", "getRequired"],
+    ),
+    (
+        "session.permissions.setRequired",
+        &["permissions", "setRequired"],
+    ),
+    (
+        "session.permissions.resetSessionApprovals",
+        &["permissions", "resetSessionApprovals"],
+    ),
+    (
+        "session.permissions.clearResumeEscalation",
+        &["permissions", "clearResumeEscalation"],
+    ),
+    (
+        "session.permissions.notifyPromptShown",
+        &["permissions", "notifyPromptShown"],
+    ),
+    (
+        "session.permissions.additionalDirectories.list",
+        &["permissions", "additionalDirectories", "list"],
+    ),
+    (
+        "session.permissions.paths.list",
+        &["permissions", "paths", "list"],
+    ),
+    (
+        "session.permissions.paths.add",
+        &["permissions", "paths", "add"],
+    ),
+    (
+        "session.permissions.paths.updatePrimary",
+        &["permissions", "paths", "updatePrimary"],
+    ),
+    (
+        "session.permissions.paths.isPathWithinAllowedDirectories",
+        &["permissions", "paths", "isPathWithinAllowedDirectories"],
+    ),
+    (
+        "session.permissions.paths.isPathWithinWorkspace",
+        &["permissions", "paths", "isPathWithinWorkspace"],
+    ),
+    (
+        "session.permissions.locations.resolve",
+        &["permissions", "locations", "resolve"],
+    ),
+    (
+        "session.permissions.locations.apply",
+        &["permissions", "locations", "apply"],
+    ),
+    (
+        "session.permissions.locations.addToolApproval",
+        &["permissions", "locations", "addToolApproval"],
+    ),
+    (
+        "session.permissions.folderTrust.isTrusted",
+        &["permissions", "folderTrust", "isTrusted"],
+    ),
+    (
+        "session.permissions.folderTrust.addSessionTrusted",
+        &["permissions", "folderTrust", "addSessionTrusted"],
+    ),
+    (
+        "session.permissions.folderTrust.addTrusted",
+        &["permissions", "folderTrust", "addTrusted"],
+    ),
+    (
+        "session.permissions.urls.setUnrestrictedMode",
+        &["permissions", "urls", "setUnrestrictedMode"],
+    ),
+    (
+        "session.metadata.getWorkingDirectoryContext",
+        &["metadata", "getWorkingDirectoryContext"],
+    ),
+    ("session.metadata.snapshot", &["metadata", "snapshot"]),
+    (
+        "session.metadata.getClientMetadata",
+        &["metadata", "getClientMetadata"],
+    ),
+    (
+        "session.metadata.updateClientMetadata",
+        &["metadata", "updateClientMetadata"],
+    ),
+    (
+        "session.metadata.isProcessing",
+        &["metadata", "isProcessing"],
+    ),
+    ("session.metadata.activity", &["metadata", "activity"]),
+    ("session.metadata.contextInfo", &["metadata", "contextInfo"]),
+    (
+        "session.metadata.getContextAttribution",
+        &["metadata", "getContextAttribution"],
+    ),
+    (
+        "session.metadata.getContextHeaviestMessages",
+        &["metadata", "getContextHeaviestMessages"],
+    ),
+    (
+        "session.metadata.recordContextChange",
+        &["metadata", "recordContextChange"],
+    ),
+    (
+        "session.metadata.setWorkingDirectory",
+        &["metadata", "setWorkingDirectory"],
+    ),
+    (
+        "session.metadata.recomputeContextTokens",
+        &["metadata", "recomputeContextTokens"],
+    ),
+    ("session.log", &["log"]),
+    ("session.settings.snapshot", &["settings", "snapshot"]),
+    (
+        "session.settings.evaluatePredicate",
+        &["settings", "evaluatePredicate"],
+    ),
+    (
+        "session.contentExclusion.checkPaths",
+        &["contentExclusion", "checkPaths"],
+    ),
+    ("session.shell.exec", &["shell", "exec"]),
+    ("session.shell.kill", &["shell", "kill"]),
+    (
+        "session.shell.executeUserRequested",
+        &["shell", "executeUserRequested"],
+    ),
+    (
+        "session.shell.cancelUserRequested",
+        &["shell", "cancelUserRequested"],
+    ),
+    ("session.history.compact", &["history", "compact"]),
+    ("session.history.truncate", &["history", "truncate"]),
+    (
+        "session.history.listRewindPoints",
+        &["history", "listRewindPoints"],
+    ),
+    (
+        "session.history.previewRewind",
+        &["history", "previewRewind"],
+    ),
+    ("session.history.rewind", &["history", "rewind"]),
+    (
+        "session.history.cancelBackgroundCompaction",
+        &["history", "cancelBackgroundCompaction"],
+    ),
+    (
+        "session.history.setCompactionConfig",
+        &["history", "setCompactionConfig"],
+    ),
+    (
+        "session.history.abortManualCompaction",
+        &["history", "abortManualCompaction"],
+    ),
+    (
+        "session.history.summarizeForHandoff",
+        &["history", "summarizeForHandoff"],
+    ),
+    ("session.history.clearContext", &["history", "clearContext"]),
+    ("session.queue.pendingItems", &["queue", "pendingItems"]),
+    ("session.queue.snapshot", &["queue", "snapshot"]),
+    ("session.queue.moveItem", &["queue", "moveItem"]),
+    ("session.queue.insertAt", &["queue", "insertAt"]),
+    ("session.queue.removeAt", &["queue", "removeAt"]),
+    ("session.queue.updateText", &["queue", "updateText"]),
+    (
+        "session.queue.withdrawMessage",
+        &["queue", "withdrawMessage"],
+    ),
+    ("session.queue.appendSteering", &["queue", "appendSteering"]),
+    ("session.queue.duplicateAt", &["queue", "duplicateAt"]),
+    ("session.queue.setDrainPaused", &["queue", "setDrainPaused"]),
+    ("session.queue.sendNow", &["queue", "sendNow"]),
+    ("session.queue.hasPending", &["queue", "hasPending"]),
+    (
+        "session.queue.beginDeferredIdleDrain",
+        &["queue", "beginDeferredIdleDrain"],
+    ),
+    (
+        "session.queue.finishDeferredIdleDrain",
+        &["queue", "finishDeferredIdleDrain"],
+    ),
+    (
+        "session.queue.deferSessionIdle",
+        &["queue", "deferSessionIdle"],
+    ),
+    (
+        "session.queue.removeMostRecent",
+        &["queue", "removeMostRecent"],
+    ),
+    ("session.queue.clear", &["queue", "clear"]),
+    (
+        "session.queue.consumeSystemNotifications",
+        &["queue", "consumeSystemNotifications"],
+    ),
+    (
+        "session.queue.enqueueResumePending",
+        &["queue", "enqueueResumePending"],
+    ),
+    ("session.queue.process", &["queue", "process"]),
+    ("session.usage.getMetrics", &["usage", "getMetrics"]),
+    ("session.usage.setCodeChanges", &["usage", "setCodeChanges"]),
+    ("session.quota.get", &["quota", "get"]),
+    ("session.quota.refresh", &["quota", "refresh"]),
+    ("session.quota.takeWarnings", &["quota", "takeWarnings"]),
+    (
+        "session.limitPrediction.predict",
+        &["limitPrediction", "predict"],
+    ),
+    ("session.visibility.get", &["visibility", "get"]),
+    ("session.visibility.set", &["visibility", "set"]),
+    ("session.schedule.list", &["schedule", "list"]),
+    ("session.schedule.hydrate", &["schedule", "hydrate"]),
+    (
+        "session.schedule.hasSelfPaced",
+        &["schedule", "hasSelfPaced"],
+    ),
+    ("session.schedule.add", &["schedule", "add"]),
+    ("session.schedule.addCron", &["schedule", "addCron"]),
+    ("session.schedule.addAt", &["schedule", "addAt"]),
+    (
+        "session.schedule.addSelfPaced",
+        &["schedule", "addSelfPaced"],
+    ),
+    (
+        "session.schedule.rearmSelfPaced",
+        &["schedule", "rearmSelfPaced"],
+    ),
+    ("session.schedule.stop", &["schedule", "stop"]),
+    ("session.cafeMetrics.attach", &["cafeMetrics", "attach"]),
+    ("session.cafeMetrics.detach", &["cafeMetrics", "detach"]),
+];
+
 /// Typed view over the [`Client`]'s server-level RPC namespace.
 #[derive(Clone, Copy)]
 pub struct ClientRpc<'a> {
@@ -39,6 +1076,13 @@ impl<'a> ClientRpc<'a> {
     /// `agents.*` sub-namespace.
     pub fn agents(&self) -> ClientRpcAgents<'a> {
         ClientRpcAgents {
+            client: self.client,
+        }
+    }
+
+    /// `ahp.*` sub-namespace.
+    pub(crate) fn ahp(&self) -> ClientRpcAhp<'a> {
+        ClientRpcAhp {
             client: self.client,
         }
     }
@@ -116,6 +1160,13 @@ impl<'a> ClientRpc<'a> {
     /// `featureFlags.*` sub-namespace.
     pub(crate) fn feature_flags(&self) -> ClientRpcFeatureFlags<'a> {
         ClientRpcFeatureFlags {
+            client: self.client,
+        }
+    }
+
+    /// `feedback.*` sub-namespace.
+    pub(crate) fn feedback(&self) -> ClientRpcFeedback<'a> {
+        ClientRpcFeedback {
             client: self.client,
         }
     }
@@ -200,6 +1251,13 @@ impl<'a> ClientRpc<'a> {
     /// `localModels.*` sub-namespace.
     pub fn local_models(&self) -> ClientRpcLocalModels<'a> {
         ClientRpcLocalModels {
+            client: self.client,
+        }
+    }
+
+    /// `logging.*` sub-namespace.
+    pub fn logging(&self) -> ClientRpcLogging<'a> {
+        ClientRpcLogging {
             client: self.client,
         }
     }
@@ -646,17 +1704,17 @@ impl<'a> ClientRpcAccount<'a> {
             .await
     }
 
-    /// Resolves a path on the identity's GitHub host into an absolute URL, so a host can link to settings or documentation on the enterprise instance the user is signed in to rather than to github.com. Falls back to the public host when no identity is supplied.
+    /// Resolves a path on the identity's GitHub host into an absolute URL. A bound host can instead select its live credential owner with authOwnerId; this form rejects extensions, foreign owners, and a simultaneous identity. Falls back to the public host only when neither identity nor authOwnerId is supplied.
     ///
     /// Wire method: `account.getWebUrl`.
     ///
     /// # Parameters
     ///
-    /// * `params` - A path to resolve against the GitHub host an identity is signed in to.
+    /// * `params` - A path to resolve against the selected GitHub host.
     ///
     /// # Returns
     ///
-    /// An absolute URL on the identity's GitHub host.
+    /// An absolute URL on the selected GitHub host.
     ///
     /// <div class="warning">
     ///
@@ -1087,6 +2145,502 @@ impl<'a> ClientRpcAgents<'a> {
     }
 }
 
+/// `ahp.*` RPCs.
+#[derive(Clone, Copy)]
+pub(crate) struct ClientRpcAhp<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcAhp<'a> {
+    /// `ahp.connectionLogs.*` sub-namespace.
+    pub(crate) fn connection_logs(&self) -> ClientRpcAhpConnectionLogs<'a> {
+        ClientRpcAhpConnectionLogs {
+            client: self.client,
+        }
+    }
+
+    /// `ahp.connections.*` sub-namespace.
+    pub(crate) fn connections(&self) -> ClientRpcAhpConnections<'a> {
+        ClientRpcAhpConnections {
+            client: self.client,
+        }
+    }
+}
+
+/// `ahp.connectionLogs.*` RPCs.
+#[derive(Clone, Copy)]
+pub(crate) struct ClientRpcAhpConnectionLogs<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcAhpConnectionLogs<'a> {
+    /// Opens a redacted diagnostic log owned by this admitted SDK connection, before any relay authentication starts.
+    ///
+    /// Wire method: `ahp.connectionLogs.open`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Opens a diagnostic log before outgoing authentication starts.
+    ///
+    /// # Returns
+    ///
+    /// Identifies a diagnostic log owned by the originating SDK connection.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn open(
+        &self,
+        params: AhpConnectionLogOpenRequest,
+    ) -> Result<AhpConnectionLogRequest, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONLOGS_OPEN, Some(wire_params))
+            .await
+    }
+
+    /// Appends diagnostic text through the runtime's live secret filter to an owned connection log.
+    ///
+    /// Wire method: `ahp.connectionLogs.write`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Appends a redacted diagnostic message to a connection log.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn write(&self, params: AhpConnectionLogWriteRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::AHP_CONNECTIONLOGS_WRITE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Waits for an owned connection log's admitted writes to reach its file.
+    ///
+    /// Wire method: `ahp.connectionLogs.flush`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies a diagnostic log owned by the originating SDK connection.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn flush(&self, params: AhpConnectionLogRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::AHP_CONNECTIONLOGS_FLUSH, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Flushes and closes an owned connection log. The log lifetime is independent of relay authentication and retries.
+    ///
+    /// Wire method: `ahp.connectionLogs.close`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies a diagnostic log owned by the originating SDK connection.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn close(&self, params: AhpConnectionLogRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::AHP_CONNECTIONLOGS_CLOSE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+}
+
+/// `ahp.connections.*` RPCs.
+#[derive(Clone, Copy)]
+pub(crate) struct ClientRpcAhpConnections<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcAhpConnections<'a> {
+    /// Creates a session at the remote AHP source and returns its refreshed catalog state. This does not create a local SDK attachment.
+    ///
+    /// Wire method: `ahp.connections.createSession`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Creates a session at the remote source, not a local SDK attachment.
+    ///
+    /// # Returns
+    ///
+    /// A session created at the remote source and its refreshed connection snapshot.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn create_session(
+        &self,
+        params: AhpConnectionCreateSessionRequest,
+    ) -> Result<AhpConnectionCreateSessionResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::AHP_CONNECTIONS_CREATESESSION,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Selects a source catalog session without subscribing to its complete state. A null summary means no session matched.
+    ///
+    /// Wire method: `ahp.connections.selectSession`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects a remote source session without opening a session subscription.
+    ///
+    /// # Returns
+    ///
+    /// The selected source catalog row.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn select_session(
+        &self,
+        params: AhpConnectionSelectSessionRequest,
+    ) -> Result<AhpConnectionSelectSessionResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::AHP_CONNECTIONS_SELECTSESSION,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Disposes a session at the remote source for every attached client. This is not a local SDK detach.
+    ///
+    /// Wire method: `ahp.connections.disposeSession`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Disposes a remote source session for every attached client.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn dispose_session(
+        &self,
+        params: AhpConnectionDisposeSessionRequest,
+    ) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(
+                rpc_methods::AHP_CONNECTIONS_DISPOSESESSION,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Creates an inert outgoing AHP connection owned by this admitted SDK connection. Uses its existing original auth owner and never accepts a setup bearer.
+    ///
+    /// Wire method: `ahp.connections.create`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Creates an inert outgoing connection under the caller's existing runtime auth owner.
+    ///
+    /// # Returns
+    ///
+    /// The connection's current protocol snapshot and negotiated client identity.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn create(
+        &self,
+        params: AhpConnectionCreateRequest,
+    ) -> Result<AhpConnectionStateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_CREATE, Some(wire_params))
+            .await
+    }
+
+    /// Attaches a runtime-owned SDK session facade to a session on the caller's outgoing AHP connection. Session state, history, approvals, and turn lifetimes stay in the runtime.
+    ///
+    /// Wire method: `ahp.connections.attachSession`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Attaches a runtime session facade to an existing AHP session.
+    ///
+    /// # Returns
+    ///
+    /// A registered runtime session and its independent attachment lease.
+    /// Read session.remote.readProjection before using host state.
+    /// The first read waits for subscription readiness and reports initialization errors.
+    /// Release the lease if initialization fails.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn attach_session(
+        &self,
+        params: AhpSessionAttachRequest,
+    ) -> Result<AhpSessionAttachResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::AHP_CONNECTIONS_ATTACHSESSION,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Releases the caller's AHP session facade, settles pending requests, and releases its subscription without disposing the host session.
+    ///
+    /// Wire method: `ahp.connections.detachSession`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Releases this caller's runtime facade without disposing the host's session.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn detach_session(
+        &self,
+        params: AhpSessionDetachRequest,
+    ) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(
+                rpc_methods::AHP_CONNECTIONS_DETACHSESSION,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Connects and initializes an owned outgoing AHP connection. Connection errors remain in the returned state.
+    ///
+    /// Wire method: `ahp.connections.connect`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects an outgoing connection owned by this SDK connection.
+    ///
+    /// # Returns
+    ///
+    /// The connection's current protocol snapshot and negotiated client identity.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn connect(
+        &self,
+        params: AhpConnectionRequest,
+    ) -> Result<AhpConnectionStateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_CONNECT, Some(wire_params))
+            .await
+    }
+
+    /// Reconnects the same outgoing client and restores its active subscriptions.
+    ///
+    /// Wire method: `ahp.connections.reconnect`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects an outgoing connection owned by this SDK connection.
+    ///
+    /// # Returns
+    ///
+    /// The connection's current protocol snapshot and negotiated client identity.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn reconnect(
+        &self,
+        params: AhpConnectionRequest,
+    ) -> Result<AhpConnectionStateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_RECONNECT, Some(wire_params))
+            .await
+    }
+
+    /// Refreshes the outgoing connection's session catalog.
+    ///
+    /// Wire method: `ahp.connections.refresh`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects an outgoing connection owned by this SDK connection.
+    ///
+    /// # Returns
+    ///
+    /// The connection's current protocol snapshot and negotiated client identity.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn refresh(
+        &self,
+        params: AhpConnectionRequest,
+    ) -> Result<AhpConnectionStateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_REFRESH, Some(wire_params))
+            .await
+    }
+
+    /// Authenticates pending protected resources with this connection's renewable account-bound credential. Reports failures per resource.
+    ///
+    /// Wire method: `ahp.connections.authenticate`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Authenticates pending protected resources with the connection's renewable credential source.
+    ///
+    /// # Returns
+    ///
+    /// Authentication outcome for each protected resource.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn authenticate(
+        &self,
+        params: AhpConnectionAuthenticateRequest,
+    ) -> Result<AhpConnectionsAuthenticateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_AUTHENTICATE, Some(wire_params))
+            .await
+    }
+
+    /// Waits for the next connection-owned event batch. Only one reader may wait at a time. Disposal releases the waiter.
+    ///
+    /// Wire method: `ahp.connections.readEvents`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects an outgoing connection owned by this SDK connection.
+    ///
+    /// # Returns
+    ///
+    /// Events admitted for this connection, in protocol order.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn read_events(
+        &self,
+        params: AhpConnectionRequest,
+    ) -> Result<AhpConnectionReadEventsResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_READEVENTS, Some(wire_params))
+            .await
+    }
+
+    /// Disposes an owned outgoing connection, cancels its protocol work, and releases its subscriptions.
+    ///
+    /// Wire method: `ahp.connections.dispose`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects an outgoing connection owned by this SDK connection.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn dispose(&self, params: AhpConnectionRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::AHP_CONNECTIONS_DISPOSE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+}
+
 /// `azureMl.*` RPCs.
 #[derive(Clone, Copy)]
 pub struct ClientRpcAzureMl<'a> {
@@ -1464,6 +3018,33 @@ impl<'a> ClientRpcCafeMetrics<'a> {
         self.client
             .call_typed(rpc_methods::CAFEMETRICS_RESOLVEADMISSION, Some(wire_params))
             .await
+    }
+
+    /// Records only the first interactive CLI readiness observation in this process. Invalid durations produce no sample. Requires the private trusted CLI host capability.
+    ///
+    /// Wire method: `cafeMetrics.recordCliReady`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Existing initial interactive CLI readiness observation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn record_cli_ready(
+        &self,
+        params: CafeMetricsRecordCliReadyRequest,
+    ) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::CAFEMETRICS_RECORDCLIREADY, Some(wire_params))
+            .await?;
+        Ok(())
     }
 
     /// Records one terminal resume result. Does nothing before startup. Requires the private trusted CLI host capability.
@@ -2444,6 +4025,116 @@ impl<'a> ClientRpcFeatureFlags<'a> {
     }
 }
 
+/// `feedback.*` RPCs.
+#[derive(Clone, Copy)]
+pub(crate) struct ClientRpcFeedback<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcFeedback<'a> {
+    /// `feedback.upload.*` sub-namespace.
+    pub(crate) fn upload(&self) -> ClientRpcFeedbackUpload<'a> {
+        ClientRpcFeedbackUpload {
+            client: self.client,
+        }
+    }
+}
+
+/// `feedback.upload.*` RPCs.
+#[derive(Clone, Copy)]
+pub(crate) struct ClientRpcFeedbackUpload<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcFeedbackUpload<'a> {
+    /// Starts the single saved desktop archive upload authorized at native host launch after fresh affirmative consent. Only its launch-bound owner may call this method; no file path, token, or destination is accepted over RPC.
+    ///
+    /// Wire method: `feedback.upload.start`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Fresh consent to upload the one archive and account authorized at host launch.
+    ///
+    /// # Returns
+    ///
+    /// Connection-owned upload state retained until host shutdown.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn start(
+        &self,
+        params: FeedbackUploadStartRequest,
+    ) -> Result<FeedbackUploadSnapshot, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::FEEDBACK_UPLOAD_START, Some(wire_params))
+            .await
+    }
+
+    /// Reads connection-owned local upload progress, optionally waiting for a changed revision. Terminal outcomes return immediately. Canceling a read does not cancel the upload.
+    ///
+    /// Wire method: `feedback.upload.read`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Read local progress, optionally waiting for a changed revision or terminal outcome. Does not poll the service.
+    ///
+    /// # Returns
+    ///
+    /// Connection-owned upload state retained until host shutdown.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn read(
+        &self,
+        params: FeedbackUploadReadRequest,
+    ) -> Result<FeedbackUploadSnapshot, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::FEEDBACK_UPLOAD_READ, Some(wire_params))
+            .await
+    }
+
+    /// Requests cancellation of the owner-bound upload. Local archive remains available; remote cancellation is best effort, not erasure.
+    ///
+    /// Wire method: `feedback.upload.cancel`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies the upload owned by this connection.
+    ///
+    /// # Returns
+    ///
+    /// Acknowledges a local cancellation request, not remote erasure.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn cancel(
+        &self,
+        params: FeedbackUploadOperationRequest,
+    ) -> Result<FeedbackUploadCancelResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::FEEDBACK_UPLOAD_CANCEL, Some(wire_params))
+            .await
+    }
+}
+
 /// `fetch.*` RPCs.
 #[derive(Clone, Copy)]
 pub struct ClientRpcFetch<'a> {
@@ -2550,6 +4241,35 @@ impl<'a> ClientRpcFetch<'a> {
             .call_typed(rpc_methods::FETCH_CANCEL, Some(wire_params))
             .await
     }
+
+    /// Reports the proxy routes fetch.send would use for a URL with the runtime's ambient proxy settings (process environment, the connection's resolveProxy callback, then OS static proxy, PAC, or WPAD). Available to all SDK clients and extensions. May download a PAC script; never contacts the target. Reports routes only, not proxy authentication: the runtime keeps proxy credentials, the connection's authenticateBasic and authenticateNegotiate callbacks, and native Negotiate credentials, so a client that connects through a returned proxy must authenticate by its own means.
+    ///
+    /// Wire method: `fetch.resolveProxy`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A target URL whose proxy route the shared fetch engine should report.
+    ///
+    /// # Returns
+    ///
+    /// The proxy routes the shared fetch engine would use for the target, without network work to the target.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn resolve_proxy(
+        &self,
+        params: FetchResolveProxyRequest,
+    ) -> Result<FetchResolveProxyResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::FETCH_RESOLVEPROXY, Some(wire_params))
+            .await
+    }
 }
 
 /// `git.*` RPCs.
@@ -2559,6 +4279,751 @@ pub(crate) struct ClientRpcGit<'a> {
 }
 
 impl<'a> ClientRpcGit<'a> {
+    /// Reads the checked-out branch name, returning an empty string on detached HEAD.
+    ///
+    /// Wire method: `git.branchName`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Working-tree path a git query applies to.
+    ///
+    /// # Returns
+    ///
+    /// A textual result of a Git operation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn branch_name(
+        &self,
+        params: GitCwdRequest,
+    ) -> Result<GitStringResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_BRANCHNAME, Some(wire_params))
+            .await
+    }
+
+    /// Lists configured remote names.
+    ///
+    /// Wire method: `git.remotes`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Working-tree path a git query applies to.
+    ///
+    /// # Returns
+    ///
+    /// The remote names configured in a checkout.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn remotes(&self, params: GitCwdRequest) -> Result<GitRemotesResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_REMOTES, Some(wire_params))
+            .await
+    }
+
+    /// Reads a named remote's URL, defaulting to origin.
+    ///
+    /// Wire method: `git.remoteUrl`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Repository and optional remote whose default branch to resolve.
+    ///
+    /// # Returns
+    ///
+    /// A textual result of a Git operation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn remote_url(
+        &self,
+        params: GitDefaultBranchRequest,
+    ) -> Result<GitStringResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_REMOTEURL, Some(wire_params))
+            .await
+    }
+
+    /// Counts staged, unstaged, and untracked changes without submodule changes.
+    ///
+    /// Wire method: `git.changeCounts`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Working-tree path a git query applies to.
+    ///
+    /// # Returns
+    ///
+    /// Counts of index, checkout, and untracked changes.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn change_counts(
+        &self,
+        params: GitCwdRequest,
+    ) -> Result<GitChangeCountsResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_CHANGECOUNTS, Some(wire_params))
+            .await
+    }
+
+    /// Checks whether a local branch exists.
+    ///
+    /// Wire method: `git.branchExists`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A branch in a local repository.
+    ///
+    /// # Returns
+    ///
+    /// The answer to a repository predicate.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn branch_exists(
+        &self,
+        params: GitBranchRequest,
+    ) -> Result<GitBooleanResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_BRANCHEXISTS, Some(wire_params))
+            .await
+    }
+
+    /// Stages all checkout changes and creates a commit, with normal Git hooks enabled.
+    ///
+    /// Wire method: `git.commitAll`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Stage and commit all changes in a checkout.
+    ///
+    /// # Returns
+    ///
+    /// The created commit.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn commit_all(
+        &self,
+        params: GitCommitAllRequest,
+    ) -> Result<GitCommitAllResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_COMMITALL, Some(wire_params))
+            .await
+    }
+
+    /// Reads file content from HEAD with a five-megabyte output limit.
+    ///
+    /// Wire method: `git.readHeadFile`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Read a file from the HEAD tree, without changing the checkout.
+    ///
+    /// # Returns
+    ///
+    /// A textual result of a Git operation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn read_head_file(
+        &self,
+        params: GitReadHeadFileRequest,
+    ) -> Result<GitStringResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_READHEADFILE, Some(wire_params))
+            .await
+    }
+
+    /// Creates or reuses a named worktree without changing the source checkout.
+    ///
+    /// Wire method: `git.createWorktree`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A named worktree to create, reuse, or check for collisions.
+    ///
+    /// # Returns
+    ///
+    /// A created or reused worktree.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn create_worktree(
+        &self,
+        params: GitNamedWorktreeRequest,
+    ) -> Result<GitPreparedWorktree, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_CREATEWORKTREE, Some(wire_params))
+            .await
+    }
+
+    /// Checks both branch and target-directory collisions using the worktree path template.
+    ///
+    /// Wire method: `git.worktreeNameAvailable`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A named worktree to create, reuse, or check for collisions.
+    ///
+    /// # Returns
+    ///
+    /// The answer to a repository predicate.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn worktree_name_available(
+        &self,
+        params: GitNamedWorktreeRequest,
+    ) -> Result<GitBooleanResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_WORKTREENAMEAVAILABLE, Some(wire_params))
+            .await
+    }
+
+    /// Discovers a repository root, optionally resolving linked worktrees to the main checkout.
+    ///
+    /// Wire method: `git.findRoot`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The directory and root-resolution policy for repository discovery.
+    ///
+    /// # Returns
+    ///
+    /// Repository discovery, including the explicit not-found result.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn find_root(
+        &self,
+        params: GitFindRootRequest,
+    ) -> Result<GitRootResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_FINDROOT, Some(wire_params))
+            .await
+    }
+
+    /// Discovers a root without masking Git access or policy errors; a non-repository returns null.
+    ///
+    /// Wire method: `git.findRootChecked`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Working-tree path a git query applies to.
+    ///
+    /// # Returns
+    ///
+    /// A Git value, or null when the requested identity does not exist.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn find_root_checked(
+        &self,
+        params: GitCwdRequest,
+    ) -> Result<GitOptionalStringResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_FINDROOTCHECKED, Some(wire_params))
+            .await
+    }
+
+    /// Reads the branch identity, including detached@ followed by the short commit hash on detached HEAD.
+    ///
+    /// Wire method: `git.currentBranch`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Working-tree path a git query applies to.
+    ///
+    /// # Returns
+    ///
+    /// A Git value, or null when the requested identity does not exist.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn current_branch(
+        &self,
+        params: GitCwdRequest,
+    ) -> Result<GitOptionalStringResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_CURRENTBRANCH, Some(wire_params))
+            .await
+    }
+
+    /// Resolves the default branch of a repository remote.
+    ///
+    /// Wire method: `git.defaultBranch`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Repository and optional remote whose default branch to resolve.
+    ///
+    /// # Returns
+    ///
+    /// A textual result of a Git operation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn default_branch(
+        &self,
+        params: GitDefaultBranchRequest,
+    ) -> Result<GitStringResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_DEFAULTBRANCH, Some(wire_params))
+            .await
+    }
+
+    /// Classifies repository remotes as GitHub or Azure DevOps, with an explicit no-root fallback.
+    ///
+    /// Wire method: `git.detectRemoteHosts`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Directory or already-discovered root whose remotes to classify.
+    ///
+    /// # Returns
+    ///
+    /// Known forge hosts reachable through repository remotes.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn detect_remote_hosts(
+        &self,
+        params: GitDetectRemoteHostsRequest,
+    ) -> Result<GitRemoteHostDetection, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_DETECTREMOTEHOSTS, Some(wire_params))
+            .await
+    }
+
+    /// Reads the repository identifier and forge host for a checkout.
+    ///
+    /// Wire method: `git.repositoryIdentifier`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Working-tree path a git query applies to.
+    ///
+    /// # Returns
+    ///
+    /// Repository identity, or null when no supported forge is configured.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn repository_identifier(
+        &self,
+        params: GitCwdRequest,
+    ) -> Result<GitRepoIdentifierResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_REPOSITORYIDENTIFIER, Some(wire_params))
+            .await
+    }
+
+    /// Reads checkout status, preserving failures unless clean fallback is explicitly requested.
+    ///
+    /// Wire method: `git.workingTreeStatus`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Working-tree status and explicit failure policy.
+    ///
+    /// # Returns
+    ///
+    /// Tracked and untracked changes in a checkout.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn working_tree_status(
+        &self,
+        params: GitWorkingTreeStatusRequest,
+    ) -> Result<GitWorkingTreeStatus, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_WORKINGTREESTATUS, Some(wire_params))
+            .await
+    }
+
+    /// Summarizes checkout changes with a caller-selected file limit.
+    ///
+    /// Wire method: `git.worktreeChangeSummary`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Checkout changes to summarize.
+    ///
+    /// # Returns
+    ///
+    /// A textual result of a Git operation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn worktree_change_summary(
+        &self,
+        params: GitWorktreeSummaryRequest,
+    ) -> Result<GitStringResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_WORKTREECHANGESUMMARY, Some(wire_params))
+            .await
+    }
+
+    /// Checks whether Git accepts a branch name.
+    ///
+    /// Wire method: `git.isValidBranchName`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A branch in a local repository.
+    ///
+    /// # Returns
+    ///
+    /// The answer to a repository predicate.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn is_valid_branch_name(
+        &self,
+        params: GitBranchRequest,
+    ) -> Result<GitBooleanResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_ISVALIDBRANCHNAME, Some(wire_params))
+            .await
+    }
+
+    /// Creates a worktree and moves local changes, preserving stash recovery and submodule diagnostics.
+    ///
+    /// Wire method: `git.moveWorktreeChanges`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A worktree to receive checkout changes from the current HEAD.
+    ///
+    /// # Returns
+    ///
+    /// A completed move or an actionable recovery message.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn move_worktree_changes(
+        &self,
+        params: GitMoveWorktreeRequest,
+    ) -> Result<GitMoveWorktreeResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_MOVEWORKTREECHANGES, Some(wire_params))
+            .await
+    }
+
+    /// Creates a worktree with collision suffixes and default-branch fallback when requested.
+    ///
+    /// Wire method: `git.createWorktreeFromBase`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A worktree to create from a selected base.
+    ///
+    /// # Returns
+    ///
+    /// A new worktree and the base ref actually used.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn create_worktree_from_base(
+        &self,
+        params: GitWorktreeRequest,
+    ) -> Result<GitCreatedWorktree, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_CREATEWORKTREEFROMBASE, Some(wire_params))
+            .await
+    }
+
+    /// Creates or reuses a pull request worktree after fetching its ref.
+    ///
+    /// Wire method: `git.createPullRequestWorktree`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A worktree for an issue or pull request.
+    ///
+    /// # Returns
+    ///
+    /// A created or reused worktree.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn create_pull_request_worktree(
+        &self,
+        params: GitResourceWorktreeRequest,
+    ) -> Result<GitPreparedWorktree, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::GIT_CREATEPULLREQUESTWORKTREE,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Creates or reuses an issue worktree.
+    ///
+    /// Wire method: `git.createIssueWorktree`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A worktree for an issue or pull request.
+    ///
+    /// # Returns
+    ///
+    /// A created or reused worktree.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn create_issue_worktree(
+        &self,
+        params: GitResourceWorktreeRequest,
+    ) -> Result<GitPreparedWorktree, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_CREATEISSUEWORKTREE, Some(wire_params))
+            .await
+    }
+
+    /// Collects bounded checkout diffs, optionally ignoring whitespace-only edits.
+    ///
+    /// Wire method: `git.diffChanges`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Working-tree changes to collect.
+    ///
+    /// # Returns
+    ///
+    /// Changed files in a checkout.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn diff_changes(
+        &self,
+        params: GitDiffChangesRequest,
+    ) -> Result<GitDiffChangesResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_DIFFCHANGES, Some(wire_params))
+            .await
+    }
+
+    /// Carries persisted trust from a main repository root to a worktree. A trusted subdirectory never grants trust for the full repository.
+    ///
+    /// Wire method: `git.inheritWorktreeTrust`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Carry persisted trust from a repository root to a new worktree, without granting trust from a narrower subdirectory.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn inherit_worktree_trust(
+        &self,
+        params: GitInheritTrustRequest,
+    ) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::GIT_INHERITWORKTREETRUST, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Switches the checkout to an existing local branch.
+    ///
+    /// Wire method: `git.switchBranch`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A branch in a local repository.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn switch_branch(&self, params: GitBranchRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::GIT_SWITCHBRANCH, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Creates a branch at HEAD and pushes it with upstream tracking to the selected remote.
+    ///
+    /// Wire method: `git.createAndPushBranch`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Create a branch at HEAD and push it with upstream tracking.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn create_and_push_branch(
+        &self,
+        params: GitCreateAndPushBranchRequest,
+    ) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::GIT_CREATEANDPUSHBRANCH, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
     /// Reads the remote that the branch checked out in a working tree tracks, as `branch.<name>.remote` configures it. Reports `origin` rather than failing whenever there is no tracking configuration to read — on a detached HEAD, on a branch with no upstream, or when git itself fails — because a caller asking which remote to talk to needs an answer it can act on, not an error. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on.
     ///
     /// Wire method: `git.currentBranchRemote`.
@@ -2588,17 +5053,43 @@ impl<'a> ClientRpcGit<'a> {
             .await
     }
 
+    /// Computes the unstaged diff of the entire Git working tree containing cwd, including untracked files. Uses the runtime's existing Git diff implementation without requiring a live model session. Repository-review SDK hosts and CLI frontends use this operation independently of the foreground session.
+    ///
+    /// Wire method: `git.diff`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Parameters for an unstaged repository diff without a live model session.
+    ///
+    /// # Returns
+    ///
+    /// Workspace diff result for the requested mode.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn diff(&self, params: GitDiffRequest) -> Result<WorkspaceDiffResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::GIT_DIFF, Some(wire_params))
+            .await
+    }
+
     /// Collects the repository context of a working directory in one call: working tree root, repository identifier and host, current branch, and the HEAD and base commits. Every repository field is omitted when the path is not inside a git working tree, and the requested path is echoed back as `cwd`. The answer is the same `SessionWorkingDirectoryContext` that `session.metadata.recordContextChange` accepts, so a caller polling for a context change can forward the result unchanged. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on. It can become public once an SDK consumer needs to derive session context from a directory itself.
     ///
     /// Wire method: `git.workingDirectoryContext`.
     ///
     /// # Parameters
     ///
-    /// * `params` - Working-tree path a git query applies to.
+    /// * `params` - Directory context with optional expensive branch and base probes.
     ///
     /// # Returns
     ///
-    /// Updated working directory and git context. Emitted as the new payload of `session.context_changed`.
+    /// Session host's working directory and optional repository context.
     ///
     /// <div class="warning">
     ///
@@ -2609,8 +5100,8 @@ impl<'a> ClientRpcGit<'a> {
     /// </div>
     pub(crate) async fn working_directory_context(
         &self,
-        params: GitCwdRequest,
-    ) -> Result<SessionWorkingDirectoryContext, Error> {
+        params: GitContextRequest,
+    ) -> Result<MetadataGetWorkingDirectoryContextResult, Error> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::GIT_WORKINGDIRECTORYCONTEXT, Some(wire_params))
@@ -3316,6 +5807,35 @@ impl<'a> ClientRpcHost<'a> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::HOST_PUBLISHSESSION, Some(wire_params))
+            .await
+    }
+
+    /// Runs the admitted CLI host's private credential lifecycle protocol. The runtime retains each transaction and its displaced registration. Callback admission uses the original connection in this same engine. This is host migration plumbing, not a public credential API.
+    ///
+    /// Wire method: `host.credentials`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Private host protocol for one runtime-owned credential transaction. Only the admitted in-process CLI host can use this protocol.
+    ///
+    /// # Returns
+    ///
+    /// Projection of the authoritative runtime credential transaction.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn credentials(
+        &self,
+        params: HostCredentialLifecycleRequest,
+    ) -> Result<HostCredentialLifecycleResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::HOST_CREDENTIALS, Some(wire_params))
             .await
     }
 
@@ -4194,6 +6714,127 @@ impl<'a> ClientRpcLocalModels<'a> {
     }
 }
 
+/// `logging.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcLogging<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcLogging<'a> {
+    /// `logging.file.*` sub-namespace.
+    pub fn file(&self) -> ClientRpcLoggingFile<'a> {
+        ClientRpcLoggingFile {
+            client: self.client,
+        }
+    }
+}
+
+/// `logging.file.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcLoggingFile<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcLoggingFile<'a> {
+    /// Opens the exact file target granted out of band to this SDK connection by its native host. Requests cannot select paths. The resource closes on disconnect.
+    ///
+    /// Wire method: `logging.file.open`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Opens the exact output target granted by the native host, never a request-selected path.
+    ///
+    /// # Returns
+    ///
+    /// Identifies a file logger owned by the originating SDK connection generation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn open(&self, params: FileLogOpenRequest) -> Result<FileLogResource, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::LOGGING_FILE_OPEN, Some(wire_params))
+            .await
+    }
+
+    /// Appends a redacted record through the runtime logger. Await writes in order before flushing or closing.
+    ///
+    /// Wire method: `logging.file.write`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Appends a redacted record to an owned file logger.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn write(&self, params: FileLogWriteRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::LOGGING_FILE_WRITE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Waits for preceding writes to reach the owned file and reports writer failures.
+    ///
+    /// Wire method: `logging.file.flush`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies a file logger owned by the originating SDK connection generation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn flush(&self, params: FileLogResource) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::LOGGING_FILE_FLUSH, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Flushes and closes the owned file logger, reporting flush errors even when closing succeeds. The identifier cannot be reused.
+    ///
+    /// Wire method: `logging.file.close`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies a file logger owned by the originating SDK connection generation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn close(&self, params: FileLogResource) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::LOGGING_FILE_CLOSE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+}
+
 /// `lsp.*` RPCs.
 #[derive(Clone, Copy)]
 pub struct ClientRpcLsp<'a> {
@@ -4448,6 +7089,38 @@ impl<'a> ClientRpcManagedSettings<'a> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::MANAGEDSETTINGS_INGEST, Some(wire_params))
+            .await
+    }
+
+    /// Resolves managed policy and retains its complete authoritative layers and fail-closed decisions for a trusted host that owns process startup policy. Unlike a separate ingest followed by retainPolicy, this keeps typed network restrictions, permission floors, helper authority, and source provenance inside the runtime. One-shot plugin hosts use the returned effective policy before guarded mutations. Session-owning hosts should use normal session policy resolution instead.
+    ///
+    /// Wire method: `managedSettings.ingestAndRetain`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Inputs describing the host and account an ingestion should resolve managed policy for.
+    ///
+    /// # Returns
+    ///
+    /// The resolved host policy and the separate outcome of retaining it. A read-only host may display the ingestion after a retention failure; mutation hosts must stop.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn ingest_and_retain(
+        &self,
+        params: ManagedSettingsIngestParams,
+    ) -> Result<ManagedSettingsIngestAndRetainResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::MANAGEDSETTINGS_INGESTANDRETAIN,
+                Some(wire_params),
+            )
             .await
     }
 
@@ -4822,6 +7495,37 @@ impl<'a> ClientRpcMcp<'a> {
             .await
     }
 
+    /// Discovers MCP servers from user, workspace, plugin, and builtin sources.
+    ///
+    /// Wire method: `mcp.discover`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Optional working directory used as context for MCP server discovery.
+    ///
+    /// # Returns
+    ///
+    /// MCP servers discovered from user, workspace, plugin, and built-in sources.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Accepts [`McpDiscoverOptions`], including inputs added after [`McpDiscoverRequest`].
+    pub async fn discover_with_options(
+        &self,
+        params: McpDiscoverOptions,
+    ) -> Result<McpDiscoverResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::MCP_DISCOVER, Some(wire_params))
+            .await
+    }
+
     /// Lists the MCP servers the runtime supplies itself, so a host that disables the built-ins wholesale suppresses exactly the set the runtime would otherwise add. The names are fixed for a build and depend on no configuration, session or account.
     ///
     /// Wire method: `mcp.listBuiltinServerNames`.
@@ -4843,6 +7547,35 @@ impl<'a> ClientRpcMcp<'a> {
         let wire_params = serde_json::json!({});
         self.client
             .call_typed(rpc_methods::MCP_LISTBUILTINSERVERNAMES, Some(wire_params))
+            .await
+    }
+
+    /// Resolves built-in GitHub MCP exposure, source attribution, and workspace restrictions. Optionally builds a secretless descriptor through the calling connection's authentication owner. IDE and ACP hosts use this before session creation. Policy-only requests do not resolve credentials or probe the host.
+    ///
+    /// Wire method: `mcp.resolveGitHubConfig`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Resolve GitHub MCP exposure and optionally build a secretless server descriptor.
+    ///
+    /// # Returns
+    ///
+    /// Effective GitHub MCP configuration and override attribution.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn resolve_git_hub_config(
+        &self,
+        params: McpResolveGitHubConfigRequest,
+    ) -> Result<McpResolveGitHubConfigResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::MCP_RESOLVEGITHUBCONFIG, Some(wire_params))
             .await
     }
 
@@ -5965,6 +8698,35 @@ impl<'a> ClientRpcPlugins<'a> {
             .await
     }
 
+    /// Lists plugins installed in user/global state.
+    ///
+    /// Wire method: `plugins.list`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Optional read-only plugin discovery context. The runtime resolves account, policy, and workspace trust. This query does not change settings.
+    ///
+    /// # Returns
+    ///
+    /// Plugins installed in user/global state.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn list_with_params(
+        &self,
+        params: PluginsListRequest,
+    ) -> Result<PluginListResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::PLUGINS_LIST, Some(wire_params))
+            .await
+    }
+
     /// Installs a plugin from a marketplace, GitHub repo, URL, or local path.
     ///
     /// Wire method: `plugins.install`.
@@ -6113,6 +8875,35 @@ impl<'a> ClientRpcPlugins<'a> {
             .await?;
         Ok(())
     }
+
+    /// Runs the sessionStart hooks of one built-in plugin without a session, so that the plugin can do its host setup before the first turn. Settings and managed policy that turn off the plugin or its hooks apply. The hooks run on the host, not in a session sandbox, so managed policy that turns on the sandbox prevents activation. The call fails when managed policy cannot be determined. Extension callers cannot use this method.
+    ///
+    /// Wire method: `plugins.activate`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Built-in plugin to activate.
+    ///
+    /// # Returns
+    ///
+    /// The result of a built-in plugin activation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn activate(
+        &self,
+        params: PluginsActivateRequest,
+    ) -> Result<PluginsActivateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::PLUGINS_ACTIVATE, Some(wire_params))
+            .await
+    }
 }
 
 /// `plugins.builtin.*` RPCs.
@@ -6173,6 +8964,31 @@ impl<'a> ClientRpcPluginsMarketplaces<'a> {
         let wire_params = serde_json::json!({});
         self.client
             .call_typed(rpc_methods::PLUGINS_MARKETPLACES_LIST, Some(wire_params))
+            .await
+    }
+
+    /// Restores a retired default marketplace in the runtime's configured profile when a retained plugin install still needs it. Uses retained managed policy without fetching catalogs or policy. Returns the persisted result so a launcher can report the settings change before opening a session or running a plugin command. Repeated calls are guarded per profile; malformed settings and write failures reject the call.
+    ///
+    /// Wire method: `plugins.marketplaces.migrateRetiredDefault`.
+    ///
+    /// # Returns
+    ///
+    /// The retired marketplace migration result for the runtime's configured profile.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn migrate_retired_default(&self) -> Result<MarketplaceMigrationResult, Error> {
+        let wire_params = serde_json::json!({});
+        self.client
+            .call_typed(
+                rpc_methods::PLUGINS_MARKETPLACES_MIGRATERETIREDDEFAULT,
+                Some(wire_params),
+            )
             .await
     }
 
@@ -6728,6 +9544,181 @@ impl<'a> ClientRpcSandbox<'a> {
         }
     }
 
+    /// Atomically consumes the first-enable sandbox onboarding marker in the supplied host context. Reports whether this call first recorded the marker, including prior consumption through the sandbox enable command. The caller owns its onboarding message.
+    ///
+    /// Wire method: `sandbox.consumeOnboarding`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The filesystem and environment facts a user-settings file is resolved from. Passed explicitly rather than read from the runtime's own process, so a host whose configuration directory differs from its process environment resolves the file it means.
+    ///
+    /// # Returns
+    ///
+    /// The result of atomically consuming the user's first-enable sandbox marker.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn consume_onboarding(
+        &self,
+        params: UserSettingsHostContext,
+    ) -> Result<SandboxConsumeOnboardingResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SANDBOX_CONSUMEONBOARDING, Some(wire_params))
+            .await
+    }
+
+    /// Returns the runtime's writable temporary directory for local hosts that stage files for sandboxed tools. On macOS without TMPDIR, this is the runtime's private directory, not another host library's independent private directory. Remote clients must not interpret this runtime-local filesystem path.
+    ///
+    /// Wire method: `sandbox.getTemporaryDirectory`.
+    ///
+    /// # Returns
+    ///
+    /// The runtime-local temporary directory allowed by the default sandbox grants, with Node-style trailing-separator trimming.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn get_temporary_directory(
+        &self,
+    ) -> Result<SandboxGetTemporaryDirectoryResult, Error> {
+        let wire_params = serde_json::json!({});
+        self.client
+            .call_typed(
+                rpc_methods::SANDBOX_GETTEMPORARYDIRECTORY,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Returns sandbox opt-out capability and managed-policy notices from the same authoritative policy rules. Hosts use this projection to keep status labels and policy notices consistent without duplicating policy defaults.
+    ///
+    /// Wire method: `sandbox.getPolicyPresentation`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Policy values a host needs to describe the effective sandbox.
+    ///
+    /// # Returns
+    ///
+    /// Authoritative policy labels and opt-out capability for a host.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn get_policy_presentation(
+        &self,
+        params: SandboxPolicyPresentationParams,
+    ) -> Result<SandboxPolicyPresentationResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SANDBOX_GETPOLICYPRESENTATION,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Probes how shell commands start under the managed learning policy and explains why a host cannot apply permissive learning mode. Hosts must await this probe instead of assuming denial capture support.
+    ///
+    /// Wire method: `sandbox.getLearningModeStart`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Effective sandbox and managed policy used for the learning-mode probe.
+    ///
+    /// # Returns
+    ///
+    /// How shell commands start under the managed learning policy.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn get_learning_mode_start(
+        &self,
+        params: SandboxLearningModeStartParams,
+    ) -> Result<SandboxLearningModeStartResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SANDBOX_GETLEARNINGMODESTART, Some(wire_params))
+            .await
+    }
+
+    /// Normalizes a sandbox credential host pattern or proxy URL with the runtime validation rule before a host saves it. Invalid host patterns fail the request; invalid proxy URLs return no accepted value.
+    ///
+    /// Wire method: `sandbox.normalizeInput`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - One sandbox value to normalize before saving it.
+    ///
+    /// # Returns
+    ///
+    /// Normalized value, absent when the runtime rejects a proxy URL.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn normalize_input(
+        &self,
+        params: SandboxNormalizeInputParams,
+    ) -> Result<SandboxNormalizeInputResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SANDBOX_NORMALIZEINPUT, Some(wire_params))
+            .await
+    }
+
+    /// Compares sandbox configurations under runtime identity rules, ignoring managed routing provenance and inactive routing flags. Hosts use this result to avoid restarting services when their effective policy does not change.
+    ///
+    /// Wire method: `sandbox.configsEqual`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Sandbox configurations to compare under runtime identity rules.
+    ///
+    /// # Returns
+    ///
+    /// Whether both configurations describe the same effective sandbox.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn configs_equal(
+        &self,
+        params: SandboxConfigsEqualParams,
+    ) -> Result<SandboxConfigsEqualResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SANDBOX_CONFIGSEQUAL, Some(wire_params))
+            .await
+    }
+
     /// Raises a user's sandbox settings to an administrator's managed sandbox floor and returns the result a session should actually run under. The floor can only tighten: an enterprise force-on is reflected even when the user's own `enabled` is false, and a user cannot lower a setting the floor raised. The result is normalized through the declared sandbox shape, so a key reorder or an undeclared passthrough key is not mistaken for a policy change by callers that diff two results. A host must call this rather than merge the two layers itself, because reimplementing the direction of the fold is what turns an administrator's floor into a suggestion.
     ///
     /// Wire method: `sandbox.resolveFlooredConfig`.
@@ -7097,6 +10088,123 @@ pub struct ClientRpcSandboxProxyCa<'a> {
 }
 
 impl<'a> ClientRpcSandboxProxyCa<'a> {
+    /// Atomically replaces a stale stored certificate authority only if OS trust does not include it. Never trusts the replacement. Returns false when no certificate authority exists, it is current, or another process already trusted it. A host can use this after a user declines an update without granting consent to trust a replacement.
+    ///
+    /// Wire method: `sandbox.proxyCa.rotateIfUntrusted`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects a Copilot profile and the credential hosts that its sandbox credential-proxy certificate authority must cover. The runtime always adds the hosts from that profile's saved user settings.
+    ///
+    /// # Returns
+    ///
+    /// True when the untrusted stale certificate authority was replaced.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn rotate_if_untrusted(
+        &self,
+        params: SandboxProxyCaProfileRequest,
+    ) -> Result<SandboxProxyCaRotateIfUntrustedResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SANDBOX_PROXYCA_ROTATEIFUNTRUSTED,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Removes the stored certificate authority for the selected Copilot configuration directory from OS trust. Keeps the stored certificate authority. Can show an OS authentication prompt. The sandboxConfig field does not affect removal.
+    ///
+    /// Wire method: `sandbox.proxyCa.removeForConfigDir`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects a Copilot profile and the credential hosts that its sandbox credential-proxy certificate authority must cover. The runtime always adds the hosts from that profile's saved user settings.
+    ///
+    /// # Returns
+    ///
+    /// Status of the persistent certificate authority of the sandbox credential proxy.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn remove_for_config_dir(
+        &self,
+        params: SandboxProxyCaProfileRequest,
+    ) -> Result<SandboxProxyCaStatus, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SANDBOX_PROXYCA_REMOVEFORCONFIGDIR,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Reports whether the user declined the ordinary certificate-authority installation offer in this explicit host context. A stale certificate authority still needs a new consent decision.
+    ///
+    /// Wire method: `sandbox.proxyCa.getDeclined`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The filesystem and environment facts a user-settings file is resolved from. Passed explicitly rather than read from the runtime's own process, so a host whose configuration directory differs from its process environment resolves the file it means.
+    ///
+    /// # Returns
+    ///
+    /// True when the ordinary installation offer was declined.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn get_declined(
+        &self,
+        params: UserSettingsHostContext,
+    ) -> Result<SandboxProxyCaGetDeclinedResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SANDBOX_PROXYCA_GETDECLINED, Some(wire_params))
+            .await
+    }
+
+    /// Remembers a user's decline of the ordinary certificate-authority installation offer in this explicit host context. Changes no certificate or OS trust. Hosts must not call this when an offer was never shown or when the user declines an update to a stale certificate authority.
+    ///
+    /// Wire method: `sandbox.proxyCa.decline`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The filesystem and environment facts a user-settings file is resolved from. Passed explicitly rather than read from the runtime's own process, so a host whose configuration directory differs from its process environment resolves the file it means.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn decline(&self, params: UserSettingsHostContext) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::SANDBOX_PROXYCA_DECLINE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
     /// Reports whether this runtime process can offer installing the sandbox credential-proxy certificate authority into OS trust.
     ///
     /// Wire method: `sandbox.proxyCa.checkInstallationSupport`.
@@ -7272,6 +10380,166 @@ impl<'a> ClientRpcSandboxProxyCa<'a> {
             .await
     }
 
+    /// Reports whether the selected Copilot profile's sandbox credential-proxy certificate authority exists, whether OS trust includes it, and whether it needs rotation. Changes nothing.
+    ///
+    /// Wire method: `sandbox.proxyCa.getStatusForConfigDir`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects a Copilot profile and the credential hosts that its sandbox credential-proxy certificate authority must cover. The runtime always adds the hosts from that profile's saved user settings.
+    ///
+    /// # Returns
+    ///
+    /// Status of the persistent certificate authority of the sandbox credential proxy.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn get_status_for_config_dir(
+        &self,
+        params: SandboxProxyCaProfileRequest,
+    ) -> Result<SandboxProxyCaStatus, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SANDBOX_PROXYCA_GETSTATUSFORCONFIGDIR,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Creates the selected Copilot profile's sandbox credential-proxy certificate authority if none exists. Returns its public certificate path without changes to OS trust. Keeps an existing certificate authority, even when it needs rotation. Fails where OS trust is unsupported. Use sandbox.proxyCa.trustForConfigDir to trust it.
+    ///
+    /// Wire method: `sandbox.proxyCa.createForConfigDir`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects a Copilot profile and the credential hosts that its sandbox credential-proxy certificate authority must cover. The runtime always adds the hosts from that profile's saved user settings.
+    ///
+    /// # Returns
+    ///
+    /// Result of creating the persistent certificate authority of the sandbox credential proxy.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn create_for_config_dir(
+        &self,
+        params: SandboxProxyCaProfileRequest,
+    ) -> Result<SandboxProxyCaCreateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SANDBOX_PROXYCA_CREATEFORCONFIGDIR,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Replaces the selected Copilot profile's sandbox credential-proxy certificate authority for its current credential hosts. If OS trust included the old certificate authority, removes it and trusts the replacement. Can show an OS authentication prompt. Active sandboxed tools keep the old certificate authority until they restart.
+    ///
+    /// Wire method: `sandbox.proxyCa.rotateForConfigDir`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects a Copilot profile and the credential hosts that its sandbox credential-proxy certificate authority must cover. The runtime always adds the hosts from that profile's saved user settings.
+    ///
+    /// # Returns
+    ///
+    /// Status of the persistent certificate authority of the sandbox credential proxy.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn rotate_for_config_dir(
+        &self,
+        params: SandboxProxyCaProfileRequest,
+    ) -> Result<SandboxProxyCaStatus, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SANDBOX_PROXYCA_ROTATEFORCONFIGDIR,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Adds the selected Copilot profile's sandbox credential-proxy certificate authority to OS trust. Call createForConfigDir first. Refuses a certificate authority that is not constrained to the current credential hosts. Can show an OS authentication prompt.
+    ///
+    /// Wire method: `sandbox.proxyCa.trustForConfigDir`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects a Copilot profile and the credential hosts that its sandbox credential-proxy certificate authority must cover. The runtime always adds the hosts from that profile's saved user settings.
+    ///
+    /// # Returns
+    ///
+    /// Status of the persistent certificate authority of the sandbox credential proxy.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn trust_for_config_dir(
+        &self,
+        params: SandboxProxyCaProfileRequest,
+    ) -> Result<SandboxProxyCaStatus, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SANDBOX_PROXYCA_TRUSTFORCONFIGDIR,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Validates and adds a supplied credential-proxy CA certificate to OS trust. Device-management hosts can distribute a certificate file and explicitly permit its credential hosts. Includes the selected profile's saved credential hosts. Refuses unsafe certificate constraints before any OS trust change. Without a file, uses the selected profile's stored CA. Can show an OS authentication prompt.
+    ///
+    /// Wire method: `sandbox.proxyCa.trustCertificate`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A certificate file and the credential hosts permitted by the caller for OS trust.
+    ///
+    /// # Returns
+    ///
+    /// Status of the persistent certificate authority of the sandbox credential proxy.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn trust_certificate(
+        &self,
+        params: SandboxProxyCaTrustCertificateRequest,
+    ) -> Result<SandboxProxyCaStatus, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SANDBOX_PROXYCA_TRUSTCERTIFICATE,
+                Some(wire_params),
+            )
+            .await
+    }
+
     /// Removes the persistent certificate authority of the sandbox credential proxy from OS trust. Keeps the stored certificate authority. Can show an OS authentication prompt. Sandboxed clients that read only OS trust then reject the proxy; clients that read the per-process certificate bundle continue to work.
     ///
     /// Wire method: `sandbox.proxyCa.remove`.
@@ -7437,6 +10705,118 @@ impl<'a> ClientRpcSandboxSettings<'a> {
             )
             .await
     }
+
+    /// Resolves the settings file for an explicit host context. Editors can capture their file baseline before an asynchronous settings read.
+    ///
+    /// Wire method: `sandbox.settings.getPath`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The filesystem and environment facts a user-settings file is resolved from. Passed explicitly rather than read from the runtime's own process, so a host whose configuration directory differs from its process environment resolves the file it means.
+    ///
+    /// # Returns
+    ///
+    /// The settings file selected by the supplied configuration directory, home directory, and environment.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn get_path(
+        &self,
+        params: UserSettingsHostContext,
+    ) -> Result<SandboxSettingsGetPathResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SANDBOX_SETTINGS_GETPATH, Some(wire_params))
+            .await
+    }
+
+    /// Reads sandbox settings from the supplied host context and applies runtime defaults. Editors and other local hosts can inspect both the resolved settings and the sparse stored override.
+    ///
+    /// Wire method: `sandbox.settings.load`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The host context to read sandbox settings from.
+    ///
+    /// # Returns
+    ///
+    /// The resolved sandbox settings and the user's sparse stored override.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn load(
+        &self,
+        params: SandboxSettingsLoadRequest,
+    ) -> Result<SandboxSettingsLoadResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SANDBOX_SETTINGS_LOAD, Some(wire_params))
+            .await
+    }
+
+    /// Merges and persists a sandbox settings patch under the runtime settings transaction. Filesystem, network, and seatbelt patches update userPolicy without replacing unrelated settings.
+    ///
+    /// Wire method: `sandbox.settings.update`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A sandbox settings patch and the host context that selects its settings file.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn update(&self, params: SandboxSettingsUpdateRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::SANDBOX_SETTINGS_UPDATE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Saves an accepted sandbox path grant for future sessions. Grants remain literal, duplicate entries are not added, and reported read-only entries are removed only by their exact stored spelling.
+    ///
+    /// Wire method: `sandbox.settings.persistPathGrant`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A literal sandbox path grant to save in the user's settings.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn persist_path_grant(
+        &self,
+        params: SandboxSettingsPersistPathGrantRequest,
+    ) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(
+                rpc_methods::SANDBOX_SETTINGS_PERSISTPATHGRANT,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(())
+    }
 }
 
 /// `secrets.*` RPCs.
@@ -7446,7 +10826,7 @@ pub struct ClientRpcSecrets<'a> {
 }
 
 impl<'a> ClientRpcSecrets<'a> {
-    /// Registers secret values for redaction in session logs and exports. The SDK calls this to inject dynamically generated secret values (e.g., OIDC tokens).
+    /// Registers secret values for best-effort redaction in session logs and exports while this client remains connected. Repeated adds are idempotent. Discouraged for runtime code: retain an owned secret registration instead. Remove rotating or unused values with secrets.removeFilterValues; historical output and late echoes may no longer be redacted after removal or disconnect.
     ///
     /// Wire method: `secrets.addFilterValues`.
     ///
@@ -7472,6 +10852,61 @@ impl<'a> ClientRpcSecrets<'a> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::SECRETS_ADDFILTERVALUES, Some(wire_params))
+            .await
+    }
+
+    /// Releases values previously added by this client. Repeated or unmatched removals are no-ops; other live registrations remain effective. Only remove values once they are reasonably unlikely to be logged again: historical output and late echoes may no longer be redacted.
+    ///
+    /// Wire method: `secrets.removeFilterValues`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Secret values this client no longer needs redacted.
+    ///
+    /// # Returns
+    ///
+    /// Confirmation that this client's registrations were released.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn remove_filter_values(
+        &self,
+        params: SecretsRemoveFilterValuesRequest,
+    ) -> Result<SecretsRemoveFilterValuesResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SECRETS_REMOVEFILTERVALUES, Some(wire_params))
+            .await
+    }
+
+    /// Redacts text or JSON with the runtime's process filter, including registered values and live environment sources. Requires COPILOT_ENABLE_SECRET_FILTERING=true in the runtime's environment, as for secrets.addFilterValues.
+    ///
+    /// Wire method: `secrets.filter`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Content to redact with the runtime's process filter.
+    ///
+    /// # Returns
+    ///
+    /// Content after runtime-owned redaction.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn filter(&self, params: SecretsFilterRequest) -> Result<SecretsFilterResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SECRETS_FILTER, Some(wire_params))
             .await
     }
 }
@@ -7520,6 +10955,13 @@ pub struct ClientRpcSessions<'a> {
 }
 
 impl<'a> ClientRpcSessions<'a> {
+    /// `sessions.forgeProposals.*` sub-namespace.
+    pub(crate) fn forge_proposals(&self) -> ClientRpcSessionsForgeProposals<'a> {
+        ClientRpcSessionsForgeProposals {
+            client: self.client,
+        }
+    }
+
     /// Creates or resumes a local session and returns the opened session ID.
     ///
     /// Wire method: `sessions.open`.
@@ -7678,6 +11120,35 @@ impl<'a> ClientRpcSessions<'a> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::SESSIONS_GETMETADATA, Some(wire_params))
+            .await
+    }
+
+    /// Lists one step of the signed-in user's Mission Control tasks, including archived tasks, as remote session metadata. Each step follows the task list's `Link: rel="next"` header (falling back to the next page number when there is none) for up to one active and one archived page, and returns a continuation for the next step. HTTP failures are reported in `failure` rather than as an RPC error so callers keep the status, payload and `retryAfterMs`.
+    ///
+    /// Wire method: `sessions.listRemotePage`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Requests the next step of a Mission Control task listing that follows `Link: rel="next"` pagination.
+    ///
+    /// # Returns
+    ///
+    /// One step of a Mission Control task listing: up to one active page and one archived page.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn list_remote_page(
+        &self,
+        params: SessionsListRemotePageRequest,
+    ) -> Result<SessionsListRemotePageResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SESSIONS_LISTREMOTEPAGE, Some(wire_params))
             .await
     }
 
@@ -8603,6 +12074,110 @@ impl<'a> ClientRpcSessions<'a> {
     }
 }
 
+/// `sessions.forgeProposals.*` RPCs.
+#[derive(Clone, Copy)]
+pub(crate) struct ClientRpcSessionsForgeProposals<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcSessionsForgeProposals<'a> {
+    /// Reads a Forge proposal's before-generation capture from the canonical store owned by the configured runtime host. The request cannot select a database.
+    ///
+    /// Wire method: `sessions.forgeProposals.workspaceBefore`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Proposal identifier whose before-generation capture is requested.
+    ///
+    /// # Returns
+    ///
+    /// Stored before-generation capture, or null when no capture exists.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn workspace_before(
+        &self,
+        params: ForgeProposalWorkspaceBeforeRequest,
+    ) -> Result<ForgeProposalWorkspaceBeforeResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SESSIONS_FORGEPROPOSALS_WORKSPACEBEFORE,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Reconciles a generated artifact with canonical Forge proposals. Reuses a ready or reviewing fingerprint, completes an eligible generation, or creates and completes an on-demand generation. Existing store transitions retain their transaction and persisted compatibility semantics. SDK skill-review clients can use the same canonical lifecycle without implementing another store.
+    ///
+    /// Wire method: `sessions.forgeProposals.reconcile`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Reconciles a generated artifact with the configured canonical store.
+    ///
+    /// # Returns
+    ///
+    /// Existing ready proposal or completed generation; null for an ineligible automatic generation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn reconcile(
+        &self,
+        params: ForgeProposalReconcileRequest,
+    ) -> Result<ForgeProposalReconcileResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SESSIONS_FORGEPROPOSALS_RECONCILE,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Marks stale generating proposals failed in the configured canonical store. The runtime clock and existing store transition own the cutoff and persisted update.
+    ///
+    /// Wire method: `sessions.forgeProposals.failStale`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Fails stale generations in one canonical proposal scope.
+    ///
+    /// # Returns
+    ///
+    /// Number of generations that the canonical store marked failed.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn fail_stale(
+        &self,
+        params: ForgeProposalFailStaleRequest,
+    ) -> Result<ForgeProposalFailStaleResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::SESSIONS_FORGEPROPOSALS_FAILSTALE,
+                Some(wire_params),
+            )
+            .await
+    }
+}
+
 /// `settings.*` RPCs.
 #[derive(Clone, Copy)]
 pub(crate) struct ClientRpcSettings<'a> {
@@ -9018,6 +12593,38 @@ impl<'a> ClientRpcSkillsConfig<'a> {
     pub async fn set_skill_disabled(
         &self,
         params: SkillsConfigSetSkillDisabledRequest,
+    ) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(
+                rpc_methods::SKILLS_CONFIG_SETSKILLDISABLED,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Atomically adds or removes one skill from the disabled list.
+    ///
+    /// Wire method: `skills.config.setSkillDisabled`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Adds or removes a single skill from the global disabled list, leaving every other entry untouched.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Accepts [`SkillsConfigSetSkillDisabledOptions`], including inputs added after [`SkillsConfigSetSkillDisabledRequest`].
+    pub async fn set_skill_disabled_with_options(
+        &self,
+        params: SkillsConfigSetSkillDisabledOptions,
     ) -> Result<(), Error> {
         let wire_params = serde_json::to_value(params)?;
         let _: serde::de::IgnoredAny = self
@@ -10011,7 +13618,7 @@ impl<'a> ClientRpcUserSettings<'a> {
         Ok(())
     }
 
-    /// Merges a partial object into one top-level user setting, re-reading the stored value inside this runtime process's settings.json write lock so that concurrent writers in this process to different sub-fields of the same key do not clobber each other. Unlike `user.settings.set`, which replaces a key's whole value with what the caller last read, this keeps sub-fields the caller did not name when both the stored value and supplied value are objects; otherwise the supplied value replaces the stored value. Use it whenever two independent surfaces own different sub-fields of one setting. Returns the key's stored value after the write, in `value`.
+    /// Merges a partial object into one top-level user setting under its cross-process transaction and local file lock. Unlike `user.settings.set`, this preserves unnamed sub-fields when the stored and supplied values are objects; otherwise the supplied value replaces the stored value. Optional `ifFieldsMatch` checks shallow fields of the stored object under those same locks, with missing fields equivalent to JSON null. A mismatch leaves the file unchanged and returns `applied: false`. A match returns `applied: true`. Without a precondition, the update remains unconditional and omits `applied`. Returns the current stored value in `value`.
     ///
     /// Wire method: `user.settings.update`.
     ///
@@ -10040,7 +13647,7 @@ impl<'a> ClientRpcUserSettings<'a> {
             .await
     }
 
-    /// Reads settings.json as stored for a caller that is about to edit it. Unlike `user.settings.get`, this returns file values rather than per-key metadata and defaults. Reports `missing` for an absent file and `invalid` when the existing file will not parse. Retired config.json and extensionless files are not read.
+    /// Reads settings.json as stored for a caller that is about to edit it. Unlike `user.settings.get`, this returns file values rather than per-key metadata and defaults. Reports `missing` for an absent file and `invalid` when the existing file will not parse. Retired config.json and extensionless files are not read. An optional configDir overrides the configured host directory.
     ///
     /// Wire method: `user.settings.loadForEdit`.
     ///
@@ -10057,6 +13664,35 @@ impl<'a> ClientRpcUserSettings<'a> {
     /// </div>
     pub(crate) async fn load_for_edit(&self) -> Result<UserSettingsLoadForEditResult, Error> {
         let wire_params = serde_json::json!({});
+        self.client
+            .call_typed(rpc_methods::USER_SETTINGS_LOADFOREDIT, Some(wire_params))
+            .await
+    }
+
+    /// Reads settings.json as stored for a caller that is about to edit it. Unlike `user.settings.get`, this returns file values rather than per-key metadata and defaults. Reports `missing` for an absent file and `invalid` when the existing file will not parse. Retired config.json and extensionless files are not read. An optional configDir overrides the configured host directory.
+    ///
+    /// Wire method: `user.settings.loadForEdit`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects the configuration directory whose user settings to read.
+    ///
+    /// # Returns
+    ///
+    /// Contents of settings.json as stored, for a caller about to rewrite it.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn load_for_edit_with_params(
+        &self,
+        params: UserSettingsLoadForConfigDirRequest,
+    ) -> Result<UserSettingsLoadForEditResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::USER_SETTINGS_LOADFOREDIT, Some(wire_params))
             .await
@@ -10109,6 +13745,13 @@ impl<'a> SessionRpc<'a> {
     /// `session.agent.*` sub-namespace.
     pub fn agent(&self) -> SessionRpcAgent<'a> {
         SessionRpcAgent {
+            session: self.session,
+        }
+    }
+
+    /// `session.authProviders.*` sub-namespace.
+    pub fn auth_providers(&self) -> SessionRpcAuthProviders<'a> {
+        SessionRpcAuthProviders {
             session: self.session,
         }
     }
@@ -10672,7 +14315,7 @@ impl<'a> SessionRpc<'a> {
             .await
     }
 
-    /// Cancels every running background agent (task-registry subagents plus sidekick agents) without interrupting the main agent loop. Promoted attached shells are left running.
+    /// Cancels every running background agent (task-registry subagents plus sidekick agents) without interrupting the main agent loop. Stops attached background shells, including promoted shells, started by cancelled task-registry agents or their descendants. Detached shells and shells belonging to unrelated agents are left running.
     ///
     /// Wire method: `session.cancelAllBackgroundAgents`.
     ///
@@ -10769,17 +14412,13 @@ impl<'a> SessionRpcAccounts<'a> {
         }
     }
 
-    /// Enumerate a typed accounts collection: the signed-in accounts, or the providers offered for interactive login.
+    /// Lists signed-in accounts, including derived accounts. The active entry identifies the session's selected account.
     ///
-    /// Wire method: `session.accounts.enumerate`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Enumerate request carrying the typed collection query.
+    /// Wire method: `session.accounts.list`.
     ///
     /// # Returns
     ///
-    /// The enumerated collection, keyed by the same selector as the query.
+    /// Signed-in accounts; empty when no accounts are available.
     ///
     /// <div class="warning">
     ///
@@ -10788,29 +14427,52 @@ impl<'a> SessionRpcAccounts<'a> {
     /// SDK and CLI versions if your code depends on it.
     ///
     /// </div>
-    pub async fn enumerate(
+    pub async fn list(&self) -> Result<AccountsList, Error> {
+        let wire_params = serde_json::json!({ "sessionId": self.session.id() });
+        self.session
+            .client()
+            .call_typed(rpc_methods::SESSION_ACCOUNTS_LIST, Some(wire_params))
+            .await
+    }
+
+    /// Lists signed-in accounts, including derived accounts. The active entry identifies the session's selected account.
+    ///
+    /// Wire method: `session.accounts.list`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Options for listing the canonical account inventory.
+    ///
+    /// # Returns
+    ///
+    /// Signed-in accounts; empty when no accounts are available.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn list_with_params(
         &self,
-        params: AccountsEnumerateRequest,
-    ) -> Result<AuthEnumerateValue, Error> {
+        params: AccountsListRequest,
+    ) -> Result<AccountsList, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
         self.session
             .client()
-            .call_typed(rpc_methods::SESSION_ACCOUNTS_ENUMERATE, Some(wire_params))
+            .call_typed(rpc_methods::SESSION_ACCOUNTS_LIST, Some(wire_params))
             .await
     }
 
-    /// Read one typed accounts datum: the active account, a neutral status summary, or the last authentication errors.
+    /// Gets the selected account and its credential-free identity metadata, including resolved Copilot user information when available.
     ///
-    /// Wire method: `session.accounts.get`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Read request carrying the typed datum query.
+    /// Wire method: `session.accounts.getActive`.
     ///
     /// # Returns
     ///
-    /// The read result, keyed by the same selector as the query.
+    /// The selected account and its credential-free identity metadata.
     ///
     /// <div class="warning">
     ///
@@ -10819,26 +14481,21 @@ impl<'a> SessionRpcAccounts<'a> {
     /// SDK and CLI versions if your code depends on it.
     ///
     /// </div>
-    pub async fn get(&self, params: AccountsGetRequest) -> Result<AuthReadValue, Error> {
-        let mut wire_params = serde_json::to_value(params)?;
-        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+    pub async fn get_active(&self) -> Result<AccountsGetActiveResult, Error> {
+        let wire_params = serde_json::json!({ "sessionId": self.session.id() });
         self.session
             .client()
-            .call_typed(rpc_methods::SESSION_ACCOUNTS_GET, Some(wire_params))
+            .call_typed(rpc_methods::SESSION_ACCOUNTS_GETACTIVE, Some(wire_params))
             .await
     }
 
-    /// Apply one non-interactive accounts mutation: switch the active account, log an account out, or set credentials from a token.
+    /// Gets validation errors from the most recent authentication attempt, not errors for a specific account.
     ///
-    /// Wire method: `session.accounts.set`.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - Mutation request carrying the typed write command.
+    /// Wire method: `session.accounts.lastErrors`.
     ///
     /// # Returns
     ///
-    /// Result of a non-interactive accounts mutation.
+    /// Validation errors from the most recent authentication attempt.
     ///
     /// <div class="warning">
     ///
@@ -10847,13 +14504,104 @@ impl<'a> SessionRpcAccounts<'a> {
     /// SDK and CLI versions if your code depends on it.
     ///
     /// </div>
-    pub async fn set(&self, params: AccountsSetRequest) -> Result<AuthWriteResult, Error> {
+    pub async fn last_errors(&self) -> Result<AuthValidationErrors, Error> {
+        let wire_params = serde_json::json!({ "sessionId": self.session.id() });
+        self.session
+            .client()
+            .call_typed(rpc_methods::SESSION_ACCOUNTS_LASTERRORS, Some(wire_params))
+            .await
+    }
+
+    /// Switches the session's selected authentication to an available account.
+    ///
+    /// Wire method: `session.accounts.switchActive`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Select a signed-in account for this session.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn switch_active(&self, params: AccountsSwitchActiveRequest) -> Result<(), Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        let _: serde::de::IgnoredAny = self
+            .session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_ACCOUNTS_SWITCHACTIVE,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Logs out the specified account, or the active account when selectionId is omitted.
+    ///
+    /// Wire method: `session.accounts.logout`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Log out a signed-in account.
+    ///
+    /// # Returns
+    ///
+    /// Whether other signed-in accounts remain. Returns false when there is no active account to log out.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn logout(
+        &self,
+        params: AccountsLogoutRequest,
+    ) -> Result<SessionAccountsLogoutResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
         self.session
             .client()
-            .call_typed(rpc_methods::SESSION_ACCOUNTS_SET, Some(wire_params))
+            .call_typed(rpc_methods::SESSION_ACCOUNTS_LOGOUT, Some(wire_params))
             .await
+    }
+
+    /// Installs and persists a GitHub authentication token for the given host and login. This credential shape is specific to GitHub, not a general token setter for every authentication provider.
+    ///
+    /// Wire method: `session.accounts.setCredentials`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A GitHub credential to install and persist.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn set_credentials(
+        &self,
+        params: AccountsSetCredentialsRequest,
+    ) -> Result<(), Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        let _: serde::de::IgnoredAny = self
+            .session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_ACCOUNTS_SETCREDENTIALS,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(())
     }
 }
 
@@ -10864,6 +14612,34 @@ pub struct SessionRpcAccountsLogin<'a> {
 }
 
 impl<'a> SessionRpcAccountsLogin<'a> {
+    /// Lists cached base identities reusable by a login provider, with the active identity first. Pass an accountId to login.begin to reuse an identity.
+    ///
+    /// Wire method: `session.accounts.login.list`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The provider whose cached base identities should be listed.
+    ///
+    /// # Returns
+    ///
+    /// Cached base identities reusable by the selected login provider, active first.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn list(&self, params: AuthLoginListRequest) -> Result<AuthLoginIdentityList, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(rpc_methods::SESSION_ACCOUNTS_LOGIN_LIST, Some(wire_params))
+            .await
+    }
+
     /// Begin an interactive login flow for a provider kind, optionally selecting how to authorize (`method`: `web` by default, or `device-code`), and return its opaque flow id and first step.
     ///
     /// Wire method: `session.accounts.login.begin`.
@@ -11129,6 +14905,37 @@ impl<'a> SessionRpcAgent<'a> {
         self.session
             .client()
             .call_typed(rpc_methods::SESSION_AGENT_RELOAD, Some(wire_params))
+            .await
+    }
+}
+
+/// `session.authProviders.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct SessionRpcAuthProviders<'a> {
+    pub(crate) session: &'a Session,
+}
+
+impl<'a> SessionRpcAuthProviders<'a> {
+    /// Lists authentication providers and whether this transport supports signing in with each. Availability is determined by the runtime; unavailable providers remain in the list.
+    ///
+    /// Wire method: `session.authProviders.list`.
+    ///
+    /// # Returns
+    ///
+    /// Authentication providers offered for interactive login.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn list(&self) -> Result<AuthProvidersList, Error> {
+        let wire_params = serde_json::json!({ "sessionId": self.session.id() });
+        self.session
+            .client()
+            .call_typed(rpc_methods::SESSION_AUTHPROVIDERS_LIST, Some(wire_params))
             .await
     }
 }
@@ -12586,6 +16393,37 @@ pub struct SessionRpcEventLog<'a> {
 }
 
 impl<'a> SessionRpcEventLog<'a> {
+    /// Publishes an existing event type for an admitted controller. The runtime validates, timestamps, orders, projects, and stores the event.
+    ///
+    /// Wire method: `session.eventLog.publish`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Publishes a controller event through the runtime-owned session log.
+    ///
+    /// # Returns
+    ///
+    /// Runtime acceptance of a controller event.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn publish(
+        &self,
+        params: SessionEventLogPublishParams,
+    ) -> Result<SessionEventPublishResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(rpc_methods::SESSION_EVENTLOG_PUBLISH, Some(wire_params))
+            .await
+    }
+
     /// Reads a batch of session events from a cursor, optionally waiting for new events. Supports tail-first reads via `direction: backward`.
     ///
     /// Wire method: `session.eventLog.read`.
@@ -12835,7 +16673,7 @@ impl<'a> SessionRpcExtensions<'a> {
         Ok(())
     }
 
-    /// Host-only reconciliation of authoritative session-effective extension membership and enablement. Refreshes runtime-owned discovery and preferences without persisting settings, installing plugins, or restarting unchanged activations. Returns ExtensionList only after required starts and process/contribution cleanup settle. Takes no caller inventory or overrides. Missing controllers, unready/incomplete discovery, unavailable workspaces, superseded inputs, and lifecycle failures are errors, not empty membership. Independently proven revocations may be applied before an error; retry converges without restarting healthy activations. Error data contains lifecycleChangesApplied and code: extension_reconciliation_host_required, extension_reconciliation_unavailable, extension_reconciliation_not_ready, extension_reconciliation_discovery_failed, extension_reconciliation_workspace_unavailable, extension_reconciliation_superseded, or extension_reconciliation_lifecycle_failed. Mark host reconciliation state applied only on success. On older runtimes, method-not-found must not fall back to global discovery and persistent extension disables.
+    /// Host-only reconciliation of authoritative session-effective extension membership and enablement. Refreshes runtime-owned discovery and preferences without persisting settings, installing plugins, or restarting unchanged activations. Returns ExtensionList only after required starts and process/contribution cleanup settle. Success means every stop, cleanup, contribution refresh and revalidation completed; an enabled extension that fails to start does not fail reconciliation and is reported with status failed, so read statuses rather than assuming every enabled extension is running. Takes no caller inventory or overrides. Missing controllers, unready/incomplete discovery, unavailable workspaces, superseded inputs, and other lifecycle failures (including managed-policy launch denials and failed stops or cleanup) are errors, not empty membership. Independently proven revocations may be applied before an error; retry converges without restarting healthy activations. Error data contains lifecycleChangesApplied and code: extension_reconciliation_host_required, extension_reconciliation_unavailable, extension_reconciliation_not_ready, extension_reconciliation_discovery_failed, extension_reconciliation_workspace_unavailable, extension_reconciliation_superseded, or extension_reconciliation_lifecycle_failed. Mark host reconciliation state applied only on success. On older runtimes, method-not-found must not fall back to global discovery and persistent extension disables.
     ///
     /// Wire method: `session.extensions.reconcile`.
     ///
@@ -13116,6 +16954,32 @@ impl<'a> SessionRpcGitHubAuth<'a> {
             .client()
             .call_typed(
                 rpc_methods::SESSION_GITHUBAUTH_GETCURRENTAUTHINFO,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Resolves authentication through the session's existing credential owner and applies it before returning a credential-free identity, or null when no account is available. Internal hosts use this before a model request when background sign-in has not finished. Preserves the session's provider and configuration; does not create another auth manager.
+    ///
+    /// Wire method: `session.gitHubAuth.resolveCurrentAuthInfo`.
+    ///
+    /// # Returns
+    ///
+    /// Current authentication information, or null when no authentication is active.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn resolve_current_auth_info(&self) -> Result<SessionAuthInfoResult, Error> {
+        let wire_params = serde_json::json!({ "sessionId": self.session.id() });
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_GITHUBAUTH_RESOLVECURRENTAUTHINFO,
                 Some(wire_params),
             )
             .await
@@ -14047,6 +17911,32 @@ impl<'a> SessionRpcManagedSettings<'a> {
             .await
     }
 
+    /// Re-reads device policy and fetches fresh managed settings for a live session. Waits for tracked policy application, including MCP, and returns the same snapshot type as session.managedSettings.get. On failure, rejects rather than returning retained policy as fresh. Requires opting in to managed-settings fetching in the SDK's GitHub session options.
+    ///
+    /// Wire method: `session.managedSettings.refresh`.
+    ///
+    /// # Returns
+    ///
+    /// Effective enterprise managed settings and contributing channels. Session events report applied policy; sessionless resolve reports an account/device snapshot, and compose reports a non-applying preview of candidate documents. Device values take precedence over server values, then the policy helper, per ordinary key, while permissions compose restrictively. Session-local SDK-client policy is included only in session results. Marked experimental while the managed-settings surface stabilizes.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn refresh(&self) -> Result<ManagedSettingsResolvedData, Error> {
+        let wire_params = serde_json::json!({ "sessionId": self.session.id() });
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_MANAGEDSETTINGS_REFRESH,
+                Some(wire_params),
+            )
+            .await
+    }
+
     /// Runs a fresh Policy Helper evaluation for the live session's current account, registration, working directory, repository and client context, bypassing only a completed cached helper result for that exact context while coalescing an equivalent execution already in flight. The previous failure and safeguards remain active until fresh success is applied. Returns the same retained snapshot as session.managedSettings.get after the recheck settles.
     ///
     /// Wire method: `session.managedSettings.recheckPolicyHelper`.
@@ -14247,6 +18137,13 @@ impl<'a> SessionRpcMcp<'a> {
     /// `session.mcp.apps.*` sub-namespace.
     pub fn apps(&self) -> SessionRpcMcpApps<'a> {
         SessionRpcMcpApps {
+            session: self.session,
+        }
+    }
+
+    /// `session.mcp.externalClient.*` sub-namespace.
+    pub(crate) fn external_client(&self) -> SessionRpcMcpExternalClient<'a> {
+        SessionRpcMcpExternalClient {
             session: self.session,
         }
     }
@@ -15097,6 +18994,48 @@ impl<'a> SessionRpcMcpApps<'a> {
         self.session
             .client()
             .call_typed(rpc_methods::SESSION_MCP_APPS_DIAGNOSE, Some(wire_params))
+            .await
+    }
+}
+
+/// `session.mcp.externalClient.*` RPCs.
+#[derive(Clone, Copy)]
+pub(crate) struct SessionRpcMcpExternalClient<'a> {
+    pub(crate) session: &'a Session,
+}
+
+impl<'a> SessionRpcMcpExternalClient<'a> {
+    /// Private trusted CLI transport for a caller-owned live MCP client. Exchanges serializable advertisements, correlated tool and protocol callbacks, progress, reverse requests, cancellation, and catalog notifications. The caller retains the client and transport.
+    ///
+    /// Wire method: `session.mcp.externalClient.exchange`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Object envelope for one trusted live-client transport operation.
+    ///
+    /// # Returns
+    ///
+    /// Operation-specific reply or a complete live-client callback frame.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn exchange(
+        &self,
+        params: SessionMcpExternalClientExchangeParams,
+    ) -> Result<McpExternalClientResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_MCP_EXTERNALCLIENT_EXCHANGE,
+                Some(wire_params),
+            )
             .await
     }
 }
@@ -16379,6 +20318,40 @@ impl<'a> SessionRpcModel<'a> {
             .await
     }
 
+    /// Classifies a serialized model-catalog error and returns request identifiers, authorization details, and the bound account's Copilot settings URL. Hosts use these facts to present catalog failures without parsing provider errors or deriving enterprise URLs themselves. Does not resolve credentials or fetch models.
+    ///
+    /// Wire method: `session.model.describeLoadError`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A serialized provider error from a failed model-catalog request.
+    ///
+    /// # Returns
+    ///
+    /// Model-catalog failure facts without host-specific presentation text.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn describe_load_error(
+        &self,
+        params: SessionModelDescribeLoadErrorParams,
+    ) -> Result<ModelLoadErrorDetails, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_MODEL_DESCRIBELOADERROR,
+                Some(wire_params),
+            )
+            .await
+    }
+
     /// Switches the session to a model and optional reasoning configuration.
     ///
     /// Wire method: `session.model.switchTo`.
@@ -17392,6 +21365,40 @@ impl<'a> SessionRpcPermissionsFolderTrust<'a> {
             .await
     }
 
+    /// Trusts the session's current working directory without changing the saved trusted-folders list. The path must match the current directory, so a stale confirmation cannot trust a different workspace. Retained host policy still applies.
+    ///
+    /// Wire method: `session.permissions.folderTrust.addSessionTrusted`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Folder path to add to trusted folders.
+    ///
+    /// # Returns
+    ///
+    /// Indicates whether the operation succeeded.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn add_session_trusted(
+        &self,
+        params: FolderTrustAddParams,
+    ) -> Result<PermissionsFolderTrustAddTrustedResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_PERMISSIONS_FOLDERTRUST_ADDSESSIONTRUSTED,
+                Some(wire_params),
+            )
+            .await
+    }
+
     /// Adds a folder to the user's trusted folders list.
     ///
     /// Wire method: `session.permissions.folderTrust.addTrusted`.
@@ -18075,6 +22082,37 @@ impl<'a> SessionRpcPlugins<'a> {
             .await
     }
 
+    /// Compares an installed plugin version with its cached marketplace catalog. Never fetches or refreshes the checkout.
+    ///
+    /// Wire method: `session.plugins.checkUpdate`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies a plugin and its configured marketplace without accepting configuration or policy overrides.
+    ///
+    /// # Returns
+    ///
+    /// Update availability without installation or checkout mutation. An error means availability is unknown.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn check_update(
+        &self,
+        params: PluginCheckUpdateRequest,
+    ) -> Result<PluginUpdateCheckResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(rpc_methods::SESSION_PLUGINS_CHECKUPDATE, Some(wire_params))
+            .await
+    }
+
     /// Reloads the session's plugin set, refreshing MCP servers, custom agents, hooks, and skills cache so SDK-driven changes via `server.plugins.*` take effect immediately.
     ///
     /// Wire method: `session.plugins.reload`.
@@ -18371,6 +22409,74 @@ impl<'a> SessionRpcPluginsMarketplaces<'a> {
             )
             .await
     }
+
+    /// Searches all configured plugin marketplaces using the session's authoritative configuration, credentials, working directory, and managed policy. Returns installation state and partial errors. This is not Agent Finder search.
+    ///
+    /// Wire method: `session.plugins.marketplaces.search`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Searches all configured plugin marketplaces, not the Agent Finder catalog.
+    ///
+    /// # Returns
+    ///
+    /// Matching plugins across configured marketplaces, with partial failures.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn search(
+        &self,
+        params: PluginMarketplaceSearchRequest,
+    ) -> Result<PluginMarketplaceSearchResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_PLUGINS_MARKETPLACES_SEARCH,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Probes a configured marketplace's revision without refreshing or creating its cached checkout.
+    ///
+    /// Wire method: `session.plugins.marketplaces.checkUpdate`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies a marketplace to probe without refreshing its checkout.
+    ///
+    /// # Returns
+    ///
+    /// Update availability without installation or checkout mutation. An error means availability is unknown.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn check_update(
+        &self,
+        params: PluginMarketplaceCheckUpdateRequest,
+    ) -> Result<PluginUpdateCheckResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_PLUGINS_MARKETPLACES_CHECKUPDATE,
+                Some(wire_params),
+            )
+            .await
+    }
 }
 
 /// `session.provider.*` RPCs.
@@ -18434,7 +22540,7 @@ impl<'a> SessionRpcProvider<'a> {
             .await
     }
 
-    /// Adds BYOK providers and/or models to the session's registry at runtime, extending the additive registry built from the session's `providers`/`models` options. Both fields are optional, so a call may add providers only, models only, or both. Within a single call providers are registered before models, so a model may reference a provider added in the same call; across calls a model may reference any provider already registered (from session creation or a prior add). A model whose referenced provider is not registered by the end of the call is rejected. Newly added models become selectable via `model.list` / `model.switchTo` and are inherited by sub-agents spawned afterwards.
+    /// Adds BYOK providers and/or models to the session's registry at runtime, extending the additive registry built from the session's `providers`/`models` options. Both fields are optional, so a call may add providers only, models only, or both. Within a single call providers are registered before models, so a model may reference a provider added in the same call; across calls a model may reference any provider already registered (from session creation or a prior add). An existing provider can be included with new models when its connection settings match; conflicting settings and repeated models are rejected. A matching saved provider can supply current authentication, and omitted authentication is otherwise preserved from the live provider. A model whose referenced provider is not registered by the end of the call is rejected. Newly added models become selectable via `model.list` / `model.switchTo` and are inherited by sub-agents spawned afterwards.
     ///
     /// Wire method: `session.provider.add`.
     ///
@@ -19481,6 +23587,134 @@ pub struct SessionRpcRemote<'a> {
 }
 
 impl<'a> SessionRpcRemote<'a> {
+    /// Replaces an owned session subscription in release and restore phases. Release returns a generation so the caller can check cancellation before restore. Restore requires the same lease and generation and waits for the authoritative snapshot to apply.
+    ///
+    /// Wire method: `session.remote.reattach`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Request for one phase of replacing an attached session's transport subscription.
+    ///
+    /// # Returns
+    ///
+    /// Runtime generation that fences the two subscription replacement phases.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn reattach(
+        &self,
+        params: SessionRemoteReattachParams,
+    ) -> Result<AhpSessionLeaseResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(rpc_methods::SESSION_REMOTE_REATTACH, Some(wire_params))
+            .await
+    }
+
+    /// Reads this caller's read-only AHP collaboration and pending-request projection, waiting after an unchanged revision.
+    ///
+    /// Wire method: `session.remote.readProjection`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Reads the host-owned collaboration and pending-request projection.
+    ///
+    /// # Returns
+    ///
+    /// A read-only host projection for clients with synchronous render paths.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn read_projection(
+        &self,
+        params: SessionRemoteReadProjectionParams,
+    ) -> Result<AhpSessionProjectionResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_REMOTE_READPROJECTION,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Submits one message through its originating trusted CLI host's request-owned admission callback. The runtime owns preparation, routing, and the admitted write.
+    ///
+    /// Wire method: `session.remote.sendWithAdmission`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - One trusted CLI host's message and its invocation-local admission identity.
+    ///
+    /// # Returns
+    ///
+    /// Result of sending a user message
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn send_with_admission(
+        &self,
+        params: SessionRemoteSendWithAdmissionParams,
+    ) -> Result<SendResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_REMOTE_SENDWITHADMISSION,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Publishes composer or view state through an owned AHP session. The runtime coalesces updates and owns retries.
+    ///
+    /// Wire method: `session.remote.publishState`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Publishes this client's collaboration state through the AHP host.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn publish_state(
+        &self,
+        params: SessionRemotePublishStateParams,
+    ) -> Result<(), Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        let _: serde::de::IgnoredAny = self
+            .session
+            .client()
+            .call_typed(rpc_methods::SESSION_REMOTE_PUBLISHSTATE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
     /// Enables remote session export or steering.
     ///
     /// Wire method: `session.remote.enable`.
@@ -19595,6 +23829,146 @@ impl<'a> SessionRpcSandbox<'a> {
                 rpc_methods::SESSION_SANDBOX_GETENFORCEMENTSTATUS,
                 Some(wire_params),
             )
+            .await
+    }
+
+    /// Reads this runtime's cached enforcement latch without contacting a remote owner or probing a sandbox backend. Hosts use this to answer owner-status callbacks without re-entering the remote status request.
+    ///
+    /// Wire method: `session.sandbox.getCachedEnforcementStatus`.
+    ///
+    /// # Returns
+    ///
+    /// Managed sandbox enforcement state for a session.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn get_cached_enforcement_status(
+        &self,
+    ) -> Result<SandboxEnforcementStatus, Error> {
+        let wire_params = serde_json::json!({ "sessionId": self.session.id() });
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_SANDBOX_GETCACHEDENFORCEMENTSTATUS,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Reads authoritative effective sandbox policy, source attribution and temporary choices for one live session.
+    ///
+    /// Wire method: `session.sandbox.getState`.
+    ///
+    /// # Returns
+    ///
+    /// Effective session policy and runtime-owned session choices.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn get_state(&self) -> Result<SandboxSessionState, Error> {
+        let wire_params = serde_json::json!({ "sessionId": self.session.id() });
+        self.session
+            .client()
+            .call_typed(rpc_methods::SESSION_SANDBOX_GETSTATE, Some(wire_params))
+            .await
+    }
+
+    /// Registers the live session's configured sandbox credentials with the runtime's process secret filter. Resolves credentials inside the runtime and returns no secret values. Local hosts call this after sandbox option updates so later logs redact the current proxy credentials.
+    ///
+    /// Wire method: `session.sandbox.registerProxySecrets`.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn register_proxy_secrets(&self) -> Result<(), Error> {
+        let wire_params = serde_json::json!({ "sessionId": self.session.id() });
+        let _: serde::de::IgnoredAny = self
+            .session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_SANDBOX_REGISTERPROXYSECRETS,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Clears temporary sandbox choices for one session and adopts the supplied preference under the current managed policy.
+    ///
+    /// Wire method: `session.sandbox.resetSessionChoices`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Saved preference to adopt after clearing this session's temporary choices.
+    ///
+    /// # Returns
+    ///
+    /// Effective session policy and runtime-owned session choices.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn reset_session_choices(
+        &self,
+        params: SessionSandboxResetSessionChoicesParams,
+    ) -> Result<SandboxSessionState, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_SANDBOX_RESETSESSIONCHOICES,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Invokes a closed sandbox operation through the session's original authenticated attachment or AHP owner. Requires a trusted in-process host and a matching runtime-owned session binding. Never falls back to the local presentation session.
+    ///
+    /// Wire method: `session.sandbox.invokeOwned`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Request for an admitted host to use its original remote sandbox owner.
+    ///
+    /// # Returns
+    ///
+    /// Existing result of the sandbox operation on its original transport owner.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn invoke_owned(
+        &self,
+        params: SessionSandboxInvokeOwnedParams,
+    ) -> Result<SandboxInvokeOwnedResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(rpc_methods::SESSION_SANDBOX_INVOKEOWNED, Some(wire_params))
             .await
     }
 

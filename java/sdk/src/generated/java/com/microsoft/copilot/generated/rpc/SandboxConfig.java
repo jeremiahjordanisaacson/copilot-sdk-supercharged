@@ -49,8 +49,10 @@ public record SandboxConfig(
     @JsonProperty("auth") SandboxConfigAuth auth,
     /** Opt-in whole-value environment masking for sandboxed shell, MCP, and LSP children. Configured names get random sentinels; the local proxy substitutes them only in HTTPS request headers at their injection hosts. Approved bypasses skip masking and the sandbox proxy, so bypassed shells may receive the real environment values. Disabled or explicitly opted-out routes are not protected. No credential values are stored in this configuration. */
     @JsonProperty("credentials") SandboxCredentialsConfig credentials,
-    /** Whether to auto-grant read access to tool directories discovered on PATH and in toolchain environment variables (GOROOT, JAVA_HOME, VIRTUAL_ENV, and similar), and to common developer-tool caches, config, and toolchains. Writable grants cover scratch caches, the Unix GitHub CLI cache, and Cargo's registry, git store, and lock/tracker files. A relocated CARGO_HOME gets the same narrow split: registry and git are read-write; bin is read-only; the home root, config.toml, and credentials.toml stay ungranted. Set to false to disable every grant listed above; user-installed toolchains and caches then need explicit userPolicy.filesystem readonlyPaths and readwritePaths entries. The working directory (see addCurrentWorkingDirectory), temporary storage, session log paths, and system locations follow their own rules and stay granted. Default: true (enabled by default; set to false to opt out). */
-    @JsonProperty("allowDevToolAccess") Boolean allowDevToolAccess
+    /** Whether to auto-grant read access to tool directories discovered on PATH and in toolchain environment variables (GOROOT, JAVA_HOME, VIRTUAL_ENV, and similar), and to common developer-tool caches, config, and toolchains. Writable grants cover scratch caches, the Unix GitHub CLI cache, and Cargo's whole home (~/.cargo or a relocated CARGO_HOME), including its config, credentials.toml, and bin. Set to false to disable every grant listed above; user-installed toolchains and caches then need explicit userPolicy.filesystem readonlyPaths and readwritePaths entries. The working directory (see addCurrentWorkingDirectory), temporary storage (see allowTempStorage), session log paths, and system locations follow their own rules; this setting does not remove them. Default: true (enabled by default; set to false to opt out). */
+    @JsonProperty("allowDevToolAccess") Boolean allowDevToolAccess,
+    /** Whether to automatically grant read-write access to the system temporary directory: `$TMPDIR` (`/tmp` when unset on Linux, the per-user container on macOS) or `%TEMP%`/`%TMP%` on Windows. Set to false to withhold this runtime-derived grant. On Linux and macOS, hosts can give the session its own scratch directory with userPolicy.filesystem readwritePaths and set `TMPDIR` for the processes that need one. On Windows, sandboxed processes keep the AppContainer's redirected `TEMP` and `TMP`; the runtime does not point those variables at a host-provided scratch directory. Only this grant is removed: the working directory (see addCurrentWorkingDirectory), the session's own files directory, developer-tool grants (see allowDevToolAccess), and every literal readwritePaths and readonlyPaths entry are unaffected, and deniedPaths still apply. SDK hosts can observe this setting in the `github.copilot.sandbox.policy_resolved` OpenTelemetry span event through `github.copilot.sandbox.allow_temp_storage`; the internal `sandbox.decision` record is not part of the public SDK event contract. Resolved paths are included only when content capture is enabled. Default: true (enabled by default; set to false to opt out). */
+    @JsonProperty("allowTempStorage") Boolean allowTempStorage
 ) {
 
     /**
@@ -87,6 +89,7 @@ public record SandboxConfig(
         private SandboxConfigAuth auth;
         private SandboxCredentialsConfig credentials;
         private Boolean allowDevToolAccess;
+        private Boolean allowTempStorage;
 
         /**
          * Sets the {@code enabled} property.
@@ -245,6 +248,18 @@ public record SandboxConfig(
         }
 
         /**
+         * Sets the {@code allowTempStorage} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder allowTempStorage(Boolean value) {
+            this.allowTempStorage = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
@@ -252,7 +267,7 @@ public record SandboxConfig(
          */
         public SandboxConfig build() {
             if (enabled == null) throw new IllegalStateException("Missing required property: enabled");
-            return new SandboxConfig(enabled, userPolicy, addCurrentWorkingDirectory, sandboxMcpServers, sandboxLspServers, sandboxExtensions, allowBypass, managedMcpRoutingLocked, managedLspRoutingLocked, managedExtensionsRoutingLocked, auth, credentials, allowDevToolAccess);
+            return new SandboxConfig(enabled, userPolicy, addCurrentWorkingDirectory, sandboxMcpServers, sandboxLspServers, sandboxExtensions, allowBypass, managedMcpRoutingLocked, managedLspRoutingLocked, managedExtensionsRoutingLocked, auth, credentials, allowDevToolAccess, allowTempStorage);
         }
     }
 }

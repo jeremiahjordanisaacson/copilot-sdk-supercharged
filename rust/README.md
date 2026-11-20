@@ -37,11 +37,11 @@ client.stop().await.ok();
 # }
 ```
 
-When targeting MCP tools configured through `mcp_servers`, remember the runtime
-tool name is `<server-key>-<tool-name>`. For `available_tools` and
-`excluded_tools`, prefer `ToolSet::new().add_mcp("<server-key>-<tool-name>")`
-or the raw `mcp:<server-key>-<tool-name>` form. For `custom_agents[].tools`
-and `default_agent.excluded_tools`, use `<server-key>-<tool-name>` directly.
+When targeting MCP tools configured through `mcp.servers`, remember the runtime
+tool name is `<server-key>-<tool-name>`. For `tools.available_tools` and
+`tools.excluded_tools`, prefer `ToolSet::new().add_mcp("<server-key>-<tool-name>")`
+or the raw `mcp:<server-key>-<tool-name>` form. For `agents.definitions[].tools`
+and `agents.default.excluded_tools`, use `<server-key>-<tool-name>` directly.
 
 ## Architecture
 
@@ -367,7 +367,7 @@ child token does not stop the host/session. Factories should cooperate with
 cancellation, but a late successful return still triggers release with the
 **same original `Arc` allocation**, exactly once per handoff. Factory errors
 fail the AHP creation; factory and release-callback panics are contained.
-Release never automatically invokes `disconnect` or `destroy`. As with any
+Release never automatically invokes `disconnect`. As with any
 Rust session, dropping its last `Arc` stops its local event loop, so retain a
 clone in application state to continue using it.
 
@@ -398,7 +398,7 @@ session-internal clients cannot form a retention cycle. Dropping the last
 owning client handle cancels pending factories and starts bounded host disposal
 before releasing their retained originals. Cleanup and release callbacks use the
 connection's originating Tokio runtime, even when the owner is dropped from
-an ordinary thread. No session `disconnect` or `destroy`
+an ordinary thread. No session `disconnect`
 is synthesized. An application-retained session still keeps its ordinary SDK
 connection alive and remains usable after the host detaches. Explicitly dispose
 hosts before dropping the client when shutdown must await cleanup. The in-process
@@ -724,7 +724,7 @@ let session = client
 ```
 
 In `ClientMode::Empty`, built-in skill loading defaults to disabled; set
-`enable_skills` to `Some(true)` when the session should use provider-backed
+`skills.enabled` to `Some(true)` when the session should use provider-backed
 skills in that mode. Providers are not persisted, so re-supply one with
 `SessionSkillOptions::with_provider` on every resume. Cloud sessions do
 not support skill providers. Each callback is dispatched on its own spawned
@@ -1056,7 +1056,7 @@ let session = client.create_session(config).await?;
 ```
 
 Use `with_ask_user_variant(AskUserVariant::Elicitation)` together with
-`with_elicitation_handler(...)` to expose the structured form-based `ask_user`
+`with_on_elicitation_request(...)` to expose the structured form-based `ask_user`
 tool. The default remains `AskUserVariant::Legacy`. Re-supply the option and
 handler through `ResumeSessionOptions` on a cold resume.
 
@@ -1066,9 +1066,9 @@ analysis telemetry for user-authored messages; automated messages stay
 excluded. The default is off, and cloud sessions ignore it. Re-supply it through
 `ResumeSessionOptions` on a cold resume.
 
-Use `with_permission_mode(PermissionMode::AllowAll)` to apply a permission mode
-before the session's first turn: before `create_session` returns, and before a
-resume continues pending work. It uses the same checks as
+Use `with_permissions(|group| group.with_mode(PermissionMode::AllowAll))` to
+apply a permission mode before the session's first turn: before `create_session`
+returns, and before a resume continues pending work. It uses the same checks as
 `session.permissions.setMode`; `Session::permission_mode_result()` reports
 whether it was applied and the authoritative mode. Cloud sessions reject it.
 
@@ -1688,7 +1688,7 @@ Only `name` and `description` are sent over the wire; the handler stays in your 
 
 ### Streaming
 
-Set `streaming: true` to receive incremental delta events alongside finalized messages:
+Set `events.streaming` to `Some(true)` to receive incremental delta events alongside finalized messages:
 
 ```rust,no_run
 # use copilot_sdk::{session::Session, CreateSessionOptions};
@@ -1714,13 +1714,15 @@ while let Ok(event) = events.recv().await {
 
 When streaming is off (the default), only the final `assistant.message` and `assistant.reasoning` events fire. Delta events arrive in order; concatenating their `delta` text payloads reproduces the final message.
 
+**Breaking change:** `SessionResumeData` adds `responses_reasoning_kept` and `responses_reasoning_overridden` (`Option<bool>`), so exhaustive literals must add both fields (use `None` when absent or `..Default::default()`), and exhaustive patterns must add them or `..`.
+
 After session shutdown or owner connection loss, `session.subscribe()` returns an immediately closed subscription: `recv()` reports `RecvErrorKind::Closed`, and stream iteration ends. Ordinary shutdown lets existing subscriptions drain already-published events. `Client::force_stop()` instead closes live and prepared subscriptions immediately and discards unread live and resume-bootstrap events, without waiting for producer shutdown. Retaining the `Session` does not retain the event producer or prevent its event loop from terminating.
 
 When the event loop retires, it also releases registered tool-handler captures, even if the application retains the `Session`. Tool replacements reject local admission and late acknowledgments after retirement. An already-admitted tool call retains its selected handler for its existing completion or cancellation path.
 
 #### Subscribing before the session starts
 
-`session.subscribe()` can only be called once the session exists. On create, events dispatched before a subscriber is installed are not delivered. Ephemeral events such as `session.idle` are not written to the session log either, so `get_messages` can't recover them afterwards.
+`session.subscribe()` can only be called once the session exists. On create, events dispatched before a subscriber is installed are not delivered. Ephemeral events such as `session.idle` are not written to the session log either, so `get_events` can't recover them afterwards.
 
 On resume with no active prepared subscriber, the SDK instead retains all routed startup events, durable and ephemeral, in an ordered bootstrap queue. The first `session.subscribe()` call claims that queue synchronously, even before the subscription is polled. It receives the complete prefix and any events dispatched while catching up, then atomically switches to bounded live delivery. Later subscribers receive newly dispatched live events immediately, even while the owner is draining.
 

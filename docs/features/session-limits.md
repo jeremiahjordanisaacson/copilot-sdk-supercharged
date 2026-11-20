@@ -1,10 +1,10 @@
 # Session limits
 
-Session limits let an application set an AI Credits budget for a Copilot session. Use `sessionLimits` when creating or resuming a session to set a soft cap for the current accounting window.
+Session limits let an application set an AI Credits budget for a Copilot session. Use `execution.limits` when creating or resuming a session to set a soft cap for the current accounting window.
 
 ## Configure a session limit
 
-Set `maxAiCredits` to the AI Credits soft cap for the session's current accounting window. Usage is checked after model calls return, so one response can exceed the configured value before the runtime blocks the next model call. The SDK forwards this value to the Copilot runtime when it creates or resumes the session.
+Set `maxAiCredits` to the AI Credits soft cap for the session's current accounting window. Usage is checked after model calls return, so one response can exceed the configured value before the runtime blocks the next model call. The SDK forwards this value to the Copilot runtime when it creates or resumes the session. The value must be at least 30 and greater than the AI Credits the session has already used; a lower value is rejected.
 
 <details open>
 <summary><strong>TypeScript</strong></summary>
@@ -258,7 +258,7 @@ var resumed = await client.ResumeSessionAsync(session.SessionId, new ResumeSessi
 });
 ```
 
-The .NET `SessionLimits` property raises the `MCPSDK001` experimental diagnostic. Suppress it with `#pragma warning disable MCPSDK001` or a project-level `<NoWarn>MCPSDK001</NoWarn>`.
+The .NET `SessionExecutionOptions.Limits` property raises the `MCPSDK001` experimental diagnostic. Suppress it with `#pragma warning disable MCPSDK001` or a project-level `<NoWarn>MCPSDK001</NoWarn>`.
 
 </details>
 <details>

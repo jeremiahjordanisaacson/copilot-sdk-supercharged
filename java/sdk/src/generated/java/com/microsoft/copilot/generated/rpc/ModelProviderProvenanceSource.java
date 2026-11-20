@@ -22,6 +22,8 @@ public enum ModelProviderProvenanceSource {
     CONFIGURED("configured"),
     /** The {@code extension} variant. */
     EXTENSION("extension"),
+    /** The {@code plugin} variant. */
+    PLUGIN("plugin"),
     /** The {@code custom} variant. */
     CUSTOM("custom");
 

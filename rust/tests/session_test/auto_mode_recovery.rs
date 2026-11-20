@@ -341,6 +341,77 @@ async fn disconnect(session: copilot_sdk::session::Session, mut server: FakeServ
     result.unwrap();
 }
 
+const CLEANUP_INCOMPLETE: &str =
+    "Session cleanup after rejected Auto recovery enrollment did not complete";
+
+fn cloud_options() -> CreateSessionOptions {
+    CreateSessionOptions::default().with_cloud(CloudSessionOptions::with_repository(
+        CloudSessionRepository::new("github", "copilot-sdk"),
+    ))
+}
+
+fn cloud_recovery_options() -> CreateSessionOptions {
+    cloud_options()
+        .with_interaction(|group| group.with_on_auto_mode_switch_request(Arc::new(LegacyHandler)))
+        .with_interaction(|group| group.with_auto_mode_recovery(true))
+}
+
+fn cloud_post_create_options() -> CreateSessionOptions {
+    cloud_recovery_options()
+        .with_mcp(|group| group.with_on_auth_request(Arc::new(CancelMcpAuthHandler)))
+        .with_instructions(|group| group.with_skip_custom_instructions(true))
+}
+
+fn spawn_create(
+    client: &Client,
+    options: CreateSessionOptions,
+) -> tokio::task::JoinHandle<Result<copilot_sdk::session::Session, copilot_sdk::Error>> {
+    let client = client.clone();
+    tokio::spawn(async move { client.create_session(options).await })
+}
+
+/// Acknowledges Auto recovery on the pending `session.create` and returns the
+/// event-log interest registration that follows it.
+async fn acknowledge_create_and_read_interest(server: &mut FakeServer) -> Value {
+    let create = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    server
+        .respond(
+            &create,
+            json!({
+                "sessionId": server.session_id,
+                "capabilities": {"ui": {"autoModeRecovery": true}}
+            }),
+        )
+        .await;
+    let interest = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(interest["method"], "session.eventLog.registerInterest");
+    interest
+}
+
+/// Starts a server-assigned cloud create that the runtime answers with the
+/// fenced `server.session_id`, and asserts the SDK rejects the registration.
+async fn assert_cloud_create_fenced(
+    client: &Client,
+    server: &mut FakeServer,
+    expected: &str,
+    case: &str,
+) {
+    let mut retry = Box::pin(client.create_session(cloud_options()));
+    assert!(futures_util::poll!(&mut retry).is_pending(), "{case}");
+    let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(request["method"], "session.create", "{case}");
+    server
+        .respond(&request, json!({"sessionId": server.session_id}))
+        .await;
+    let error = timeout(TIMEOUT, retry)
+        .await
+        .unwrap()
+        .err()
+        .unwrap_or_else(|| panic!("{case}: create must respect the cleanup fence"));
+    assert_eq!(*error.kind(), ErrorKind::Rpc { code: -32603 }, "{case}");
+    assert!(error.to_string().contains(expected), "{case}: {error:?}");
+}
+
 #[tokio::test]
 async fn enrollment_requires_handler_before_any_wire_request() {
     let (client, _server) = auto_mode_recovery_client();
@@ -499,9 +570,7 @@ async fn assert_recovery_waits_for_ordinary_initialization(
             client.resume_session(config).await
         } else {
             let mut config = if matches!(phase, OrdinaryInitialization::CloudCreateInterest) {
-                CreateSessionOptions::default().with_cloud(CloudSessionOptions::with_repository(
-                    CloudSessionRepository::new("github", "copilot-sdk"),
-                ))
+                cloud_options()
             } else {
                 CreateSessionOptions::default().with_session_id("recovery-session")
             };
@@ -648,32 +717,12 @@ async fn assert_recovery_waits_for_ordinary_initialization(
 }
 
 #[tokio::test]
-async fn recovery_waits_for_ordinary_create_rpc_failure_or_cancellation() {
-    for cancel in [false, true] {
-        assert_recovery_waits_for_ordinary_initialization(
-            OrdinaryInitialization::CreateRpc,
-            cancel,
-        )
-        .await;
-    }
-}
-
-#[tokio::test]
-async fn recovery_waits_for_ordinary_resume_post_rpc_setup() {
+async fn recovery_waits_for_ordinary_initialization_to_settle() {
     for phase in [
+        OrdinaryInitialization::CreateRpc,
         OrdinaryInitialization::ResumeInterest,
         OrdinaryInitialization::ResumeReload,
         OrdinaryInitialization::ResumeOptions,
-    ] {
-        for cancel in [false, true] {
-            assert_recovery_waits_for_ordinary_initialization(phase, cancel).await;
-        }
-    }
-}
-
-#[tokio::test]
-async fn recovery_waits_for_ordinary_create_post_rpc_setup() {
-    for phase in [
         OrdinaryInitialization::CreateInterest,
         OrdinaryInitialization::CloudCreateInterest,
         OrdinaryInitialization::CreateOptions,
@@ -699,14 +748,17 @@ async fn cancelled_displaced_startup_is_not_restored_as_a_resident_session() {
         ))),
     );
     assert!(futures_util::poll!(&mut resume).is_pending());
-    let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    assert_eq!(request["method"], "session.resume");
+    let resume_request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(resume_request["method"], "session.resume");
 
     // Drop both without yielding: their event-loop channels can still be open,
     // but neither cancelled registration represents a resident session.
     drop(create);
     drop(resume);
     assert_eq!(client.registered_session_count_for_test(), 0);
+    let cancellation = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(cancellation["method"], "$/cancelRequest");
+    assert_eq!(cancellation["params"]["id"], resume_request["id"]);
 
     let recovery = start_unsupported_attachment(&client, &mut server, true).await;
     let detach = timeout(TIMEOUT, server.read_request()).await.unwrap();
@@ -895,21 +947,8 @@ async fn failed_recovery_cleanup_fences_same_id_after_failure_timeout_or_cancell
 
 #[tokio::test]
 async fn server_assigned_create_cannot_replace_pending_or_failed_cleanup() {
-    let cloud_config = || {
-        CreateSessionOptions::default().with_cloud(CloudSessionOptions::with_repository(
-            CloudSessionRepository::new("github", "copilot-sdk"),
-        ))
-    };
     let (client, mut server) = auto_mode_recovery_client();
-    let mut start = Box::pin(
-        client.create_session(
-            cloud_config()
-                .with_interaction(|group| {
-                    group.with_on_auto_mode_switch_request(Arc::new(LegacyHandler))
-                })
-                .with_interaction(|group| group.with_auto_mode_recovery(true)),
-        ),
-    );
+    let mut start = Box::pin(client.create_session(cloud_recovery_options()));
     assert!(futures_util::poll!(&mut start).is_pending());
     let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
     assert_eq!(request["method"], "session.create");
@@ -931,30 +970,15 @@ async fn server_assigned_create_cannot_replace_pending_or_failed_cleanup() {
     assert_eq!(detach["method"], "session.detach");
     assert_eq!(detach["params"]["sessionId"], server.session_id);
     for cleanup_pending in [true, false] {
-        let mut retry = Box::pin(client.create_session(cloud_config()));
-        assert!(futures_util::poll!(&mut retry).is_pending());
-        let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
-        assert_eq!(request["method"], "session.create");
-        server
-            .respond(
-                &request,
-                serde_json::json!({"sessionId": server.session_id}),
+        let (expected, case) = if cleanup_pending {
+            (
+                "Session initialization or cleanup is still in progress",
+                "cleanup pending",
             )
-            .await;
-        let error = timeout(TIMEOUT, retry)
-            .await
-            .unwrap()
-            .err()
-            .expect("server-assigned registration must respect the cleanup fence");
-        assert_eq!(*error.kind(), ErrorKind::Rpc { code: -32603 });
-        assert!(
-            error.to_string().contains(if cleanup_pending {
-                "Session initialization or cleanup is still in progress"
-            } else {
-                "Session cleanup after rejected Auto recovery enrollment did not complete"
-            }),
-            "{error:?}"
-        );
+        } else {
+            (CLEANUP_INCOMPLETE, "cleanup failed")
+        };
+        assert_cloud_create_fenced(&client, &mut server, expected, case).await;
         assert_eq!(
             client.registered_session_count_for_test(),
             usize::from(cleanup_pending)
@@ -990,41 +1014,8 @@ async fn cancelled_cloud_post_create_setup_owns_fenced_rollback() {
     for cancel_interest in [false, true] {
         for cleanup_failure in [false, true] {
             let (client, mut server) = auto_mode_recovery_client();
-            let start = tokio::spawn({
-                let client = client.clone();
-                async move {
-                    client
-                        .create_session(
-                            CreateSessionOptions::default()
-                                .with_cloud(CloudSessionOptions::with_repository(
-                                    CloudSessionRepository::new("github", "copilot-sdk"),
-                                ))
-                                .with_interaction(|group| {
-                                    group.with_on_auto_mode_switch_request(Arc::new(LegacyHandler))
-                                })
-                                .with_interaction(|group| group.with_auto_mode_recovery(true))
-                                .with_mcp(|group| {
-                                    group.with_on_auth_request(Arc::new(CancelMcpAuthHandler))
-                                })
-                                .with_instructions(|group| {
-                                    group.with_skip_custom_instructions(true)
-                                }),
-                        )
-                        .await
-                }
-            });
-            let create = timeout(TIMEOUT, server.read_request()).await.unwrap();
-            server
-                .respond(
-                    &create,
-                    json!({
-                        "sessionId": server.session_id,
-                        "capabilities": {"ui": {"autoModeRecovery": true}}
-                    }),
-                )
-                .await;
-            let interest = timeout(TIMEOUT, server.read_request()).await.unwrap();
-            assert_eq!(interest["method"], "session.eventLog.registerInterest");
+            let start = spawn_create(&client, cloud_post_create_options());
+            let interest = acknowledge_create_and_read_interest(&mut server).await;
             let pending = if cancel_interest {
                 interest
             } else {
@@ -1105,39 +1096,8 @@ async fn cloud_post_create_failure_is_deleted_before_returning_error() {
         [(false, false), (true, false), (false, true), (true, true)]
     {
         let (client, mut server) = auto_mode_recovery_client();
-        let mut start = tokio::spawn({
-            let client = client.clone();
-            async move {
-                client
-                    .create_session(
-                        CreateSessionOptions::default()
-                            .with_cloud(CloudSessionOptions::with_repository(
-                                CloudSessionRepository::new("github", "copilot-sdk"),
-                            ))
-                            .with_interaction(|group| {
-                                group.with_on_auto_mode_switch_request(Arc::new(LegacyHandler))
-                            })
-                            .with_interaction(|group| group.with_auto_mode_recovery(true))
-                            .with_mcp(|group| {
-                                group.with_on_auth_request(Arc::new(CancelMcpAuthHandler))
-                            })
-                            .with_instructions(|group| group.with_skip_custom_instructions(true)),
-                    )
-                    .await
-            }
-        });
-        let create = timeout(TIMEOUT, server.read_request()).await.unwrap();
-        server
-            .respond(
-                &create,
-                json!({
-                    "sessionId": server.session_id,
-                    "capabilities": {"ui": {"autoModeRecovery": true}}
-                }),
-            )
-            .await;
-        let interest = timeout(TIMEOUT, server.read_request()).await.unwrap();
-        assert_eq!(interest["method"], "session.eventLog.registerInterest");
+        let mut start = spawn_create(&client, cloud_post_create_options());
+        let interest = acknowledge_create_and_read_interest(&mut server).await;
         if fail_interest {
             server
                 .respond_error(&interest, -32603, "post-create setup failed")
@@ -1195,238 +1155,129 @@ async fn cloud_post_create_failure_is_deleted_before_returning_error() {
 }
 
 #[tokio::test]
-async fn rejected_server_assigned_cloud_create_is_deleted_after_detach() {
-    let (client, mut server) = auto_mode_recovery_client();
-    let start = tokio::spawn({
-        let client = client.clone();
-        async move {
-            client
-                .create_session(
-                    CreateSessionOptions::default()
-                        .with_cloud(CloudSessionOptions::with_repository(
-                            CloudSessionRepository::new("github", "copilot-sdk"),
-                        ))
-                        .with_interaction(|group| {
-                            group.with_on_auto_mode_switch_request(Arc::new(LegacyHandler))
-                        })
-                        .with_interaction(|group| group.with_auto_mode_recovery(true)),
-                )
-                .await
+async fn rejected_cloud_create_is_deleted_only_when_server_assigned() {
+    for explicit_id in [false, true] {
+        let case = if explicit_id {
+            "explicit id"
+        } else {
+            "server-assigned id"
+        };
+        let (client, mut server) = auto_mode_recovery_client();
+        let mut options = cloud_recovery_options();
+        if explicit_id {
+            server.session_id = "explicit-cloud-session".to_string();
+            options = options.with_session_id("explicit-cloud-session");
         }
-    });
+        let start = spawn_create(&client, options);
 
-    let create = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    assert_eq!(create["method"], "session.create");
-    assert!(create["params"].get("sessionId").is_none());
-    server
-        .respond(&create, serde_json::json!({"sessionId": server.session_id}))
-        .await;
-
-    let detach = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    assert_eq!(detach["method"], "session.detach");
-    assert_eq!(detach["params"]["sessionId"], server.session_id);
-    server
-        .respond(&detach, serde_json::json!({"success": true}))
-        .await;
-
-    let delete = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    assert_eq!(delete["method"], "session.delete");
-    assert_eq!(delete["params"]["sessionId"], server.session_id);
-    server
-        .respond(&delete, serde_json::json!({"success": true}))
-        .await;
-
-    let error = timeout(TIMEOUT, start)
-        .await
-        .unwrap()
-        .unwrap()
-        .err()
-        .expect("unsupported enrollment must fail");
-    assert_eq!(
-        *error.kind(),
-        ErrorKind::Session(SessionErrorKind::AutoModeRecoveryNotSupported)
-    );
-    assert_eq!(client.registered_session_count_for_test(), 0);
-}
-
-#[tokio::test]
-async fn server_assigned_cloud_cleanup_deletes_even_when_detach_fails_and_keeps_both_errors() {
-    let (client, mut server) = auto_mode_recovery_client();
-    let start = tokio::spawn({
-        let client = client.clone();
-        async move {
-            client
-                .create_session(
-                    CreateSessionOptions::default()
-                        .with_cloud(CloudSessionOptions::with_repository(
-                            CloudSessionRepository::new("github", "copilot-sdk"),
-                        ))
-                        .with_interaction(|group| {
-                            group.with_on_auto_mode_switch_request(Arc::new(LegacyHandler))
-                        })
-                        .with_interaction(|group| group.with_auto_mode_recovery(true)),
-                )
-                .await
+        let create = timeout(TIMEOUT, server.read_request()).await.unwrap();
+        assert_eq!(create["method"], "session.create", "{case}");
+        if explicit_id {
+            assert_eq!(create["params"]["sessionId"], "explicit-cloud-session");
+        } else {
+            assert!(create["params"].get("sessionId").is_none(), "{case}");
         }
-    });
+        server
+            .respond(&create, serde_json::json!({"sessionId": server.session_id}))
+            .await;
 
-    let create = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    server
-        .respond(&create, serde_json::json!({"sessionId": server.session_id}))
-        .await;
-    let detach = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    assert_eq!(detach["method"], "session.detach");
-    server
-        .respond_error(&detach, -32000, "detach rejected")
-        .await;
+        let detach = timeout(TIMEOUT, server.read_request()).await.unwrap();
+        assert_eq!(detach["method"], "session.detach", "{case}");
+        assert_eq!(detach["params"]["sessionId"], server.session_id, "{case}");
+        server
+            .respond(&detach, serde_json::json!({"success": true}))
+            .await;
 
-    let delete = timeout(TIMEOUT, server.read_request())
-        .await
-        .expect("delete must still be attempted after detach failure");
-    assert_eq!(delete["method"], "session.delete");
-    server
-        .respond(
-            &delete,
-            serde_json::json!({"success": false, "error": "delete rejected"}),
-        )
-        .await;
+        if !explicit_id {
+            let delete = timeout(TIMEOUT, server.read_request()).await.unwrap();
+            assert_eq!(delete["method"], "session.delete");
+            assert_eq!(delete["params"]["sessionId"], server.session_id);
+            server
+                .respond(&delete, serde_json::json!({"success": true}))
+                .await;
+        }
 
-    let error = timeout(TIMEOUT, start)
-        .await
-        .unwrap()
-        .unwrap()
-        .err()
-        .expect("unsupported enrollment cleanup must fail");
-    assert_eq!(
-        *error.kind(),
-        ErrorKind::Session(SessionErrorKind::AutoModeRecoveryNotSupported)
-    );
-    let cleanup_errors = std::error::Error::source(&error)
-        .expect("both cleanup failures must remain available")
-        .to_string();
-    assert!(
-        cleanup_errors.contains("detach rejected"),
-        "{cleanup_errors}"
-    );
-    assert!(
-        cleanup_errors.contains("delete rejected"),
-        "{cleanup_errors}"
-    );
-    assert_eq!(client.registered_session_count_for_test(), 0);
-
-    let mut retry = Box::pin(
-        client.create_session(CreateSessionOptions::default().with_cloud(
-            CloudSessionOptions::with_repository(CloudSessionRepository::new(
-                "github",
-                "copilot-sdk",
-            )),
-        )),
-    );
-    assert!(futures_util::poll!(&mut retry).is_pending());
-    let retry_request = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    server
-        .respond(
-            &retry_request,
-            serde_json::json!({"sessionId": server.session_id}),
-        )
-        .await;
-    let error = timeout(TIMEOUT, retry)
-        .await
-        .unwrap()
-        .err()
-        .expect("failed cleanup must keep the same ID fenced");
-    assert_eq!(*error.kind(), ErrorKind::Rpc { code: -32603 });
-    assert!(
-        error
-            .to_string()
-            .contains("Session cleanup after rejected Auto recovery enrollment did not complete")
-    );
-    client.force_stop();
+        let error = timeout(TIMEOUT, start)
+            .await
+            .unwrap()
+            .unwrap()
+            .err()
+            .unwrap_or_else(|| panic!("{case}: unsupported enrollment must fail"));
+        assert_eq!(
+            *error.kind(),
+            ErrorKind::Session(SessionErrorKind::AutoModeRecoveryNotSupported),
+            "{case}"
+        );
+        assert_eq!(client.registered_session_count_for_test(), 0, "{case}");
+    }
 }
 
 #[tokio::test(start_paused = true)]
-async fn server_assigned_cloud_cleanup_attempts_delete_after_detach_timeout() {
-    let (client, mut server) = auto_mode_recovery_client();
-    let start = tokio::spawn({
-        let client = client.clone();
-        async move {
-            client
-                .create_session(
-                    CreateSessionOptions::default()
-                        .with_cloud(CloudSessionOptions::with_repository(
-                            CloudSessionRepository::new("github", "copilot-sdk"),
-                        ))
-                        .with_interaction(|group| {
-                            group.with_on_auto_mode_switch_request(Arc::new(LegacyHandler))
-                        })
-                        .with_interaction(|group| group.with_auto_mode_recovery(true)),
-                )
-                .await
+async fn server_assigned_cloud_cleanup_attempts_delete_after_detach_failure_or_timeout() {
+    for detach_times_out in [false, true] {
+        let case = if detach_times_out {
+            "detach timeout"
+        } else {
+            "detach failure"
+        };
+        let (client, mut server) = auto_mode_recovery_client();
+        let start = spawn_create(&client, cloud_recovery_options());
+
+        let create = timeout(TIMEOUT, server.read_request()).await.unwrap();
+        server
+            .respond(&create, serde_json::json!({"sessionId": server.session_id}))
+            .await;
+        let detach = timeout(TIMEOUT, server.read_request()).await.unwrap();
+        assert_eq!(detach["method"], "session.detach", "{case}");
+        if detach_times_out {
+            tokio::time::advance(Duration::from_secs(11)).await;
+        } else {
+            server
+                .respond_error(&detach, -32000, "detach rejected")
+                .await;
         }
-    });
 
-    let create = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    server
-        .respond(&create, serde_json::json!({"sessionId": server.session_id}))
-        .await;
-    let detach = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    assert_eq!(detach["method"], "session.detach");
-    tokio::time::advance(Duration::from_secs(11)).await;
+        let delete = timeout(TIMEOUT, server.read_request())
+            .await
+            .unwrap_or_else(|_| panic!("{case}: delete must still be attempted"));
+        assert_eq!(delete["method"], "session.delete", "{case}");
+        let delete_response = if detach_times_out {
+            serde_json::json!({"success": true})
+        } else {
+            serde_json::json!({"success": false, "error": "delete rejected"})
+        };
+        server.respond(&delete, delete_response).await;
 
-    let delete = timeout(TIMEOUT, server.read_request())
-        .await
-        .expect("delete must still be attempted after detach timeout");
-    assert_eq!(delete["method"], "session.delete");
-    server
-        .respond(&delete, serde_json::json!({"success": true}))
-        .await;
+        let error = timeout(TIMEOUT, start)
+            .await
+            .unwrap()
+            .unwrap()
+            .err()
+            .unwrap_or_else(|| panic!("{case}: unsupported enrollment cleanup must fail"));
+        assert_eq!(
+            *error.kind(),
+            ErrorKind::Session(SessionErrorKind::AutoModeRecoveryNotSupported),
+            "{case}"
+        );
+        let cleanup_errors = std::error::Error::source(&error)
+            .unwrap_or_else(|| panic!("{case}: cleanup failures must remain available"))
+            .to_string();
+        let expected: &[&str] = if detach_times_out {
+            &["session.detach timed out"]
+        } else {
+            &["detach rejected", "delete rejected"]
+        };
+        for expected in expected {
+            assert!(
+                cleanup_errors.contains(expected),
+                "{case}: {cleanup_errors}"
+            );
+        }
+        assert_eq!(client.registered_session_count_for_test(), 0, "{case}");
 
-    let error = timeout(TIMEOUT, start)
-        .await
-        .unwrap()
-        .unwrap()
-        .err()
-        .expect("timed-out detach must keep enrollment rejected");
-    assert_eq!(
-        *error.kind(),
-        ErrorKind::Session(SessionErrorKind::AutoModeRecoveryNotSupported)
-    );
-    assert!(
-        std::error::Error::source(&error)
-            .expect("detach timeout must be preserved")
-            .to_string()
-            .contains("session.detach timed out")
-    );
-    assert_eq!(client.registered_session_count_for_test(), 0);
-
-    let mut retry = Box::pin(
-        client.create_session(CreateSessionOptions::default().with_cloud(
-            CloudSessionOptions::with_repository(CloudSessionRepository::new(
-                "github",
-                "copilot-sdk",
-            )),
-        )),
-    );
-    assert!(futures_util::poll!(&mut retry).is_pending());
-    let retry_request = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    server
-        .respond(
-            &retry_request,
-            serde_json::json!({"sessionId": server.session_id}),
-        )
-        .await;
-    let error = timeout(TIMEOUT, retry)
-        .await
-        .unwrap()
-        .err()
-        .expect("ambiguous detach must keep the same ID fenced");
-    assert_eq!(*error.kind(), ErrorKind::Rpc { code: -32603 });
-    assert!(
-        error
-            .to_string()
-            .contains("Session cleanup after rejected Auto recovery enrollment did not complete")
-    );
-    client.force_stop();
+        assert_cloud_create_fenced(&client, &mut server, CLEANUP_INCOMPLETE, case).await;
+        client.force_stop();
+    }
 }
 
 #[tokio::test]
@@ -1501,12 +1352,9 @@ impl copilot_sdk::session_fs::SessionFsProvider for ReentrantSessionFsProvider {
 
 #[tokio::test]
 async fn session_fs_callback_rejects_same_id_reentry_but_allows_other_ids() {
-    assert_session_fs_callback_reentry(false).await;
-}
-
-#[tokio::test]
-async fn spawned_session_fs_callback_rejects_same_id_reentry_but_allows_other_ids() {
-    assert_session_fs_callback_reentry(true).await;
+    for spawn in [false, true] {
+        assert_session_fs_callback_reentry(spawn).await;
+    }
 }
 
 async fn assert_session_fs_callback_reentry(spawn: bool) {
@@ -1692,12 +1540,9 @@ async fn recovery_resume_waits_for_an_ordinary_resume_rpc_before_replacing_regis
 
 #[tokio::test]
 async fn session_end_hook_reentry_during_rejected_recovery_does_not_wait_on_cleanup() {
-    assert_session_end_hook_reentry(false).await;
-}
-
-#[tokio::test]
-async fn spawned_session_end_hook_reentry_does_not_wait_on_cleanup() {
-    assert_session_end_hook_reentry(true).await;
+    for spawn in [false, true] {
+        assert_session_end_hook_reentry(spawn).await;
+    }
 }
 
 async fn assert_session_end_hook_reentry(spawn: bool) {
@@ -2072,76 +1917,10 @@ async fn parameterless_direct_registration_keeps_its_legacy_result_and_stays_une
     client.force_stop();
 }
 
-#[tokio::test]
-async fn rejected_explicit_id_cloud_create_is_not_deleted() {
-    let (client, mut server) = auto_mode_recovery_client();
-    let start = tokio::spawn({
-        let client = client.clone();
-        async move {
-            client
-                .create_session(
-                    CreateSessionOptions::default()
-                        .with_session_id("explicit-cloud-session")
-                        .with_cloud(CloudSessionOptions::with_repository(
-                            CloudSessionRepository::new("github", "copilot-sdk"),
-                        ))
-                        .with_interaction(|group| {
-                            group.with_on_auto_mode_switch_request(Arc::new(LegacyHandler))
-                        })
-                        .with_interaction(|group| group.with_auto_mode_recovery(true)),
-                )
-                .await
-        }
-    });
-
-    let create = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    assert_eq!(create["method"], "session.create");
-    assert_eq!(create["params"]["sessionId"], "explicit-cloud-session");
-    server
-        .respond(
-            &create,
-            serde_json::json!({"sessionId": "explicit-cloud-session"}),
-        )
-        .await;
-    let detach = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    assert_eq!(detach["method"], "session.detach");
-    server
-        .respond(&detach, serde_json::json!({"success": true}))
-        .await;
-
-    let error = timeout(TIMEOUT, start)
-        .await
-        .unwrap()
-        .unwrap()
-        .err()
-        .expect("unsupported enrollment must fail");
-    assert_eq!(
-        *error.kind(),
-        ErrorKind::Session(SessionErrorKind::AutoModeRecoveryNotSupported)
-    );
-    assert_eq!(client.registered_session_count_for_test(), 0);
-}
-
 #[tokio::test(start_paused = true)]
 async fn failed_cloud_deletion_keeps_same_id_fenced_after_caller_cancellation() {
     let (client, mut server) = auto_mode_recovery_client();
-    let start = tokio::spawn({
-        let client = client.clone();
-        async move {
-            client
-                .create_session(
-                    CreateSessionOptions::default()
-                        .with_cloud(CloudSessionOptions::with_repository(
-                            CloudSessionRepository::new("github", "copilot-sdk"),
-                        ))
-                        .with_interaction(|group| {
-                            group.with_on_auto_mode_switch_request(Arc::new(LegacyHandler))
-                        })
-                        .with_interaction(|group| group.with_auto_mode_recovery(true)),
-                )
-                .await
-        }
-    });
+    let start = spawn_create(&client, cloud_recovery_options());
 
     let create = timeout(TIMEOUT, server.read_request()).await.unwrap();
     server
@@ -2164,64 +1943,22 @@ async fn failed_cloud_deletion_keeps_same_id_fenced_after_caller_cancellation() 
             .is_cancelled()
     );
 
-    let mut retry = Box::pin(
-        client.create_session(CreateSessionOptions::default().with_cloud(
-            CloudSessionOptions::with_repository(CloudSessionRepository::new(
-                "github",
-                "copilot-sdk",
-            )),
-        )),
-    );
-    assert!(futures_util::poll!(&mut retry).is_pending());
-    let retry_request = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    assert_eq!(retry_request["method"], "session.create");
-    server
-        .respond(
-            &retry_request,
-            serde_json::json!({"sessionId": server.session_id}),
-        )
-        .await;
-    let error = timeout(TIMEOUT, retry)
-        .await
-        .unwrap()
-        .err()
-        .expect("create must not reuse an ID while deletion is pending");
-    assert_eq!(*error.kind(), ErrorKind::Rpc { code: -32603 });
-    assert!(
-        error
-            .to_string()
-            .contains("initialization or cleanup is still in progress")
-    );
+    assert_cloud_create_fenced(
+        &client,
+        &mut server,
+        "initialization or cleanup is still in progress",
+        "deletion pending",
+    )
+    .await;
 
     tokio::time::advance(Duration::from_secs(11)).await;
-    let mut retry = Box::pin(
-        client.create_session(CreateSessionOptions::default().with_cloud(
-            CloudSessionOptions::with_repository(CloudSessionRepository::new(
-                "github",
-                "copilot-sdk",
-            )),
-        )),
-    );
-    assert!(futures_util::poll!(&mut retry).is_pending());
-    let retry_request = timeout(TIMEOUT, server.read_request()).await.unwrap();
-    assert_eq!(retry_request["method"], "session.create");
-    server
-        .respond(
-            &retry_request,
-            serde_json::json!({"sessionId": server.session_id}),
-        )
-        .await;
-    let error = timeout(TIMEOUT, retry)
-        .await
-        .unwrap()
-        .err()
-        .expect("ambiguous deletion must keep the ID fenced");
-    assert_eq!(*error.kind(), ErrorKind::Rpc { code: -32603 });
-    assert!(
-        error
-            .to_string()
-            .contains("Session cleanup after rejected Auto recovery enrollment did not complete")
-    );
+    assert_cloud_create_fenced(
+        &client,
+        &mut server,
+        CLEANUP_INCOMPLETE,
+        "deletion ambiguous",
+    )
+    .await;
     assert_eq!(client.registered_session_count_for_test(), 0);
     client.force_stop();
 }
@@ -2335,18 +2072,12 @@ async fn assert_resume_callback_owner(acknowledged: Option<bool>, rpc_rejected: 
 }
 
 #[tokio::test]
-async fn missing_acknowledgment_preserves_the_accepted_resume_callback_owner() {
-    assert_resume_callback_owner(None, false).await;
-}
-
-#[tokio::test]
-async fn false_acknowledgment_preserves_the_accepted_resume_callback_owner() {
-    assert_resume_callback_owner(Some(false), false).await;
-}
-
-#[tokio::test]
-async fn rpc_rejection_restores_the_resident_callback_owner() {
-    assert_resume_callback_owner(None, true).await;
+async fn resume_callback_owner_survives_missing_or_false_acknowledgment_and_rpc_rejection() {
+    // Missing or false acknowledgment preserves the accepted resume callback
+    // owner; RPC rejection restores the resident one.
+    for (acknowledged, rpc_rejected) in [(None, false), (Some(false), false), (None, true)] {
+        assert_resume_callback_owner(acknowledged, rpc_rejected).await;
+    }
 }
 
 #[tokio::test]

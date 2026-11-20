@@ -26,6 +26,9 @@ final class GitHubTokenProviderRegistry {
     }
 
     private synchronized void claim(String registrationId, String sessionId) {
+        if (!providers.containsKey(registrationId)) {
+            return;
+        }
         String previous = sessionOwners.put(sessionId, registrationId);
         if (previous != null && !previous.equals(registrationId)) {
             providers.remove(previous);

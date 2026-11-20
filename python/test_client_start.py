@@ -516,6 +516,20 @@ STATUS_CALLS = {
     "get_status": ("status.get", {}, {"version": "1.2.3", "protocolVersion": 3}),
     "get_auth_status": ("auth.getStatus", {}, {"isAuthenticated": False}),
     "list_models": ("models.list", {}, {"models": []}),
+    "list_sessions": ("session.list", {}, {"sessions": []}),
+    "get_last_session_id": ("session.getLastId", {}, {"sessionId": "session-1"}),
+    "get_session_metadata": ("session.getMetadata", {"sessionId": "session-1"}, {}),
+    "get_foreground_session_id": ("session.getForeground", {}, {"sessionId": "session-1"}),
+    "set_foreground_session_id": (
+        "session.setForeground",
+        {"sessionId": "session-1"},
+        {"success": True},
+    ),
+}
+# Arguments of the calls above that take any.
+STATUS_CALL_ARGS = {
+    "get_session_metadata": ("session-1",),
+    "set_foreground_session_id": ("session-1",),
 }
 
 CONVENIENCE_CALLS = {
@@ -765,6 +779,10 @@ async def test_custom_model_callback_stays_offline_during_shutdown(client, shutd
         await asyncio.wait_for(shutdown, timeout=1)
 
 
+def _call(client, method):
+    return getattr(client, method)(*STATUS_CALL_ARGS.get(method, ()))
+
+
 async def _settle(task: asyncio.Task) -> None:
     # Enough turns for a call that does not wait for start() to send or fail.
     for _ in range(10):
@@ -794,7 +812,7 @@ async def test_status_call_waits_for_in_progress_start(client, method, phase):
     getattr(client, phase).side_effect = block
     start = asyncio.create_task(client.start())
     await asyncio.wait_for(entered.wait(), timeout=1)
-    call = asyncio.create_task(getattr(client, method)())
+    call = asyncio.create_task(_call(client, method))
     try:
         await _settle(call)
         assert not call.done()
@@ -825,7 +843,7 @@ async def test_status_call_reports_failure_of_the_start_it_waited_for(client, me
     client._verify_protocol_version.side_effect = refuse
     start = asyncio.create_task(client.start())
     await asyncio.wait_for(entered.wait(), timeout=1)
-    call = asyncio.create_task(getattr(client, method)())
+    call = asyncio.create_task(_call(client, method))
     await _settle(call)
     release.set()
 
@@ -975,7 +993,7 @@ async def test_status_call_follows_replacement_start_queued_after_success(client
     await asyncio.wait_for(entered.wait(), timeout=1)
     second = asyncio.create_task(client.start())
     await asyncio.sleep(0)
-    call = asyncio.create_task(getattr(client, method)())
+    call = asyncio.create_task(_call(client, method))
     await _settle(call)
     release.set()
     try:
@@ -995,6 +1013,217 @@ async def test_status_call_follows_replacement_start_queued_after_success(client
             task.cancel()
         await asyncio.gather(first, second, call, return_exceptions=True)
         client.force_stop = real_force_stop
+        await client.force_stop()
+
+
+START_PHASES = {"spawning": "_start_cli_server", "handshake": "_verify_protocol_version"}
+
+
+async def _delete_session_during(client, start: str) -> tuple[str, str | None, int]:
+    """Call delete_session with start() in the state ``start`` names.
+
+    ``start`` is a settled state (``never``, ``connected``, ``stopped``, ``failed``) or
+    ``<phase> then <end>``: a start() held in that phase when delete_session is called,
+    which then ``succeeds``, ``fails`` or is ``cancelled``. Returns the call's result,
+    the client state ``session.delete`` was sent in (``None`` if it was not sent) and
+    how many times a runtime was started.
+    """
+    sent_in_state: list[str] = []
+
+    async def request(method, params):
+        assert (method, params) == ("session.delete", {"sessionId": "session-1"})
+        sent_in_state.append(client._state)
+        return {"success": True}
+
+    rpc = Mock(request=AsyncMock(side_effect=request), stop=AsyncMock())
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def connect():
+        client._client = rpc
+
+    client._connect_to_server.side_effect = connect
+    starting = None
+    end = None
+    if start in ("connected", "stopped"):
+        await client.start()
+        if start == "stopped":
+            await client.force_stop()
+    elif start == "failed":
+        client._verify_protocol_version.side_effect = RuntimeError("startup refused")
+        with pytest.raises(RuntimeError, match="startup refused"):
+            await client.start()
+    elif start != "never":
+        phase, _, end = start.split()
+
+        async def hold():
+            entered.set()
+            await release.wait()
+            if end == "fails":
+                raise RuntimeError("startup refused")
+
+        getattr(client, START_PHASES[phase]).side_effect = hold
+        starting = asyncio.create_task(client.start())
+        await asyncio.wait_for(entered.wait(), timeout=1)
+
+    call = asyncio.create_task(client.delete_session("session-1"))
+    try:
+        if starting is not None:
+            await _settle(call)
+            if end == "cancelled":
+                starting.cancel()
+            release.set()
+            await asyncio.gather(starting, return_exceptions=True)
+        try:
+            await asyncio.wait_for(call, timeout=1)
+            result = "deleted"
+        except asyncio.CancelledError:
+            result = "cancelled"
+        except RuntimeError as error:
+            result = str(error)
+    finally:
+        release.set()
+        tasks = [task for task in (starting, call) if task is not None]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await client.force_stop()
+    sent = sent_in_state[0] if sent_in_state else None
+    return result, sent, client._start_cli_server.await_count
+
+
+@pytest.mark.parametrize(
+    ("start", "expected"),
+    [
+        ("never", ("deleted", "connected", 1)),
+        ("connected", ("deleted", "connected", 1)),
+        ("stopped", ("deleted", "connected", 2)),
+        ("failed", ("startup refused", None, 2)),
+        # A start() in progress is waited for, and its failure is reported instead of
+        # sending session.delete on the connection that start() then closes.
+        ("spawning then succeeds", ("deleted", "connected", 1)),
+        ("handshake then succeeds", ("deleted", "connected", 1)),
+        ("spawning then fails", ("Client failed to start: startup refused", None, 1)),
+        ("handshake then fails", ("Client failed to start: startup refused", None, 1)),
+        ("handshake then cancelled", ("cancelled", None, 1)),
+    ],
+)
+async def test_delete_session_waits_for_in_progress_start(client, start, expected):
+    assert await _delete_session_during(client, start) == expected
+
+
+async def test_delete_session_queued_during_start_stays_ahead_of_same_id_create(client):
+    """A delete called before a same-ID create keeps its place while both wait for start()."""
+    session_id = "11111111-2222-4333-8444-555555555555"
+    requests: list[str] = []
+
+    async def request(method, params, **kwargs):
+        requests.append(method)
+        if method == "session.create":
+            result = {"sessionId": params["sessionId"]}
+            kwargs["on_response_inline"](result)
+            return result
+        assert method == "session.delete"
+        return {"success": True}
+
+    rpc = Mock(request=AsyncMock(side_effect=request), stop=AsyncMock())
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def connect():
+        client._client = rpc
+
+    async def hold():
+        entered.set()
+        await release.wait()
+
+    client._connect_to_server.side_effect = connect
+    client._start_cli_server.side_effect = hold
+    starting = asyncio.create_task(client.start())
+    await asyncio.wait_for(entered.wait(), timeout=1)
+
+    deleting = asyncio.create_task(client.delete_session(session_id))
+    await _settle(deleting)
+    creating = asyncio.create_task(
+        client.create_session(session_id=session_id, permissions={"on_request": lambda *_: None})
+    )
+    await _settle(creating)
+    release.set()
+    try:
+        await asyncio.wait_for(asyncio.gather(starting, deleting, creating), timeout=2)
+        assert requests == ["session.delete", "session.create"]
+    finally:
+        for task in (starting, deleting, creating):
+            task.cancel()
+        await asyncio.gather(starting, deleting, creating, return_exceptions=True)
+        await client.force_stop()
+
+
+async def test_delete_sessions_queued_behind_a_failing_start_all_report_it(client):
+    """Every delete queued during a start that fails reports that failure, not 'not connected'."""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold():
+        entered.set()
+        await release.wait()
+        raise RuntimeError("startup refused")
+
+    client._start_cli_server.side_effect = hold
+    starting = asyncio.create_task(client.start())
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    deletions = [asyncio.create_task(client.delete_session("session-1")) for _ in range(2)]
+    await _settle(deletions[0])
+    release.set()
+    results = await asyncio.gather(starting, *deletions, return_exceptions=True)
+    await client.force_stop()
+
+    assert [str(result) for result in results] == ["startup refused"] + [
+        "Client failed to start: startup refused"
+    ] * 2
+
+
+async def test_delete_session_stays_behind_an_earlier_create_that_is_auto_starting(client):
+    """A create that is starting the client reserves its ID ahead of a later same-ID delete."""
+    session_id = "11111111-2222-4333-8444-555555555555"
+    requests: list[str] = []
+
+    async def request(method, params, **kwargs):
+        requests.append(method)
+        if method == "session.create":
+            result = {"sessionId": params["sessionId"]}
+            kwargs["on_response_inline"](result)
+            return result
+        assert method == "session.delete"
+        return {"success": True}
+
+    rpc = Mock(request=AsyncMock(side_effect=request), stop=AsyncMock())
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def connect():
+        client._client = rpc
+
+    async def hold():
+        entered.set()
+        await release.wait()
+
+    client._connect_to_server.side_effect = connect
+    client._start_cli_server.side_effect = hold
+    creating = asyncio.create_task(
+        client.create_session(session_id=session_id, permissions={"on_request": lambda *_: None})
+    )
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    deleting = asyncio.create_task(client.delete_session(session_id))
+    await _settle(deleting)
+    release.set()
+    try:
+        await asyncio.wait_for(asyncio.gather(creating, deleting), timeout=2)
+        assert requests == ["session.create", "session.delete"]
+    finally:
+        for task in (creating, deleting):
+            task.cancel()
+        await asyncio.gather(creating, deleting, return_exceptions=True)
         await client.force_stop()
 
 

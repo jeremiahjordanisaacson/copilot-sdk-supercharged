@@ -137,13 +137,18 @@ cd /expected/working/dir
 **Causes & Solutions:**
 
 1. **Tools filtered out in config:**
+   <!-- docs-validate: strict -->
    ```typescript
-   mcpServers: {
-     "server": {
-       // ...
-       tools: ["*"],  // Every tool; omitting the field does the same. [] exposes none, a list only those names
+   const session = await client.createSession({
+     mcp: {
+       servers: {
+         "server": {
+           command: "/path/to/server",
+           tools: ["*"],  // Every tool; omitting the field does the same. [] exposes none, a list only those names
+         },
+       },
      },
-   }
+   });
    ```
 
 1. **Server doesn't expose tools:**
@@ -191,13 +196,18 @@ cd /expected/working/dir
 **Solutions:**
 
 1. **Increase timeout:**
+   <!-- docs-validate: strict -->
    ```typescript
-   mcpServers: {
-     "slow-server": {
-       // ...
-       timeout: 300000,  // 5 minutes
+   const session = await client.createSession({
+     mcp: {
+       servers: {
+         "slow-server": {
+           command: "/path/to/server",
+           timeout: 300000,  // 5 minutes
+         },
+       },
      },
-   }
+   });
    ```
 
 1. **Optimize server performance:**

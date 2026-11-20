@@ -118,4 +118,36 @@ public final class SessionPluginsMarketplacesApi {
         return caller.invoke("session.plugins.marketplaces.refresh", _p, SessionPluginsMarketplacesRefreshResult.class);
     }
 
+    /**
+     * Searches all configured plugin marketplaces using the session's authoritative configuration, credentials, working directory, and managed policy. Returns installation state and partial errors. This is not Agent Finder search.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SessionPluginsMarketplacesSearchResult> search(SessionPluginsMarketplacesSearchParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.plugins.marketplaces.search", _p, SessionPluginsMarketplacesSearchResult.class);
+    }
+
+    /**
+     * Probes a configured marketplace's revision without refreshing or creating its cached checkout.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SessionPluginsMarketplacesCheckUpdateResult> checkUpdate(SessionPluginsMarketplacesCheckUpdateParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.plugins.marketplaces.checkUpdate", _p, SessionPluginsMarketplacesCheckUpdateResult.class);
+    }
+
 }

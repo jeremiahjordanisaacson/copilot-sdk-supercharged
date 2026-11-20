@@ -47,6 +47,22 @@ public final class SessionPermissionsFolderTrustApi {
     }
 
     /**
+     * Trusts the session's current working directory without changing the saved trusted-folders list. The path must match the current directory, so a stale confirmation cannot trust a different workspace. Retained host policy still applies.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SessionPermissionsFolderTrustAddSessionTrustedResult> addSessionTrusted(SessionPermissionsFolderTrustAddSessionTrustedParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.permissions.folderTrust.addSessionTrusted", _p, SessionPermissionsFolderTrustAddSessionTrustedResult.class);
+    }
+
+    /**
      * Adds a folder to the user's trusted folders list.
      * <p>
      * Note: the {@code sessionId} field in the params record is overridden

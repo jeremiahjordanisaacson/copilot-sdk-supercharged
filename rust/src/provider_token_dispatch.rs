@@ -62,12 +62,11 @@ async fn parse_params<T: serde::de::DeserializeOwned>(
     client: &Client,
     request: &JsonRpcRequest,
 ) -> Option<T> {
-    let params = request
-        .params
-        .as_ref()
-        .cloned()
-        .unwrap_or(Value::Object(serde_json::Map::new()));
-    match serde_json::from_value(params) {
+    let parsed = match request.params.as_ref() {
+        Some(params) => T::deserialize(params),
+        None => T::deserialize(&Value::Object(serde_json::Map::new())),
+    };
+    match parsed {
         Ok(params) => Some(params),
         Err(error) => {
             send_error(

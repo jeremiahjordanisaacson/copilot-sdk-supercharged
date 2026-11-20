@@ -123,6 +123,7 @@ def to_enum(c: type[EnumT], x: Any) -> str:
 
 
 class SessionEventType(Enum):
+    SESSION_SANDBOX_STATE_CHANGED = "session.sandbox_state_changed"
     IDE_CONNECTION_CHANGED = "ide.connection_changed"
     IDE_SELECTION_CHANGED = "ide.selection_changed"
     IDE_ADD_FILE_REFERENCE = "ide.add_file_reference"
@@ -162,6 +163,8 @@ class SessionEventType(Enum):
     SESSION_USAGE_CHECKPOINT = "session.usage_checkpoint"
     # Experimental: this event is part of an experimental API and may change or be removed.
     SESSION_QUOTA_OBSERVATION = "session.quota_observation"
+    # Experimental: this event is part of an experimental API and may change or be removed.
+    SESSION_SENSITIVITY_LABEL_OBSERVATION = "session.sensitivity_label_observation"
     SESSION_CONTEXT_CHANGED = "session.context_changed"
     SESSION_USAGE_INFO = "session.usage_info"
     SESSION_CONTEXT_CLEARED = "session.context_cleared"
@@ -806,19 +809,24 @@ class AssistedApprovalAssessmentFailed:
     "The judge path produced no usable verdict."
     reason: str
     status: ClassVar[str] = "failed"
+    message: str | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "AssistedApprovalAssessmentFailed":
         assert isinstance(obj, dict)
         reason = from_str(obj.get("reason"))
+        message = from_union([from_none, from_str], obj.get("message"))
         return AssistedApprovalAssessmentFailed(
             reason=reason,
+            message=message,
         )
 
     def to_dict(self) -> dict:
         result: dict = {}
         result["reason"] = from_str(self.reason)
         result["status"] = self.status
+        if self.message is not None:
+            result["message"] = from_union([from_none, from_str], self.message)
         return result
 
 
@@ -2136,8 +2144,76 @@ class ProviderQuotaState:
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
+class SensitivityLabel:
+    "A sensitivity label the provider applied to one model request."
+    id: str
+    name: str
+    color: str | None = None
+    is_encrypted: bool | None = None
+    tooltip: str | None = None
+
+    @staticmethod
+    def from_dict(obj: Any) -> "SensitivityLabel":
+        assert isinstance(obj, dict)
+        id = from_str(obj.get("id"))
+        name = from_str(obj.get("name"))
+        color = from_union([from_none, from_str], obj.get("color"))
+        is_encrypted = from_union([from_none, from_bool], obj.get("isEncrypted"))
+        tooltip = from_union([from_none, from_str], obj.get("tooltip"))
+        return SensitivityLabel(
+            id=id,
+            name=name,
+            color=color,
+            is_encrypted=is_encrypted,
+            tooltip=tooltip,
+        )
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["id"] = from_str(self.id)
+        result["name"] = from_str(self.name)
+        if self.color is not None:
+            result["color"] = from_union([from_none, from_str], self.color)
+        if self.is_encrypted is not None:
+            result["isEncrypted"] = from_union([from_none, from_bool], self.is_encrypted)
+        if self.tooltip is not None:
+            result["tooltip"] = from_union([from_none, from_str], self.tooltip)
+        return result
+
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SensitivityLabelFailure:
+    "Why the provider could not determine a sensitivity label."
+    category: str
+    retryable: bool
+    status: int | None = None
+
+    @staticmethod
+    def from_dict(obj: Any) -> "SensitivityLabelFailure":
+        assert isinstance(obj, dict)
+        category = from_str(obj.get("category"))
+        retryable = from_bool(obj.get("retryable"))
+        status = from_union([from_none, from_int], obj.get("status"))
+        return SensitivityLabelFailure(
+            category=category,
+            retryable=retryable,
+            status=status,
+        )
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["category"] = from_str(self.category)
+        result["retryable"] = from_bool(self.retryable)
+        if self.status is not None:
+            result["status"] = from_union([from_none, to_int], self.status)
+        return result
+
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
 class SessionAutoModeResolvedData:
-    "Auto Intent resolution: the concrete model an auto-mode session settled on, and why. Published when Auto settles on a model that differs from the one it last published in the current Auto selection, so a routing check that keeps the same model does not repeat it; selecting a model, switching Auto tiers, or returning to Auto starts a new selection. Lets SDK clients render the chosen model and the full reason it was picked. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability."
+    "Auto or Fusion Single resolution: the concrete model the session settled on, with an optional explanation. Published when routing selects a model that differs from the one last published in the current selection; selecting a model, switching Auto tiers, or returning to Auto starts a new selection. Does not change the user's selected model or tier. Lets SDK clients render the chosen model and its selection notice. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability."
     chosen_model: str
     auto_tier: AutoTier | None = None
     available_models: list[str] | None = None
@@ -2506,7 +2582,7 @@ class SessionCompletionReceiptData:
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class SessionFusionCompletedData:
-    "Experimental durable aggregate outcome of a HydraFusion turn."
+    "Experimental durable aggregate outcome of a HydraFusion turn. Phase-free Single reports completed, failed, or cancelled; staged patterns emit this event only on successful or degraded completion."
     cached_tokens: int
     commit_id: str
     degraded_reason: str | None
@@ -2527,6 +2603,12 @@ class SessionFusionCompletedData:
     # Experimental: this field is part of an experimental API and may change or be removed.
     awaiting_background_work: bool | None = None
     cache_write_tokens: int | None = None
+    # Experimental: this field is part of an experimental API and may change or be removed.
+    error_message: str | None = None
+    # Experimental: this field is part of an experimental API and may change or be removed.
+    failure_reason: str | None = None
+    # Experimental: this field is part of an experimental API and may change or be removed.
+    reasoning_effort: str | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "SessionFusionCompletedData":
@@ -2550,6 +2632,9 @@ class SessionFusionCompletedData:
         turn_id = from_str(obj.get("turnId"))
         awaiting_background_work = from_union([from_none, from_bool], obj.get("awaitingBackgroundWork"))
         cache_write_tokens = from_union([from_none, from_int], obj.get("cacheWriteTokens"))
+        error_message = from_union([from_none, from_str], obj.get("errorMessage"))
+        failure_reason = from_union([from_none, from_str], obj.get("failureReason"))
+        reasoning_effort = from_union([from_none, from_str], obj.get("reasoningEffort"))
         return SessionFusionCompletedData(
             cached_tokens=cached_tokens,
             commit_id=commit_id,
@@ -2570,6 +2655,9 @@ class SessionFusionCompletedData:
             turn_id=turn_id,
             awaiting_background_work=awaiting_background_work,
             cache_write_tokens=cache_write_tokens,
+            error_message=error_message,
+            failure_reason=failure_reason,
+            reasoning_effort=reasoning_effort,
         )
 
     def to_dict(self) -> dict:
@@ -2595,13 +2683,19 @@ class SessionFusionCompletedData:
             result["awaitingBackgroundWork"] = from_union([from_none, from_bool], self.awaiting_background_work)
         if self.cache_write_tokens is not None:
             result["cacheWriteTokens"] = from_union([from_none, to_int], self.cache_write_tokens)
+        if self.error_message is not None:
+            result["errorMessage"] = from_union([from_none, from_str], self.error_message)
+        if self.failure_reason is not None:
+            result["failureReason"] = from_union([from_none, from_str], self.failure_reason)
+        if self.reasoning_effort is not None:
+            result["reasoningEffort"] = from_union([from_none, from_str], self.reasoning_effort)
         return result
 
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class SessionFusionResolvedData:
-    "Experimental durable validated HydraFusion route and turn policy."
+    "Experimental durable validated HydraFusion route and turn policy. An empty phase plan with pattern single runs an ordinary streaming turn, without phase or commit events."
     contract_version: int
     fallback_model: str
     follow_up_model: str
@@ -3017,6 +3111,54 @@ class SessionQuotaObservationData:
     def to_dict(self) -> dict:
         result: dict = {}
         result["observation"] = to_class(ProviderQuotaState, self.observation)
+        return result
+
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SessionSensitivityLabelObservationData:
+    "A provider-reported sensitivity label observation for one model request. Each observation describes only its own request; it neither sets nor clears a session-level label."
+    outcome: SensitivityLabelOutcome
+    provider: ModelProviderRef
+    turn_id: str
+    failure: SensitivityLabelFailure | None = None
+    interaction_id: str | None = None
+    label: SensitivityLabel | None = None
+    request_id: str | None = None
+
+    @staticmethod
+    def from_dict(obj: Any) -> "SessionSensitivityLabelObservationData":
+        assert isinstance(obj, dict)
+        outcome = parse_enum(SensitivityLabelOutcome, obj.get("outcome"))
+        provider = ModelProviderRef.from_dict(obj.get("provider"))
+        turn_id = from_str(obj.get("turnId"))
+        failure = from_union([from_none, SensitivityLabelFailure.from_dict], obj.get("failure"))
+        interaction_id = from_union([from_none, from_str], obj.get("interactionId"))
+        label = from_union([from_none, SensitivityLabel.from_dict], obj.get("label"))
+        request_id = from_union([from_none, from_str], obj.get("requestId"))
+        return SessionSensitivityLabelObservationData(
+            outcome=outcome,
+            provider=provider,
+            turn_id=turn_id,
+            failure=failure,
+            interaction_id=interaction_id,
+            label=label,
+            request_id=request_id,
+        )
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["outcome"] = to_enum(SensitivityLabelOutcome, self.outcome)
+        result["provider"] = to_class(ModelProviderRef, self.provider)
+        result["turnId"] = from_str(self.turn_id)
+        if self.failure is not None:
+            result["failure"] = from_union([from_none, lambda x: to_class(SensitivityLabelFailure, x)], self.failure)
+        if self.interaction_id is not None:
+            result["interactionId"] = from_union([from_none, from_str], self.interaction_id)
+        if self.label is not None:
+            result["label"] = from_union([from_none, lambda x: to_class(SensitivityLabel, x)], self.label)
+        if self.request_id is not None:
+            result["requestId"] = from_union([from_none, from_str], self.request_id)
         return result
 
 
@@ -3578,21 +3720,27 @@ class AssistantMessageDeltaData:
     "Streaming assistant message delta for incremental response updates"
     delta_content: str
     message_id: str
+    # Experimental: this field is part of an experimental API and may change or be removed.
+    fusion: FusionAttribution | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "AssistantMessageDeltaData":
         assert isinstance(obj, dict)
         delta_content = from_str(obj.get("deltaContent"))
         message_id = from_str(obj.get("messageId"))
+        fusion = from_union([from_none, FusionAttribution.from_dict], obj.get("fusion"))
         return AssistantMessageDeltaData(
             delta_content=delta_content,
             message_id=message_id,
+            fusion=fusion,
         )
 
     def to_dict(self) -> dict:
         result: dict = {}
         result["deltaContent"] = from_str(self.delta_content)
         result["messageId"] = from_str(self.message_id)
+        if self.fusion is not None:
+            result["fusion"] = from_union([from_none, lambda x: to_class(FusionAttribution, x)], self.fusion)
         return result
 
 
@@ -3600,21 +3748,27 @@ class AssistantMessageDeltaData:
 class AssistantMessageStartData:
     "Streaming assistant message start metadata"
     message_id: str
+    # Experimental: this field is part of an experimental API and may change or be removed.
+    fusion: FusionAttribution | None = None
     phase: str | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "AssistantMessageStartData":
         assert isinstance(obj, dict)
         message_id = from_str(obj.get("messageId"))
+        fusion = from_union([from_none, FusionAttribution.from_dict], obj.get("fusion"))
         phase = from_union([from_none, from_str], obj.get("phase"))
         return AssistantMessageStartData(
             message_id=message_id,
+            fusion=fusion,
             phase=phase,
         )
 
     def to_dict(self) -> dict:
         result: dict = {}
         result["messageId"] = from_str(self.message_id)
+        if self.fusion is not None:
+            result["fusion"] = from_union([from_none, lambda x: to_class(FusionAttribution, x)], self.fusion)
         if self.phase is not None:
             result["phase"] = from_union([from_none, from_str], self.phase)
         return result
@@ -3712,6 +3866,8 @@ class AssistantReasoningData:
     content: str
     reasoning_id: str
     api_call_id: str | None = None
+    # Experimental: this field is part of an experimental API and may change or be removed.
+    fusion: FusionAttribution | None = None
     is_byok: bool | None = None
     model: str | None = None
     rte: bool | None = None
@@ -3723,6 +3879,7 @@ class AssistantReasoningData:
         content = from_str(obj.get("content"))
         reasoning_id = from_str(obj.get("reasoningId"))
         api_call_id = from_union([from_none, from_str], obj.get("apiCallId"))
+        fusion = from_union([from_none, FusionAttribution.from_dict], obj.get("fusion"))
         is_byok = from_union([from_none, from_bool], obj.get("isByok"))
         model = from_union([from_none, from_str], obj.get("model"))
         rte = from_union([from_none, from_bool], obj.get("rte"))
@@ -3731,6 +3888,7 @@ class AssistantReasoningData:
             content=content,
             reasoning_id=reasoning_id,
             api_call_id=api_call_id,
+            fusion=fusion,
             is_byok=is_byok,
             model=model,
             rte=rte,
@@ -3743,6 +3901,8 @@ class AssistantReasoningData:
         result["reasoningId"] = from_str(self.reasoning_id)
         if self.api_call_id is not None:
             result["apiCallId"] = from_union([from_none, from_str], self.api_call_id)
+        if self.fusion is not None:
+            result["fusion"] = from_union([from_none, lambda x: to_class(FusionAttribution, x)], self.fusion)
         if self.is_byok is not None:
             result["isByok"] = from_union([from_none, from_bool], self.is_byok)
         if self.model is not None:
@@ -3759,21 +3919,27 @@ class AssistantReasoningDeltaData:
     "Streaming reasoning delta for incremental extended thinking updates"
     delta_content: str
     reasoning_id: str
+    # Experimental: this field is part of an experimental API and may change or be removed.
+    fusion: FusionAttribution | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "AssistantReasoningDeltaData":
         assert isinstance(obj, dict)
         delta_content = from_str(obj.get("deltaContent"))
         reasoning_id = from_str(obj.get("reasoningId"))
+        fusion = from_union([from_none, FusionAttribution.from_dict], obj.get("fusion"))
         return AssistantReasoningDeltaData(
             delta_content=delta_content,
             reasoning_id=reasoning_id,
+            fusion=fusion,
         )
 
     def to_dict(self) -> dict:
         result: dict = {}
         result["deltaContent"] = from_str(self.delta_content)
         result["reasoningId"] = from_str(self.reasoning_id)
+        if self.fusion is not None:
+            result["fusion"] = from_union([from_none, lambda x: to_class(FusionAttribution, x)], self.fusion)
         return result
 
 
@@ -3828,6 +3994,8 @@ class AssistantToolCallDeltaData:
     "Streaming tool-call input delta for incremental tool-call updates"
     input_delta: str
     tool_call_id: str
+    # Experimental: this field is part of an experimental API and may change or be removed.
+    fusion: FusionAttribution | None = None
     tool_name: str | None = None
     tool_type: AssistantMessageToolRequestType | None = None
 
@@ -3836,11 +4004,13 @@ class AssistantToolCallDeltaData:
         assert isinstance(obj, dict)
         input_delta = from_str(obj.get("inputDelta"))
         tool_call_id = from_str(obj.get("toolCallId"))
+        fusion = from_union([from_none, FusionAttribution.from_dict], obj.get("fusion"))
         tool_name = from_union([from_none, from_str], obj.get("toolName"))
         tool_type = from_union([from_none, lambda x: parse_enum(AssistantMessageToolRequestType, x)], obj.get("toolType"))
         return AssistantToolCallDeltaData(
             input_delta=input_delta,
             tool_call_id=tool_call_id,
+            fusion=fusion,
             tool_name=tool_name,
             tool_type=tool_type,
         )
@@ -3849,6 +4019,8 @@ class AssistantToolCallDeltaData:
         result: dict = {}
         result["inputDelta"] = from_str(self.input_delta)
         result["toolCallId"] = from_str(self.tool_call_id)
+        if self.fusion is not None:
+            result["fusion"] = from_union([from_none, lambda x: to_class(FusionAttribution, x)], self.fusion)
         if self.tool_name is not None:
             result["toolName"] = from_union([from_none, from_str], self.tool_name)
         if self.tool_type is not None:
@@ -4025,9 +4197,13 @@ class AssistantUsageData:
     model: str
     accepted_prediction_tokens: int | None = None
     accounting: UsageAccountingIdentity | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
+    _after_resume: bool | None = None
     ai_credits_status: AiCreditsStatus | None = None
     api_call_id: str | None = None
     api_endpoint: AssistantUsageApiEndpoint | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
+    _attempt_index: int | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _available_tool_count: int | None = None
     byok_kind: str | None = None
@@ -4063,6 +4239,8 @@ class AssistantUsageData:
     inter_token_latency: timedelta | None = None
     is_auto: bool | None = None
     is_byok: bool | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
+    _logical_request_id: str | None = None
     max_output_tokens: int | None = None
     max_prompt_tokens: int | None = None
     model_display_name: str | None = None
@@ -4094,6 +4272,10 @@ class AssistantUsageData:
     request_body_encoding: ModelCallRequestBodyEncoding | None = None
     request_body_wire_bytes: int | None = None
     response_model: str | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
+    _resume_generation: str | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
+    _retry_index: int | None = None
     rte: bool | None = None
     service_request_id: str | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
@@ -4122,9 +4304,11 @@ class AssistantUsageData:
         model = from_str(obj.get("model"))
         accepted_prediction_tokens = from_union([from_none, from_int], obj.get("acceptedPredictionTokens"))
         accounting = from_union([from_none, UsageAccountingIdentity.from_dict], obj.get("accounting"))
+        _after_resume = from_union([from_none, from_bool], obj.get("afterResume"))
         ai_credits_status = from_union([from_none, lambda x: parse_enum(AiCreditsStatus, x)], obj.get("aiCreditsStatus"))
         api_call_id = from_union([from_none, from_str], obj.get("apiCallId"))
         api_endpoint = from_union([from_none, lambda x: parse_enum(AssistantUsageApiEndpoint, x)], obj.get("apiEndpoint"))
+        _attempt_index = from_union([from_none, from_int], obj.get("attemptIndex"))
         _available_tool_count = from_union([from_none, from_int], obj.get("availableToolCount"))
         byok_kind = from_union([from_none, from_str], obj.get("byokKind"))
         _cache_details_reported = from_union([from_none, from_bool], obj.get("cacheDetailsReported"))
@@ -4150,6 +4334,7 @@ class AssistantUsageData:
         inter_token_latency = from_union([from_none, from_timedelta], obj.get("interTokenLatencyMs"))
         is_auto = from_union([from_none, from_bool], obj.get("isAuto"))
         is_byok = from_union([from_none, from_bool], obj.get("isByok"))
+        _logical_request_id = from_union([from_none, from_str], obj.get("logicalRequestId"))
         max_output_tokens = from_union([from_none, from_int], obj.get("maxOutputTokens"))
         max_prompt_tokens = from_union([from_none, from_int], obj.get("maxPromptTokens"))
         model_display_name = from_union([from_none, from_str], obj.get("modelDisplayName"))
@@ -4175,6 +4360,8 @@ class AssistantUsageData:
         request_body_encoding = from_union([from_none, lambda x: parse_enum(ModelCallRequestBodyEncoding, x)], obj.get("requestBodyEncoding"))
         request_body_wire_bytes = from_union([from_none, from_int], obj.get("requestBodyWireBytes"))
         response_model = from_union([from_none, from_str], obj.get("responseModel"))
+        _resume_generation = from_union([from_none, from_str], obj.get("resumeGeneration"))
+        _retry_index = from_union([from_none, from_int], obj.get("retryIndex"))
         rte = from_union([from_none, from_bool], obj.get("rte"))
         service_request_id = from_union([from_none, from_str], obj.get("serviceRequestId"))
         _thinking_dropped_blocks = from_union([from_none, from_int], obj.get("thinkingDroppedBlocks"))
@@ -4195,9 +4382,11 @@ class AssistantUsageData:
             model=model,
             accepted_prediction_tokens=accepted_prediction_tokens,
             accounting=accounting,
+            _after_resume=_after_resume,
             ai_credits_status=ai_credits_status,
             api_call_id=api_call_id,
             api_endpoint=api_endpoint,
+            _attempt_index=_attempt_index,
             _available_tool_count=_available_tool_count,
             byok_kind=byok_kind,
             _cache_details_reported=_cache_details_reported,
@@ -4223,6 +4412,7 @@ class AssistantUsageData:
             inter_token_latency=inter_token_latency,
             is_auto=is_auto,
             is_byok=is_byok,
+            _logical_request_id=_logical_request_id,
             max_output_tokens=max_output_tokens,
             max_prompt_tokens=max_prompt_tokens,
             model_display_name=model_display_name,
@@ -4248,6 +4438,8 @@ class AssistantUsageData:
             request_body_encoding=request_body_encoding,
             request_body_wire_bytes=request_body_wire_bytes,
             response_model=response_model,
+            _resume_generation=_resume_generation,
+            _retry_index=_retry_index,
             rte=rte,
             service_request_id=service_request_id,
             _thinking_dropped_blocks=_thinking_dropped_blocks,
@@ -4273,12 +4465,16 @@ class AssistantUsageData:
             result["acceptedPredictionTokens"] = from_union([from_none, to_int], self.accepted_prediction_tokens)
         if self.accounting is not None:
             result["accounting"] = from_union([from_none, lambda x: to_class(UsageAccountingIdentity, x)], self.accounting)
+        if self._after_resume is not None:
+            result["afterResume"] = from_union([from_none, from_bool], self._after_resume)
         if self.ai_credits_status is not None:
             result["aiCreditsStatus"] = from_union([from_none, lambda x: to_enum(AiCreditsStatus, x)], self.ai_credits_status)
         if self.api_call_id is not None:
             result["apiCallId"] = from_union([from_none, from_str], self.api_call_id)
         if self.api_endpoint is not None:
             result["apiEndpoint"] = from_union([from_none, lambda x: to_enum(AssistantUsageApiEndpoint, x)], self.api_endpoint)
+        if self._attempt_index is not None:
+            result["attemptIndex"] = from_union([from_none, to_int], self._attempt_index)
         if self._available_tool_count is not None:
             result["availableToolCount"] = from_union([from_none, to_int], self._available_tool_count)
         if self.byok_kind is not None:
@@ -4329,6 +4525,8 @@ class AssistantUsageData:
             result["isAuto"] = from_union([from_none, from_bool], self.is_auto)
         if self.is_byok is not None:
             result["isByok"] = from_union([from_none, from_bool], self.is_byok)
+        if self._logical_request_id is not None:
+            result["logicalRequestId"] = from_union([from_none, from_str], self._logical_request_id)
         if self.max_output_tokens is not None:
             result["maxOutputTokens"] = from_union([from_none, to_int], self.max_output_tokens)
         if self.max_prompt_tokens is not None:
@@ -4379,6 +4577,10 @@ class AssistantUsageData:
             result["requestBodyWireBytes"] = from_union([from_none, to_int], self.request_body_wire_bytes)
         if self.response_model is not None:
             result["responseModel"] = from_union([from_none, from_str], self.response_model)
+        if self._resume_generation is not None:
+            result["resumeGeneration"] = from_union([from_none, from_str], self._resume_generation)
+        if self._retry_index is not None:
+            result["retryIndex"] = from_union([from_none, to_int], self._retry_index)
         if self.rte is not None:
             result["rte"] = from_union([from_none, from_bool], self.rte)
         if self.service_request_id is not None:
@@ -5518,6 +5720,10 @@ class _CompactionCompleteAttemptMetrics:
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _cancelled_request_count: int | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
+    _capacity_refresh_outcome: str | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
+    _capacity_source: str | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
     _deadline_limit: timedelta | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _deadline_overshoot: timedelta | None = None
@@ -5531,6 +5737,8 @@ class _CompactionCompleteAttemptMetrics:
     _failed_request_input_tokens_estimate: int | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _failure_operation: str | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
+    _inferred_context_limit_tokens: float | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _last_retry_after: timedelta | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
@@ -5557,6 +5765,8 @@ class _CompactionCompleteAttemptMetrics:
         _apply_delay = from_union([from_none, from_timedelta], obj.get("applyDelayMs"))
         _blocking_wait = from_union([from_none, from_timedelta], obj.get("blockingWaitMs"))
         _cancelled_request_count = from_union([from_none, from_int], obj.get("cancelledRequestCount"))
+        _capacity_refresh_outcome = from_union([from_none, from_str], obj.get("capacityRefreshOutcome"))
+        _capacity_source = from_union([from_none, from_str], obj.get("capacitySource"))
         _deadline_limit = from_union([from_none, from_timedelta], obj.get("deadlineLimitMs"))
         _deadline_overshoot = from_union([from_none, from_timedelta], obj.get("deadlineOvershootMs"))
         _deadline_policy = from_union([from_none, from_str], obj.get("deadlinePolicy"))
@@ -5564,6 +5774,7 @@ class _CompactionCompleteAttemptMetrics:
         _failed_request_count = from_union([from_none, from_int], obj.get("failedRequestCount"))
         _failed_request_input_tokens_estimate = from_union([from_none, from_int], obj.get("failedRequestInputTokensEstimate"))
         _failure_operation = from_union([from_none, from_str], obj.get("failureOperation"))
+        _inferred_context_limit_tokens = from_union([from_none, from_float], obj.get("inferredContextLimitTokens"))
         _last_retry_after = from_union([from_none, from_timedelta], obj.get("lastRetryAfterMs"))
         _max_output_tokens = from_union([from_none, from_float], obj.get("maxOutputTokens"))
         _requested_reasoning_effort = from_union([from_none, from_str], obj.get("requestedReasoningEffort"))
@@ -5578,6 +5789,8 @@ class _CompactionCompleteAttemptMetrics:
             _apply_delay=_apply_delay,
             _blocking_wait=_blocking_wait,
             _cancelled_request_count=_cancelled_request_count,
+            _capacity_refresh_outcome=_capacity_refresh_outcome,
+            _capacity_source=_capacity_source,
             _deadline_limit=_deadline_limit,
             _deadline_overshoot=_deadline_overshoot,
             _deadline_policy=_deadline_policy,
@@ -5585,6 +5798,7 @@ class _CompactionCompleteAttemptMetrics:
             _failed_request_count=_failed_request_count,
             _failed_request_input_tokens_estimate=_failed_request_input_tokens_estimate,
             _failure_operation=_failure_operation,
+            _inferred_context_limit_tokens=_inferred_context_limit_tokens,
             _last_retry_after=_last_retry_after,
             _max_output_tokens=_max_output_tokens,
             _requested_reasoning_effort=_requested_reasoning_effort,
@@ -5605,6 +5819,10 @@ class _CompactionCompleteAttemptMetrics:
             result["blockingWaitMs"] = from_union([from_none, to_timedelta_int], self._blocking_wait)
         if self._cancelled_request_count is not None:
             result["cancelledRequestCount"] = from_union([from_none, to_int], self._cancelled_request_count)
+        if self._capacity_refresh_outcome is not None:
+            result["capacityRefreshOutcome"] = from_union([from_none, from_str], self._capacity_refresh_outcome)
+        if self._capacity_source is not None:
+            result["capacitySource"] = from_union([from_none, from_str], self._capacity_source)
         if self._deadline_limit is not None:
             result["deadlineLimitMs"] = from_union([from_none, to_timedelta_int], self._deadline_limit)
         if self._deadline_overshoot is not None:
@@ -5619,6 +5837,8 @@ class _CompactionCompleteAttemptMetrics:
             result["failedRequestInputTokensEstimate"] = from_union([from_none, to_int], self._failed_request_input_tokens_estimate)
         if self._failure_operation is not None:
             result["failureOperation"] = from_union([from_none, from_str], self._failure_operation)
+        if self._inferred_context_limit_tokens is not None:
+            result["inferredContextLimitTokens"] = from_union([from_none, to_float], self._inferred_context_limit_tokens)
         if self._last_retry_after is not None:
             result["lastRetryAfterMs"] = from_union([from_none, to_timedelta_int], self._last_retry_after)
         if self._max_output_tokens is not None:
@@ -8389,7 +8609,7 @@ class PermissionDeniedByRules:
 
 @dataclass
 class PermissionDeniedInteractivelyByUser:
-    "Permission response variant denied in an interactive user prompt, with optional feedback and force-reject flag."
+    "Permission response variant for a rejection given in answer to a permission prompt, with optional feedback and force-reject flag. A person or an automated responder, such as the Assisted Permissions judge or a host policy, may have given it; the completion's `decisionSource` says which."
     kind: ClassVar[str] = "denied-interactively-by-user"
     feedback: str | None = None
     force_reject: bool | None = None
@@ -10621,6 +10841,7 @@ class SandboxDecisionData:
     allow_bypass: bool | None = None
     allow_local_network: bool | None = None
     allow_outbound: bool | None = None
+    allow_temp_storage: bool | None = None
     attestation: SandboxAttestation | None = None
     backend: SandboxBackend | None = None
     command: str | None = None
@@ -10634,6 +10855,7 @@ class SandboxDecisionData:
     gh_auth: bool | None = None
     git_auth: bool | None = None
     keychain_access: bool | None = None
+    managed_controls: list[SandboxManagedControl] | None = None
     permissive_source: SandboxPermissiveSource | None = None
     policy_source: SandboxPolicySource | None = None
     process_name: str | None = None
@@ -10655,6 +10877,7 @@ class SandboxDecisionData:
         allow_bypass = from_union([from_none, from_bool], obj.get("allowBypass"))
         allow_local_network = from_union([from_none, from_bool], obj.get("allowLocalNetwork"))
         allow_outbound = from_union([from_none, from_bool], obj.get("allowOutbound"))
+        allow_temp_storage = from_union([from_none, from_bool], obj.get("allowTempStorage"))
         attestation = from_union([from_none, lambda x: parse_enum(SandboxAttestation, x)], obj.get("attestation"))
         backend = from_union([from_none, lambda x: parse_enum(SandboxBackend, x)], obj.get("backend"))
         command = from_union([from_none, from_str], obj.get("command"))
@@ -10668,6 +10891,7 @@ class SandboxDecisionData:
         gh_auth = from_union([from_none, from_bool], obj.get("ghAuth"))
         git_auth = from_union([from_none, from_bool], obj.get("gitAuth"))
         keychain_access = from_union([from_none, from_bool], obj.get("keychainAccess"))
+        managed_controls = from_union([from_none, lambda x: from_list(lambda x: parse_enum(SandboxManagedControl, x), x)], obj.get("managedControls"))
         permissive_source = from_union([from_none, lambda x: parse_enum(SandboxPermissiveSource, x)], obj.get("permissiveSource"))
         policy_source = from_union([from_none, lambda x: parse_enum(SandboxPolicySource, x)], obj.get("policySource"))
         process_name = from_union([from_none, from_str], obj.get("processName"))
@@ -10686,6 +10910,7 @@ class SandboxDecisionData:
             allow_bypass=allow_bypass,
             allow_local_network=allow_local_network,
             allow_outbound=allow_outbound,
+            allow_temp_storage=allow_temp_storage,
             attestation=attestation,
             backend=backend,
             command=command,
@@ -10699,6 +10924,7 @@ class SandboxDecisionData:
             gh_auth=gh_auth,
             git_auth=git_auth,
             keychain_access=keychain_access,
+            managed_controls=managed_controls,
             permissive_source=permissive_source,
             policy_source=policy_source,
             process_name=process_name,
@@ -10724,6 +10950,8 @@ class SandboxDecisionData:
             result["allowLocalNetwork"] = from_union([from_none, from_bool], self.allow_local_network)
         if self.allow_outbound is not None:
             result["allowOutbound"] = from_union([from_none, from_bool], self.allow_outbound)
+        if self.allow_temp_storage is not None:
+            result["allowTempStorage"] = from_union([from_none, from_bool], self.allow_temp_storage)
         if self.attestation is not None:
             result["attestation"] = from_union([from_none, lambda x: to_enum(SandboxAttestation, x)], self.attestation)
         if self.backend is not None:
@@ -10750,6 +10978,8 @@ class SandboxDecisionData:
             result["gitAuth"] = from_union([from_none, from_bool], self.git_auth)
         if self.keychain_access is not None:
             result["keychainAccess"] = from_union([from_none, from_bool], self.keychain_access)
+        if self.managed_controls is not None:
+            result["managedControls"] = from_union([from_none, lambda x: from_list(lambda x: to_enum(SandboxManagedControl, x), x)], self.managed_controls)
         if self.permissive_source is not None:
             result["permissiveSource"] = from_union([from_none, lambda x: to_enum(SandboxPermissiveSource, x)], self.permissive_source)
         if self.policy_source is not None:
@@ -11154,6 +11384,10 @@ class SessionCompactionStartData:
     _execution: str | None = None
     model: str | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
+    _rejected_request_tokens: int | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
+    _rejection_kind: str | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
     _retained_input_messages: int | None = None
     switch_target_model: str | None = None
     system_tokens: int | None = None
@@ -11170,6 +11404,8 @@ class SessionCompactionStartData:
         current_tokens = from_union([from_none, from_int], obj.get("currentTokens"))
         _execution = from_union([from_none, from_str], obj.get("execution"))
         model = from_union([from_none, from_str], obj.get("model"))
+        _rejected_request_tokens = from_union([from_none, from_int], obj.get("rejectedRequestTokens"))
+        _rejection_kind = from_union([from_none, from_str], obj.get("rejectionKind"))
         _retained_input_messages = from_union([from_none, from_int], obj.get("retainedInputMessages"))
         switch_target_model = from_union([from_none, from_str], obj.get("switchTargetModel"))
         system_tokens = from_union([from_none, from_int], obj.get("systemTokens"))
@@ -11183,6 +11419,8 @@ class SessionCompactionStartData:
             current_tokens=current_tokens,
             _execution=_execution,
             model=model,
+            _rejected_request_tokens=_rejected_request_tokens,
+            _rejection_kind=_rejection_kind,
             _retained_input_messages=_retained_input_messages,
             switch_target_model=switch_target_model,
             system_tokens=system_tokens,
@@ -11204,6 +11442,10 @@ class SessionCompactionStartData:
             result["execution"] = from_union([from_none, from_str], self._execution)
         if self.model is not None:
             result["model"] = from_union([from_none, from_str], self.model)
+        if self._rejected_request_tokens is not None:
+            result["rejectedRequestTokens"] = from_union([from_none, to_int], self._rejected_request_tokens)
+        if self._rejection_kind is not None:
+            result["rejectionKind"] = from_union([from_none, from_str], self._rejection_kind)
         if self._retained_input_messages is not None:
             result["retainedInputMessages"] = from_union([from_none, to_int], self._retained_input_messages)
         if self.switch_target_model is not None:
@@ -11415,9 +11657,10 @@ class SessionCustomNotificationData:
 
 @dataclass
 class SessionErrorData:
-    "Session error details for timeline display. Request-correlated completion RPC failures carry the terminal error's same fields in their error data, with stack and completionEventId."
+    "Session error details for timeline display. Request-correlated completion RPC failures carry the terminal error's same fields in their error data, with stack and completionEventId. errorCode is an optional runtime or Copilot API classification, not a closed enum; clients must tolerate unknown values. CAPI HTTP 429 normalizes missing or unknown codes to rate_limited, while HTTP 402 forwards upstream codes or omits an absent code. Direct BYOK provider codes use the separate providerErrorCode field. A code alone does not define remediation or retry policy."
     error_type: str
     message: str
+    dlp_block: DlpBlockKind | None = None
     eligible_for_auto_switch: bool | None = None
     error_code: str | None = None
     originating_message_id: str | None = None
@@ -11429,6 +11672,7 @@ class SessionErrorData:
     service_request_id: str | None = None
     stack: str | None = None
     status_code: int | None = None
+    turn_id: str | None = None
     url: str | None = None
 
     @staticmethod
@@ -11436,6 +11680,7 @@ class SessionErrorData:
         assert isinstance(obj, dict)
         error_type = from_str(obj.get("errorType"))
         message = from_str(obj.get("message"))
+        dlp_block = from_union([from_none, lambda x: parse_enum(DlpBlockKind, x)], obj.get("dlpBlock"))
         eligible_for_auto_switch = from_union([from_none, from_bool], obj.get("eligibleForAutoSwitch"))
         error_code = from_union([from_none, from_str], obj.get("errorCode"))
         originating_message_id = from_union([from_none, from_str], obj.get("originatingMessageId"))
@@ -11447,10 +11692,12 @@ class SessionErrorData:
         service_request_id = from_union([from_none, from_str], obj.get("serviceRequestId"))
         stack = from_union([from_none, from_str], obj.get("stack"))
         status_code = from_union([from_none, from_int], obj.get("statusCode"))
+        turn_id = from_union([from_none, from_str], obj.get("turnId"))
         url = from_union([from_none, from_str], obj.get("url"))
         return SessionErrorData(
             error_type=error_type,
             message=message,
+            dlp_block=dlp_block,
             eligible_for_auto_switch=eligible_for_auto_switch,
             error_code=error_code,
             originating_message_id=originating_message_id,
@@ -11462,6 +11709,7 @@ class SessionErrorData:
             service_request_id=service_request_id,
             stack=stack,
             status_code=status_code,
+            turn_id=turn_id,
             url=url,
         )
 
@@ -11469,6 +11717,8 @@ class SessionErrorData:
         result: dict = {}
         result["errorType"] = from_str(self.error_type)
         result["message"] = from_str(self.message)
+        if self.dlp_block is not None:
+            result["dlpBlock"] = from_union([from_none, lambda x: to_enum(DlpBlockKind, x)], self.dlp_block)
         if self.eligible_for_auto_switch is not None:
             result["eligibleForAutoSwitch"] = from_union([from_none, from_bool], self.eligible_for_auto_switch)
         if self.error_code is not None:
@@ -11491,6 +11741,8 @@ class SessionErrorData:
             result["stack"] = from_union([from_none, from_str], self.stack)
         if self.status_code is not None:
             result["statusCode"] = from_union([from_none, to_int], self.status_code)
+        if self.turn_id is not None:
+            result["turnId"] = from_union([from_none, from_str], self.turn_id)
         if self.url is not None:
             result["url"] = from_union([from_none, from_str], self.url)
         return result
@@ -12316,6 +12568,8 @@ class SessionResumeData:
     reasoning_effort_model: str | None = None
     reasoning_summary: ReasoningSummary | None = None
     remote_steerable: bool | None = None
+    responses_reasoning_kept: bool | None = None
+    responses_reasoning_overridden: bool | None = None
     selected_model: str | None = None
     session_limits: SessionLimitsConfig | None = None
     session_was_active: bool | None = None
@@ -12341,6 +12595,8 @@ class SessionResumeData:
         reasoning_effort_model = from_union([from_none, from_str], obj.get("reasoningEffortModel"))
         reasoning_summary = from_union([from_none, lambda x: parse_enum(ReasoningSummary, x)], obj.get("reasoningSummary"))
         remote_steerable = from_union([from_none, from_bool], obj.get("remoteSteerable"))
+        responses_reasoning_kept = from_union([from_none, from_bool], obj.get("responsesReasoningKept"))
+        responses_reasoning_overridden = from_union([from_none, from_bool], obj.get("responsesReasoningOverridden"))
         selected_model = from_union([from_none, from_str], obj.get("selectedModel"))
         session_limits = from_union([from_none, SessionLimitsConfig.from_dict], obj.get("sessionLimits"))
         session_was_active = from_union([from_none, from_bool], obj.get("sessionWasActive"))
@@ -12363,6 +12619,8 @@ class SessionResumeData:
             reasoning_effort_model=reasoning_effort_model,
             reasoning_summary=reasoning_summary,
             remote_steerable=remote_steerable,
+            responses_reasoning_kept=responses_reasoning_kept,
+            responses_reasoning_overridden=responses_reasoning_overridden,
             selected_model=selected_model,
             session_limits=session_limits,
             session_was_active=session_was_active,
@@ -12403,6 +12661,10 @@ class SessionResumeData:
             result["reasoningSummary"] = from_union([from_none, lambda x: to_enum(ReasoningSummary, x)], self.reasoning_summary)
         if self.remote_steerable is not None:
             result["remoteSteerable"] = from_union([from_none, from_bool], self.remote_steerable)
+        if self.responses_reasoning_kept is not None:
+            result["responsesReasoningKept"] = from_union([from_none, from_bool], self.responses_reasoning_kept)
+        if self.responses_reasoning_overridden is not None:
+            result["responsesReasoningOverridden"] = from_union([from_none, from_bool], self.responses_reasoning_overridden)
         if self.selected_model is not None:
             result["selectedModel"] = from_union([from_none, from_str], self.selected_model)
         if self.session_limits is not None:
@@ -12411,6 +12673,49 @@ class SessionResumeData:
             result["sessionWasActive"] = from_union([from_none, from_bool], self.session_was_active)
         if self.verbosity is not None:
             result["verbosity"] = from_union([from_none, lambda x: to_enum(Verbosity, x)], self.verbosity)
+        return result
+
+
+@dataclass
+class SessionSandboxStateChangedData:
+    "Read-only sandbox state after a live session policy transition."
+    auto_approve_bypass: bool
+    config: Any
+    config_source: str
+    disabled_for_session: bool
+    incarnation: int
+    revision: int
+    session_override: bool | None
+
+    @staticmethod
+    def from_dict(obj: Any) -> "SessionSandboxStateChangedData":
+        assert isinstance(obj, dict)
+        auto_approve_bypass = from_bool(obj.get("autoApproveBypass"))
+        config = obj.get("config")
+        config_source = from_str(obj.get("configSource"))
+        disabled_for_session = from_bool(obj.get("disabledForSession"))
+        incarnation = from_int(obj.get("incarnation"))
+        revision = from_int(obj.get("revision"))
+        session_override = from_union([from_none, from_bool], obj.get("sessionOverride"))
+        return SessionSandboxStateChangedData(
+            auto_approve_bypass=auto_approve_bypass,
+            config=config,
+            config_source=config_source,
+            disabled_for_session=disabled_for_session,
+            incarnation=incarnation,
+            revision=revision,
+            session_override=session_override,
+        )
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["autoApproveBypass"] = from_bool(self.auto_approve_bypass)
+        result["config"] = self.config
+        result["configSource"] = from_str(self.config_source)
+        result["disabledForSession"] = from_bool(self.disabled_for_session)
+        result["incarnation"] = to_int(self.incarnation)
+        result["revision"] = to_int(self.revision)
+        result["sessionOverride"] = from_union([from_none, from_bool], self.session_override)
         return result
 
 
@@ -13659,6 +13964,7 @@ class SubagentCompletedData:
     explicit_model_matches_preference: bool | None = None
     explicit_model_override: str | None = None
     first_dispatched_model: str | None = None
+    interaction_id: str | None = None
     model: str | None = None
     model_override_reason: str | None = None
     model_selection_source: SubagentModelSelectionSource | None = None
@@ -13678,6 +13984,7 @@ class SubagentCompletedData:
         explicit_model_matches_preference = from_union([from_none, from_bool], obj.get("explicitModelMatchesPreference"))
         explicit_model_override = from_union([from_none, from_str], obj.get("explicitModelOverride"))
         first_dispatched_model = from_union([from_none, from_str], obj.get("firstDispatchedModel"))
+        interaction_id = from_union([from_none, from_str], obj.get("interactionId"))
         model = from_union([from_none, from_str], obj.get("model"))
         model_override_reason = from_union([from_none, from_str], obj.get("modelOverrideReason"))
         model_selection_source = from_union([from_none, lambda x: parse_enum(SubagentModelSelectionSource, x)], obj.get("modelSelectionSource"))
@@ -13694,6 +14001,7 @@ class SubagentCompletedData:
             explicit_model_matches_preference=explicit_model_matches_preference,
             explicit_model_override=explicit_model_override,
             first_dispatched_model=first_dispatched_model,
+            interaction_id=interaction_id,
             model=model,
             model_override_reason=model_override_reason,
             model_selection_source=model_selection_source,
@@ -13720,6 +14028,8 @@ class SubagentCompletedData:
             result["explicitModelOverride"] = from_union([from_none, from_str], self.explicit_model_override)
         if self.first_dispatched_model is not None:
             result["firstDispatchedModel"] = from_union([from_none, from_str], self.first_dispatched_model)
+        if self.interaction_id is not None:
+            result["interactionId"] = from_union([from_none, from_str], self.interaction_id)
         if self.model is not None:
             result["model"] = from_union([from_none, from_str], self.model)
         if self.model_override_reason is not None:
@@ -13791,6 +14101,7 @@ class SubagentFailedData:
     explicit_model_matches_preference: bool | None = None
     explicit_model_override: str | None = None
     first_dispatched_model: str | None = None
+    interaction_id: str | None = None
     model: str | None = None
     model_override_reason: str | None = None
     model_selection_source: SubagentModelSelectionSource | None = None
@@ -13810,6 +14121,7 @@ class SubagentFailedData:
         explicit_model_matches_preference = from_union([from_none, from_bool], obj.get("explicitModelMatchesPreference"))
         explicit_model_override = from_union([from_none, from_str], obj.get("explicitModelOverride"))
         first_dispatched_model = from_union([from_none, from_str], obj.get("firstDispatchedModel"))
+        interaction_id = from_union([from_none, from_str], obj.get("interactionId"))
         model = from_union([from_none, from_str], obj.get("model"))
         model_override_reason = from_union([from_none, from_str], obj.get("modelOverrideReason"))
         model_selection_source = from_union([from_none, lambda x: parse_enum(SubagentModelSelectionSource, x)], obj.get("modelSelectionSource"))
@@ -13826,6 +14138,7 @@ class SubagentFailedData:
             explicit_model_matches_preference=explicit_model_matches_preference,
             explicit_model_override=explicit_model_override,
             first_dispatched_model=first_dispatched_model,
+            interaction_id=interaction_id,
             model=model,
             model_override_reason=model_override_reason,
             model_selection_source=model_selection_source,
@@ -13851,6 +14164,8 @@ class SubagentFailedData:
             result["explicitModelOverride"] = from_union([from_none, from_str], self.explicit_model_override)
         if self.first_dispatched_model is not None:
             result["firstDispatchedModel"] = from_union([from_none, from_str], self.first_dispatched_model)
+        if self.interaction_id is not None:
+            result["interactionId"] = from_union([from_none, from_str], self.interaction_id)
         if self.model is not None:
             result["model"] = from_union([from_none, from_str], self.model)
         if self.model_override_reason is not None:
@@ -13900,6 +14215,7 @@ class SubagentStartedData:
     tool_call_id: str
     agent_type: str | None = None
     execution_mode: str | None = None
+    interaction_id: str | None = None
     model: str | None = None
     model_selection_source: SubagentModelSelectionSource | None = None
     parent_id: str | None = None
@@ -13916,6 +14232,7 @@ class SubagentStartedData:
         tool_call_id = from_str(obj.get("toolCallId"))
         agent_type = from_union([from_none, from_str], obj.get("agentType"))
         execution_mode = from_union([from_none, from_str], obj.get("executionMode"))
+        interaction_id = from_union([from_none, from_str], obj.get("interactionId"))
         model = from_union([from_none, from_str], obj.get("model"))
         model_selection_source = from_union([from_none, lambda x: parse_enum(SubagentModelSelectionSource, x)], obj.get("modelSelectionSource"))
         parent_id = from_union([from_none, from_str], obj.get("parentId"))
@@ -13929,6 +14246,7 @@ class SubagentStartedData:
             tool_call_id=tool_call_id,
             agent_type=agent_type,
             execution_mode=execution_mode,
+            interaction_id=interaction_id,
             model=model,
             model_selection_source=model_selection_source,
             parent_id=parent_id,
@@ -13947,6 +14265,8 @@ class SubagentStartedData:
             result["agentType"] = from_union([from_none, from_str], self.agent_type)
         if self.execution_mode is not None:
             result["executionMode"] = from_union([from_none, from_str], self.execution_mode)
+        if self.interaction_id is not None:
+            result["interactionId"] = from_union([from_none, from_str], self.interaction_id)
         if self.model is not None:
             result["model"] = from_union([from_none, from_str], self.model)
         if self.model_selection_source is not None:
@@ -14785,6 +15105,7 @@ class ToolExecutionCompleteResult:
     # Experimental: this field is part of an experimental API and may change or be removed.
     mcp_result_meta: dict[str, Any] | None = None
     structured_content: Any = None
+    tool_references: list[str] | None = None
     ui_resource: ToolExecutionCompleteUIResource | None = None
 
     @staticmethod
@@ -14798,6 +15119,7 @@ class ToolExecutionCompleteResult:
         mcp_meta = obj.get("mcpMeta")
         mcp_result_meta = from_union([from_none, lambda x: from_dict(lambda x: x, x)], obj.get("mcpResultMeta"))
         structured_content = obj.get("structuredContent")
+        tool_references = from_union([from_none, lambda x: from_list(from_str, x)], obj.get("toolReferences"))
         ui_resource = from_union([from_none, ToolExecutionCompleteUIResource.from_dict], obj.get("uiResource"))
         return ToolExecutionCompleteResult(
             content=content,
@@ -14808,6 +15130,7 @@ class ToolExecutionCompleteResult:
             mcp_meta=mcp_meta,
             mcp_result_meta=mcp_result_meta,
             structured_content=structured_content,
+            tool_references=tool_references,
             ui_resource=ui_resource,
         )
 
@@ -14828,6 +15151,8 @@ class ToolExecutionCompleteResult:
             result["mcpResultMeta"] = from_union([from_none, lambda x: from_dict(lambda x: x, x)], self.mcp_result_meta)
         if self.structured_content is not None:
             result["structuredContent"] = self.structured_content
+        if self.tool_references is not None:
+            result["toolReferences"] = from_union([from_none, lambda x: from_list(from_str, x)], self.tool_references)
         if self.ui_resource is not None:
             result["uiResource"] = from_union([from_none, lambda x: to_class(ToolExecutionCompleteUIResource, x)], self.ui_resource)
         return result
@@ -16679,6 +17004,19 @@ class PermissionRecommendation(Enum):
 
 
 # Experimental: this enum is part of an experimental API and may change or be removed.
+class SensitivityLabelOutcome(Enum):
+    "How the provider resolved the sensitivity label for one model request"
+    # The request inherited the sensitivity label carried in `label`.
+    INHERITED = "inherited"
+    # The request's sources carried no sensitivity labels.
+    NO_SOURCE_LABELS = "no_source_labels"
+    # The request's sources were labeled, but no label applies to the request.
+    NO_APPLICABLE_LABEL = "no_applicable_label"
+    # The provider could not determine the label; `failure` may describe why.
+    INDETERMINATE = "indeterminate"
+
+
+# Experimental: this enum is part of an experimental API and may change or be removed.
 class ToolExecutionCompleteFileEditKind(Enum):
     "Kind of file mutation committed by a built-in editing tool."
     # A file was created.
@@ -16943,6 +17281,14 @@ class ContextTier(Enum):
     DEFAULT = "default"
     # Extended context tier with a larger context window.
     LONG_CONTEXT = "long_context"
+
+
+class DlpBlockKind(Enum):
+    "Data loss prevention (DLP) block reported by the model provider's exact error code. Resending the same conversation is blocked again; rewind to the user.message whose messageId equals the error's originatingMessageId."
+    # The provider's DLP policy blocked the prompt (provider code `prompt_dlp_blocked`).
+    PROMPT_DLP_BLOCKED = "prompt_dlp_blocked"
+    # The provider blocked restricted content included inline in the request (provider code `inline_restricted`).
+    INLINE_RESTRICTED = "inline_restricted"
 
 
 class ElicitationCompletedAction(Enum):
@@ -17516,6 +17862,10 @@ class PermissionApprovalEvaluationReasonCode(Enum):
     SANDBOX_BYPASS = "sandbox-bypass"
     # An action field exceeded the judge input limit.
     ACTION_TOO_LONG = "action-too-long"
+    # The action would grant login or privilege to whoever holds a key, which always requires explicit approval.
+    CREDENTIAL_MINTING = "credential-minting"
+    # An automation started the turn, and the command would use a live credential from a credential store, which requires explicit approval.
+    CREDENTIAL_EXPOSURE = "credential-exposure"
     # The script path was not authorized for inspection.
     PATH_NOT_AUTHORIZED = "path-not-authorized"
     # A code source was excluded from review by content exclusion policy.
@@ -17997,6 +18347,14 @@ class SandboxEnforcementPoint(Enum):
     LSP = "lsp"
 
 
+class SandboxManagedControl(Enum):
+    "Sandbox control whose value the enterprise-managed policy decided"
+    # The managed policy forced the sandbox on.
+    ENABLED = "enabled"
+    # The managed policy forbade per-command sandbox bypass.
+    ALLOW_BYPASS = "allow_bypass"
+
+
 class SandboxOutcome(Enum):
     "Finite result of a sandbox decision. Each `SandboxDecisionData` variant uses a disjoint subset: `policy_resolved` is `resolved | degraded`, `spawn_completed` and `permissive_retry_completed` are `succeeded | failed`, `enforcement_state` is `engaged | inactive | failed`, `access_denied` is `denied`, `access_recorded` is `allowed`, and escalation decisions are `approved | declined`."
     # The sandbox policy resolved successfully. Describes configuration only and makes no claim that a backend engaged.
@@ -18343,7 +18701,7 @@ class WorkspaceFileChangedOperation(Enum):
     UPDATE = "update"
 
 
-SessionEventData = IdeConnectionChangedData | IdeSelectionChangedData | IdeAddFileReferenceData | IdeElicitationCompleteData | SessionJournalLinkData | SessionStartData | SessionResumeData | SessionRemoteSteerableChangedData | SessionErrorData | SessionIdleData | SessionAutopilotStoppedData | SessionTitleChangedData | SessionScheduleCreatedData | SessionScheduleCancelledData | SessionScheduleRearmedData | SessionAutopilotObjectiveChangedData | SessionInfoData | SessionIndexedSearchData | SessionWarningData | SessionModelChangeData | SessionModelDeselectedData | SessionAutoTierRecommendationData | SessionAutoTierSwitchFailedData | SessionModeChangedData | SessionModeNoticeDeliveredData | SessionSessionLimitsChangedData | SessionPermissionsChangedData | SessionPlanChangedData | SessionTodosChangedData | SessionWorkspaceFileChangedData | SessionHandoffData | SessionTruncationData | SessionSnapshotRewindData | SessionShutdownData | SessionUsageCheckpointData | SessionQuotaObservationData | SessionContextChangedData | SessionUsageInfoData | SessionContextClearedData | SessionCompactionStartData | SessionCompactionSummarizedData | SessionCompactionCompleteData | SessionTaskCompleteData | SessionCompletionReceiptData | SessionFusionRouteStartedData | SessionFusionRouteFailedData | SessionFusionResolvedData | SessionFusionCompletedData | SessionPermissionRecoveryData | UserMessageData | PendingMessagesModifiedData | AssistantTurnStartData | AssistantTurnRetryData | AgentInterruptedData | AssistantIntentData | AssistantFusionPhaseStartedData | AssistantFusionPhaseActivityData | AssistantFusionPhaseCompletedData | AssistantFusionPhaseFailedData | AssistantServerToolProgressData | AssistantReasoningData | AssistantReasoningDeltaData | AssistantToolCallDeltaData | AssistantStreamingDeltaData | AssistantMessageData | AssistantMessageStartData | AssistantMessageDeltaData | AssistantTurnEndData | AssistantIdleData | AssistantUsageData | PromptCacheBreakData | ModelCallFailureData | ModelCallFinalResultData | ModelCallFinishedData | ModelCallStartData | AbortData | ToolUserRequestedData | ToolExecutionStartData | ToolShellOutputData | ToolExecutionProgressData | ToolExecutionCompleteData | ToolSearchActivatedData | SkillInvokedData | SkillInvokedRefData | SkillContextDeliveredData | SkillContextDeliveredRefData | SandboxDecisionData | SubagentStartedData | SubagentConfiguredData | SubagentCompletedData | SubagentFailedData | SubagentSelectedData | SubagentDeselectedData | HookStartData | HookEndData | HookProgressData | SessionBinaryAssetData | SystemMessageData | InstructionUpdateData | SystemNotificationData | PermissionRequestedData | PermissionCompletedData | PermissionCarriedForwardData | PermissionMessageAuthorizationData | PermissionMessageAuthorizationReadData | PermissionMessageAuthorizationDegradedData | PermissionAssentDetectedData | PermissionContextualAuthorizationData | UserInputRequestedData | UserInputCompletedData | ElicitationRequestedData | ElicitationCompletedData | SamplingRequestedData | SamplingCompletedData | McpOauthRequiredData | McpOauthCompletedData | McpOauthRecoveryCompletedData | McpHeadersRefreshRequiredData | McpHeadersRefreshCompletedData | SessionCustomNotificationData | UiEphemeralQueryData | ExternalToolRequestedData | ExternalToolCompletedData | CommandQueuedData | CommandExecuteData | CommandCompletedData | AutoModeSwitchRequestedData | AutoModeSwitchCompletedData | AutoModeRecoveryConsentRequestedData | AutoModeRecoveryConsentCompletedData | AutoModeRecoveryOutcomeData | SessionLimitsExhaustedRequestedData | SessionLimitsExhaustedCompletedData | SessionAutoModeResolvedData | SessionManagedPluginProgressData | SessionManagedSettingsResolvedData | SessionManagedSettingsEnforcedData | CommandsChangedData | CapabilitiesChangedData | ExitPlanModeRequestedData | ExitPlanModeCompletedData | HumanResponseRecordedData | SessionToolsUpdatedData | SessionBackgroundTasksChangedData | WorkflowRunUpdatedData | WorkflowRunStartedData | WorkflowRunSettledData | SessionSkillsLoadedData | SessionCustomAgentsUpdatedData | SessionMcpServersLoadedData | SessionMcpServerStatusChangedData | SessionMcpServerToolsLoadedData | SessionMcpServerRemovedData | SessionMcpServerNeedsReconnectData | McpToolsListChangedData | McpResourcesListChangedData | McpPromptsListChangedData | SessionExtensionsLoadedData | SessionCanvasOpenedData | SessionCanvasRegistryChangedData | SessionCanvasClosedData | SessionCanvasUnavailableData | SessionCanvasRecordedData | SessionCanvasRemovedData | SessionExtensionsAttachmentsPushedData | McpAppToolCallCompleteData | RawSessionEventData | Data
+SessionEventData = SessionSandboxStateChangedData | IdeConnectionChangedData | IdeSelectionChangedData | IdeAddFileReferenceData | IdeElicitationCompleteData | SessionJournalLinkData | SessionStartData | SessionResumeData | SessionRemoteSteerableChangedData | SessionErrorData | SessionIdleData | SessionAutopilotStoppedData | SessionTitleChangedData | SessionScheduleCreatedData | SessionScheduleCancelledData | SessionScheduleRearmedData | SessionAutopilotObjectiveChangedData | SessionInfoData | SessionIndexedSearchData | SessionWarningData | SessionModelChangeData | SessionModelDeselectedData | SessionAutoTierRecommendationData | SessionAutoTierSwitchFailedData | SessionModeChangedData | SessionModeNoticeDeliveredData | SessionSessionLimitsChangedData | SessionPermissionsChangedData | SessionPlanChangedData | SessionTodosChangedData | SessionWorkspaceFileChangedData | SessionHandoffData | SessionTruncationData | SessionSnapshotRewindData | SessionShutdownData | SessionUsageCheckpointData | SessionQuotaObservationData | SessionSensitivityLabelObservationData | SessionContextChangedData | SessionUsageInfoData | SessionContextClearedData | SessionCompactionStartData | SessionCompactionSummarizedData | SessionCompactionCompleteData | SessionTaskCompleteData | SessionCompletionReceiptData | SessionFusionRouteStartedData | SessionFusionRouteFailedData | SessionFusionResolvedData | SessionFusionCompletedData | SessionPermissionRecoveryData | UserMessageData | PendingMessagesModifiedData | AssistantTurnStartData | AssistantTurnRetryData | AgentInterruptedData | AssistantIntentData | AssistantFusionPhaseStartedData | AssistantFusionPhaseActivityData | AssistantFusionPhaseCompletedData | AssistantFusionPhaseFailedData | AssistantServerToolProgressData | AssistantReasoningData | AssistantReasoningDeltaData | AssistantToolCallDeltaData | AssistantStreamingDeltaData | AssistantMessageData | AssistantMessageStartData | AssistantMessageDeltaData | AssistantTurnEndData | AssistantIdleData | AssistantUsageData | PromptCacheBreakData | ModelCallFailureData | ModelCallFinalResultData | ModelCallFinishedData | ModelCallStartData | AbortData | ToolUserRequestedData | ToolExecutionStartData | ToolShellOutputData | ToolExecutionProgressData | ToolExecutionCompleteData | ToolSearchActivatedData | SkillInvokedData | SkillInvokedRefData | SkillContextDeliveredData | SkillContextDeliveredRefData | SandboxDecisionData | SubagentStartedData | SubagentConfiguredData | SubagentCompletedData | SubagentFailedData | SubagentSelectedData | SubagentDeselectedData | HookStartData | HookEndData | HookProgressData | SessionBinaryAssetData | SystemMessageData | InstructionUpdateData | SystemNotificationData | PermissionRequestedData | PermissionCompletedData | PermissionCarriedForwardData | PermissionMessageAuthorizationData | PermissionMessageAuthorizationReadData | PermissionMessageAuthorizationDegradedData | PermissionAssentDetectedData | PermissionContextualAuthorizationData | UserInputRequestedData | UserInputCompletedData | ElicitationRequestedData | ElicitationCompletedData | SamplingRequestedData | SamplingCompletedData | McpOauthRequiredData | McpOauthCompletedData | McpOauthRecoveryCompletedData | McpHeadersRefreshRequiredData | McpHeadersRefreshCompletedData | SessionCustomNotificationData | UiEphemeralQueryData | ExternalToolRequestedData | ExternalToolCompletedData | CommandQueuedData | CommandExecuteData | CommandCompletedData | AutoModeSwitchRequestedData | AutoModeSwitchCompletedData | AutoModeRecoveryConsentRequestedData | AutoModeRecoveryConsentCompletedData | AutoModeRecoveryOutcomeData | SessionLimitsExhaustedRequestedData | SessionLimitsExhaustedCompletedData | SessionAutoModeResolvedData | SessionManagedPluginProgressData | SessionManagedSettingsResolvedData | SessionManagedSettingsEnforcedData | CommandsChangedData | CapabilitiesChangedData | ExitPlanModeRequestedData | ExitPlanModeCompletedData | HumanResponseRecordedData | SessionToolsUpdatedData | SessionBackgroundTasksChangedData | WorkflowRunUpdatedData | WorkflowRunStartedData | WorkflowRunSettledData | SessionSkillsLoadedData | SessionCustomAgentsUpdatedData | SessionMcpServersLoadedData | SessionMcpServerStatusChangedData | SessionMcpServerToolsLoadedData | SessionMcpServerRemovedData | SessionMcpServerNeedsReconnectData | McpToolsListChangedData | McpResourcesListChangedData | McpPromptsListChangedData | SessionExtensionsLoadedData | SessionCanvasOpenedData | SessionCanvasRegistryChangedData | SessionCanvasClosedData | SessionCanvasUnavailableData | SessionCanvasRecordedData | SessionCanvasRemovedData | SessionExtensionsAttachmentsPushedData | McpAppToolCallCompleteData | RawSessionEventData | Data
 
 
 @dataclass
@@ -18371,6 +18729,7 @@ class SessionEvent:
         timestamp = from_datetime(obj.get("timestamp"))
         data_obj = obj.get("data")
         match event_type:
+            case SessionEventType.SESSION_SANDBOX_STATE_CHANGED: data = SessionSandboxStateChangedData.from_dict(data_obj)
             case SessionEventType.IDE_CONNECTION_CHANGED: data = IdeConnectionChangedData.from_dict(data_obj)
             case SessionEventType.IDE_SELECTION_CHANGED: data = IdeSelectionChangedData.from_dict(data_obj)
             case SessionEventType.IDE_ADD_FILE_REFERENCE: data = IdeAddFileReferenceData.from_dict(data_obj)
@@ -18407,6 +18766,7 @@ class SessionEvent:
             case SessionEventType.SESSION_SHUTDOWN: data = SessionShutdownData.from_dict(data_obj)
             case SessionEventType.SESSION_USAGE_CHECKPOINT: data = SessionUsageCheckpointData.from_dict(data_obj)
             case SessionEventType.SESSION_QUOTA_OBSERVATION: data = SessionQuotaObservationData.from_dict(data_obj)
+            case SessionEventType.SESSION_SENSITIVITY_LABEL_OBSERVATION: data = SessionSensitivityLabelObservationData.from_dict(data_obj)
             case SessionEventType.SESSION_CONTEXT_CHANGED: data = SessionContextChangedData.from_dict(data_obj)
             case SessionEventType.SESSION_USAGE_INFO: data = SessionUsageInfoData.from_dict(data_obj)
             case SessionEventType.SESSION_CONTEXT_CLEARED: data = SessionContextClearedData.from_dict(data_obj)
@@ -18686,6 +19046,7 @@ __all__ = [
     "ContextTier",
     "CustomAgentsUpdatedAgent",
     "Data",
+    "DlpBlockKind",
     "ElicitationCompletedAction",
     "ElicitationCompletedData",
     "ElicitationRequestedData",
@@ -18916,12 +19277,16 @@ __all__ = [
     "SandboxDenialConfidence",
     "SandboxEnforcementPoint",
     "SandboxFilesystemPolicyDetails",
+    "SandboxManagedControl",
     "SandboxOutcome",
     "SandboxPermissiveSource",
     "SandboxPlatform",
     "SandboxPolicySource",
     "SandboxProxyMode",
     "ScheduleOrigin",
+    "SensitivityLabel",
+    "SensitivityLabelFailure",
+    "SensitivityLabelOutcome",
     "SessionAutoModeResolvedData",
     "SessionAutoTierRecommendationData",
     "SessionAutoTierSwitchFailedData",
@@ -18983,9 +19348,11 @@ __all__ = [
     "SessionQuotaObservationData",
     "SessionRemoteSteerableChangedData",
     "SessionResumeData",
+    "SessionSandboxStateChangedData",
     "SessionScheduleCancelledData",
     "SessionScheduleCreatedData",
     "SessionScheduleRearmedData",
+    "SessionSensitivityLabelObservationData",
     "SessionSessionLimitsChangedData",
     "SessionShutdownData",
     "SessionSkillsLoadedData",

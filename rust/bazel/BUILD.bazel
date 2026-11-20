@@ -10,8 +10,8 @@ crates_vendor(
                 [],
                 {
                     "aarch64-pc-windows-msvc": [
-                        "@windows_host_clang_cl//:all",
-                        "@windows_host_clang_cl//:clang_cl",
+                        "@windows_cpp_toolchain//:clang_files",
+                        "@windows_cpp_toolchain//:clang_cl",
                     ],
                 },
             ),
@@ -19,7 +19,7 @@ crates_vendor(
                 {"NUM_JOBS": "8"},
                 {
                     "aarch64-pc-windows-msvc": {
-                        "CC_aarch64_pc_windows_msvc": "$(execpath @windows_host_clang_cl//:clang_cl)",
+                        "CC_aarch64_pc_windows_msvc": "$(execpath @windows_cpp_toolchain//:clang_cl)",
                     },
                 },
             ),

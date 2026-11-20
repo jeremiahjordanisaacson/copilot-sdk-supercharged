@@ -409,33 +409,7 @@ func installAt(installDir string) (string, error) {
 		if !bytes.Equal(existingHash, config.CliHash) {
 			return "", fmt.Errorf("existing binary hash mismatch")
 		}
-		if err := installLicense(finalPath); err != nil {
-			return "", err
-		}
-		var installedRuntimePath string
-		if config.RuntimeExecutable != nil {
-			path, err := installRuntimePair(installDir)
-			if err != nil {
-				return "", err
-			}
-			installedRuntimePath = path
-		}
-		if config.RuntimeLib != nil {
-			libPath, err := installRuntimeLib(installDir)
-			if err != nil {
-				return "", err
-			}
-			runtimeLibPath = libPath
-		}
-		if err := installRuntimeAssets(installDir); err != nil {
-			return "", err
-		}
-		runtimePath = installedRuntimePath
-		releaseReaders()
-		return finalPath, nil
-	}
-
-	if err := installVerifiedFile(finalPath, config.Cli, config.CliHash, 0755, "CLI binary"); err != nil {
+	} else if err := installVerifiedFile(finalPath, config.Cli, config.CliHash, 0755, "CLI binary"); err != nil {
 		return "", err
 	}
 	if err := installLicense(finalPath); err != nil {
@@ -728,17 +702,6 @@ func installRuntimeLib(installDir string) (string, error) {
 		return "", fmt.Errorf("RuntimeLibHash must be a SHA-256 hash (%d bytes), got %d bytes", sha256.Size, len(config.RuntimeLibHash))
 	}
 	libPath := filepath.Join(installDir, naturalRuntimeLibName())
-
-	if _, err := os.Stat(libPath); err == nil {
-		existingHash, err := hashFile(libPath)
-		if err != nil {
-			return "", fmt.Errorf("hashing existing runtime library: %w", err)
-		}
-		if !bytes.Equal(existingHash, config.RuntimeLibHash) {
-			return "", fmt.Errorf("existing runtime library hash mismatch")
-		}
-		return libPath, nil
-	}
 
 	if err := installVerifiedFile(libPath, config.RuntimeLib, config.RuntimeLibHash, 0600, "runtime library"); err != nil {
 		return "", err

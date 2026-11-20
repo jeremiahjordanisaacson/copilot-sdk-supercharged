@@ -7,6 +7,12 @@ See [GitHub Releases](https://github.com/github/copilot-sdk/releases) for the fu
 
 ## [Unreleased]
 
+### Bugfix: Java session event handlers no longer block the connection reader
+
+Java session event handlers now run on the client's executor rather than the connection reader. Events remain ordered and serialized within each session, but handlers for different sessions on the same client can run concurrently. Synchronize shared callback state when needed.
+
+Completion of an ordinary RPC no longer guarantees that handlers have observed events received before its response. Wait for the relevant handler explicitly when event delivery matters. A handler can wait for an RPC response, but must not wait for a later event from its own session, including the event that completes `sendAndWait`.
+
 ### Feature: idempotent external tools
 
 External tool definitions accept an optional `idempotent` hint. Set it when repeating a call with the same arguments has no further effect, so the runtime can safely re-run a programmatic tool call whose outcome was lost to a crash. It does not affect permission checks.
@@ -52,6 +58,12 @@ if snapshot
         .await?;
 }
 ```
+
+### Fix: managed-policy refusal reason for permission mode
+
+When a managed policy refuses `/yolo` or `/allow-all`, the permission-mode result now carries `reason: "managed_policy"`, so hosts can show the real cause instead of a generic message. The field is optional and absent when the cause is unknown or the mode change succeeded.
+
+**Source break:** `PermissionsSetModeResult` and `SessionPermissionsSetModeResult` gain a field. Exhaustive Rust struct literals must add `reason: None` or use `..Default::default()`, and Rust destructuring patterns must add `..`. Go positional literals must add the field; keyed Go literals are unaffected. Java records are built with the builder and need no change.
 
 ## [v1.0.14](https://github.com/github/copilot-sdk/releases/tag/v1.0.14) (2026-09-16)
 

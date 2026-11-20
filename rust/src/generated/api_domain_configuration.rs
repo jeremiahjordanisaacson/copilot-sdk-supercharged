@@ -16,9 +16,9 @@ pub use session_events::{
     ManagedSettingsResolvedSource, McpOauthHttpResponse, McpOauthWWWAuthenticateParams,
     McpServerMetadata, McpServerSource, McpServerStatus, McpSkillOrigin, ModelChangeSource,
     ModelProviderKind, ModelProviderRef, OmittedBinaryOmittedReason, PermissionDecisionSource,
-    PermissionMode, PermissionPromptRequest, PermissionRule, PolicyHelperCapabilities,
-    PolicyHelperFailure, ProviderQuotaState, ReasoningSummary, RemediationAction,
-    SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskBlocker,
+    PermissionMode, PermissionPromptRequest, PermissionRule, PermissionSandboxPathGrant,
+    PolicyHelperCapabilities, PolicyHelperFailure, ProviderQuotaState, ReasoningSummary,
+    RemediationAction, SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskBlocker,
     TaskCompletionOutcome, UsageGetMetricsResult, UserToolSessionApproval, Verbosity,
 };
 
@@ -34,16 +34,15 @@ use crate::types::{RequestId, SessionEvent, SessionId};
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ConfigureSessionExtensionsParams {
     /// In-process ExtensionController delegate (CLI-only optimization). Marked internal: this field is excluded from the public SDK surface. The post-SDK extension surface exposes list/enable/disable/reload via dedicated RPCs served by the runtime.
     #[doc(hidden)]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) controller: Option<serde_json::Value>,
     /// Session to attach the extension controller delegate to.
     pub session_id: SessionId,
 }
+crate::record_serde::wire_record!(ConfigureSessionExtensionsParams { controller: "controller" if is_none, session_id: "sessionId" });
 
 /// The declared shape of one feature flag, independent of any caller population.
 ///
@@ -53,8 +52,7 @@ pub(crate) struct ConfigureSessionExtensionsParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct FeatureFlagMetadata {
     /// The population the flag is declared for before any environment or user-settings override is applied.
     #[doc(hidden)]
@@ -62,17 +60,15 @@ pub(crate) struct FeatureFlagMetadata {
     /// Whether the flag participates in the CAPI sanity suite.
     pub capi_sanity: bool,
     /// Text shown to a user choosing whether to turn the flag on in experimental mode. Absent when the flag is not user-facing.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub experimental_description: Option<String>,
     /// The online-experiment (ExP) flag this maps to, when the flag is assigned by an experiment rather than declared statically.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub exp_flag: Option<String>,
     /// Environment variable that overrides this flag's experiment assignment locally in the experiment service, not in `featureFlags.resolve`. Present exactly when `expFlag` is, and derived from it, so a caller reads a local override without reproducing the naming rule.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub exp_flag_env_var: Option<String>,
     /// The flag's name, matching the key it is listed under.
     pub name: String,
 }
+crate::record_serde::wire_record!(FeatureFlagMetadata { availability: "availability", capi_sanity: "capiSanity", experimental_description: "experimentalDescription" if is_none, exp_flag: "expFlag" if is_none, exp_flag_env_var: "expFlagEnvVar" if is_none, name: "name" });
 
 /// Evaluation inputs for the bound session's feature service, not authentication claims.
 ///
@@ -82,39 +78,29 @@ pub(crate) struct FeatureFlagMetadata {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct FeatureFlagServiceConfigureParams {
     /// Explicit assignment replacement or clear; omission retains current assignments.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub assignments: Option<FeatureFlagAssignmentsUpdate>,
     /// The retained user-settings snapshot.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<serde_json::Value>,
     /// Host environment snapshot; omit to use the live process environment.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<HashMap<String, String>>,
     /// Explicit experiment overrides, after delivered assignments.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub exp_flag_overrides: Option<HashMap<String, serde_json::Value>>,
     /// Installation first-launch time in Unix milliseconds, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub first_launch_at_millis: Option<f64>,
     /// Explicit static overrides, after environment and user settings.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub flag_overrides: Option<HashMap<String, bool>>,
     /// Constructor scalar seed; omission retains the existing constructor snapshot.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_session_flags: Option<HashMap<String, bool>>,
     /// Whether experimental features are enabled.
     pub is_experimental: bool,
     /// Static staff availability; this does not establish staff authentication.
     pub is_staff: bool,
     /// GitHub staff population, when the host recorded split populations.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_staff_github: Option<bool>,
     /// Microsoft staff population, when the host recorded split populations.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_staff_microsoft: Option<bool>,
     /// Static team availability; this does not select the authenticated account.
     pub is_team: bool,
@@ -123,6 +109,7 @@ pub struct FeatureFlagServiceConfigureParams {
     /// Whether online segmentation withholds audience populations.
     pub streamer_mode: bool,
 }
+crate::record_serde::wire_record!(FeatureFlagServiceConfigureParams { assignments: "assignments" if is_none, config: "config" if is_none, environment: "environment" if is_none, exp_flag_overrides: "expFlagOverrides" if is_none, first_launch_at_millis: "firstLaunchAtMillis" if is_none, flag_overrides: "flagOverrides" if is_none, initial_session_flags: "initialSessionFlags" if is_none, is_experimental: "isExperimental", is_staff: "isStaff", is_staff_github: "isStaffGithub" if is_none, is_staff_microsoft: "isStaffMicrosoft" if is_none, is_team: "isTeam", online: "online", streamer_mode: "streamerMode" });
 
 /// Optional evaluations and readiness barriers for one feature snapshot.
 ///
@@ -132,28 +119,22 @@ pub struct FeatureFlagServiceConfigureParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct FeatureFlagServiceReadParams {
     /// Wait for a different revision or service disposal using the existing change notification.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub after_revision: Option<i64>,
     /// Return only the redacted UI projection, without assignment data or requested evaluations.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub display_only: Option<bool>,
     /// Feature names evaluated with their canonical experiment mappings.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub flags: Option<Vec<String>>,
     /// Explicit experiment/static queries, in result order.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub overrides: Option<Vec<FeatureFlagExpOverrideQuery>>,
     /// Original display generation; a replaced service returns an unavailable projection.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub service_id: Option<String>,
     /// Wait for the current assignment. Omission does not wait.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_for_exp_response: Option<bool>,
 }
+crate::record_serde::wire_record!(FeatureFlagServiceReadParams { after_revision: "afterRevision" if is_none, display_only: "displayOnly" if is_none, flags: "flags" if is_none, overrides: "overrides" if is_none, service_id: "serviceId" if is_none, wait_for_exp_response: "waitForExpResponse" if is_none });
 
 /// One authoritative snapshot and the requested evaluations.
 ///
@@ -163,11 +144,9 @@ pub struct FeatureFlagServiceReadParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct FeatureFlagServiceReadResult {
     /// Redacted runtime decisions for UI presentation, present only for an available display read.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub display_state: Option<serde_json::Value>,
     /// Requested feature values. Unknown or unset values are absent.
     pub flags: HashMap<String, bool>,
@@ -176,6 +155,7 @@ pub struct FeatureFlagServiceReadResult {
     /// The state used by these evaluations.
     pub snapshot: FeatureFlagServiceSnapshot,
 }
+crate::record_serde::wire_record!(FeatureFlagServiceReadResult { display_state: "displayState" if is_none, flags: "flags", overrides: "overrides", snapshot: "snapshot" });
 
 /// Changes apply in field order: config, preference, assignments, secondary context.
 ///
@@ -185,22 +165,18 @@ pub struct FeatureFlagServiceReadResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct FeatureFlagServiceUpdateParams {
     /// Replace or clear delivered assignments.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub assignments: Option<FeatureFlagAssignmentsUpdate>,
     /// Patch the retained configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub config_patch: Option<FeatureFlagConfigPatch>,
     /// Apply or remove one preference.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled_override: Option<FeatureFlagEnabledOverride>,
     /// Retain a nonempty secondary context using the original whitespace rules.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_assignment_context: Option<String>,
 }
+crate::record_serde::wire_record!(FeatureFlagServiceUpdateParams { assignments: "assignments" if is_none, config_patch: "configPatch" if is_none, enabled_override: "enabledOverride" if is_none, secondary_assignment_context: "secondaryAssignmentContext" if is_none });
 
 /// Every feature flag this runtime declares, with the shape each one was declared with.
 ///
@@ -210,13 +186,13 @@ pub struct FeatureFlagServiceUpdateParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct FeatureFlagsMetadataResult {
     /// Declared feature flags keyed by flag name.
     #[doc(hidden)]
     pub(crate) flags: HashMap<String, FeatureFlagMetadata>,
 }
+crate::record_serde::wire_record!(FeatureFlagsMetadataResult { flags: "flags" });
 
 /// Caller population and overrides for static feature-flag resolution, independent of experiment assignments and active runtime state.
 ///
@@ -226,37 +202,30 @@ pub(crate) struct FeatureFlagsMetadataResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct FeatureFlagsResolveRequest {
     /// Resolve against this already-computed flag set rather than each flag's declared availability. Keyed by flag name.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub base_flags: Option<HashMap<String, bool>>,
     /// User settings to apply, including `enabledFeatureFlags`, legacy `feature_flags.enabled`, and supported convenience settings.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<serde_json::Value>,
     /// Environment for direct feature-flag overrides and `COPILOT_CLI_ENABLED_FEATURE_FLAGS`. Does not apply `COPILOT_EXP_*` experiment assignments. Defaults to this runtime process's own environment.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<HashMap<String, String>>,
     /// Flags forced to a value after every other layer, keyed by flag name.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub flag_overrides: Option<HashMap<String, bool>>,
     /// Whether the caller is in an experimental population.
     pub is_experimental: bool,
     /// Whether the caller is GitHub or Microsoft staff.
     pub is_staff: bool,
     /// GitHub-staff membership. Omit when it was never recorded: a legacy staff account then counts as both staff populations and keeps every staff feature.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_staff_github: Option<bool>,
     /// Microsoft-staff membership. Omitted the same way as `isStaffGitHub`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_staff_microsoft: Option<bool>,
     /// Whether the caller belongs to the team population used by feature availability.
     pub is_team: bool,
     /// Resolve repository team membership in the runtime instead of accepting a host classification.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
 }
+crate::record_serde::wire_record!(FeatureFlagsResolveRequest { base_flags: "baseFlags" if is_none, config: "config" if is_none, environment: "environment" if is_none, flag_overrides: "flagOverrides" if is_none, is_experimental: "isExperimental", is_staff: "isStaff", is_staff_github: "isStaffGithub" if is_none, is_staff_microsoft: "isStaffMicrosoft" if is_none, is_team: "isTeam", working_directory: "workingDirectory" if is_none });
 
 /// Caller population and startup inputs to resolve named online-experiment gates for. Carries no account: the runtime resolves the assignment for the authentication it already holds.
 ///
@@ -266,41 +235,31 @@ pub(crate) struct FeatureFlagsResolveRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct FeatureFlagsResolveStartupGatesRequest {
     /// Existing host owner authorized for this connection. Omit to use its bound owner.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_owner_id: Option<String>,
     /// User settings document whose `featureFlags` block is layered on top of the resolved set.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<serde_json::Value>,
     /// Environment to read flag overrides from. Defaults to this runtime process's own environment.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<HashMap<String, String>>,
     /// Explicit experiment overrides applied after cached assignments.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub exp_flag_overrides: Option<serde_json::Value>,
     /// When this installation first launched, in milliseconds since the Unix epoch. Experiments that segment on installation age read it. Omit when the first launch was never recorded.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub first_launch_at_millis: Option<f64>,
     /// Explicit static overrides applied after environment and configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub flag_overrides: Option<HashMap<String, bool>>,
     /// The feature flags to resolve. A name this runtime does not declare is reported as an error rather than as a disabled flag.
     pub flags: Vec<String>,
     /// Include isTeamRepository beside the requested gates. One launch can then share its fresh audience with static resolution. An empty flags list reads no authentication or experiment assignments.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub include_team_membership: Option<bool>,
     /// Whether the caller is in an experimental population.
     pub is_experimental: bool,
     /// Whether the caller is GitHub or Microsoft staff.
     pub is_staff: bool,
     /// GitHub-staff membership. Omit when it was never recorded: a legacy staff account then counts as both staff populations and keeps every staff feature.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_staff_github: Option<bool>,
     /// Microsoft-staff membership. Omitted the same way as `isStaffGitHub`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_staff_microsoft: Option<bool>,
     /// Whether the caller belongs to a team plan.
     pub is_team: bool,
@@ -309,9 +268,9 @@ pub(crate) struct FeatureFlagsResolveStartupGatesRequest {
     /// Whether streamer mode is on, which withholds the populations an experiment would otherwise segment on.
     pub streamer_mode: bool,
     /// Repository directory whose team membership the runtime resolves.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
 }
+crate::record_serde::wire_record!(FeatureFlagsResolveStartupGatesRequest { auth_owner_id: "authOwnerId" if is_none, config: "config" if is_none, environment: "environment" if is_none, exp_flag_overrides: "expFlagOverrides" if is_none, first_launch_at_millis: "firstLaunchAtMillis" if is_none, flag_overrides: "flagOverrides" if is_none, flags: "flags", include_team_membership: "includeTeamMembership" if is_none, is_experimental: "isExperimental", is_staff: "isStaff", is_staff_github: "isStaffGithub" if is_none, is_staff_microsoft: "isStaffMicrosoft" if is_none, is_team: "isTeam", refresh_without_session: "refreshWithoutSession", streamer_mode: "streamerMode", working_directory: "workingDirectory" if is_none });
 
 /// The verdict of the `forceLoginOrgs` enterprise sign-in pin for one credential. A managed device may pin Copilot to an approved set of GitHub organizations so a developer cannot sign in with a personal — or another enterprise's — account and escape every control that keys off the signed-in identity. A host must refuse to proceed when `allowed` is false; the remaining fields explain the refusal rather than qualifying it.
 ///
@@ -321,27 +280,24 @@ pub(crate) struct FeatureFlagsResolveStartupGatesRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ForceLoginOrgsDecision {
     /// Whether the client may proceed. True whenever no pin is in force, so an unmanaged host is never blocked.
     pub allowed: bool,
     /// A stable kebab-case reason code when refused: `org-not-approved`, `unverifiable-credential`, `policy-undetermined`, `policy-invalid`, `not-signed-in`, or `membership-unknown`. Omitted when allowed. Treat an unrecognized code as a refusal rather than mapping it to an allow: a code this host has not been taught about still denied the credential.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub denial: Option<String>,
     /// Whether a pin applies at all. Distinguishes "allowed because unmanaged" from "allowed because the account is approved", which a diagnostics surface needs and which also decides whether a bring-your-own-key provider may serve inference.
     pub enforced: bool,
     /// The approved organization the account matched, when allowed under a pin.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub matched_org: Option<String>,
     /// A developer-facing explanation of the refusal. Omitted when allowed.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     /// Error-level detail from managed-policy discovery — which file failed to load, which field failed validation. Carried on the decision rather than left to the log because a refusal can exit the process before a log sink exists, which would discard the only actionable diagnostic a misconfigured managed device produces.
     pub policy_diagnostics: Vec<String>,
     /// The approved organization logins, as configured. Enterprise configuration rather than user data, so it is safe to name in a message or a log line.
     pub required_orgs: Vec<String>,
 }
+crate::record_serde::wire_record!(ForceLoginOrgsDecision { allowed: "allowed", denial: "denial" if is_none, enforced: "enforced", matched_org: "matchedOrg" if is_none, message: "message" if is_none, policy_diagnostics: "policyDiagnostics", required_orgs: "requiredOrgs" });
 
 /// Organization support information for end users.
 ///
@@ -351,13 +307,12 @@ pub(crate) struct ForceLoginOrgsDecision {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedCommunicationSupport {
     /// Absolute http or https URL of an organization-maintained help page, for example one that names who administers Copilot. Clients may link to it wherever they would otherwise tell users to contact their administrator. Open it only in an external browser.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }
+crate::record_serde::wire_record!(ManagedCommunicationSupport { url: "url" if is_none });
 
 /// Organization-specific information that clients surface to end users. Informational only; the runtime does not enforce it.
 ///
@@ -367,13 +322,12 @@ pub struct ManagedCommunicationSupport {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedCommunicationSettings {
     /// Where end users find help for this organization's Copilot deployment.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub support: Option<ManagedCommunicationSupport>,
 }
+crate::record_serde::wire_record!(ManagedCommunicationSettings { support: "support" if is_none });
 
 ///
 /// <div class="warning">
@@ -382,14 +336,17 @@ pub struct ManagedCommunicationSettings {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedPermissionOperation {
     /// Operation to evaluate. Currently only url is supported.
     pub kind: ManagedPermissionOperationKind,
     /// Absolute HTTP(S) URL with a host. Invalid URLs reject the entire evaluation batch.
     pub url: String,
 }
+crate::record_serde::wire_record!(ManagedPermissionOperation {
+    kind: "kind",
+    url: "url"
+});
 
 ///
 /// <div class="warning">
@@ -398,14 +355,17 @@ pub struct ManagedPermissionOperation {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedPermissionEvaluation {
     /// Original input operation associated with this verdict.
     pub operation: ManagedPermissionOperation,
     /// Managed-policy decision only; never bypasses user permissions or other security controls.
     pub verdict: ManagedPermissionVerdict,
 }
+crate::record_serde::wire_record!(ManagedPermissionEvaluation {
+    operation: "operation",
+    verdict: "verdict"
+});
 
 /// Managed policy context and ordered operations for pure, sessionless evaluation.
 ///
@@ -415,14 +375,17 @@ pub struct ManagedPermissionEvaluation {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedPermissionsEvaluateRequest {
     /// Trusted, reusable managed permission policy snapshot; no policy is discovered during evaluation.
     pub context: ManagedPermissionsContext,
     /// Operations to evaluate, preserving input order and duplicates. An empty batch is valid.
     pub operations: Vec<ManagedPermissionOperation>,
 }
+crate::record_serde::wire_record!(ManagedPermissionsEvaluateRequest {
+    context: "context",
+    operations: "operations"
+});
 
 /// Ordered managed permission verdicts and the supplied policy's fail-closed posture.
 ///
@@ -432,14 +395,17 @@ pub struct ManagedPermissionsEvaluateRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedPermissionsEvaluateResult {
     /// Managed permission policy could not be determined; every operation is denied.
     pub fail_closed: bool,
     /// One verdict per input operation, in the same order, including duplicates.
     pub results: Vec<ManagedPermissionEvaluation>,
 }
+crate::record_serde::wire_record!(ManagedPermissionsEvaluateResult {
+    fail_closed: "failClosed",
+    results: "results"
+});
 
 /// Lock state and provenance of one managed setting.
 ///
@@ -449,17 +415,16 @@ pub struct ManagedPermissionsEvaluateResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingMeta {
     /// Whether users and repositories may choose a different value. `false` means policy locks the value.
     pub overridable: bool,
     /// Original managed value when the runtime adjusted it to a supported effective value. Omitted when no adjustment was needed.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub requested: Option<String>,
     /// Channel that supplied this scalar value, matching a `layers[].source`: `device`, `server`, or `policyHelper`. These scalar defaults select one winning channel, not a mixed source. Treat unknown values as additional channels; more may be added.
     pub source: String,
 }
+crate::record_serde::wire_record!(ManagedSettingMeta { overridable: "overridable", requested: "requested" if is_none, source: "source" });
 
 /// A user settings document and the effective managed policy whose controlled entries should be stamped onto it.
 ///
@@ -469,15 +434,14 @@ pub struct ManagedSettingMeta {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsApplyControlsParams {
     /// The effective managed policy, as composed by `managedSettings.resolveEffectiveValue`. Omit it on an unmanaged host: the settings then come back unchanged.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub managed: Option<serde_json::Value>,
     /// The user settings document to stamp. Entries the managed layer does not name are returned exactly as supplied.
     pub settings: serde_json::Value,
 }
+crate::record_serde::wire_record!(ManagedSettingsApplyControlsParams { managed: "managed" if is_none, settings: "settings" });
 
 /// The user settings with the managed layer's controlled entries stamped on.
 ///
@@ -487,12 +451,14 @@ pub(crate) struct ManagedSettingsApplyControlsParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsApplyControlsResult {
     /// The resulting settings document.
     pub settings_json: serde_json::Value,
 }
+crate::record_serde::wire_record!(ManagedSettingsApplyControlsResult {
+    settings_json: "settingsJson"
+});
 
 /// One candidate channel; absent settings represents a channel that delivered no document.
 ///
@@ -502,15 +468,14 @@ pub(crate) struct ManagedSettingsApplyControlsResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsComposeLayer {
     /// Candidate managed-settings document. Omit when the channel delivered none, as in resolve output.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
     /// The channel whose candidate document is being supplied.
     pub source: ManagedSettingsChannel,
 }
+crate::record_serde::wire_record!(ManagedSettingsComposeLayer { settings: "settings" if is_none, source: "source" });
 
 /// Candidate managed-settings documents to merge without applying them.
 ///
@@ -520,12 +485,12 @@ pub struct ManagedSettingsComposeLayer {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsComposeRequest {
     /// One entry per channel. `source` must be `device`, `server`, or `policyHelper`, each at most once (checked at runtime); order does not matter, because channel precedence is fixed. To preview documents from resolve output, map recognized source strings to ManagedSettingsChannel and copy their settings; generated resolve and compose layer types are distinct. Omitted settings means this channel delivered no document. Supplied documents must be valid within the preview limits; warnings are returned in diagnostics. Compose does not reproduce source-failure state or retained enforcement floors from resolve.
     pub layers: Vec<ManagedSettingsComposeLayer>,
 }
+crate::record_serde::wire_record!(ManagedSettingsComposeRequest { layers: "layers" });
 
 /// One validation finding for a managed-settings document.
 ///
@@ -535,8 +500,7 @@ pub struct ManagedSettingsComposeRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsDiagnostic {
     /// Human-readable description of the finding.
     pub message: String,
@@ -545,6 +509,11 @@ pub struct ManagedSettingsDiagnostic {
     /// Whether the finding rejects the document.
     pub severity: ManagedSettingsDiagnosticSeverity,
 }
+crate::record_serde::wire_record!(ManagedSettingsDiagnostic {
+    message: "message",
+    path: "path",
+    severity: "severity"
+});
 
 /// One managed-settings channel and the document it delivered.
 ///
@@ -554,15 +523,14 @@ pub struct ManagedSettingsDiagnostic {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsLayer {
     /// Validated managed-settings document this channel delivered. Absent when the channel delivered none.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
     /// Channel identifier: `device` (MDM, plist, registry, or managed file), `server` (account or organization policy), or `policyHelper` (session-local helper output, supported by compose). Treat unknown output values as additional channels; more may be added.
     pub source: String,
 }
+crate::record_serde::wire_record!(ManagedSettingsLayer { settings: "settings" if is_none, source: "source" });
 
 /// Per-key lock state and provenance for `ManagedSettingsValues`, with the same field names. Producers emit each typed key in values and meta together; both outer objects are omitted when no typed key is set.
 ///
@@ -572,28 +540,22 @@ pub struct ManagedSettingsLayer {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsMeta {
     /// Lock state and provenance of `values.autoTier`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_tier: Option<ManagedSettingMeta>,
     /// Provenance of `values.communication`. Always reported as not overridable: users cannot replace the organization's information.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub communication: Option<ManagedSettingMeta>,
     /// Lock state and provenance of `values.contextTier`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub context_tier: Option<ManagedSettingMeta>,
     /// Lock state and provenance of `values.effortLevel`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub effort_level: Option<ManagedSettingMeta>,
     /// Lock state and provenance of values.fusionTier, including a legacy alias's original source. An unmanaged value imposes no tier lock.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub fusion_tier: Option<ManagedSettingMeta>,
     /// Lock state and provenance of `values.model`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<ManagedSettingMeta>,
 }
+crate::record_serde::wire_record!(ManagedSettingsMeta { auto_tier: "autoTier" if is_none, communication: "communication" if is_none, context_tier: "contextTier" if is_none, effort_level: "effortLevel" if is_none, fusion_tier: "fusionTier" if is_none, model: "model" if is_none });
 
 /// Typed effective values of managed settings. Each field mirrors the managed-settings schema key of the same name; more keys are added as they are typed.
 ///
@@ -603,28 +565,22 @@ pub struct ManagedSettingsMeta {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsValues {
     /// Managed Auto routing preference, used when the selected model is `auto`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_tier: Option<AutoTier>,
     /// Organization-specific information for clients to surface to end users. Present when policy sets `communication.support.url`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub communication: Option<ManagedCommunicationSettings>,
     /// Managed context-tier default for the managed concrete model.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub context_tier: Option<ContextTier>,
     /// Managed reasoning-effort default for the managed concrete model. The runtime clamps it to an entitled effort when model availability is known.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub effort_level: Option<String>,
     /// Managed Fusion preference. Takes precedence over autoTier even when unmanaged, which means no managed tier and forbids legacy fallback. Legacy Auto values are mapped only when no managed source supplies fusionTier.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub fusion_tier: Option<ManagedFusionTier>,
     /// Managed default model identifier. When model availability was resolved, aliases and family names are projected to a concrete available model ID; otherwise the configured value is returned.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 }
+crate::record_serde::wire_record!(ManagedSettingsValues { auto_tier: "autoTier" if is_none, communication: "communication" if is_none, context_tier: "contextTier" if is_none, effort_level: "effortLevel" if is_none, fusion_tier: "fusionTier" if is_none, model: "model" if is_none });
 
 /// The effective managed settings the runtime would enforce for the given documents, in the same shape `managedSettings.resolve` returns.
 ///
@@ -634,81 +590,20 @@ pub struct ManagedSettingsValues {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsComposeResult {
     /// Warnings about ignored content, with paths prefixed by the channel name.
     pub diagnostics: Vec<ManagedSettingsDiagnostic>,
     /// Only the supplied channels, strongest first, with canonical documents. Empty canonical documents are represented as absent settings, as in live resolution.
     pub layers: Vec<ManagedSettingsLayer>,
     /// Per-key lock state and provenance for `values`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<ManagedSettingsMeta>,
     /// Effective managed settings, in the same shape as `session.managedSettings.get`.
     pub resolved: ManagedSettingsResolvedData,
     /// Typed effective values, as in `managedSettings.resolve`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub values: Option<ManagedSettingsValues>,
 }
-
-/// Inputs describing the host and account an ingestion should resolve managed policy for.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ManagedSettingsIngestParams {
-    /// The authenticated identity to resolve policy for. Omitted before sign-in, in which case no server layer is fetched.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auth_info: Option<serde_json::Value>,
-    /// Whether to ignore a cached server policy when reading, forcing the resolution to come from a live fetch.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bypass_cache_read: Option<bool>,
-    /// Name of the embedding client, reported to the managed-settings service as `client_id` so it can refuse to deliver a policy this client is too old to enforce. Omit it and the runtime reports a generic identity; the runtime version sent alongside is the gate that actually matters.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_name: Option<String>,
-    /// A device layer supplied by the host instead of discovered from the machine. Pair it with `hasDeviceResponse` so an explicit absence is distinguishable from an omitted override.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub device_response: Option<serde_json::Value>,
-    /// The host's environment variables, read for cache location and policy overrides. Supplied by the host rather than read from the runtime process so a command that selected its own configuration home is honored.
-    pub environment: serde_json::Value,
-    /// Whether `deviceResponse` is an override at all. True with a null `deviceResponse` asserts the device layer is empty; false discovers it from the machine.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub has_device_response: Option<bool>,
-    /// The host's home directory, used to resolve cache and managed-file locations.
-    pub home_directory: String,
-    /// The host's platform, in Node's `process.platform` spelling, used to locate platform-specific cache and policy paths.
-    pub platform: String,
-    /// Caller identity for a policy helper before session registration. Omit to keep the runtime default. This does not change clientName on managed-service requests.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub policy_helper_client_name: Option<String>,
-    /// Whether a configured platform policy helper may be run to produce an enforced helper layer.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub policy_helper_enabled: Option<bool>,
-    /// The policy-helper invocation reason. Defaults to sessionStart.
-    #[doc(hidden)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) policy_helper_reason: Option<ManagedSettingsPolicyHelperReason>,
-    /// Directory the policy helper runs in when this ingestion is not owned by a registered session. A host resolving policy before its session exists must pass this, or a directory-sensitive helper judges the wrong repository.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub policy_helper_working_directory: Option<String>,
-    /// Whether to run ingestion. Omit or set false to return an empty result without discovering or fetching policy.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub self_fetch: Option<bool>,
-    /// How this ingestion may use the on-disk server-policy cache. Defaults to the runtime's own policy when omitted.
-    #[doc(hidden)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) server_policy_cache_mode: Option<ManagedSettingsServerPolicyCacheMode>,
-    /// The session whose credential store and working directory the policy helper should use. Omit it when no session exists yet and the process-wide store applies.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<SessionId>,
-    /// User agent to send with the policy fetch.
-    pub user_agent: String,
-}
+crate::record_serde::wire_record!(ManagedSettingsComposeResult { diagnostics: "diagnostics", layers: "layers", meta: "meta" if is_none, resolved: "resolved", values: "values" if is_none });
 
 /// One diagnostic emitted while ingesting managed settings. Returned rather than logged by the runtime so the host decides where ingestion diagnostics go, which matters because an ingestion runs before a session exists to carry a log sink.
 ///
@@ -718,8 +613,7 @@ pub(crate) struct ManagedSettingsIngestParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsLogMessage {
     /// Severity of this diagnostic.
     #[doc(hidden)]
@@ -727,6 +621,10 @@ pub(crate) struct ManagedSettingsLogMessage {
     /// Human-readable diagnostic text.
     pub message: String,
 }
+crate::record_serde::wire_record!(ManagedSettingsLogMessage {
+    level: "level",
+    message: "message"
+});
 
 /// The managed policy layers an ingestion resolved, together with the per-layer outcome flags a host needs to decide how much to trust the result. The flags are reported rather than folded into the settings because a host must be able to distinguish an unmanaged device from a managed device whose policy could not be confirmed, and apply its fail-closed gates in the second case.
 ///
@@ -736,16 +634,13 @@ pub(crate) struct ManagedSettingsLogMessage {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsIngestResult {
     /// The device layer could not be read, so it is unconfirmed rather than known-absent.
     pub device_load_failed: bool,
     /// The device layer discovered from the machine, when one exists.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_response: Option<serde_json::Value>,
     /// The sandbox floor contributed by the device layer.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_sandbox_floor: Option<serde_json::Value>,
     /// Whether the device layer's sandbox intent could not be determined, so a consumer must not read its absence as permission to run unsandboxed.
     pub device_sandbox_undetermined: bool,
@@ -755,61 +650,118 @@ pub(crate) struct ManagedSettingsIngestResult {
     #[doc(hidden)]
     pub(crate) log_messages: Vec<ManagedSettingsLogMessage>,
     /// The effective managed permissions layer, when the resolved policy carries one.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub permissions: Option<serde_json::Value>,
     /// Which channel registered the policy helper that produced the helper layer.
     #[doc(hidden)]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) policy_helper_authority: Option<ManagedSettingsPolicyHelperAuthority>,
     /// A policy helper is configured for this host.
     pub policy_helper_configured: bool,
     /// The policy helper's failure must be treated as fail-closed rather than ignored.
     pub policy_helper_fail_closed: bool,
     /// Structured latest Policy Helper failure for this ingestion, when one occurred.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_helper_failure: Option<PolicyHelperFailure>,
     /// The policy helper was configured but could not be run or its output could not be read.
     pub policy_helper_load_failed: bool,
     /// The layer produced by the platform policy helper, when one ran.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_helper_response: Option<serde_json::Value>,
     /// A live fetch failed but a recent cached entry was served in its place, so `serverFetchFailed` stays false. Lets a consumer distinguish a clean fetch from a cache-backed fallback.
     pub server_cache_fallback: bool,
     /// Minimum client version requested by a successful response. Advisory only; the delivered policy remains active.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_client_update_requested: Option<String>,
     /// The server refused to deliver a policy because this client is too old to enforce it, carrying the user-facing sentence describing the refusal. No retry will help; the remedy is a client update. Gates that exist only because of managed policy should deny on this rather than falling back to their unmanaged default.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_client_update_required: Option<String>,
     /// The error that made the server fetch fail, when one did.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_fetch_error: Option<String>,
     /// The server fetch failed and no cached entry stood in for it, so the server layer is unconfirmed and fail-closed gates apply.
     pub server_fetch_failed: bool,
     /// The server fetch failed while a policy demanded a fresh confirmation, which is the strict posture an enterprise opted into rather than an ordinary transient failure.
     pub server_forced_refresh_failure: bool,
     /// The synthesized fail-closed permissions layer applied in place of a policy a refused client may not enforce.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_permissions_floor: Option<serde_json::Value>,
     /// How the server layer was resolved.
     #[doc(hidden)]
     pub(crate) server_resolution: ManagedSettingsServerPolicyResolution,
     /// The account's server-delivered policy, when one was resolved.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_response: Option<serde_json::Value>,
     /// The server fetch failed in a way a later retry could succeed at, as opposed to a refusal that no retry will change.
     pub server_retryable_failure: bool,
     /// The sandbox object from a cached server policy that a forced refresh declined to serve in full. Folded back into the effective sandbox layer so an outage during a forced refresh still synthesizes the fail-closed sandbox floor from the administrator's known intent.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_sandbox_floor: Option<serde_json::Value>,
     /// A server-managed policy is known to exist even though `serverResponse` is intentionally unset. Consumers should OR this with the presence of `serverResponse` when deciding whether the device is managed, so a fresh start during an outage still applies the fail-closed gates instead of treating the device as unmanaged.
     pub server_source_found: bool,
     /// No usable token was available, so no server fetch was attempted.
     pub server_token_unavailable: bool,
     /// The effective managed settings composed from every resolved layer. Omitted when no layer set anything, so an unmanaged host locks nothing.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(ManagedSettingsIngestResult { device_load_failed: "deviceLoadFailed", device_response: "deviceResponse" if is_none, device_sandbox_floor: "deviceSandboxFloor" if is_none, device_sandbox_undetermined: "deviceSandboxUndetermined", device_source_found: "deviceSourceFound", log_messages: "logMessages", permissions: "permissions" if is_none, policy_helper_authority: "policyHelperAuthority" if is_none, policy_helper_configured: "policyHelperConfigured", policy_helper_fail_closed: "policyHelperFailClosed", policy_helper_failure: "policyHelperFailure" if is_none, policy_helper_load_failed: "policyHelperLoadFailed", policy_helper_response: "policyHelperResponse" if is_none, server_cache_fallback: "serverCacheFallback", server_client_update_requested: "serverClientUpdateRequested" if is_none, server_client_update_required: "serverClientUpdateRequired" if is_none, server_fetch_error: "serverFetchError" if is_none, server_fetch_failed: "serverFetchFailed", server_forced_refresh_failure: "serverForcedRefreshFailure", server_permissions_floor: "serverPermissionsFloor" if is_none, server_resolution: "serverResolution", server_response: "serverResponse" if is_none, server_retryable_failure: "serverRetryableFailure", server_sandbox_floor: "serverSandboxFloor" if is_none, server_source_found: "serverSourceFound", server_token_unavailable: "serverTokenUnavailable", settings: "settings" if is_none });
+
+/// The resolved host policy and the separate outcome of retaining it. A read-only host may display the ingestion after a retention failure; mutation hosts must stop.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ManagedSettingsIngestAndRetainResult {
+    /// The complete policy ingestion, available even when retention failed.
+    #[doc(hidden)]
+    pub(crate) ingestion: ManagedSettingsIngestResult,
+    /// Why the runtime could not retain the policy. Omitted after successful retention. A host must not perform mutations when this field is present.
+    pub retention_error: Option<String>,
+}
+crate::record_serde::wire_record!(ManagedSettingsIngestAndRetainResult { ingestion: "ingestion", retention_error: "retentionError" if is_none });
+
+/// Inputs describing the host and account an ingestion should resolve managed policy for.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ManagedSettingsIngestParams {
+    /// The authenticated identity to resolve policy for. Omitted before sign-in, in which case no server layer is fetched.
+    pub auth_info: Option<serde_json::Value>,
+    /// The environment variable selected by the host for explicit-token authentication. Its value comes from this request's environment; session credentials keep their owner.
+    pub auth_token_env_var: Option<String>,
+    /// Whether to ignore a cached server policy when reading, forcing the resolution to come from a live fetch.
+    pub bypass_cache_read: Option<bool>,
+    /// Name of the embedding client, reported to the managed-settings service as `client_id` so it can refuse to deliver a policy this client is too old to enforce. Omit it and the runtime reports a generic identity; the runtime version sent alongside is the gate that actually matters.
+    pub client_name: Option<String>,
+    /// A device layer supplied by the host instead of discovered from the machine. Pair it with `hasDeviceResponse` so an explicit absence is distinguishable from an omitted override.
+    pub device_response: Option<serde_json::Value>,
+    /// The host's environment variables, read for cache location and policy overrides. Supplied by the host rather than read from the runtime process so a command that selected its own configuration home is honored.
+    pub environment: serde_json::Value,
+    /// Whether `deviceResponse` is an override at all. True with a null `deviceResponse` asserts the device layer is empty; false discovers it from the machine.
+    pub has_device_response: Option<bool>,
+    /// The host's home directory, used to resolve cache and managed-file locations.
+    pub home_directory: String,
+    /// The host's platform, in Node's `process.platform` spelling, used to locate platform-specific cache and policy paths.
+    pub platform: String,
+    /// Caller identity for a policy helper before session registration. Omit to keep the runtime default. This does not change clientName on managed-service requests.
+    pub policy_helper_client_name: Option<String>,
+    /// Whether a configured platform policy helper may be run to produce an enforced helper layer.
+    pub policy_helper_enabled: Option<bool>,
+    /// The policy-helper invocation reason. Defaults to sessionStart.
+    #[doc(hidden)]
+    pub(crate) policy_helper_reason: Option<ManagedSettingsPolicyHelperReason>,
+    /// Directory the policy helper runs in when this ingestion is not owned by a registered session. A host resolving policy before its session exists must pass this, or a directory-sensitive helper judges the wrong repository.
+    pub policy_helper_working_directory: Option<String>,
+    /// Whether to run ingestion. Omit or set false to return an empty result without discovering or fetching policy.
+    pub self_fetch: Option<bool>,
+    /// How this ingestion may use the on-disk server-policy cache. Defaults to the runtime's own policy when omitted.
+    #[doc(hidden)]
+    pub(crate) server_policy_cache_mode: Option<ManagedSettingsServerPolicyCacheMode>,
+    /// The session whose credential store and working directory the policy helper should use. Omit it when no session exists yet and the process-wide store applies.
+    pub session_id: Option<SessionId>,
+    /// User agent to send with the policy fetch.
+    pub user_agent: String,
+}
+crate::record_serde::wire_record!(ManagedSettingsIngestParams { auth_info: "authInfo" if is_none, auth_token_env_var: "authTokenEnvVar" if is_none, bypass_cache_read: "bypassCacheRead" if is_none, client_name: "clientName" if is_none, device_response: "deviceResponse" if is_none, environment: "environment", has_device_response: "hasDeviceResponse" if is_none, home_directory: "homeDirectory", platform: "platform", policy_helper_client_name: "policyHelperClientName" if is_none, policy_helper_enabled: "policyHelperEnabled" if is_none, policy_helper_reason: "policyHelperReason" if is_none, policy_helper_working_directory: "policyHelperWorkingDirectory" if is_none, self_fetch: "selfFetch" if is_none, server_policy_cache_mode: "serverPolicyCacheMode" if is_none, session_id: "sessionId" if is_none, user_agent: "userAgent" });
 
 /// Inputs describing the host and account whose managed remote-control policy should be resolved. Mirrors `managedSettings.ingest`, and deliberately carries no retention decision: reading this gate never becomes this runtime process's startup policy.
 ///
@@ -819,43 +771,37 @@ pub(crate) struct ManagedSettingsIngestResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsLoadRemoteControlParams {
     /// The authenticated identity to resolve policy for. Omitted before sign-in, in which case no server layer is fetched.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_info: Option<serde_json::Value>,
+    /// The environment variable selected by the host for explicit-token authentication. Its value comes from this request's environment; session credentials keep their owner.
+    pub auth_token_env_var: Option<String>,
     /// Name of the embedding client, reported to the managed-settings service as `client_id` so it can refuse to deliver a policy this client is too old to enforce. That refusal is exactly what turns into an explicit `disabled` below, so a host that omits this field forfeits the protection.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_name: Option<String>,
     /// A device layer supplied by the host instead of discovered from the machine. Pair it with `hasDeviceResponse` so an explicit absence is distinguishable from an omitted override.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_response: Option<serde_json::Value>,
     /// The host's environment variables, read for cache location and policy overrides.
     pub environment: serde_json::Value,
     /// Whether `deviceResponse` is an override at all. True with a null `deviceResponse` asserts the device layer is empty; false discovers it from the machine.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub has_device_response: Option<bool>,
     /// The host's home directory, used to resolve cache and managed-file locations.
     pub home_directory: String,
     /// The host's platform, in Node's `process.platform` spelling, used to locate platform-specific cache and policy paths.
     pub platform: String,
     /// Optional policy-helper caller identity. Does not change the managed-service clientName.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_helper_client_name: Option<String>,
     /// Whether a configured platform policy helper may be run to produce an enforced helper layer.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_helper_enabled: Option<bool>,
     /// The policy-helper invocation reason. Defaults to sessionStart.
     #[doc(hidden)]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) policy_helper_reason: Option<ManagedSettingsPolicyHelperReason>,
     /// Whether to run ingestion. Omit or set false to return an empty result without discovering or fetching policy.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub self_fetch: Option<bool>,
     /// User agent to send with the policy fetch.
     pub user_agent: String,
 }
+crate::record_serde::wire_record!(ManagedSettingsLoadRemoteControlParams { auth_info: "authInfo" if is_none, auth_token_env_var: "authTokenEnvVar" if is_none, client_name: "clientName" if is_none, device_response: "deviceResponse" if is_none, environment: "environment", has_device_response: "hasDeviceResponse" if is_none, home_directory: "homeDirectory", platform: "platform", policy_helper_client_name: "policyHelperClientName" if is_none, policy_helper_enabled: "policyHelperEnabled" if is_none, policy_helper_reason: "policyHelperReason" if is_none, self_fetch: "selfFetch" if is_none, user_agent: "userAgent" });
 
 /// The managed remote-control policy in force for an account, if any. An absent policy means the account is unmanaged for this capability, which a host reads as allowed — so absence here is a positive statement that no policy applies, never a stand-in for a resolution that failed. A resolution that cannot be completed is rejected instead.
 ///
@@ -865,13 +811,12 @@ pub(crate) struct ManagedSettingsLoadRemoteControlParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsLoadRemoteControlResult {
     /// The account's `remoteControl` policy document. Absent when no managed policy governs remote control for this account. Reported as an explicit disabled policy, rather than as absence, when the service refused to deliver a policy this client is too old to enforce.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_control: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(ManagedSettingsLoadRemoteControlResult { remote_control: "remoteControl" if is_none });
 
 /// The client-supplied managed settings to validate and normalize. Omitting them is valid and yields no policy.
 ///
@@ -881,13 +826,12 @@ pub(crate) struct ManagedSettingsLoadRemoteControlResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsParseClientValueParams {
     /// The managed settings a client is supplying for a session it is about to open. Omit them when the client is imposing no policy of its own.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(ManagedSettingsParseClientValueParams { settings: "settings" if is_none });
 
 /// The accepted managed settings, reduced to the keys a client is allowed to set.
 ///
@@ -897,13 +841,12 @@ pub(crate) struct ManagedSettingsParseClientValueParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsParseClientValueResult {
     /// The normalized settings. Omitted when the client supplied none. An accepted document that sets nothing comes back as an empty object, which is distinct from omission.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings_json: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(ManagedSettingsParseClientValueResult { settings_json: "settingsJson" if is_none });
 
 /// The device-managed settings layer, with the sandbox floor and the load outcome a host needs to compose it into an effective policy.
 ///
@@ -913,18 +856,16 @@ pub(crate) struct ManagedSettingsParseClientValueResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsReadDeviceResult {
     /// Whether discovery or validation failed. A host must treat this as "policy unknown" rather than "no policy": absent settings with this set false mean the device genuinely has none.
     pub load_failed: bool,
     /// Sandbox floor read from the discovered document before validation, so a document that is otherwise rejected can still raise the floor it declared.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub sandbox_floor: Option<serde_json::Value>,
     /// Validated, canonical device-managed settings. Omitted when no device policy was discovered, when the discovered document failed validation, or when it validated to an empty object — an empty document carries no policy, and reporting it as present would outrank layers that do.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(ManagedSettingsReadDeviceResult { load_failed: "loadFailed", sandbox_floor: "sandboxFloor" if is_none, settings: "settings" if is_none });
 
 /// Validated device-managed settings discovered before a session exists.
 ///
@@ -934,16 +875,14 @@ pub(crate) struct ManagedSettingsReadDeviceResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsReadResult {
     /// Discovery or validation error text when managed settings could not be read safely.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
     /// Validated, canonical managed-settings JSON. Omitted when no managed settings were discovered or when discovered settings failed validation.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings_json: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(ManagedSettingsReadResult { error_message: "errorMessage" if is_none, settings_json: "settingsJson" if is_none });
 
 /// The bypass-permissions state a host holds today, the account now signed in, and what the managed-policy resolution said.
 ///
@@ -953,22 +892,20 @@ pub struct ManagedSettingsReadResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsResolveBypassDisableTransitionParams {
     /// The account signed in now. A `managed` disable pinned to a different account is lifted.
     pub active_identity: String,
     /// The account a `managed` disable is pinned to. Omit it when the current source is not `managed`; it is ignored for the other sources.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub current_managed_identity: Option<String>,
     /// Which layer currently disables bypass mode. Omit it when nothing does.
     #[doc(hidden)]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) current_source: Option<ManagedSettingsBypassDisableSource>,
     /// What the resolution said about bypass mode. Send `unknown` rather than omitting the field when there is no verdict.
     #[doc(hidden)]
     pub(crate) policy: ManagedSettingsBypassPolicyResolution,
 }
+crate::record_serde::wire_record!(ManagedSettingsResolveBypassDisableTransitionParams { active_identity: "activeIdentity", current_managed_identity: "currentManagedIdentity" if is_none, current_source: "currentSource" if is_none, policy: "policy" });
 
 /// The bypass-permissions state a host should hold after the resolution, and what it must do to get there.
 ///
@@ -978,22 +915,19 @@ pub(crate) struct ManagedSettingsResolveBypassDisableTransitionParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsResolveBypassDisableTransitionResult {
     /// The account the returned `managed` source is pinned to. Store it alongside `source`; the next call needs it to decide whether an account switch lifts the disable.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub managed_identity: Option<String>,
     /// The value to store in the host's own bypass-disabled flag. Omitted means leave it exactly as it is, which is not the same as being told to store `false`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub set_disabled_state: Option<bool>,
     /// Which layer disables bypass mode after this resolution. Omitted when none does, which is what a lifted disable looks like.
     #[doc(hidden)]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) source: Option<ManagedSettingsBypassDisableSource>,
     /// Whether a bypass-permissions session already running must be turned off. True only when this resolution newly disables bypass mode, so a host that is already compliant is not interrupted.
     pub suppress_runtime_allow_all: bool,
 }
+crate::record_serde::wire_record!(ManagedSettingsResolveBypassDisableTransitionResult { managed_identity: "managedIdentity" if is_none, set_disabled_state: "setDisabledState" if is_none, source: "source" if is_none, suppress_runtime_allow_all: "suppressRuntimeAllowAll" });
 
 /// The credential and environment to evaluate the device-channel sign-in pin against.
 ///
@@ -1003,18 +937,16 @@ pub(crate) struct ManagedSettingsResolveBypassDisableTransitionResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsResolveDeviceForceLoginOrgsGateParams {
     /// The authenticated identity to judge. Omitted when signed out, which is the case the device channel exists to serve: it can refuse a first sign-in before any credential exists.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_info: Option<serde_json::Value>,
     /// The host's environment variables. Read for the variables that would make an identity's membership snapshot forgeable, so a credential whose provenance cannot be trusted is refused rather than accepted.
     pub environment: serde_json::Value,
     /// Resolve the current credential from this connection's original auth owner only when device policy enforces a pin. Refreshes membership and preserves credential-resolution diagnostics. Defaults to false, which evaluates authInfo as supplied. Cannot be combined with authInfo; requires an original auth-owner binding.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub resolve_current_auth: Option<bool>,
 }
+crate::record_serde::wire_record!(ManagedSettingsResolveDeviceForceLoginOrgsGateParams { auth_info: "authInfo" if is_none, environment: "environment", resolve_current_auth: "resolveCurrentAuth" if is_none });
 
 /// The managed-settings layers to compose into an effective policy. Every layer is optional; omitting all of them yields no effective policy.
 ///
@@ -1024,22 +956,18 @@ pub(crate) struct ManagedSettingsResolveDeviceForceLoginOrgsGateParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsResolveEffectiveValueParams {
     /// The device sandbox floor, folded into the device layer under `sandbox` before composition.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_sandbox_floor: Option<serde_json::Value>,
     /// The device layer: native MDM and managed-file settings describing the machine rather than the account.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub mdm: Option<serde_json::Value>,
     /// The policy-helper layer, an enforced channel sourced from a platform policy helper process.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_helper: Option<serde_json::Value>,
     /// The account's server-delivered org policy, as returned by a managed-settings fetch. Omitted before sign-in or when the fetch has not landed.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub server: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(ManagedSettingsResolveEffectiveValueParams { device_sandbox_floor: "deviceSandboxFloor" if is_none, mdm: "mdm" if is_none, policy_helper: "policyHelper" if is_none, server: "server" if is_none });
 
 /// The effective managed policy composed from the supplied layers.
 ///
@@ -1049,13 +977,12 @@ pub(crate) struct ManagedSettingsResolveEffectiveValueParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsResolveEffectiveValueResult {
     /// The composed effective managed settings. Omitted when no layer sets anything, so an unmanaged host locks nothing. Carries `sandboxAdvisoryFloorDeclined: true` when an advisory server force-on was dropped because this host cannot run the sandbox.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings_json: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(ManagedSettingsResolveEffectiveValueResult { settings_json: "settingsJson" if is_none });
 
 /// Optional opaque account selection or GitHub token whose managed settings are resolved.
 ///
@@ -1065,22 +992,18 @@ pub(crate) struct ManagedSettingsResolveEffectiveValueResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsResolveRequest {
     /// Embedding client identity for server policy requests, as in session creation. Omit for the CLI identity.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_name: Option<String>,
     /// GitHub token to resolve instead of the current account. The call fails when the token cannot be resolved.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub git_hub_token: Option<String>,
     /// Opaque account identifier returned by `account.getAllUsers`. When omitted, the current account is used, or device policy only when no account is signed in.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub selection_id: Option<String>,
     /// Working directory used to run an organization policy helper. When omitted, sessionless resolution does not run the helper.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
 }
+crate::record_serde::wire_record!(ManagedSettingsResolveRequest { client_name: "clientName" if is_none, git_hub_token: "gitHubToken" if is_none, selection_id: "selectionId" if is_none, working_directory: "workingDirectory" if is_none });
 
 /// Effective enterprise managed settings for an account, resolved without a session.
 ///
@@ -1090,28 +1013,24 @@ pub struct ManagedSettingsResolveRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsResolveResult {
     /// Printable opaque identity of the account the settings were resolved for, suitable for comparison and storage, not an account selectionId. Absent when no account was available, in which case only device policy is reported.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
     /// Warnings about unavailable policy sources or a failed refresh served from cache. A cached response is not proof of a successful live fetch; `resolved.failClosed` separately describes enforcement.
     pub diagnostics: Vec<ManagedSettingsDiagnostic>,
     /// Each managed-settings channel consulted, strongest first, with the validated document it delivered before merging. `resolved.settings` is the merged result. More channels may be added over time.
     pub layers: Vec<ManagedSettingsLayer>,
     /// Per-key lock state and provenance for the entries in `values`, using the same key names.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<ManagedSettingsMeta>,
     /// Reusable source-composed permission policy for managedSettings.permissions.evaluate. Unlike resolved.settings.permissions, this retains every source's allowlist and default-prompt semantics. Refresh through resolve when account/device policy changes. Absent on runtimes that do not support permission evaluation.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub permissions_context: Option<ManagedPermissionsContext>,
     /// Effective managed settings from the device and account (server) channels, in the same shape as `session.managedSettings.get`, excluding session-local injection.
     pub resolved: ManagedSettingsResolvedData,
     /// Typed effective values of managed settings, keyed like the managed-settings schema and already resolved across channels, with the `{ "overridable": ... }` wrapper removed. Present when policy sets at least one typed key. Keys not typed here are available in `resolved.settings`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub values: Option<ManagedSettingsValues>,
 }
+crate::record_serde::wire_record!(ManagedSettingsResolveResult { account: "account" if is_none, diagnostics: "diagnostics", layers: "layers", meta: "meta" if is_none, permissions_context: "permissionsContext" if is_none, resolved: "resolved", values: "values" if is_none });
 
 /// Inputs describing the host and account a startup policy resolution should run for. Mirrors `managedSettings.ingest`, and adds the decision of whether the resolved policy is retained for this runtime process.
 ///
@@ -1121,58 +1040,48 @@ pub struct ManagedSettingsResolveResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsResolveStartupPolicyParams {
     /// The authenticated identity to resolve policy for. Omitted before sign-in, in which case no server layer is fetched and the sign-in pin is evaluated against no credential.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_info: Option<serde_json::Value>,
+    /// The environment variable selected by the host for explicit-token authentication. Its value comes from this request's environment; session credentials keep their owner.
+    pub auth_token_env_var: Option<String>,
     /// Whether to ignore a cached server policy when reading, forcing the resolution to come from a live fetch.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub bypass_cache_read: Option<bool>,
     /// Name of the embedding client, reported to the managed-settings service as `client_id` so it can refuse to deliver a policy this client is too old to enforce.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_name: Option<String>,
     /// A device layer supplied by the host instead of discovered from the machine. Pair it with `hasDeviceResponse` so an explicit absence is distinguishable from an omitted override.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_response: Option<serde_json::Value>,
     /// The host's environment variables, read for cache location, policy overrides, and the variables that would make a membership snapshot forgeable.
     pub environment: serde_json::Value,
     /// Whether `deviceResponse` is an override at all. True with a null `deviceResponse` asserts the device layer is empty; false discovers it from the machine.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub has_device_response: Option<bool>,
     /// The host's home directory, used to resolve cache and managed-file locations.
     pub home_directory: String,
     /// The host's platform, in Node's `process.platform` spelling, used to locate platform-specific cache and policy paths.
     pub platform: String,
     /// Caller identity for a policy helper before session registration. Omit to keep the runtime default. This does not change clientName on managed-service requests.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_helper_client_name: Option<String>,
     /// Whether a configured platform policy helper may be run to produce an enforced helper layer.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_helper_enabled: Option<bool>,
     /// The policy-helper invocation reason. Defaults to sessionStart.
     #[doc(hidden)]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) policy_helper_reason: Option<ManagedSettingsPolicyHelperReason>,
     /// Directory the policy helper runs in when this resolution is not owned by a registered session. A host resolving policy before its session exists must pass this, or a directory-sensitive helper judges the wrong repository.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_helper_working_directory: Option<String>,
     /// Whether to retain the resolved policy as this runtime process's startup policy, so later work in the process enforces it. Set false to resolve without side effects, which is what a protocol host wants before session creation: its sessions apply the complete policy through the normal lifecycle, and retaining here would let a readiness credential affect unrelated sessions. The returned verdict is identical either way — this decides only whether the process keeps it.
     pub retain_and_apply: bool,
     /// Whether to run ingestion. Omit or set false to return an empty result without discovering or fetching policy.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub self_fetch: Option<bool>,
     /// How this resolution may use the on-disk server-policy cache. Defaults to the runtime's own policy when omitted. Rejected when combined with `bypassCacheRead`, because the two express the same decision and accepting both would leave the caller unsure which one the runtime honored.
     #[doc(hidden)]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) server_policy_cache_mode: Option<ManagedSettingsServerPolicyCacheMode>,
     /// The session whose credential store, working directory and client kind the resolution should use. Omit it when no session exists yet and the process-wide store applies. A resolution whose session names a credential other than `authInfo` is returned but not retained, so a stale sign-in cannot apply policy for an account that has already been switched away from.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
     /// User agent to send with the policy fetch.
     pub user_agent: String,
 }
+crate::record_serde::wire_record!(ManagedSettingsResolveStartupPolicyParams { auth_info: "authInfo" if is_none, auth_token_env_var: "authTokenEnvVar" if is_none, bypass_cache_read: "bypassCacheRead" if is_none, client_name: "clientName" if is_none, device_response: "deviceResponse" if is_none, environment: "environment", has_device_response: "hasDeviceResponse" if is_none, home_directory: "homeDirectory", platform: "platform", policy_helper_client_name: "policyHelperClientName" if is_none, policy_helper_enabled: "policyHelperEnabled" if is_none, policy_helper_reason: "policyHelperReason" if is_none, policy_helper_working_directory: "policyHelperWorkingDirectory" if is_none, retain_and_apply: "retainAndApply", self_fetch: "selfFetch" if is_none, server_policy_cache_mode: "serverPolicyCacheMode" if is_none, session_id: "sessionId" if is_none, user_agent: "userAgent" });
 
 /// The startup policy a resolution composed, the per-layer outcome flags a host needs to decide how much to trust it, and the enterprise sign-in verdict for the credential it ran against. The flags are reported rather than folded into the settings because a host must distinguish an unmanaged device from a managed device whose policy could not be confirmed, and apply its fail-closed gates in the second case.
 ///
@@ -1182,22 +1091,17 @@ pub(crate) struct ManagedSettingsResolveStartupPolicyParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsResolveStartupPolicyResult {
     /// Advisory minimum client version from a successful server response.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_update_requested: Option<String>,
     /// The server refused to deliver a policy because this client is too old to enforce it, carrying the user-facing sentence describing the refusal. No retry will help; the remedy is a client update.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_update_required: Option<String>,
     /// The device layer could not be read, so it is unconfirmed rather than known-absent.
     pub device_load_failed: bool,
     /// The device layer discovered from the machine, when one exists.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_response: Option<serde_json::Value>,
     /// The sandbox floor contributed by the device layer.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_sandbox_floor: Option<serde_json::Value>,
     /// The enterprise sign-in verdict for the credential this resolution ran against, evaluated over the effective policy so a server-delivered pin is honored alongside a device one. Computed on every resolution, including one that was not retained, so a host that declines to apply policy still cannot proceed past a pin.
     #[doc(hidden)]
@@ -1207,19 +1111,16 @@ pub(crate) struct ManagedSettingsResolveStartupPolicyResult {
     /// The permissions layer specifically could not be confirmed, so permission gates apply their fail-closed posture.
     pub permission_policy_undetermined: bool,
     /// Structured latest Policy Helper failure for this startup resolution, when one occurred.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_helper_failure: Option<PolicyHelperFailure>,
     /// The policy helper was configured but could not be run, or its output could not be read.
     pub policy_helper_load_failed: bool,
     /// The layer produced by the platform policy helper, when one ran.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_helper_response: Option<serde_json::Value>,
     /// Some layer of the policy could not be confirmed, so its absence must not be read as permission. Folds in a failed server fetch as well as an unreadable device layer.
     pub policy_undetermined: bool,
     /// The sandbox was enabled because policy could not be confirmed rather than because an administrator asked for it. Lets a host explain a sandbox the user did not configure.
     pub sandbox_enabled_by_undetermined_policy: bool,
     /// The effective sandbox floor composed across every layer, which a host must apply rather than its own default.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub sandbox_floor: Option<serde_json::Value>,
     /// The server fetch failed and no cached entry stood in for it, so the server layer is unconfirmed and fail-closed gates apply.
     pub server_fetch_failed: bool,
@@ -1227,13 +1128,13 @@ pub(crate) struct ManagedSettingsResolveStartupPolicyResult {
     #[doc(hidden)]
     pub(crate) server_resolution: ManagedSettingsServerPolicyResolution,
     /// The account's server-delivered policy, when one was resolved.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_response: Option<serde_json::Value>,
     /// Telemetry describing which layers answered and how, for the host to report alongside its own startup events.
     pub telemetry: serde_json::Value,
     /// Warnings raised while resolving, in the order they occurred.
     pub warnings: Vec<String>,
 }
+crate::record_serde::wire_record!(ManagedSettingsResolveStartupPolicyResult { client_update_requested: "clientUpdateRequested" if is_none, client_update_required: "clientUpdateRequired" if is_none, device_load_failed: "deviceLoadFailed", device_response: "deviceResponse" if is_none, device_sandbox_floor: "deviceSandboxFloor" if is_none, force_login_orgs: "forceLoginOrgs", managed_policy_present: "managedPolicyPresent", permission_policy_undetermined: "permissionPolicyUndetermined", policy_helper_failure: "policyHelperFailure" if is_none, policy_helper_load_failed: "policyHelperLoadFailed", policy_helper_response: "policyHelperResponse" if is_none, policy_undetermined: "policyUndetermined", sandbox_enabled_by_undetermined_policy: "sandboxEnabledByUndeterminedPolicy", sandbox_floor: "sandboxFloor" if is_none, server_fetch_failed: "serverFetchFailed", server_resolution: "serverResolution", server_response: "serverResponse" if is_none, telemetry: "telemetry", warnings: "warnings" });
 
 /// The managed layers to retain as this process's startup policy, with the outcome of fetching each one.
 ///
@@ -1243,16 +1144,13 @@ pub(crate) struct ManagedSettingsResolveStartupPolicyResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsRetainPolicyParams {
     /// Whether the device load failed. Report it honestly, for the same reason as `serverFetchFailed`.
     pub device_load_failed: bool,
     /// The device/MDM policy layer.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_response: Option<serde_json::Value>,
     /// Sandbox floor declared by the device layer, carried separately so a document that failed validation can still raise the floor.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_sandbox_floor: Option<serde_json::Value>,
     /// Whether the device sandbox intent is unreadable independently of its other settings.
     pub device_sandbox_undetermined: bool,
@@ -1263,7 +1161,6 @@ pub(crate) struct ManagedSettingsRetainPolicyParams {
     /// Whether permission policy is undetermined. Sandbox-only uncertainty does not imply this flag.
     pub permission_policy_undetermined: bool,
     /// The policy helper's response: the third managed layer that a process owning its startup policy resolves. It is retained with the other two so that every ambient read in this process, including the mutation guards and the governed marketplace allowlist that the `plugins.*` handlers derive, sees the whole policy the process fetched. A session-owning process omits it, because it resolves a helper per session against that session's working directory.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_helper_response: Option<serde_json::Value>,
     /// Preserve the retained server layer during a device-only resolution.
     pub preserve_server_state: bool,
@@ -1276,14 +1173,13 @@ pub(crate) struct ManagedSettingsRetainPolicyParams {
     /// Whether a required fresh server-policy confirmation failed.
     pub server_forced_refresh_failure: bool,
     /// The resolved server policy. A known source can lack a response after a forced-refresh failure.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_response: Option<serde_json::Value>,
     /// Whether the server policy source exists, even when its response is unavailable.
     pub server_source_found: bool,
     /// Shared server/device sandbox floor, excluding session-local helper policy.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub shared_sandbox_floor: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(ManagedSettingsRetainPolicyParams { device_load_failed: "deviceLoadFailed", device_response: "deviceResponse" if is_none, device_sandbox_floor: "deviceSandboxFloor" if is_none, device_sandbox_undetermined: "deviceSandboxUndetermined", device_source_found: "deviceSourceFound", managed_policy_present: "managedPolicyPresent", permission_policy_undetermined: "permissionPolicyUndetermined", policy_helper_response: "policyHelperResponse" if is_none, preserve_server_state: "preserveServerState", sandbox_enabled_by_undetermined_policy: "sandboxEnabledByUndeterminedPolicy", sandbox_floor_undetermined: "sandboxFloorUndetermined", server_fetch_failed: "serverFetchFailed", server_forced_refresh_failure: "serverForcedRefreshFailure", server_response: "serverResponse" if is_none, server_source_found: "serverSourceFound", shared_sandbox_floor: "sharedSandboxFloor" if is_none });
 
 /// The authoring JSON schema for managed settings recognized by this runtime.
 ///
@@ -1293,14 +1189,17 @@ pub(crate) struct ManagedSettingsRetainPolicyParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsSchemaResult {
     /// Version of the runtime that owns this schema.
     pub runtime_version: String,
     /// JSON schema (draft 2020-12) with descriptive shared `x-composition` annotations, not a complete runtime composition contract. Model, effortLevel, and contextTier remain coupled; use `managedSettings.compose` for the runtime's effective result.
     pub schema: serde_json::Value,
 }
+crate::record_serde::wire_record!(ManagedSettingsSchemaResult {
+    runtime_version: "runtimeVersion",
+    schema: "schema"
+});
 
 /// A candidate managed-settings document to validate without applying it.
 ///
@@ -1310,15 +1209,14 @@ pub struct ManagedSettingsSchemaResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsValidateRequest {
     /// The document to validate: a JSON object, or a string containing the document's JSON text. Preview documents are limited to 1 MiB and 64 levels of nesting, a stricter resource limit than delivered-policy parsing; violations are returned as diagnostics.
     pub content: serde_json::Value,
     /// Channel the document is meant for (`device`, `server`, or `policyHelper`). Some keys are only honored in some channels; for example, a `policyHelper` registration is ignored in policy-helper output. When omitted, no channel-specific checks run.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub layer: Option<String>,
 }
+crate::record_serde::wire_record!(ManagedSettingsValidateRequest { content: "content", layer: "layer" if is_none });
 
 /// Result of validating a managed-settings document.
 ///
@@ -1328,17 +1226,16 @@ pub struct ManagedSettingsValidateRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsValidateResult {
     /// Errors that reject the document and warnings about content the runtime ignores.
     pub diagnostics: Vec<ManagedSettingsDiagnostic>,
     /// Canonical form of the document the runtime would apply, with unrecognized keys removed. Absent when the document is invalid.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
     /// Whether the runtime would accept the document within the preview resource limits. Always equals whether `settings` is present. An invalid document is rejected as a whole.
     pub valid: bool,
 }
+crate::record_serde::wire_record!(ManagedSettingsValidateResult { diagnostics: "diagnostics", settings: "settings" if is_none, valid: "valid" });
 
 /// Result of a user-requested shell command.
 ///
@@ -1348,14 +1245,11 @@ pub struct ManagedSettingsValidateResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserRequestedShellCommandResult {
     /// Error output when the execution failed
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// Process exit code, when available
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i64>,
     /// Captured command output
     pub output: String,
@@ -1364,6 +1258,7 @@ pub struct UserRequestedShellCommandResult {
     /// Tool call id emitted for the shell execution
     pub tool_call_id: String,
 }
+crate::record_serde::wire_record!(UserRequestedShellCommandResult { error: "error" if is_none, exit_code: "exitCode" if is_none, output: "output", success: "success", tool_call_id: "toolCallId" });
 
 /// A single user setting's effective value alongside its default, so consumers can render settings left at their default.
 ///
@@ -1373,8 +1268,7 @@ pub struct UserRequestedShellCommandResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingMetadata {
     /// The centrally-known default for this setting (null when no default is registered).
     pub default: serde_json::Value,
@@ -1383,6 +1277,11 @@ pub struct UserSettingMetadata {
     /// The effective value: the user's value if set, otherwise the default.
     pub value: serde_json::Value,
 }
+crate::record_serde::wire_record!(UserSettingMetadata {
+    default: "default",
+    is_default: "isDefault",
+    value: "value"
+});
 
 /// A single top-level setting subtree to validate and write.
 ///
@@ -1392,23 +1291,20 @@ pub struct UserSettingMetadata {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsApplyTopKeyRequest {
     /// Canonical path of the setting the caller is editing. Currently informational only.
     pub canonical_path: Vec<String>,
     /// Records that the user chose an update channel explicitly, so the one-time staff channel migration stops reapplying. Honored only for the `autoUpdatesChannel` key.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub complete_staff_update_channel_migration: Option<bool>,
     /// True to remove the top-level key instead of writing it.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub delete: Option<bool>,
     /// Top-level setting name to write.
     pub top_key: String,
     /// Value to write for the whole top-level key. Omitted when `delete` is true. Explicit null is preserved and validated as null.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(UserSettingsApplyTopKeyRequest { canonical_path: "canonicalPath", complete_staff_update_channel_migration: "completeStaffUpdateChannelMigration" if is_none, delete: "delete" if is_none, top_key: "topKey", value: "value" if is_none });
 
 /// One problem found while validating a setting value.
 ///
@@ -1418,14 +1314,17 @@ pub struct UserSettingsApplyTopKeyRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsValidationIssue {
     /// Human-readable description of the problem.
     pub message: String,
     /// Where in the settings tree the problem sits, as object keys and array indices. The first element is the top-level key; a whole-value problem is reported as that single key.
     pub path: Vec<serde_json::Value>,
 }
+crate::record_serde::wire_record!(UserSettingsValidationIssue {
+    message: "message",
+    path: "path"
+});
 
 /// Outcome of validating and writing one top-level setting subtree.
 ///
@@ -1435,18 +1334,16 @@ pub struct UserSettingsValidationIssue {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsApplyTopKeyResult {
     /// Why the write failed, present only when `status` is `write-error`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// Problems found, present only when `status` is `validation-error`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub issues: Option<Vec<UserSettingsValidationIssue>>,
     /// `ok` when the value was written, `validation-error` when it was rejected before any write, `write-error` when validation passed but the write failed.
     pub status: String,
 }
+crate::record_serde::wire_record!(UserSettingsApplyTopKeyResult { error: "error" if is_none, issues: "issues" if is_none, status: "status" });
 
 /// The overrides and host context to resolve effective runtime settings from.
 ///
@@ -1456,19 +1353,18 @@ pub struct UserSettingsApplyTopKeyResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsBuildRuntimeRequest {
     /// The environment to read settings-bearing variables from. Passed explicitly rather than read from the server process so a host can resolve settings for an environment it is about to create rather than the one it runs in.
     pub environment: HashMap<String, String>,
     /// Settings that take precedence over every document and environment layer, such as the values a host derived from its own command line. Keyed by setting name, with each value carried verbatim, so a host may pass keys this runtime does not recognize. Absent when the host contributes no overrides of its own.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub overrides: Option<HashMap<String, serde_json::Value>>,
     /// The platform to apply platform-specific defaults for, in the same spelling the host's own runtime reports.
     pub platform: String,
     /// The directory the settings are being resolved for. This selects the repository-scoped document, so a host resolving settings for a directory other than its own process working directory must pass that directory here.
     pub working_directory: String,
 }
+crate::record_serde::wire_record!(UserSettingsBuildRuntimeRequest { environment: "environment", overrides: "overrides" if is_none, platform: "platform", working_directory: "workingDirectory" });
 
 /// One atomic edit of a canonical setting in settings.json.
 ///
@@ -1478,21 +1374,19 @@ pub(crate) struct UserSettingsBuildRuntimeRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsEditRequest {
     /// Nonempty canonical path segments of the setting to edit, starting with its top-level key.
     pub canonical_path: Vec<String>,
     /// Configuration directory to edit. Omitted or empty resolves the server's own home, as in `user.settings.loadForConfigDir`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub config_dir: Option<String>,
     /// Set a scalar, add or remove a string list item, or remove the setting. The handler rejects a missing or incompatible value.
     #[doc(hidden)]
     pub(crate) operation: SettingsEditOperation,
     /// Required boolean, string or number for set, required string for add-item and remove-item, and forbidden for remove. The runtime rejects all other JSON values.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(UserSettingsEditRequest { canonical_path: "canonicalPath", config_dir: "configDir" if is_none, operation: "operation", value: "value" if is_none });
 
 /// Selects which settings file paths to resolve.
 ///
@@ -1502,13 +1396,12 @@ pub(crate) struct UserSettingsEditRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsGetPathsRequest {
     /// Absolute path of a repository root. Supply it to also resolve that repository's two settings file paths; omit it to resolve only the user path.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_root: Option<String>,
 }
+crate::record_serde::wire_record!(UserSettingsGetPathsRequest { repo_root: "repoRoot" if is_none });
 
 /// On-disk locations of the settings files this runtime reads. A path is reported whether or not the file exists.
 ///
@@ -1518,18 +1411,16 @@ pub struct UserSettingsGetPathsRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsGetPathsResult {
     /// The repository's local, untracked settings file, or null when no repository root was supplied.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_local_settings: Option<String>,
     /// The repository's checked-in settings file, or null when no repository root was supplied.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_settings: Option<String>,
     /// The user settings file: `settings.json` under the resolved Copilot home. This is the file `user.settings.get`, `user.settings.loadWithWarning`, and `user.settings.set` read and write.
     pub user_settings: String,
 }
+crate::record_serde::wire_record!(UserSettingsGetPathsResult { repo_local_settings: "repoLocalSettings" if is_none, repo_settings: "repoSettings" if is_none, user_settings: "userSettings" });
 
 /// Per-key metadata for every known user setting in settings.json, including settings left at their default. Excludes repository- and enterprise-managed overrides.
 ///
@@ -1539,12 +1430,14 @@ pub struct UserSettingsGetPathsResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsGetResult {
     /// Every known user setting keyed by setting name, each with its effective value, default, and whether it is at the default.
     pub settings: HashMap<String, UserSettingMetadata>,
 }
+crate::record_serde::wire_record!(UserSettingsGetResult {
+    settings: "settings"
+});
 
 /// Top-level user-setting keys grouped by who may govern them.
 ///
@@ -1554,8 +1447,7 @@ pub struct UserSettingsGetResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsGovernanceKeysResult {
     /// Top-level keys a repository may override through a Claude-compatible repository config.
     pub claude_repo: Vec<String>,
@@ -1564,26 +1456,11 @@ pub struct UserSettingsGovernanceKeysResult {
     /// Top-level keys a repository may override through `.github/copilot/settings.json` or `.github/copilot/settings.local.json`.
     pub repo: Vec<String>,
 }
-
-/// The filesystem and environment facts a user-settings file is resolved from. Passed explicitly rather than read from the runtime's own process, so a host whose configuration directory differs from its process environment resolves the file it means.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UserSettingsHostContext {
-    /// The Copilot configuration directory, when the host set one. Takes precedence over `COPILOT_HOME` and the home directory.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config_dir: Option<String>,
-    /// The host's environment variables. `COPILOT_HOME` is read from here, as are the variables a settings hook may expand.
-    pub environment: serde_json::Value,
-    /// The user's home directory, used when neither a configuration directory nor `COPILOT_HOME` is set.
-    pub home_directory: String,
-}
+crate::record_serde::wire_record!(UserSettingsGovernanceKeysResult {
+    claude_repo: "claudeRepo",
+    managed: "managed",
+    repo: "repo"
+});
 
 /// A repository to read settings from, and the user layer they are merged over.
 ///
@@ -1593,14 +1470,17 @@ pub struct UserSettingsHostContext {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsLoadAndMergeRepoRequest {
     /// Absolute path of the repository root whose settings to read. When this is the user's home directory, the Claude-compatible configuration is skipped, so a home-directory session does not inherit a personal config as if it were repository policy.
     pub repo_root: String,
     /// The user's own settings, keyed by setting name. The repository layer is merged over this; a repository may only add to the collection settings it is allowed to influence, so a user setting it does not name survives unchanged.
     pub user_settings: HashMap<String, serde_json::Value>,
 }
+crate::record_serde::wire_record!(UserSettingsLoadAndMergeRepoRequest {
+    repo_root: "repoRoot",
+    user_settings: "userSettings"
+});
 
 /// The settings a consumer should act on inside a repository, together with any diagnostic raised while reading the repository layer.
 ///
@@ -1610,15 +1490,14 @@ pub(crate) struct UserSettingsLoadAndMergeRepoRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsLoadAndMergeRepoResult {
     /// The merged settings document, keyed by setting name. Equals the supplied user layer when the repository declares no settings.
     pub settings: HashMap<String, serde_json::Value>,
     /// Why part of the repository document was ignored, as a single human-readable string joining every diagnostic with `; `. Null when it loaded cleanly. The settings that did load are still merged, so a consumer should surface this and continue rather than treat it as a failure.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
 }
+crate::record_serde::wire_record!(UserSettingsLoadAndMergeRepoResult { settings: "settings", warning: "warning" if is_none });
 
 /// Selects the configuration directory whose user settings to read.
 ///
@@ -1628,13 +1507,12 @@ pub(crate) struct UserSettingsLoadAndMergeRepoResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsLoadForConfigDirRequest {
     /// Copilot configuration directory to read the settings document from, taking precedence over the server's own `COPILOT_HOME` and default home. Omit it, or pass an empty string, to read the directory the server resolved for itself.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub config_dir: Option<String>,
 }
+crate::record_serde::wire_record!(UserSettingsLoadForConfigDirRequest { config_dir: "configDir" if is_none });
 
 /// Contents of settings.json as stored, for a caller about to rewrite it.
 ///
@@ -1644,15 +1522,14 @@ pub(crate) struct UserSettingsLoadForConfigDirRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsLoadForEditResult {
     /// Parsed contents, present only when `status` is `ok`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
     /// `ok` when the file parsed, `missing` when there is no file yet, `invalid` when the file exists but will not parse.
     pub status: String,
 }
+crate::record_serde::wire_record!(UserSettingsLoadForEditResult { settings: "settings" if is_none, status: "status" });
 
 /// Selects the repository whose checked-in settings to read.
 ///
@@ -1662,12 +1539,14 @@ pub struct UserSettingsLoadForEditResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsLoadRepoRequest {
     /// Absolute path of the repository root whose settings to read. When this is the user's home directory, the Claude-compatible configuration is skipped, so a home-directory session does not inherit a personal config as if it were repository policy.
     pub repo_root: String,
 }
+crate::record_serde::wire_record!(UserSettingsLoadRepoRequest {
+    repo_root: "repoRoot"
+});
 
 /// A repository's settings as stored, together with any diagnostic raised while reading them.
 ///
@@ -1677,16 +1556,14 @@ pub struct UserSettingsLoadRepoRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsLoadRepoResult {
     /// The repository's settings document, keyed by setting name, with each value carried verbatim. Null when the repository declares no settings.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<HashMap<String, serde_json::Value>>,
     /// Why part of the document was ignored, as a single human-readable string joining every diagnostic with `; `. Null when the document loaded cleanly. The settings that did load are still reported, so a consumer should surface this and continue rather than treat it as a failure.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
 }
+crate::record_serde::wire_record!(UserSettingsLoadRepoResult { settings: "settings" if is_none, warning: "warning" if is_none });
 
 /// The user's stored settings, together with any diagnostic raised while reading them.
 ///
@@ -1696,15 +1573,14 @@ pub struct UserSettingsLoadRepoResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsLoadWithWarningResult {
     /// The stored user settings document, keyed by setting name, with each value carried verbatim. Empty when the file could not be read at all.
     pub settings: HashMap<String, serde_json::Value>,
     /// Why part of the document was ignored, phrased for display to the user. Null when the document loaded cleanly. The settings that did load are still reported, so a consumer may surface this and continue rather than treat it as a failure.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
 }
+crate::record_serde::wire_record!(UserSettingsLoadWithWarningResult { settings: "settings", warning: "warning" if is_none });
 
 /// The managed (enterprise policy) layer and the user layer to fold together. The field names carry the layer identity: nothing about a settings object identifies which layer produced it, so a generic base/override pair would let a caller transpose them and silently resolve the governance keys in the user's favour.
 ///
@@ -1714,16 +1590,14 @@ pub struct UserSettingsLoadWithWarningResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsMergeManagedAndUserParams {
     /// The managed layer. Its governance keys win, and the per-entry `enabledPlugins` and `extraKnownMarketplaces` control maps are stamped back from it after the union. Omitted when the host is unmanaged.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub managed: Option<serde_json::Value>,
     /// The user's own settings layer. Wins on every key the managed layer does not govern. Omitted when the user has no settings yet.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(UserSettingsMergeManagedAndUserParams { managed: "managed" if is_none, user: "user" if is_none });
 
 /// The user layer folded over the managed layer.
 ///
@@ -1733,12 +1607,14 @@ pub(crate) struct UserSettingsMergeManagedAndUserParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsMergeManagedAndUserResult {
     /// The merged settings. An empty object when neither layer was supplied, so an unmanaged host with no user settings governs nothing.
     pub settings_json: serde_json::Value,
 }
+crate::record_serde::wire_record!(UserSettingsMergeManagedAndUserResult {
+    settings_json: "settingsJson"
+});
 
 /// The user layer and the repository layer to fold together.
 ///
@@ -1748,14 +1624,17 @@ pub struct UserSettingsMergeManagedAndUserResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsMergeRepoValueParams {
     /// The repository's checked-in settings layer.
     pub repo_settings: serde_json::Value,
     /// The user's settings, already resolved against any managed layer.
     pub user_settings: serde_json::Value,
 }
+crate::record_serde::wire_record!(UserSettingsMergeRepoValueParams {
+    repo_settings: "repoSettings",
+    user_settings: "userSettings"
+});
 
 /// The repository layer folded into the user layer.
 ///
@@ -1765,12 +1644,14 @@ pub(crate) struct UserSettingsMergeRepoValueParams {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsMergeRepoValueResult {
     /// The merged settings, with the per-entry managed control maps re-stamped from the runtime's ambient managed policy.
     pub settings_json: serde_json::Value,
 }
+crate::record_serde::wire_record!(UserSettingsMergeRepoValueResult {
+    settings_json: "settingsJson"
+});
 
 /// Selects the configuration directory whose settings document to clean.
 ///
@@ -1780,13 +1661,12 @@ pub struct UserSettingsMergeRepoValueResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsMigrateObsoleteOnDiskRequest {
     /// The configuration directory holding the settings document to clean. A host that scopes a session to its own Copilot home passes that directory here; omit it to clean the document under the home the server resolved for itself. The home directory and environment are deliberately not caller-supplied: they decide only the settings path root and the two hook-parsing flags, and those describe the process doing the reading rather than the caller.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub config_dir: Option<String>,
 }
+crate::record_serde::wire_record!(UserSettingsMigrateObsoleteOnDiskRequest { config_dir: "configDir" if is_none });
 
 /// The outcome of the one-time obsolete-settings cleanup.
 ///
@@ -1796,13 +1676,13 @@ pub(crate) struct UserSettingsMigrateObsoleteOnDiskRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsMigrateObsoleteOnDiskResult {
     /// What the cleanup did. Only `changed` rewrote the document. The cleaned settings are not returned here: the document is written before this replies, so `user.settings.loadWithWarning` reads it authoritatively.
     #[doc(hidden)]
     pub(crate) status: UserSettingsMigrateObsoleteOnDiskStatus,
 }
+crate::record_serde::wire_record!(UserSettingsMigrateObsoleteOnDiskResult { status: "status" });
 
 /// Selects the configuration directory to run the one-time staff log-level migration against, and supplies the caller's record of whether it has already run.
 ///
@@ -1812,15 +1692,14 @@ pub(crate) struct UserSettingsMigrateObsoleteOnDiskResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsMigrateStaffLogLevelOnceRequest {
     /// When the caller last recorded this migration, as an ISO-8601 timestamp. Supplying it lets the runtime answer `current` without re-running the evaluation.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub cached_completed_at: Option<String>,
     /// The configuration directory, home directory and environment to resolve the settings and global-state documents from. A host that scopes a session to its own Copilot home must pass that directory here, or the migration is evaluated against the server's own home instead.
     pub context: UserSettingsHostContext,
 }
+crate::record_serde::wire_record!(UserSettingsMigrateStaffLogLevelOnceRequest { cached_completed_at: "cachedCompletedAt" if is_none, context: "context" });
 
 /// The outcome of the one-time staff log-level migration.
 ///
@@ -1830,18 +1709,16 @@ pub(crate) struct UserSettingsMigrateStaffLogLevelOnceRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsMigrateStaffLogLevelOnceResult {
     /// When the migration was recorded as done, as an ISO-8601 timestamp. Absent only for `ineligible`, which records nothing.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
     /// The settings document as it stands after the migration, keyed by setting name. Present only for `refreshed`, and only when the document could be re-read cleanly.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
     /// What the migration did. Only `refreshed` can have changed the persisted settings.
     pub status: StaffLogLevelMigrationStatus,
 }
+crate::record_serde::wire_record!(UserSettingsMigrateStaffLogLevelOnceResult { completed_at: "completedAt" if is_none, settings: "settings" if is_none, status: "status" });
 
 /// The outcome of the one-time staff update-channel migration.
 ///
@@ -1851,15 +1728,14 @@ pub(crate) struct UserSettingsMigrateStaffLogLevelOnceResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsMigrateStaffUpdateChannelOnceResult {
     /// When the migration was recorded as done, as an ISO-8601 timestamp. Absent only for `ineligible`, which records nothing.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
     /// What the migration did. Only `migrated` means the persisted settings changed.
     pub status: StaffUpdateChannelMigrationStatus,
 }
+crate::record_serde::wire_record!(UserSettingsMigrateStaffUpdateChannelOnceResult { completed_at: "completedAt" if is_none, status: "status" });
 
 /// Settings object whose key names should be canonicalized.
 ///
@@ -1869,12 +1745,14 @@ pub(crate) struct UserSettingsMigrateStaffUpdateChannelOnceResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsNormalizeRequest {
     /// Free-form settings object, possibly using legacy or snake_case key names.
     pub settings: serde_json::Value,
 }
+crate::record_serde::wire_record!(UserSettingsNormalizeRequest {
+    settings: "settings"
+});
 
 /// Settings object with canonical key names.
 ///
@@ -1884,12 +1762,14 @@ pub struct UserSettingsNormalizeRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsNormalizeResult {
     /// The same settings with every legacy or snake_case key renamed to its canonical spelling.
     pub settings: serde_json::Value,
 }
+crate::record_serde::wire_record!(UserSettingsNormalizeResult {
+    settings: "settings"
+});
 
 /// The on-disk location of the user's settings document.
 ///
@@ -1899,12 +1779,12 @@ pub struct UserSettingsNormalizeResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsPathResult {
     /// Absolute path to the settings file this runtime reads and writes. Normally `settings.json` under the Copilot configuration directory; an extensionless legacy `settings` file is reported instead when it exists and `settings.json` does not.
     pub path: String,
 }
+crate::record_serde::wire_record!(UserSettingsPathResult { path: "path" });
 
 /// The settings layer a problem was found in.
 ///
@@ -1914,8 +1794,7 @@ pub struct UserSettingsPathResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsProblemLocation {
     /// Absolute path of the file backing this layer.
     pub file_path: String,
@@ -1924,6 +1803,11 @@ pub struct UserSettingsProblemLocation {
     /// The caller-supplied display label for the layer.
     pub label: String,
 }
+crate::record_serde::wire_record!(UserSettingsProblemLocation {
+    file_path: "filePath",
+    kind: "kind",
+    label: "label"
+});
 
 /// One setting that will not take effect, and why.
 ///
@@ -1933,8 +1817,7 @@ pub struct UserSettingsProblemLocation {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsProblem {
     /// Coarse grouping for the problem, for a caller that presents problems in sections.
     pub category: String,
@@ -1945,11 +1828,11 @@ pub struct UserSettingsProblem {
     /// What is wrong in machine-readable form, for a caller that wants to branch rather than display.
     pub kind: String,
     /// The offending key as written in the file, when the problem is attributable to a single key. Absent when the whole file is at fault.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_key: Option<String>,
     /// The settings layer the problem was found in.
     pub source: UserSettingsProblemLocation,
 }
+crate::record_serde::wire_record!(UserSettingsProblem { category: "category", explanation: "explanation", id: "id", kind: "kind", raw_key: "rawKey" if is_none, source: "source" });
 
 /// One already-loaded settings layer to diagnose.
 ///
@@ -1959,22 +1842,20 @@ pub struct UserSettingsProblem {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsProblemSource {
     /// The layer's settings exactly as loaded, unnormalized. Empty when the file is missing or failed to parse.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<HashMap<String, serde_json::Value>>,
     /// Absolute path of the file backing this layer.
     pub file_path: String,
     /// True when the file itself failed to parse, so its keys could not be read at all.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub invalid: Option<bool>,
     /// Which layer this is: `user`, `repo`, or `local`.
     pub kind: String,
     /// Caller-chosen display label for the layer, echoed back on each problem so a caller can group by layer without re-deriving its own naming.
     pub label: String,
 }
+crate::record_serde::wire_record!(UserSettingsProblemSource { config: "config" if is_none, file_path: "filePath", invalid: "invalid" if is_none, kind: "kind", label: "label" });
 
 /// The settings layers to diagnose.
 ///
@@ -1984,13 +1865,12 @@ pub struct UserSettingsProblemSource {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsProblemsRequest {
     /// Layers to diagnose, in the precedence order the caller applies them.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<UserSettingsProblemSource>>,
 }
+crate::record_serde::wire_record!(UserSettingsProblemsRequest { sources: "sources" if is_none });
 
 /// The settings that will not take effect across the given layers.
 ///
@@ -2000,13 +1880,12 @@ pub struct UserSettingsProblemsRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsProblemsResult {
     /// Each setting that will not take effect, and why. Empty when every layer is healthy.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub problems: Option<Vec<UserSettingsProblem>>,
 }
+crate::record_serde::wire_record!(UserSettingsProblemsResult { problems: "problems" if is_none });
 
 /// Selects the configuration directory to run the one-time staff model-selection reset against, and supplies the caller's record of whether it has already run.
 ///
@@ -2016,18 +1895,16 @@ pub struct UserSettingsProblemsResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsResetStaffModelSelectionOnceRequest {
     /// The configuration directory, home directory and environment to resolve the settings and global-state documents from. A host that scopes a session to its own Copilot home must pass that directory here, or the reset is evaluated against the server's own home instead.
     pub context: UserSettingsHostContext,
     /// Whether the signed-in account is a staff account. The reset applies only to staff, so anything other than `true` returns `didReset: false` without touching the settings document.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub staff: Option<bool>,
     /// When the caller last recorded this reset, as an ISO-8601 timestamp. A timestamp at or after the cutoff means the reset already ran and is returned unchanged.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub staff_model_reset_at: Option<String>,
 }
+crate::record_serde::wire_record!(UserSettingsResetStaffModelSelectionOnceRequest { context: "context", staff: "staff" if is_none, staff_model_reset_at: "staffModelResetAt" if is_none });
 
 /// The outcome of the one-time staff model-selection reset.
 ///
@@ -2037,20 +1914,18 @@ pub(crate) struct UserSettingsResetStaffModelSelectionOnceRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsResetStaffModelSelectionOnceResult {
     /// The cutoff this reset is gated on, as an ISO-8601 timestamp. A recorded timestamp at or after it means the reset is already done.
     pub cutoff: String,
     /// Whether the persisted model selection was cleared. Only `true` means the settings document changed and the host should adopt the returned settings.
     pub did_reset: bool,
     /// The timestamp the host should now record, as an ISO-8601 timestamp. Carries the caller's own value back unchanged when nothing was reset.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub reset_at: Option<String>,
     /// The settings document as it stands after the reset, keyed by setting name. Present only when `didReset` is true.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(UserSettingsResetStaffModelSelectionOnceResult { cutoff: "cutoff", did_reset: "didReset", reset_at: "resetAt" if is_none, settings: "settings" if is_none });
 
 /// One hook to disable or re-enable.
 ///
@@ -2060,8 +1935,7 @@ pub(crate) struct UserSettingsResetStaffModelSelectionOnceResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsSetHookDisabledRequest {
     /// True adds the key to `disabledHooks`, false removes it.
     pub disabled: bool,
@@ -2070,6 +1944,11 @@ pub(crate) struct UserSettingsSetHookDisabledRequest {
     /// Path of the settings.json to rewrite.
     pub settings_path: String,
 }
+crate::record_serde::wire_record!(UserSettingsSetHookDisabledRequest {
+    disabled: "disabled",
+    disable_key: "disableKey",
+    settings_path: "settingsPath"
+});
 
 /// Outcome of rewriting the `disabledHooks` setting.
 ///
@@ -2079,15 +1958,14 @@ pub(crate) struct UserSettingsSetHookDisabledRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsSetHookDisabledResult {
     /// Why the write failed. Absent when the status is `ok`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
     /// `ok` when the setting was written, `invalid` when settings.json could not be parsed and was left alone, `error` when the write itself failed.
     pub status: String,
 }
+crate::record_serde::wire_record!(UserSettingsSetHookDisabledResult { error_message: "errorMessage" if is_none, status: "status" });
 
 /// Partial user settings to write to settings.json. Each top-level key is written individually, replacing the existing value; a key whose value is null is removed.
 ///
@@ -2097,12 +1975,14 @@ pub(crate) struct UserSettingsSetHookDisabledResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsSetRequest {
     /// Partial user settings to write, as a free-form object keyed by setting name
     pub settings: serde_json::Value,
 }
+crate::record_serde::wire_record!(UserSettingsSetRequest {
+    settings: "settings"
+});
 
 /// Selects the configuration directory whose user settings document should be inspected for unrecognized top-level keys.
 ///
@@ -2112,12 +1992,12 @@ pub struct UserSettingsSetRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsUnknownKeysWarningRequest {
     /// The configuration directory, home directory and environment to resolve the settings document from. A host that scopes a session to its own Copilot home must pass that directory here, or the server's own home is inspected instead.
     pub context: UserSettingsHostContext,
 }
+crate::record_serde::wire_record!(UserSettingsUnknownKeysWarningRequest { context: "context" });
 
 /// The unrecognized top-level keys found in the user settings document, already phrased for display.
 ///
@@ -2127,13 +2007,12 @@ pub(crate) struct UserSettingsUnknownKeysWarningRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsUnknownKeysWarningResult {
     /// The warning to show the user, naming the unrecognized keys and the file they were found in. Absent when every top-level key is recognized, and also when the document is missing or could not be read, because an unknown-key list taken from a document the runtime could not load would name keys that may not be there.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
 }
+crate::record_serde::wire_record!(UserSettingsUnknownKeysWarningResult { warning: "warning" if is_none });
 
 /// Names the user setting to merge into, and the partial object to merge.
 ///
@@ -2143,20 +2022,20 @@ pub(crate) struct UserSettingsUnknownKeysWarningResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsUpdateRequest {
     /// Copilot configuration directory to write the settings document in, taking precedence over the server's own `COPILOT_HOME` and default home. Omit it, or pass an empty string, to use the directory the server resolved for itself.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub config_dir: Option<String>,
+    /// Optional shallow field precondition checked against the stored object under the same cross-process transaction as the update. Missing fields compare as JSON null. Field values compare recursively; integer and floating-point representations of the same number compare equally without rounding integers to floating point. A mismatch leaves the file unchanged. Omit this object for an unconditional update.
+    pub if_fields_match: Option<HashMap<String, serde_json::Value>>,
     /// Top-level user-setting key to merge into, such as `extensions`.
     pub key: String,
     /// Single-component name for the settings document at `<configDir>/settings/<subDir>.json`; path separators, `.` and `..` are rejected. Omit it, or pass an empty string, to use the main settings document.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub sub_dir: Option<String>,
     /// Value to store for `key`. When both the stored value and this value are objects, their fields are shallow-merged and fields this object does not name are preserved. Otherwise this value replaces the stored value.
     pub value: serde_json::Value,
 }
+crate::record_serde::wire_record!(UserSettingsUpdateRequest { config_dir: "configDir" if is_none, if_fields_match: "ifFieldsMatch" if is_none, key: "key", sub_dir: "subDir" if is_none, value: "value" });
 
 /// The stored value of the user setting after the merge.
 ///
@@ -2166,12 +2045,14 @@ pub(crate) struct UserSettingsUpdateRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsUpdateResult {
+    /// Whether a conditional update was applied. False means its precondition did not match and value contains the unchanged stored value. Omitted for an unconditional update.
+    pub applied: Option<bool>,
     /// The key's stored value after the write: the merged object when both the stored value and the supplied value are objects, otherwise the supplied value.
     pub value: serde_json::Value,
 }
+crate::record_serde::wire_record!(UserSettingsUpdateResult { applied: "applied" if is_none, value: "value" });
 
 /// A single top-level setting subtree to validate.
 ///
@@ -2181,18 +2062,16 @@ pub(crate) struct UserSettingsUpdateResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsValidateRequest {
     /// True to validate a removal of this key. The current settings file is not read.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub delete: Option<bool>,
     /// Top-level setting name to validate.
     pub top_key: String,
     /// Value to validate. Omitted when `delete` is true.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(UserSettingsValidateRequest { delete: "delete" if is_none, top_key: "topKey", value: "value" if is_none });
 
 /// Outcome of validating one top-level setting subtree.
 ///
@@ -2202,15 +2081,14 @@ pub struct UserSettingsValidateRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsValidateResult {
     /// Problems found, empty when `ok` is true.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub issues: Option<Vec<UserSettingsValidationIssue>>,
     /// True when the subtree is valid.
     pub ok: bool,
 }
+crate::record_serde::wire_record!(UserSettingsValidateResult { issues: "issues" if is_none, ok: "ok" });
 
 /// The whole content to store in the user settings file.
 ///
@@ -2220,12 +2098,14 @@ pub struct UserSettingsValidateResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsWriteAllRequest {
     /// The settings object to store. It replaces the file's entire content, so a key absent here is removed.
     pub settings: serde_json::Value,
 }
+crate::record_serde::wire_record!(UserSettingsWriteAllRequest {
+    settings: "settings"
+});
 
 /// A raw top-level setting edit with explicit read-failure behavior.
 ///
@@ -2235,27 +2115,23 @@ pub struct UserSettingsWriteAllRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsWriteKeyRequest {
     /// Optional host paths and environment. Omit to use the server's settings home.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<UserSettingsHostContext>,
     /// Remove the key instead of writing it. Defaults to false.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub delete: Option<bool>,
     /// The top-level setting to write without canonicalizing legacy siblings.
     pub key: String,
     /// Refuse to replace an unreadable or invalid file. Defaults to false.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub refuse_on_read_failure: Option<bool>,
     /// Refuse content no JSONC recovery pass reads as an object. Defaults to false.
     /// Recoverable content can still be repaired when refuseOnReadFailure is false.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub refuse_on_unrecoverable_read_failure: Option<bool>,
     /// The value to store. Explicit null is retained. Pass null when deleting.
     pub value: Option<serde_json::Value>,
 }
+crate::record_serde::wire_record!(UserSettingsWriteKeyRequest { context: "context" if is_none, delete: "delete" if is_none, key: "key", refuse_on_read_failure: "refuseOnReadFailure" if is_none, refuse_on_unrecoverable_read_failure: "refuseOnUnrecoverableReadFailure" if is_none, value: "value" });
 
 /// The on-disk location of the user's settings document.
 ///
@@ -2265,12 +2141,12 @@ pub struct UserSettingsWriteKeyRequest {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsGetPathResult {
     /// Absolute path to the settings file this runtime reads and writes. Normally `settings.json` under the Copilot configuration directory; an extensionless legacy `settings` file is reported instead when it exists and `settings.json` does not.
     pub path: String,
 }
+crate::record_serde::wire_record!(UserSettingsGetPathResult { path: "path" });
 
 /// The unrecognized top-level keys found in the user settings document, already phrased for display.
 ///
@@ -2280,13 +2156,12 @@ pub struct UserSettingsGetPathResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsGetUnknownKeysWarningResult {
     /// The warning to show the user, naming the unrecognized keys and the file they were found in. Absent when every top-level key is recognized, and also when the document is missing or could not be read, because an unknown-key list taken from a document the runtime could not load would name keys that may not be there.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
 }
+crate::record_serde::wire_record!(UserSettingsGetUnknownKeysWarningResult { warning: "warning" if is_none });
 
 /// Top-level user-setting keys grouped by who may govern them.
 ///
@@ -2296,8 +2171,7 @@ pub(crate) struct UserSettingsGetUnknownKeysWarningResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsListGovernanceKeysResult {
     /// Top-level keys a repository may override through a Claude-compatible repository config.
     pub claude_repo: Vec<String>,
@@ -2306,6 +2180,11 @@ pub struct UserSettingsListGovernanceKeysResult {
     /// Top-level keys a repository may override through `.github/copilot/settings.json` or `.github/copilot/settings.local.json`.
     pub repo: Vec<String>,
 }
+crate::record_serde::wire_record!(UserSettingsListGovernanceKeysResult {
+    claude_repo: "claudeRepo",
+    managed: "managed",
+    repo: "repo"
+});
 
 /// Outcome of an atomic user or repository settings edit.
 ///
@@ -2315,13 +2194,13 @@ pub struct UserSettingsListGovernanceKeysResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UserSettingsEditResult {
     /// Changed, unchanged or invalid existing file. Rejected input, validation failures and I/O errors remain RPC errors.
     #[doc(hidden)]
     pub(crate) status: SettingsEditStatus,
 }
+crate::record_serde::wire_record!(UserSettingsEditResult { status: "status" });
 
 /// The settings that will not take effect across the given layers.
 ///
@@ -2331,13 +2210,12 @@ pub(crate) struct UserSettingsEditResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct UserSettingsDiagnoseProblemsResult {
     /// Each setting that will not take effect, and why. Empty when every layer is healthy.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub problems: Option<Vec<UserSettingsProblem>>,
 }
+crate::record_serde::wire_record!(UserSettingsDiagnoseProblemsResult { problems: "problems" if is_none });
 
 /// Every feature flag this runtime declares, with the shape each one was declared with.
 ///
@@ -2347,13 +2225,13 @@ pub struct UserSettingsDiagnoseProblemsResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct FeatureFlagsListMetadataResult {
     /// Declared feature flags keyed by flag name.
     #[doc(hidden)]
     pub(crate) flags: HashMap<String, FeatureFlagMetadata>,
 }
+crate::record_serde::wire_record!(FeatureFlagsListMetadataResult { flags: "flags" });
 
 /// The verdict of the `forceLoginOrgs` enterprise sign-in pin for one credential. A managed device may pin Copilot to an approved set of GitHub organizations so a developer cannot sign in with a personal — or another enterprise's — account and escape every control that keys off the signed-in identity. A host must refuse to proceed when `allowed` is false; the remaining fields explain the refusal rather than qualifying it.
 ///
@@ -2363,27 +2241,24 @@ pub(crate) struct FeatureFlagsListMetadataResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ManagedSettingsResolveDeviceForceLoginOrgsGateResult {
     /// Whether the client may proceed. True whenever no pin is in force, so an unmanaged host is never blocked.
     pub allowed: bool,
     /// A stable kebab-case reason code when refused: `org-not-approved`, `unverifiable-credential`, `policy-undetermined`, `policy-invalid`, `not-signed-in`, or `membership-unknown`. Omitted when allowed. Treat an unrecognized code as a refusal rather than mapping it to an allow: a code this host has not been taught about still denied the credential.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub denial: Option<String>,
     /// Whether a pin applies at all. Distinguishes "allowed because unmanaged" from "allowed because the account is approved", which a diagnostics surface needs and which also decides whether a bring-your-own-key provider may serve inference.
     pub enforced: bool,
     /// The approved organization the account matched, when allowed under a pin.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub matched_org: Option<String>,
     /// A developer-facing explanation of the refusal. Omitted when allowed.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     /// Error-level detail from managed-policy discovery — which file failed to load, which field failed validation. Carried on the decision rather than left to the log because a refusal can exit the process before a log sink exists, which would discard the only actionable diagnostic a misconfigured managed device produces.
     pub policy_diagnostics: Vec<String>,
     /// The approved organization logins, as configured. Enterprise configuration rather than user data, so it is safe to name in a message or a log line.
     pub required_orgs: Vec<String>,
 }
+crate::record_serde::wire_record!(ManagedSettingsResolveDeviceForceLoginOrgsGateResult { allowed: "allowed", denial: "denial" if is_none, enforced: "enforced", matched_org: "matchedOrg" if is_none, message: "message" if is_none, policy_diagnostics: "policyDiagnostics", required_orgs: "requiredOrgs" });
 
 /// Ordered managed permission verdicts and the supplied policy's fail-closed posture.
 ///
@@ -2393,14 +2268,17 @@ pub(crate) struct ManagedSettingsResolveDeviceForceLoginOrgsGateResult {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettingsPermissionsEvaluateResult {
     /// Managed permission policy could not be determined; every operation is denied.
     pub fail_closed: bool,
     /// One verdict per input operation, in the same order, including duplicates.
     pub results: Vec<ManagedPermissionEvaluation>,
 }
+crate::record_serde::wire_record!(ManagedSettingsPermissionsEvaluateResult {
+    fail_closed: "failClosed",
+    results: "results"
+});
 
 /// Current retained policy event payload, or null before policy resolution.
 ///
@@ -2460,7 +2338,7 @@ pub type FeatureFlagsResolveResult = HashMap<String, bool>;
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) enum FeatureFlagAvailability {
     /// Enabled for everyone, before any override.
     #[serde(rename = "on")]
@@ -2494,6 +2372,39 @@ pub(crate) enum FeatureFlagAvailability {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for FeatureFlagAvailability {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "FeatureFlagAvailability",
+            &[
+                "on",
+                "team",
+                "staff-and-experimental",
+                "staff-or-experimental",
+                "staff",
+                "staff-github",
+                "staff-microsoft",
+                "experimental",
+                "off",
+                "Unknown",
+            ],
+            Some(9),
+        )?;
+        Ok(match index {
+            0 => Self::On,
+            1 => Self::Team,
+            2 => Self::StaffAndExperimental,
+            3 => Self::StaffOrExperimental,
+            4 => Self::Staff,
+            5 => Self::StaffGitHub,
+            6 => Self::StaffMicrosoft,
+            7 => Self::Experimental,
+            8 => Self::Off,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// Administrator-configured Fusion preference, independent of execution support.
 ///
@@ -2503,7 +2414,7 @@ pub(crate) enum FeatureFlagAvailability {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub enum ManagedFusionTier {
     /// Use Auto Balance to balance capability, speed, and cost.
     #[serde(rename = "standard")]
@@ -2522,13 +2433,41 @@ pub enum ManagedFusionTier {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for ManagedFusionTier {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedFusionTier",
+            &["standard", "high", "max", "unmanaged", "Unknown"],
+            Some(4),
+        )?;
+        Ok(match index {
+            0 => Self::Standard,
+            1 => Self::High,
+            2 => Self::Max,
+            3 => Self::Unmanaged,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// Operation to evaluate. Currently only url is supported.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub enum ManagedPermissionOperationKind {
     #[serde(rename = "url")]
     #[default]
     Url,
+}
+impl<'de> Deserialize<'de> for ManagedPermissionOperationKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedPermissionOperationKind",
+            &["url"],
+            None,
+        )?;
+        Ok(Self::Url)
+    }
 }
 
 /// Managed-policy verdict only: deny blocks the URL, ask requires approval, allow approves under managed policy, and unmanaged leaves the normal consumer permission flow in effect. No verdict bypasses other security controls.
@@ -2539,7 +2478,7 @@ pub enum ManagedPermissionOperationKind {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub enum ManagedPermissionVerdict {
     /// Managed policy prohibits the operation; do not offer approval.
     #[serde(rename = "deny")]
@@ -2558,6 +2497,23 @@ pub enum ManagedPermissionVerdict {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for ManagedPermissionVerdict {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedPermissionVerdict",
+            &["deny", "ask", "allow", "unmanaged", "Unknown"],
+            Some(4),
+        )?;
+        Ok(match index {
+            0 => Self::Deny,
+            1 => Self::Ask,
+            2 => Self::Allow,
+            3 => Self::Unmanaged,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// Which layer disabled bypass-permissions mode. The layer matters because only a server-delivered disable is pinned to an account and can later be lifted by signing in elsewhere.
 ///
@@ -2567,7 +2523,7 @@ pub enum ManagedPermissionVerdict {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) enum ManagedSettingsBypassDisableSource {
     /// The user turned bypass mode off themselves.
     #[serde(rename = "user")]
@@ -2583,6 +2539,22 @@ pub(crate) enum ManagedSettingsBypassDisableSource {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for ManagedSettingsBypassDisableSource {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedSettingsBypassDisableSource",
+            &["user", "managed", "mdm", "Unknown"],
+            Some(3),
+        )?;
+        Ok(match index {
+            0 => Self::User,
+            1 => Self::Managed,
+            2 => Self::Mdm,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// What the managed-policy resolution said about bypass-permissions mode. `unknown` is a third answer rather than a missing one, and the caller must send it explicitly when it has no verdict.
 ///
@@ -2592,7 +2564,7 @@ pub(crate) enum ManagedSettingsBypassDisableSource {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) enum ManagedSettingsBypassPolicyResolution {
     /// The policy resolved and does not disable bypass mode.
     #[serde(rename = "allowed")]
@@ -2608,6 +2580,22 @@ pub(crate) enum ManagedSettingsBypassPolicyResolution {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for ManagedSettingsBypassPolicyResolution {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedSettingsBypassPolicyResolution",
+            &["allowed", "disabled", "unknown", "Unknown"],
+            Some(3),
+        )?;
+        Ok(match index {
+            0 => Self::Allowed,
+            1 => Self::Disabled,
+            2 => Self::UnknownValue,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// A channel accepted by managedSettings.compose.
 ///
@@ -2617,7 +2605,7 @@ pub(crate) enum ManagedSettingsBypassPolicyResolution {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub enum ManagedSettingsChannel {
     /// Device policy, the strongest channel.
     #[serde(rename = "device")]
@@ -2633,6 +2621,22 @@ pub enum ManagedSettingsChannel {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for ManagedSettingsChannel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedSettingsChannel",
+            &["device", "server", "policyHelper", "Unknown"],
+            Some(3),
+        )?;
+        Ok(match index {
+            0 => Self::Device,
+            1 => Self::Server,
+            2 => Self::PolicyHelper,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// Severity of a managed-settings validation finding.
 ///
@@ -2642,7 +2646,7 @@ pub enum ManagedSettingsChannel {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub enum ManagedSettingsDiagnosticSeverity {
     /// The runtime rejects the document.
     #[serde(rename = "error")]
@@ -2655,55 +2659,20 @@ pub enum ManagedSettingsDiagnosticSeverity {
     #[serde(other)]
     Unknown,
 }
-
-/// The operation that requires a policy-helper response.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum ManagedSettingsPolicyHelperReason {
-    /// Resolve policy for session startup.
-    #[serde(rename = "sessionStart")]
-    SessionStart,
-    /// Resolve policy before plugin activation.
-    #[serde(rename = "pluginActivation")]
-    PluginActivation,
-    /// Unknown variant for forward compatibility.
-    #[default]
-    #[serde(other)]
-    Unknown,
-}
-
-/// How an ingestion may use the on-disk server-policy cache.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum ManagedSettingsServerPolicyCacheMode {
-    /// Serve a recent cache entry before a live fetch.
-    #[serde(rename = "preferFresh")]
-    PreferFresh,
-    /// Read cached policy without a network request.
-    #[serde(rename = "cacheOnly")]
-    CacheOnly,
-    /// Serve a cached entry only as a fallback after a failed live fetch.
-    #[serde(rename = "fallbackOnly")]
-    FallbackOnly,
-    /// Ignore the cache entirely and rely on the live fetch alone.
-    #[serde(rename = "disabled")]
-    Disabled,
-    /// Unknown variant for forward compatibility.
-    #[default]
-    #[serde(other)]
-    Unknown,
+impl<'de> Deserialize<'de> for ManagedSettingsDiagnosticSeverity {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedSettingsDiagnosticSeverity",
+            &["error", "warning", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::Error,
+            1 => Self::Warning,
+            _ => Self::Unknown,
+        })
+    }
 }
 
 /// Severity of a diagnostic emitted while ingesting managed settings.
@@ -2714,7 +2683,7 @@ pub(crate) enum ManagedSettingsServerPolicyCacheMode {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) enum ManagedSettingsLogLevel {
     /// Detail useful only when diagnosing an ingestion.
     #[serde(rename = "debug")]
@@ -2733,6 +2702,23 @@ pub(crate) enum ManagedSettingsLogLevel {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for ManagedSettingsLogLevel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedSettingsLogLevel",
+            &["debug", "info", "warning", "error", "Unknown"],
+            Some(4),
+        )?;
+        Ok(match index {
+            0 => Self::Debug,
+            1 => Self::Info,
+            2 => Self::Warning,
+            3 => Self::Error,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// Which channel registered the policy helper that produced a helper layer.
 ///
@@ -2742,7 +2728,7 @@ pub(crate) enum ManagedSettingsLogLevel {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) enum ManagedSettingsPolicyHelperAuthority {
     /// The helper was registered by the device (MDM or managed file) layer.
     #[serde(rename = "device")]
@@ -2758,6 +2744,22 @@ pub(crate) enum ManagedSettingsPolicyHelperAuthority {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for ManagedSettingsPolicyHelperAuthority {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedSettingsPolicyHelperAuthority",
+            &["device", "server", "environment", "Unknown"],
+            Some(3),
+        )?;
+        Ok(match index {
+            0 => Self::Device,
+            1 => Self::Server,
+            2 => Self::Environment,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// How the server layer of an ingestion was resolved.
 ///
@@ -2767,7 +2769,7 @@ pub(crate) enum ManagedSettingsPolicyHelperAuthority {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) enum ManagedSettingsServerPolicyResolution {
     /// A live fetch succeeded.
     #[serde(rename = "live")]
@@ -2795,6 +2797,123 @@ pub(crate) enum ManagedSettingsServerPolicyResolution {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for ManagedSettingsServerPolicyResolution {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedSettingsServerPolicyResolution",
+            &[
+                "live",
+                "freshCache",
+                "cacheMiss",
+                "fallbackCache",
+                "failOpen",
+                "failClosed",
+                "skippedNoToken",
+                "Unknown",
+            ],
+            Some(7),
+        )?;
+        Ok(match index {
+            0 => Self::Live,
+            1 => Self::FreshCache,
+            2 => Self::CacheMiss,
+            3 => Self::FallbackCache,
+            4 => Self::FailOpen,
+            5 => Self::FailClosed,
+            6 => Self::SkippedNoToken,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// The operation that requires a policy-helper response.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum ManagedSettingsPolicyHelperReason {
+    /// Resolve policy for session startup.
+    #[serde(rename = "sessionStart")]
+    SessionStart,
+    /// Resolve policy before plugin activation.
+    #[serde(rename = "pluginActivation")]
+    PluginActivation,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for ManagedSettingsPolicyHelperReason {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedSettingsPolicyHelperReason",
+            &["sessionStart", "pluginActivation", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::SessionStart,
+            1 => Self::PluginActivation,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// How an ingestion may use the on-disk server-policy cache.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum ManagedSettingsServerPolicyCacheMode {
+    /// Serve a recent cache entry before a live fetch.
+    #[serde(rename = "preferFresh")]
+    PreferFresh,
+    /// Read cached policy without a network request.
+    #[serde(rename = "cacheOnly")]
+    CacheOnly,
+    /// Serve a cached entry only as a fallback after a failed live fetch.
+    #[serde(rename = "fallbackOnly")]
+    FallbackOnly,
+    /// Ignore the cache entirely and rely on the live fetch alone.
+    #[serde(rename = "disabled")]
+    Disabled,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for ManagedSettingsServerPolicyCacheMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "ManagedSettingsServerPolicyCacheMode",
+            &[
+                "preferFresh",
+                "cacheOnly",
+                "fallbackOnly",
+                "disabled",
+                "Unknown",
+            ],
+            Some(4),
+        )?;
+        Ok(match index {
+            0 => Self::PreferFresh,
+            1 => Self::CacheOnly,
+            2 => Self::FallbackOnly,
+            3 => Self::Disabled,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// What the one-time staff log-level migration did.
 ///
@@ -2804,7 +2923,7 @@ pub(crate) enum ManagedSettingsServerPolicyResolution {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub enum StaffLogLevelMigrationStatus {
     /// The account is not a staff account, so the migration does not apply and nothing was recorded.
     #[serde(rename = "ineligible")]
@@ -2820,6 +2939,22 @@ pub enum StaffLogLevelMigrationStatus {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for StaffLogLevelMigrationStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "StaffLogLevelMigrationStatus",
+            &["ineligible", "current", "refreshed", "Unknown"],
+            Some(3),
+        )?;
+        Ok(match index {
+            0 => Self::Ineligible,
+            1 => Self::Current,
+            2 => Self::Refreshed,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// What the one-time staff update-channel migration did.
 ///
@@ -2829,7 +2964,7 @@ pub enum StaffLogLevelMigrationStatus {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub enum StaffUpdateChannelMigrationStatus {
     /// The account is not a staff account, so the migration does not apply and nothing was recorded.
     #[serde(rename = "ineligible")]
@@ -2851,6 +2986,31 @@ pub enum StaffUpdateChannelMigrationStatus {
     #[serde(other)]
     Unknown,
 }
+impl<'de> Deserialize<'de> for StaffUpdateChannelMigrationStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "StaffUpdateChannelMigrationStatus",
+            &[
+                "ineligible",
+                "current",
+                "migrated",
+                "completed",
+                "excluded-experimental",
+                "Unknown",
+            ],
+            Some(5),
+        )?;
+        Ok(match index {
+            0 => Self::Ineligible,
+            1 => Self::Current,
+            2 => Self::Migrated,
+            3 => Self::Completed,
+            4 => Self::ExcludedExperimental,
+            _ => Self::Unknown,
+        })
+    }
+}
 
 /// What the one-time obsolete-settings cleanup did to the document.
 ///
@@ -2860,7 +3020,7 @@ pub enum StaffUpdateChannelMigrationStatus {
 /// and may change or be removed in future SDK or CLI releases.
 ///
 /// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) enum UserSettingsMigrateObsoleteOnDiskStatus {
     /// No settings document exists, so there was nothing to clean.
     #[serde(rename = "missing")]
@@ -2878,4 +3038,21 @@ pub(crate) enum UserSettingsMigrateObsoleteOnDiskStatus {
     #[default]
     #[serde(other)]
     Unknown,
+}
+impl<'de> Deserialize<'de> for UserSettingsMigrateObsoleteOnDiskStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "UserSettingsMigrateObsoleteOnDiskStatus",
+            &["missing", "invalid", "unchanged", "changed", "Unknown"],
+            Some(4),
+        )?;
+        Ok(match index {
+            0 => Self::Missing,
+            1 => Self::Invalid,
+            2 => Self::Unchanged,
+            3 => Self::Changed,
+            _ => Self::Unknown,
+        })
+    }
 }

@@ -25,9 +25,9 @@ flowchart TD
 
 ## Defining custom agents
 
-To discover Markdown definitions from versioned packages or vendored folders, use `agentDirectories` or [repository customization locations](./customization-locations.md).
+To discover Markdown definitions from versioned packages or vendored folders, use `agents.directories` or [repository customization locations](./customization-locations.md).
 
-Pass `customAgents` when creating a session. Each agent needs at minimum a `name` and `prompt`.
+Pass `agents.definitions` when creating a session. Each agent needs at minimum a `name` and `prompt`.
 
 Use the built-in subagent allowlist on both create and resume to restrict only
 built-in subagents. An empty list disables all built-in subagents; a nonempty
@@ -35,14 +35,14 @@ list allows only the named built-ins, subject to runtime availability and
 exclusions. Unknown built-in names are rejected. Custom agents remain available,
 including custom agents with the same name as a built-in.
 
-| SDK                  | Create and resume option                                            |
-| -------------------- | ------------------------------------------------------------------- |
-| Node.js / TypeScript | `includedBuiltinAgents`                                             |
-| Python               | `included_builtin_agents`                                           |
-| Go                   | `IncludedBuiltInAgents` (use a non-nil `[]string{}` to disable all) |
-| .NET                 | `IncludedBuiltInAgents`                                             |
-| Java                 | `setIncludedBuiltInAgents`                                          |
-| Rust                 | `with_included_builtin_agents`                                      |
+| SDK                  | Create and resume option                                                       |
+| -------------------- | ------------------------------------------------------------------------------ |
+| Node.js / TypeScript | `agents.includedBuiltinAgents`                                                 |
+| Python               | `agents["included_builtin_agents"]`                                            |
+| Go                   | `Agents.IncludedBuiltinAgents` (use a non-nil `[]string{}` to disable all)     |
+| .NET                 | `Agents.IncludedBuiltInAgents`                                                 |
+| Java                 | `SessionAgentOptions.setIncludedBuiltInAgents`, passed with `setAgents`        |
+| Rust                 | `SessionAgentOptions::with_included_builtin_agents`, passed with `with_agents` |
 
 Omitting the allowlist uses existing defaults when creating a session or
 resuming after a runtime restart (cold resume). On a resident session (warm
@@ -211,6 +211,7 @@ session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
 <summary><strong>.NET</strong></summary>
 
 ```csharp
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
 using Microsoft.Copilot;
 using Microsoft.Copilot.Rpc;
 
@@ -319,15 +320,15 @@ try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotCl
 
 Set `model` and `reasoningEffort` to override the parent session's model settings while a custom agent runs. When `reasoningEffort` is omitted, the SDK sends no per-agent override and the runtime resolves the effort from its own precedence: a per-call client option, the resolved model's default, or the agent definition all take priority; otherwise the runtime inherits the parent session's effort only when the subagent runs the same model as the parent. When the subagent resolves to a different model, it falls back to that model's default instead of inheriting the parent's effort. Python uses `reasoning_effort`, .NET uses `ReasoningEffort`, Go uses `ReasoningEffort`, Java uses `setReasoningEffort`, and Rust uses `with_reasoning_effort`.
 
-In addition to per-agent configuration above, you can set `agent` on the **session config** itself to pre-select which custom agent is active when the session starts. See [Selecting an Agent at Session Creation](#selecting-an-agent-at-session-creation) below.
+In addition to per-agent configuration above, you can set `agents.selected` on the **session config** itself to pre-select which custom agent is active when the session starts. See [Selecting an Agent at Session Creation](#selecting-an-agent-at-session-creation) below.
 
 | Session Config Property | Type | Description |
 |-------------------------|------|-------------|
-| `agent` | `string` | Name of the custom agent to pre-select at session creation. Must match a `name` in `customAgents`. |
+| `agents.selected` | `string` | Name of the custom agent to pre-select at session creation. Must match a `name` in `agents.definitions`. |
 
 ## Per-agent skills
 
-You can preload skills into an agent's context using the `skills` property. When specified, the **full content** of each listed skill is eagerly injected into the agent's context at startup—the agent doesn't need to invoke a skill tool; the instructions are already present. Skills are **opt-in**: agents receive no skills by default, and sub-agents do not inherit skills from the parent. Skill names are resolved from the session-level `skillDirectories`.
+You can preload skills into an agent's context using the `skills` property. When specified, the **full content** of each listed skill is eagerly injected into the agent's context at startup—the agent doesn't need to invoke a skill tool; the instructions are already present. Skills are **opt-in**: agents receive no skills by default, and sub-agents do not inherit skills from the parent. Skill names are resolved from the session-level `skills.directories`.
 
 ```typescript
 const session = await client.createSession({
@@ -360,7 +361,7 @@ In this example, `security-auditor` starts with `security-scan` and `dependency-
 
 ## Selecting an agent at session creation
 
-You can pass `agent` in the session config to pre-select which custom agent should be active when the session starts. The value must match the `name` of one of the agents defined in `customAgents`.
+You can pass `agents.selected` in the session config to pre-select which custom agent should be active when the session starts. The value must match the `name` of one of the agents defined in `agents.definitions`.
 
 This is equivalent to calling `session.rpc.agent.select()` after creation, but avoids the extra API call and ensures the agent is active from the very first prompt.
 
@@ -955,7 +956,7 @@ const session = await client.createSession({
 
 ## Agent-exclusive tools
 
-Use the `defaultAgent` property on the session configuration to hide specific tools from the default agent (the built-in agent that handles turns when no custom agent is selected). This forces the main agent to delegate to sub-agents when those tools' capabilities are needed, keeping the main agent's context clean.
+Use the `agents.default` property on the session configuration to hide specific tools from the default agent (the built-in agent that handles turns when no custom agent is selected). This forces the main agent to delegate to sub-agents when those tools' capabilities are needed, keeping the main agent's context clean.
 
 This is useful when:
 * Certain tools generate large amounts of context that would overwhelm the main agent
@@ -1160,7 +1161,7 @@ var session = await client.CreateSessionAsync(new CreateSessionOptions
 
 ### How it works
 
-Tools listed in `defaultAgent.excludedTools`:
+Tools listed in `agents.default.excludedTools`:
 
 1. **Are registered**—their handlers are available for execution
 1. **Are hidden** from the main agent's tool list—the LLM won't see or call them directly
@@ -1168,20 +1169,20 @@ Tools listed in `defaultAgent.excludedTools`:
 
 ### Interaction with other tool filters
 
-`defaultAgent.excludedTools` is orthogonal to the session-level `availableTools` and `excludedTools`:
+`agents.default.excludedTools` is orthogonal to the session-level `tools.availableTools` and `tools.excludedTools`:
 
 | Filter | Scope | Effect |
 |--------|-------|--------|
-| `availableTools` | Session-wide | Allowlist—only these tools exist for anyone |
-| `excludedTools` | Session-wide | Blocklist—these tools are blocked for everyone |
-| `defaultAgent.excludedTools` | Main agent only | These tools are hidden from the main agent but available to sub-agents |
+| `tools.availableTools` | Session-wide | Allowlist—only these tools exist for anyone |
+| `tools.excludedTools` | Session-wide | Blocklist—these tools are blocked for everyone |
+| `agents.default.excludedTools` | Main agent only | These tools are hidden from the main agent but available to sub-agents |
 
 Precedence:
-1. Session-level `availableTools`/`excludedTools` are applied first (globally)
-1. `defaultAgent.excludedTools` is applied on top, further restricting the main agent only
+1. Session-level `tools.availableTools`/`tools.excludedTools` are applied first (globally)
+1. `agents.default.excludedTools` is applied on top, further restricting the main agent only
 
 > [!NOTE]
-> If a tool is in both `excludedTools` (session-level) and `defaultAgent.excludedTools`, the session-level exclusion takes precedence—the tool is unavailable to everyone.
+> If a tool is in both `tools.excludedTools` (session-level) and `agents.default.excludedTools`, the session-level exclusion takes precedence—the tool is unavailable to everyone.
 
 ## Attaching MCP servers to agents
 
@@ -1218,20 +1219,24 @@ const session = await client.createSession({
 A common pattern is to define a read-only researcher agent and a write-capable editor agent. The runtime delegates exploration tasks to the researcher and modification tasks to the editor:
 
 ```typescript
-customAgents: [
-    {
-        name: "researcher",
-        description: "Analyzes code structure, finds patterns, and answers questions",
-        tools: ["grep", "glob", "view"],
-        prompt: "You are a code analyst. Thoroughly explore the codebase to answer questions.",
+const session = await client.createSession({
+    agents: {
+        definitions: [
+            {
+                name: "researcher",
+                description: "Analyzes code structure, finds patterns, and answers questions",
+                tools: ["grep", "glob", "view"],
+                prompt: "You are a code analyst. Thoroughly explore the codebase to answer questions.",
+            },
+            {
+                name: "implementer",
+                description: "Implements code changes based on analysis",
+                tools: ["view", "edit", "bash"],
+                prompt: "You make minimal, targeted code changes. Always verify changes compile.",
+            },
+        ],
     },
-    {
-        name: "implementer",
-        description: "Implements code changes based on analysis",
-        tools: ["view", "edit", "bash"],
-        prompt: "You make minimal, targeted code changes. Always verify changes compile.",
-    },
-]
+});
 ```
 
 ### Keep agent descriptions specific

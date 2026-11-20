@@ -43,7 +43,8 @@ public sealed partial class ClientSessionLifetimeTests
             },
         };
         ActivitySource.AddActivityListener(listener);
-        using var remote = toolSource.StartActivity("external_tool")!;
+        using var remote = toolSource.CreateActivity("external_tool", ActivityKind.Internal)!
+            .SetIdFormat(ActivityIdFormat.W3C).Start();
         traceId = remote.TraceId;
         remote.TraceStateString = "tenant=example";
         remote.Stop();

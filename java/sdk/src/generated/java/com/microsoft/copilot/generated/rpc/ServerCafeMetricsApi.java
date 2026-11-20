@@ -49,6 +49,17 @@ final class ServerCafeMetricsApi {
     }
 
     /**
+     * Records only the first interactive CLI readiness observation in this process. Invalid durations produce no sample. Requires the private trusted CLI host capability.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<Void> recordCliReady(CafeMetricsRecordCliReadyParams params) {
+        return caller.invoke("cafeMetrics.recordCliReady", params, Void.class);
+    }
+
+    /**
      * Records one terminal resume result. Does nothing before startup. Requires the private trusted CLI host capability.
      *
      * @apiNote This method is experimental and may change in a future version.

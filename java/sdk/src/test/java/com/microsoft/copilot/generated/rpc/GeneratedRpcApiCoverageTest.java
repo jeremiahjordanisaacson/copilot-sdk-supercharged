@@ -32,23 +32,15 @@ class GeneratedRpcApiCoverageTest {
 
     @Test
     void canonical_plugin_records_preserve_wire_defaults_without_team_provenance() throws Exception {
-        var plugin = Plugin.class
-                .getConstructor(ManagedPluginAssignment.class, String.class, String.class, String.class, Boolean.class,
-                        String.class, String.class, String.class, String.class, Boolean.class, Boolean.class,
-                        Boolean.class, Boolean.class, String.class)
-                .newInstance(null, "p", "corp", "1.0.0", true, null, null, null, null, null, null, null, null, "id");
+        var plugin = Plugin.builder().name("p").marketplace("corp").version("1.0.0").enabled(true).id("id").build();
         assertNull(plugin.team());
-        assertEquals(Plugin.builder().name("p").marketplace("corp").version("1.0.0").enabled(true).id("id").build(),
-                plugin);
+        assertEquals(new ObjectMapper().readTree("""
+                {"name":"p","marketplace":"corp","version":"1.0.0","enabled":true,"id":"id"}
+                """), new ObjectMapper().valueToTree(plugin));
 
-        var installed = InstalledPluginInfo.class.getConstructor(ManagedPluginAssignment.class, String.class,
-                String.class, String.class, String.class, Boolean.class, String.class, String.class, String.class,
-                Boolean.class, Boolean.class, Boolean.class, Boolean.class, String.class,
-                InstalledPluginVerifiedSource.class, String.class, String.class).newInstance(null, "p", "corp", null,
-                        "1.0.0", true, null, null, null, null, null, null, null, null, null, null, "id");
+        var installed = InstalledPluginInfo.builder().name("p").marketplace("corp").version("1.0.0").enabled(true)
+                .id("id").build();
         assertNull(installed.team());
-        assertEquals(InstalledPluginInfo.builder().name("p").marketplace("corp").version("1.0.0").enabled(true).id("id")
-                .build(), installed);
         assertEquals(new ObjectMapper().readTree("""
                 {"name":"p","marketplace":"corp","version":"1.0.0","enabled":true,"id":"id"}
                 """), new ObjectMapper().valueToTree(installed));

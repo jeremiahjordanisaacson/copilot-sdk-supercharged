@@ -23,7 +23,7 @@ rust_library(
         allow_empty = True,
     ),
     aliases = {
-        "@sdk_vendor__rustls-pki-types-1.15.1//:rustls_pki_types": "pki_types",
+        "@sdk_vendor__rustls-pki-types-1.16.0//:rustls_pki_types": "pki_types",
     },
     compile_data = glob(
         include = ["**"],
@@ -63,7 +63,7 @@ rust_library(
     }),
     version = "0.8.5",
     deps = [
-        "@sdk_vendor__rustls-pki-types-1.15.1//:rustls_pki_types",
+        "@sdk_vendor__rustls-pki-types-1.16.0//:rustls_pki_types",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
             "@sdk_vendor__security-framework-3.7.0//:security_framework",  # cfg(target_os = "macos")

@@ -70,4 +70,15 @@ public final class ServerFetchApi {
         return caller.invoke("fetch.cancel", params, FetchCancelResult.class);
     }
 
+    /**
+     * Reports the proxy routes fetch.send would use for a URL with the runtime's ambient proxy settings (process environment, the connection's resolveProxy callback, then OS static proxy, PAC, or WPAD). Available to all SDK clients and extensions. May download a PAC script; never contacts the target. Reports routes only, not proxy authentication: the runtime keeps proxy credentials, the connection's authenticateBasic and authenticateNegotiate callbacks, and native Negotiate credentials, so a client that connects through a returned proxy must authenticate by its own means.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<FetchResolveProxyResult> resolveProxy(FetchResolveProxyParams params) {
+        return caller.invoke("fetch.resolveProxy", params, FetchResolveProxyResult.class);
+    }
+
 }

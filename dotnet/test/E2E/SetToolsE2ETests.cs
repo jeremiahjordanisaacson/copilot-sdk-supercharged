@@ -7,6 +7,7 @@
 using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.ComponentModel;
+using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -18,6 +19,11 @@ public class SetToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
     private const string FruitAndVegetablePrompt = "Use lookup_fruit to find the fruit for code 42 again, and use lookup_vegetable to find the vegetable for code 7.";
     private const string VegetablePrompt = "Use lookup_vegetable to find the vegetable for code 7.";
 
+    // The replacement cases run in the control arm, the default for every SDK. The stable
+    // prompt-prefix treatment of previously sent definitions is shared runtime behavior,
+    // covered by the Node.js SDK's explicit treatment cases.
+    private static Dictionary<string, bool> ControlArm() => new() { ["STABLE_PROMPT_PREFIX"] = false };
+
     [Fact]
     public async Task Replaces_Tools_On_A_Created_Session()
     {
@@ -25,7 +31,7 @@ public class SetToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
         var replacementLookups = new List<int>();
         var vegetableLookups = new List<int>();
         var session = await CreateSessionAsync(new CreateSessionOptions
-        { Tools = new SessionToolOptions { Definitions = [LookupFruit("apple", originalLookups), RetiredLookup()] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
+        { Tools = new SessionToolOptions { Definitions = [LookupFruit("apple", originalLookups), RetiredLookup()] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Experiments = new SessionExperimentOptions { Flags = ControlArm() } });
 
         var first = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions { Prompt = FruitPrompt });
         Assert.Contains("apple", first?.Data.Content ?? string.Empty);
@@ -64,7 +70,7 @@ public class SetToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
     {
         var createdLookups = new List<int>();
         var created = await CreateSessionAsync(new CreateSessionOptions
-        { Tools = new SessionToolOptions { Definitions = [LookupFruit("apple", createdLookups)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
+        { Tools = new SessionToolOptions { Definitions = [LookupFruit("apple", createdLookups)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Experiments = new SessionExperimentOptions { Flags = ControlArm() } });
         var sessionId = created.SessionId;
         var first = await TestHelper.SendAndGetFinalAssistantMessageAsync(created, new MessageOptions { Prompt = FruitPrompt });
         Assert.Contains("apple", first?.Data.Content ?? string.Empty);
@@ -74,7 +80,7 @@ public class SetToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
         var fruitLookups = new List<int>();
         var vegetableLookups = new List<int>();
         var resumed = await Ctx.ResumeSessionAsync(Client, sessionId, new ResumeSessionOptions
-        { Tools = new SessionToolOptions { Definitions = [LookupFruit("apple", fruitLookups)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
+        { Tools = new SessionToolOptions { Definitions = [LookupFruit("apple", fruitLookups)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Experiments = new SessionExperimentOptions { Flags = ControlArm() } });
         await resumed.SetToolsAsync([LookupVegetable(vegetableLookups)]);
 
         var answer = await TestHelper.SendAndGetFinalAssistantMessageAsync(resumed, new MessageOptions { Prompt = VegetablePrompt });
@@ -91,6 +97,12 @@ public class SetToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
             Assert.Contains("lookup_vegetable", tools);
             Assert.DoesNotContain("lookup_fruit", tools);
         });
+
+        var result = await resumed.Rpc.Tools.ExecuteAsync("lookup_fruit", JsonElement.Parse("""{"code":42}"""));
+        Assert.Equal("failure", result.GetProperty("resultType").GetString());
+        Assert.Contains("does not exist", result.GetProperty("textResultForLlm").GetString());
+        Assert.Equal([42], createdLookups);
+        Assert.Empty(fruitLookups);
     }
 
     [Fact]

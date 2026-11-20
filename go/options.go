@@ -338,7 +338,8 @@ type SessionAgentOptions struct {
 	// ExcludedBuiltinAgents is a list of built-in agent names to exclude from
 	// the session. Excluded built-in agents are hidden from discovery and cannot
 	// be selected or invoked unless a custom agent with the same name is
-	// configured.
+	// configured. On warm resume, nil keeps the current exclusions and an empty
+	// non-nil list clears them.
 	ExcludedBuiltinAgents []string
 	// IncludedBuiltinAgents allows only the named built-in subagents, subject to
 	// availability and ExcludedBuiltInAgents. A non-nil []string{} disables all

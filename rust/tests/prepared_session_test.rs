@@ -731,6 +731,9 @@ async fn cancelled_prepared_resume_cleans_up_and_allows_retry() {
     assert_eq!(resume_req["method"], "session.resume");
     start.abort();
     let _ = start.await;
+    let cancellation = server.read_request().await;
+    assert_eq!(cancellation["method"], "$/cancelRequest");
+    assert_eq!(cancellation["params"]["id"], resume_req["id"]);
 
     await_no_registrations(&client).await;
     expect_closed(&mut events).await;

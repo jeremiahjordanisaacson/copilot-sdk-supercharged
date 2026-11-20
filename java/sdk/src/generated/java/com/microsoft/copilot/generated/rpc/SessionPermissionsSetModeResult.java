@@ -27,7 +27,9 @@ public record SessionPermissionsSetModeResult(
     /** Whether the operation succeeded */
     @JsonProperty("success") Boolean success,
     /** Authoritative permission mode after the mutation */
-    @JsonProperty("mode") PermissionMode mode
+    @JsonProperty("mode") PermissionMode mode,
+    /** Why the requested mode was refused, when known. Currently `managed_policy`; absent when the cause is unknown or the operation succeeded. */
+    @JsonProperty("reason") String reason
 ) {
 
     /**
@@ -53,6 +55,7 @@ public record SessionPermissionsSetModeResult(
         private Builder() {}
         private Boolean success;
         private PermissionMode mode;
+        private String reason;
 
         /**
          * Sets the {@code success} property.
@@ -79,6 +82,18 @@ public record SessionPermissionsSetModeResult(
         }
 
         /**
+         * Sets the {@code reason} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder reason(String value) {
+            this.reason = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
@@ -87,7 +102,7 @@ public record SessionPermissionsSetModeResult(
         public SessionPermissionsSetModeResult build() {
             if (success == null) throw new IllegalStateException("Missing required property: success");
             if (mode == null) throw new IllegalStateException("Missing required property: mode");
-            return new SessionPermissionsSetModeResult(success, mode);
+            return new SessionPermissionsSetModeResult(success, mode, reason);
         }
     }
 }
