@@ -25,6 +25,8 @@ import javax.annotation.processing.Generated;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record InstructionsDiscoverParams(
+    /** Optional configuration root for personal instructions and plugins. Omission retains the connection's root. */
+    @JsonProperty("configDir") String configDir,
     /** Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without ambient discovery, subject to instruction/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots. */
     @JsonProperty("instructionDirectories") List<String> instructionDirectories,
     /** Optional list of project directory paths to scan for repository/working-directory instruction sources. When omitted or empty, only user-level and plugin instruction sources are returned (no project scan). */
@@ -52,9 +54,21 @@ public record InstructionsDiscoverParams(
      */
     public static final class Builder {
         private Builder() {}
+        private String configDir;
         private List<String> instructionDirectories;
         private List<String> projectPaths;
         private Boolean excludeHostInstructions;
+
+        /**
+         * Sets the {@code configDir} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder configDir(String value) {
+            this.configDir = value;
+            return this;
+        }
 
         /**
          * Sets the {@code instructionDirectories} property.
@@ -96,7 +110,7 @@ public record InstructionsDiscoverParams(
          * @since 2.0.0
          */
         public InstructionsDiscoverParams build() {
-            return new InstructionsDiscoverParams(instructionDirectories, projectPaths, excludeHostInstructions);
+            return new InstructionsDiscoverParams(configDir, instructionDirectories, projectPaths, excludeHostInstructions);
         }
     }
 }

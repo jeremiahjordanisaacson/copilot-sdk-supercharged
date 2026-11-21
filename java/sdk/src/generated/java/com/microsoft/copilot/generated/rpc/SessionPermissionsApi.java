@@ -256,4 +256,20 @@ public final class SessionPermissionsApi {
         return caller.invoke("session.permissions.notifyPromptShown", _p, SessionPermissionsNotifyPromptShownResult.class);
     }
 
+    /**
+     * Reads advisory repository-owned resource disables using the bound session's configuration and matching workspace trust.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<RepositoryDisabledNamesResult> repositoryDisabledNames(SessionPermissionsRepositoryDisabledNamesParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.permissions.repositoryDisabledNames", _p, RepositoryDisabledNamesResult.class);
+    }
+
 }

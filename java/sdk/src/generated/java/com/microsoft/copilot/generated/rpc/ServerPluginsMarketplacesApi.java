@@ -28,13 +28,26 @@ public final class ServerPluginsMarketplacesApi {
 
     /**
      * Lists all registered marketplaces (defaults + user-added).
+     * <p>
+     * Invokes the method with no params, applying the runtime defaults.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0
      */
     @CopilotExperimental
     public CompletableFuture<PluginsMarketplacesListResult> list() {
-        return caller.invoke("plugins.marketplaces.list", java.util.Map.of(), PluginsMarketplacesListResult.class);
+        return list(null);
+    }
+
+    /**
+     * Lists all registered marketplaces (defaults + user-added).
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<PluginsMarketplacesListResult> list(PluginsMarketplacesListParams params) {
+        return caller.invoke("plugins.marketplaces.list", params == null ? java.util.Map.of() : params, PluginsMarketplacesListResult.class);
     }
 
     /**

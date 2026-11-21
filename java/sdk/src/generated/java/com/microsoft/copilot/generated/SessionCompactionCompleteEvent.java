@@ -10,6 +10,7 @@ package com.microsoft.copilot.generated;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.microsoft.copilot.CopilotExperimental;
 import javax.annotation.processing.Generated;
 
 /**
@@ -109,7 +110,10 @@ public final class SessionCompactionCompleteEvent extends SessionEvent {
         /** How long the compaction attempt took end to end, how long it blocked the user, and the configuration it ran under */
         @JsonProperty("attemptMetrics") CompactionCompleteAttemptMetrics attemptMetrics,
         /** Evidence about the summarizer's latest model call for a failed compaction, so a failure its reason alone does not explain can be diagnosed */
-        @JsonProperty("failureDiagnostics") CompactionCompleteFailureDiagnostics failureDiagnostics
+        @JsonProperty("failureDiagnostics") CompactionCompleteFailureDiagnostics failureDiagnostics,
+        /** Experimental HydraFusion attribution for a compaction a HydraFusion turn ran before its first phase. */
+        @CopilotExperimental
+        @JsonProperty("fusion") FusionAttribution fusion
     ) {
 
         /**
@@ -169,6 +173,7 @@ public final class SessionCompactionCompleteEvent extends SessionEvent {
             private CompactionCompleteSummarizerProgress summarizerProgress;
             private CompactionCompleteAttemptMetrics attemptMetrics;
             private CompactionCompleteFailureDiagnostics failureDiagnostics;
+            private FusionAttribution fusion;
 
             /**
              * Sets the {@code success} property.
@@ -589,6 +594,18 @@ public final class SessionCompactionCompleteEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code fusion} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            @com.microsoft.copilot.CopilotExperimental
+            public Builder fusion(FusionAttribution value) {
+                this.fusion = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
@@ -596,7 +613,7 @@ public final class SessionCompactionCompleteEvent extends SessionEvent {
              */
             public SessionCompactionCompleteEventData build() {
                 if (success == null) throw new IllegalStateException("Missing required property: success");
-                return new SessionCompactionCompleteEventData(success, outcome, outcomeReason, failureReason, compactionAttemptId, model, initialModel, reasoningEffort, error, preCompactionTokens, postCompactionTokens, preCompactionMessagesLength, messagesRemoved, tokensRemoved, tokenAccountingBasis, customInstructions, summaryContent, responsesReasoning, activeWorkflowSummary, behaviorModelId, checkpointNumber, checkpointPath, compactionTokensUsed, requestId, serviceRequestId, clientRequestId, systemTokens, conversationTokens, toolDefinitionsTokens, statusCode, tokenLimit, targetPromptTokenLimit, switchTargetModel, trigger, execution, summarizerProgress, attemptMetrics, failureDiagnostics);
+                return new SessionCompactionCompleteEventData(success, outcome, outcomeReason, failureReason, compactionAttemptId, model, initialModel, reasoningEffort, error, preCompactionTokens, postCompactionTokens, preCompactionMessagesLength, messagesRemoved, tokensRemoved, tokenAccountingBasis, customInstructions, summaryContent, responsesReasoning, activeWorkflowSummary, behaviorModelId, checkpointNumber, checkpointPath, compactionTokensUsed, requestId, serviceRequestId, clientRequestId, systemTokens, conversationTokens, toolDefinitionsTokens, statusCode, tokenLimit, targetPromptTokenLimit, switchTargetModel, trigger, execution, summarizerProgress, attemptMetrics, failureDiagnostics, fusion);
             }
         }
     }

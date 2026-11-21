@@ -31,6 +31,22 @@ public final class SessionModelApi {
     }
 
     /**
+     * Generates a branch slug with the original session's model policy and renewable credentials, including its established derived-name fallback.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<ModelGenerateBranchSlugResult> generateBranchSlug(SessionModelGenerateBranchSlugParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.model.generateBranchSlug", _p, ModelGenerateBranchSlugResult.class);
+    }
+
+    /**
      * Gets the session's authoritative model snapshot, including the committed Auto preference and any newer unclaimed Auto preference waiting for a future user turn.
      *
      * @apiNote This method is experimental and may change in a future version.

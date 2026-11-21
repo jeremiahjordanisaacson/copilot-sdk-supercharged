@@ -35,6 +35,22 @@ public final class SessionPluginsApi {
     }
 
     /**
+     * Inspects extension contributions for a changed plugin under the selected session's activation policy and installation root.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SessionPluginInspectExtensionContributionsResult> inspectExtensionContributions(SessionPluginsInspectExtensionContributionsParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.plugins.inspectExtensionContributions", _p, SessionPluginInspectExtensionContributionsResult.class);
+    }
+
+    /**
      * Lists globally installed, live, built-in, and enterprise-managed desired plugins using the live session's authoritative account, working directory, and retained managed policy.
      *
      * @apiNote This method is experimental and may change in a future version.
@@ -208,6 +224,17 @@ public final class SessionPluginsApi {
         com.fasterxml.jackson.databind.node.ObjectNode _p = params == null ? MAPPER.createObjectNode() : MAPPER.valueToTree(params);
         _p.put("sessionId", this.sessionId);
         return caller.invoke("session.plugins.retryManaged", _p, SessionPluginsRetryManagedResult.class);
+    }
+
+    /**
+     * Inspects available and inactive plugins with live, external, and trusted bundled provenance under the bound session's configuration and policy.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SessionPluginInventoryResult> inspectInventory() {
+        return caller.invoke("session.plugins.inspectInventory", java.util.Map.of("sessionId", this.sessionId), SessionPluginInventoryResult.class);
     }
 
 }

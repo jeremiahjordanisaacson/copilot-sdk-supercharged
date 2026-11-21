@@ -511,6 +511,33 @@ pub struct AuthIdentity {
 }
 crate::record_serde::wire_record!(AuthIdentity { copilot_user: "copilotUser" if is_none, env_var: "envVar" if is_none, host: "host", login: "login" if is_none, registration_id: "registrationId" if is_none, r#type: "type" });
 
+/// The verdict of the `forceLoginOrgs` enterprise sign-in pin for one credential. A managed device may pin Copilot to an approved set of GitHub organizations so a developer cannot sign in with a personal — or another enterprise's — account and escape every control that keys off the signed-in identity. A host must refuse to proceed when `allowed` is false; the remaining fields explain the refusal rather than qualifying it.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ForceLoginOrgsDecision {
+    /// Whether the client may proceed. True whenever no pin is in force, so an unmanaged host is never blocked.
+    pub allowed: bool,
+    /// A stable kebab-case reason code when refused: `org-not-approved`, `unverifiable-credential`, `policy-undetermined`, `policy-invalid`, `not-signed-in`, or `membership-unknown`. Omitted when allowed. Treat an unrecognized code as a refusal rather than mapping it to an allow: a code this host has not been taught about still denied the credential.
+    pub denial: Option<String>,
+    /// Whether a pin applies at all. Distinguishes "allowed because unmanaged" from "allowed because the account is approved", which a diagnostics surface needs and which also decides whether a bring-your-own-key provider may serve inference.
+    pub enforced: bool,
+    /// The approved organization the account matched, when allowed under a pin.
+    pub matched_org: Option<String>,
+    /// A developer-facing explanation of the refusal. Omitted when allowed.
+    pub message: Option<String>,
+    /// Error-level detail from managed-policy discovery — which file failed to load, which field failed validation. Carried on the decision rather than left to the log because a refusal can exit the process before a log sink exists, which would discard the only actionable diagnostic a misconfigured managed device produces.
+    pub policy_diagnostics: Vec<String>,
+    /// The approved organization logins, as configured. Enterprise configuration rather than user data, so it is safe to name in a message or a log line.
+    pub required_orgs: Vec<String>,
+}
+crate::record_serde::wire_record!(ForceLoginOrgsDecision { allowed: "allowed", denial: "denial" if is_none, enforced: "enforced", matched_org: "matchedOrg" if is_none, message: "message" if is_none, policy_diagnostics: "policyDiagnostics", required_orgs: "requiredOrgs" });
+
 /// Agent metadata, including identifiers, display details, source, tools, model, models, reasoning effort, MCP servers, skills, and file path.
 ///
 /// <div class="warning">
@@ -3755,6 +3782,29 @@ pub struct McpAppsResourceContent {
 }
 crate::record_serde::wire_record!(McpAppsResourceContent { meta: "_meta" if is_none, blob: "blob" if is_none, mime_type: "mimeType" if is_none, text: "text" if is_none, uri: "uri" });
 
+/// A source file or server entry that the MCP composition omitted.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpConfigSourceDiagnostic {
+    /// Diagnostic from the existing MCP parser.
+    pub message: String,
+    /// Source file that contains the problem.
+    pub path: String,
+    /// Either malformed, unreadable, or invalid-server.
+    pub reason: String,
+}
+crate::record_serde::wire_record!(McpConfigSourceDiagnostic {
+    message: "message",
+    path: "path",
+    reason: "reason"
+});
+
 /// Observational state for a matching already materialized MCP server.
 ///
 /// <div class="warning">
@@ -4340,6 +4390,27 @@ crate::record_serde::wire_record!(McpServerToolTokenBreakdown {
     tools: "tools",
     total_tokens: "totalTokens"
 });
+
+/// One actionable semantic import diagnostic.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SemanticImportDiagnostic {
+    /// Stable diagnostic code.
+    pub code: String,
+    /// External record identifier, when present.
+    pub external_id: Option<String>,
+    /// One-based input line.
+    pub line: i64,
+    /// Explanation of the invalid input or failed operation.
+    pub message: String,
+}
+crate::record_serde::wire_record!(SemanticImportDiagnostic { code: "code", external_id: "externalId" if is_none, line: "line", message: "message" });
 
 /// Active server-driven promotion for a model, including its discount and optional expiry.
 ///
@@ -4980,6 +5051,26 @@ pub struct PluginMarketplaceSearchError {
 }
 crate::record_serde::wire_record!(PluginMarketplaceSearchError { error: "error", marketplace: "marketplace", scope: "scope" if is_none });
 
+/// A diagnostic from plugin policy resolution.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginPolicyDiagnostic {
+    /// Diagnostic severity: debug, info, warning, or error.
+    pub level: String,
+    /// Diagnostic text for the host's private log.
+    pub message: String,
+}
+crate::record_serde::wire_record!(PluginPolicyDiagnostic {
+    level: "level",
+    message: "message"
+});
+
 /// Opt into native CAPI image generation.
 ///
 /// <div class="warning">
@@ -5089,6 +5180,51 @@ pub struct QuotaWarningProjection {
     pub warning_type: String,
 }
 crate::record_serde::wire_record!(QuotaWarningProjection { message: "message", url: "url" if is_none, warning_type: "warningType" });
+
+/// The filesystem and environment facts a user-settings file is resolved from. Passed explicitly rather than read from the runtime's own process, so a host whose configuration directory differs from its process environment resolves the file it means.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UserSettingsHostContext {
+    /// The Copilot configuration directory, when the host set one. Takes precedence over `COPILOT_HOME` and the home directory.
+    pub config_dir: Option<String>,
+    /// The host's environment variables. `COPILOT_HOME` is read from here, as are the variables a settings hook may expand.
+    pub environment: serde_json::Value,
+    /// The user's home directory, used when neither a configuration directory nor `COPILOT_HOME` is set.
+    pub home_directory: String,
+}
+crate::record_serde::wire_record!(UserSettingsHostContext { config_dir: "configDir" if is_none, environment: "environment", home_directory: "homeDirectory" });
+
+/// A stored Markdown research report in the bound session's authoritative state directory.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ResearchStoredReport {
+    /// The full report path on the runtime host.
+    pub file_path: String,
+    /// The file name without its final .md extension.
+    pub id: String,
+    /// The file modification time as a UTC ISO timestamp.
+    pub timestamp: String,
+    /// The identifier with hyphens replaced by spaces.
+    pub topic: String,
+}
+crate::record_serde::wire_record!(ResearchStoredReport {
+    file_path: "filePath",
+    id: "id",
+    timestamp: "timestamp",
+    topic: "topic"
+});
 
 /// Credential-injection capability flags applied while the sandbox is enabled. For the same capability independent of sandboxing, and matched to the credential's GitHub host, see `shell.credentials`; the two are additive.
 ///
@@ -5348,25 +5484,6 @@ crate::record_serde::wire_record!(SandboxTransportOwnerAhp {
     relay_id: "relayId",
     session_uri: "sessionUri"
 });
-
-/// The filesystem and environment facts a user-settings file is resolved from. Passed explicitly rather than read from the runtime's own process, so a host whose configuration directory differs from its process environment resolves the file it means.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct UserSettingsHostContext {
-    /// The Copilot configuration directory, when the host set one. Takes precedence over `COPILOT_HOME` and the home directory.
-    pub config_dir: Option<String>,
-    /// The host's environment variables. `COPILOT_HOME` is read from here, as are the variables a settings hook may expand.
-    pub environment: serde_json::Value,
-    /// The user's home directory, used when neither a configuration directory nor `COPILOT_HOME` is set.
-    pub home_directory: String,
-}
-crate::record_serde::wire_record!(UserSettingsHostContext { config_dir: "configDir" if is_none, environment: "environment", home_directory: "homeDirectory" });
 
 /// A saved provider's editable settings and credential status, never secret values.
 ///
@@ -10299,6 +10416,43 @@ impl<'de> Deserialize<'de> for McpAppsHostContextDetailsTheme {
     }
 }
 
+/// Controls how availableTools (allowlist) and excludedTools (denylist) combine when both are set.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum OptionsUpdateToolFilterPrecedence {
+    /// If availableTools is set, it is the only constraint that applies (excludedTools is ignored). Explicitly opts into allowlist precedence.
+    #[serde(rename = "available")]
+    Available,
+    /// A tool is enabled if and only if it matches the allowlist (or the allowlist is unset) AND it does not match the denylist. Default for new sessions.
+    #[serde(rename = "excluded")]
+    Excluded,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for OptionsUpdateToolFilterPrecedence {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "OptionsUpdateToolFilterPrecedence",
+            &["available", "excluded", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::Available,
+            1 => Self::Excluded,
+            _ => Self::Unknown,
+        })
+    }
+}
+
 /// Consumer allowed to call an MCP tool.
 ///
 /// <div class="warning">
@@ -10646,43 +10800,6 @@ impl<'de> Deserialize<'de> for McpSetEnvValueModeDetails {
         Ok(match index {
             0 => Self::Direct,
             1 => Self::Indirect,
-            _ => Self::Unknown,
-        })
-    }
-}
-
-/// Controls how availableTools (allowlist) and excludedTools (denylist) combine when both are set.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub enum OptionsUpdateToolFilterPrecedence {
-    /// If availableTools is set, it is the only constraint that applies (excludedTools is ignored). Explicitly opts into allowlist precedence.
-    #[serde(rename = "available")]
-    Available,
-    /// A tool is enabled if and only if it matches the allowlist (or the allowlist is unset) AND it does not match the denylist. Default for new sessions.
-    #[serde(rename = "excluded")]
-    Excluded,
-    /// Unknown variant for forward compatibility.
-    #[default]
-    #[serde(other)]
-    Unknown,
-}
-impl<'de> Deserialize<'de> for OptionsUpdateToolFilterPrecedence {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let index = crate::enum_serde::deserialize_variant(
-            deserializer,
-            "OptionsUpdateToolFilterPrecedence",
-            &["available", "excluded", "Unknown"],
-            Some(2),
-        )?;
-        Ok(match index {
-            0 => Self::Available,
-            1 => Self::Excluded,
             _ => Self::Unknown,
         })
     }
@@ -11405,6 +11522,43 @@ impl<'de> Deserialize<'de> for SettingsEditOperation {
     }
 }
 
+/// A resource disable list to which a repository may contribute names.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RepositoryDisabledKey {
+    /// MCP servers disabled by the repository.
+    #[serde(rename = "disabledMcpServers")]
+    DisabledMcpServers,
+    /// Skills disabled by the repository.
+    #[serde(rename = "disabledSkills")]
+    DisabledSkills,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for RepositoryDisabledKey {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RepositoryDisabledKey",
+            &["disabledMcpServers", "disabledSkills", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::DisabledMcpServers,
+            1 => Self::DisabledSkills,
+            _ => Self::Unknown,
+        })
+    }
+}
+
 /// Origin of the sandbox choice supplied by the host. This value describes preference or session intent; it does not authorize bypassing managed policy.
 ///
 /// <div class="warning">
@@ -11676,6 +11830,62 @@ impl<'de> Deserialize<'de> for ShellInitScriptShell {
     }
 }
 
+/// An original-host persistence barrier stage.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum SessionPersistenceBarrierPhase {
+    /// Wait for the original owner's initial workspace metadata.
+    #[serde(rename = "prepare")]
+    Prepare,
+    /// Drain the original owner's retained write callbacks.
+    #[serde(rename = "writeCallbacks")]
+    WriteCallbacks,
+    /// Release callback results and preserve their original failures.
+    #[serde(rename = "complete")]
+    Complete,
+    /// Drain the original owner's live tracker or pending teardown.
+    #[serde(rename = "tracking")]
+    Tracking,
+    /// Release results retained by a canceled flush.
+    #[serde(rename = "cancel")]
+    Cancel,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for SessionPersistenceBarrierPhase {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "SessionPersistenceBarrierPhase",
+            &[
+                "prepare",
+                "writeCallbacks",
+                "complete",
+                "tracking",
+                "cancel",
+                "Unknown",
+            ],
+            Some(5),
+        )?;
+        Ok(match index {
+            0 => Self::Prepare,
+            1 => Self::WriteCallbacks,
+            2 => Self::Complete,
+            3 => Self::Tracking,
+            4 => Self::Cancel,
+            _ => Self::Unknown,
+        })
+    }
+}
+
 /// Sharing status for a synced session. "repo" makes the session visible to anyone with read access to the repository; "unshared" restricts it to the creator and collaborators.
 ///
 /// <div class="warning">
@@ -11749,6 +11959,125 @@ impl<'de> Deserialize<'de> for SettingsEditStatus {
             0 => Self::Changed,
             1 => Self::Unchanged,
             2 => Self::Invalid,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// The source of an installed or registered skill.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum SkillResourceInstallKind {
+    /// A local skill definition.
+    #[serde(rename = "file")]
+    File,
+    /// An HTTPS skill definition.
+    #[serde(rename = "url")]
+    Url,
+    /// A registered skill directory.
+    #[serde(rename = "directory")]
+    Directory,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for SkillResourceInstallKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "SkillResourceInstallKind",
+            &["file", "url", "directory", "Unknown"],
+            Some(3),
+        )?;
+        Ok(match index {
+            0 => Self::File,
+            1 => Self::Url,
+            2 => Self::Directory,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// The personal or project destination of an installed skill.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum SkillResourceInstallScope {
+    /// The user's personal skill directory.
+    #[serde(rename = "personal")]
+    Personal,
+    /// The project's skill directory.
+    #[serde(rename = "project")]
+    Project,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for SkillResourceInstallScope {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "SkillResourceInstallScope",
+            &["personal", "project", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::Personal,
+            1 => Self::Project,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// The removed skill's storage tier.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum SkillResourceRemoveKind {
+    /// An unregistered skill directory.
+    #[serde(rename = "directory")]
+    Directory,
+    /// A removed personal skill.
+    #[serde(rename = "personal")]
+    Personal,
+    /// A removed project skill.
+    #[serde(rename = "project")]
+    Project,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for SkillResourceRemoveKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "SkillResourceRemoveKind",
+            &["directory", "personal", "project", "Unknown"],
+            Some(3),
+        )?;
+        Ok(match index {
+            0 => Self::Directory,
+            1 => Self::Personal,
+            2 => Self::Project,
             _ => Self::Unknown,
         })
     }
@@ -11831,6 +12160,43 @@ impl<'de> Deserialize<'de> for UIElicitationResponseAction {
             0 => Self::Accept,
             1 => Self::Decline,
             2 => Self::Cancel,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// Availability of the utility-model result.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum UtilityPromptResultKind {
+    /// Generation produced a value.
+    #[serde(rename = "success")]
+    Success,
+    /// Generation could not produce a value.
+    #[serde(rename = "unavailable")]
+    Unavailable,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for UtilityPromptResultKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "UtilityPromptResultKind",
+            &["success", "unavailable", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::Success,
+            1 => Self::Unavailable,
             _ => Self::Unknown,
         })
     }

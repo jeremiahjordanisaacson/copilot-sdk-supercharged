@@ -27,6 +27,17 @@ public final class ServerSecretsApi {
     }
 
     /**
+     * Redacts host output with the runtime's current secret sources, including when SDK-managed secret registration is disabled. Extensions cannot call this method. Does not retain the input.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SecretsFilterResult> filterForHost(SecretsFilterForHostParams params) {
+        return caller.invoke("secrets.filterForHost", params, SecretsFilterResult.class);
+    }
+
+    /**
      * Registers secret values for best-effort redaction in session logs and exports while this client remains connected. Repeated adds are idempotent. Discouraged for runtime code: retain an owned secret registration instead. Remove rotating or unused values with secrets.removeFilterValues; historical output and late echoes may no longer be redacted after removal or disconnect.
      *
      * @apiNote This method is experimental and may change in a future version.

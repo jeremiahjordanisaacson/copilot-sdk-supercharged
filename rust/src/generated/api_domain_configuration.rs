@@ -272,33 +272,6 @@ pub(crate) struct FeatureFlagsResolveStartupGatesRequest {
 }
 crate::record_serde::wire_record!(FeatureFlagsResolveStartupGatesRequest { auth_owner_id: "authOwnerId" if is_none, config: "config" if is_none, environment: "environment" if is_none, exp_flag_overrides: "expFlagOverrides" if is_none, first_launch_at_millis: "firstLaunchAtMillis" if is_none, flag_overrides: "flagOverrides" if is_none, flags: "flags", include_team_membership: "includeTeamMembership" if is_none, is_experimental: "isExperimental", is_staff: "isStaff", is_staff_github: "isStaffGithub" if is_none, is_staff_microsoft: "isStaffMicrosoft" if is_none, is_team: "isTeam", refresh_without_session: "refreshWithoutSession", streamer_mode: "streamerMode", working_directory: "workingDirectory" if is_none });
 
-/// The verdict of the `forceLoginOrgs` enterprise sign-in pin for one credential. A managed device may pin Copilot to an approved set of GitHub organizations so a developer cannot sign in with a personal — or another enterprise's — account and escape every control that keys off the signed-in identity. A host must refuse to proceed when `allowed` is false; the remaining fields explain the refusal rather than qualifying it.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ForceLoginOrgsDecision {
-    /// Whether the client may proceed. True whenever no pin is in force, so an unmanaged host is never blocked.
-    pub allowed: bool,
-    /// A stable kebab-case reason code when refused: `org-not-approved`, `unverifiable-credential`, `policy-undetermined`, `policy-invalid`, `not-signed-in`, or `membership-unknown`. Omitted when allowed. Treat an unrecognized code as a refusal rather than mapping it to an allow: a code this host has not been taught about still denied the credential.
-    pub denial: Option<String>,
-    /// Whether a pin applies at all. Distinguishes "allowed because unmanaged" from "allowed because the account is approved", which a diagnostics surface needs and which also decides whether a bring-your-own-key provider may serve inference.
-    pub enforced: bool,
-    /// The approved organization the account matched, when allowed under a pin.
-    pub matched_org: Option<String>,
-    /// A developer-facing explanation of the refusal. Omitted when allowed.
-    pub message: Option<String>,
-    /// Error-level detail from managed-policy discovery — which file failed to load, which field failed validation. Carried on the decision rather than left to the log because a refusal can exit the process before a log sink exists, which would discard the only actionable diagnostic a misconfigured managed device produces.
-    pub policy_diagnostics: Vec<String>,
-    /// The approved organization logins, as configured. Enterprise configuration rather than user data, so it is safe to name in a message or a log line.
-    pub required_orgs: Vec<String>,
-}
-crate::record_serde::wire_record!(ForceLoginOrgsDecision { allowed: "allowed", denial: "denial" if is_none, enforced: "enforced", matched_org: "matchedOrg" if is_none, message: "message" if is_none, policy_diagnostics: "policyDiagnostics", required_orgs: "requiredOrgs" });
-
 /// Organization support information for end users.
 ///
 /// <div class="warning">
@@ -1388,6 +1361,94 @@ pub(crate) struct UserSettingsEditRequest {
 }
 crate::record_serde::wire_record!(UserSettingsEditRequest { canonical_path: "canonicalPath", config_dir: "configDir" if is_none, operation: "operation", value: "value" if is_none });
 
+/// Extensible [`UserSettingsEditRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`UserSettingsEditOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UserSettingsEditOptions {
+    #[serde(flatten)]
+    legacy: UserSettingsEditRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context: Option<UserSettingsHostContext>,
+}
+
+impl UserSettingsEditOptions {
+    /// Creates options with the required inputs.
+    pub(crate) fn new(canonical_path: Vec<String>, operation: SettingsEditOperation) -> Self {
+        Self {
+            legacy: UserSettingsEditRequest {
+                canonical_path,
+                operation,
+                config_dir: None,
+                value: None,
+            },
+            context: None,
+        }
+    }
+
+    /// Configuration directory to edit. Omitted or empty resolves the server's own home, as in `user.settings.loadForConfigDir`.
+    pub(crate) fn config_dir(mut self, value: impl Into<String>) -> Self {
+        self.legacy.config_dir = Some(value.into());
+        self
+    }
+
+    /// Required boolean, string or number for set, required string for add-item and remove-item, and forbidden for remove. The runtime rejects all other JSON values.
+    pub(crate) fn value(mut self, value: serde_json::Value) -> Self {
+        self.legacy.value = Some(value);
+        self
+    }
+
+    /// Optional trusted-host paths and hook environment. Cannot be combined with configDir.
+    pub(crate) fn context(mut self, value: UserSettingsHostContext) -> Self {
+        self.context = Some(value);
+        self
+    }
+}
+
+/// Selects the settings document and hook environment for an explicit host.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct UserSettingsForContextRequest {
+    /// Host paths and environment used instead of the server process defaults.
+    pub context: UserSettingsHostContext,
+}
+crate::record_serde::wire_record!(UserSettingsForContextRequest { context: "context" });
+
+/// Reads a contextual user document with trusted repository settings for one working directory.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct UserSettingsForWorkingDirectoryRequest {
+    /// Host paths and environment that select the user document.
+    pub context: UserSettingsHostContext,
+    /// Directory whose repository and persisted trust determine the overlay.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(UserSettingsForWorkingDirectoryRequest {
+    context: "context",
+    working_directory: "workingDirectory"
+});
+
 /// Selects which settings file paths to resolve.
 ///
 /// <div class="warning">
@@ -1564,6 +1625,21 @@ pub struct UserSettingsLoadRepoResult {
     pub warning: Option<String>,
 }
 crate::record_serde::wire_record!(UserSettingsLoadRepoResult { settings: "settings" if is_none, warning: "warning" if is_none });
+
+/// Selects an optional trusted-host context for settings and parser diagnostics.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct UserSettingsLoadWithWarningRequest {
+    /// Optional host paths and hook environment. Omit to keep the server defaults.
+    pub context: Option<UserSettingsHostContext>,
+}
+crate::record_serde::wire_record!(UserSettingsLoadWithWarningRequest { context: "context" if is_none });
 
 /// The user's stored settings, together with any diagnostic raised while reading them.
 ///
@@ -2073,6 +2149,58 @@ pub struct UserSettingsValidateRequest {
 }
 crate::record_serde::wire_record!(UserSettingsValidateRequest { delete: "delete" if is_none, top_key: "topKey", value: "value" if is_none });
 
+/// Extensible [`UserSettingsValidateRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`UserSettingsValidateOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsValidateOptions {
+    #[serde(flatten)]
+    legacy: UserSettingsValidateRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context: Option<UserSettingsHostContext>,
+}
+
+impl UserSettingsValidateOptions {
+    /// Creates options with the required inputs.
+    pub fn new(top_key: impl Into<String>) -> Self {
+        Self {
+            legacy: UserSettingsValidateRequest {
+                top_key: top_key.into(),
+                value: None,
+                delete: None,
+            },
+            context: None,
+        }
+    }
+
+    /// Value to validate. Omitted when `delete` is true.
+    pub fn value(mut self, value: serde_json::Value) -> Self {
+        self.legacy.value = Some(value);
+        self
+    }
+
+    /// True to validate a removal of this key. The current settings file is not read.
+    pub fn delete(mut self, value: bool) -> Self {
+        self.legacy.delete = Some(value);
+        self
+    }
+
+    /// Optional trusted-host context whose environment controls hook validation.
+    pub fn context(mut self, value: UserSettingsHostContext) -> Self {
+        self.context = Some(value);
+        self
+    }
+}
+
 /// Outcome of validating one top-level setting subtree.
 ///
 /// <div class="warning">
@@ -2132,6 +2260,44 @@ pub struct UserSettingsWriteKeyRequest {
     pub value: Option<serde_json::Value>,
 }
 crate::record_serde::wire_record!(UserSettingsWriteKeyRequest { context: "context" if is_none, delete: "delete" if is_none, key: "key", refuse_on_read_failure: "refuseOnReadFailure" if is_none, refuse_on_unrecoverable_read_failure: "refuseOnUnrecoverableReadFailure" if is_none, value: "value" });
+
+/// An atomic set of top-level settings updates that preserves unrelated stored values.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct UserSettingsWriteKeysRequest {
+    /// Host paths and environment that select the target document.
+    pub context: UserSettingsHostContext,
+    /// Top-level keys to remove in the same transaction.
+    pub delete_keys: Vec<String>,
+    /// Top-level values to write. Stored null remains a value, not deletion.
+    pub settings: HashMap<String, serde_json::Value>,
+}
+crate::record_serde::wire_record!(UserSettingsWriteKeysRequest {
+    context: "context",
+    delete_keys: "deleteKeys",
+    settings: "settings"
+});
+
+/// Reports whether the atomic update succeeded or the existing document was invalid.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct UserSettingsWriteKeysResult {
+    /// Either ok, or invalid when no safe document could be read and nothing changed.
+    pub status: String,
+}
+crate::record_serde::wire_record!(UserSettingsWriteKeysResult { status: "status" });
 
 /// The on-disk location of the user's settings document.
 ///
@@ -2216,6 +2382,23 @@ pub struct UserSettingsDiagnoseProblemsResult {
     pub problems: Option<Vec<UserSettingsProblem>>,
 }
 crate::record_serde::wire_record!(UserSettingsDiagnoseProblemsResult { problems: "problems" if is_none });
+
+/// The advisory repository disable list. A read failure returns no names and a diagnostic, rather than blocking a listing or mutation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UserSettingsRepositoryDisabledNamesResult {
+    /// Repository-owned names, excluding the user contribution.
+    pub names: Vec<String>,
+    /// Debug diagnostic for a repository that could not be inspected.
+    pub warning: Option<String>,
+}
+crate::record_serde::wire_record!(UserSettingsRepositoryDisabledNamesResult { names: "names", warning: "warning" if is_none });
 
 /// Every feature flag this runtime declares, with the shape each one was declared with.
 ///
@@ -2309,6 +2492,26 @@ pub type UserSettingsLoadForConfigDirResult = HashMap<String, serde_json::Value>
 ///
 /// </div>
 pub type UserSettingsBuildRuntimeResult = HashMap<String, serde_json::Value>;
+
+/// The normalized user document with trusted repository settings.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+pub type UserSettingsLoadForWorkingDirectoryResult = HashMap<String, serde_json::Value>;
+
+/// The persisted AHP environment compute identity.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+pub type UserSettingsGetOrCreateAhpEnvironmentComputeIdResult = String;
 
 /// The resolved gates, keyed by flag name.
 ///

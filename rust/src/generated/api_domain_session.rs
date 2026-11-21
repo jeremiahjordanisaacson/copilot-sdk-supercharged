@@ -185,6 +185,23 @@ pub struct CurrentToolMetadata {
 }
 crate::record_serde::wire_record!(CurrentToolMetadata { defer_loading: "deferLoading" if is_none, description: "description", input_schema: "input_schema" if is_none, mcp_server_display_name: "mcpServerDisplayName" if is_none, mcp_server_name: "mcpServerName" if is_none, mcp_tool_name: "mcpToolName" if is_none, name: "name", namespaced_name: "namespacedName" if is_none });
 
+/// Extensions discovered for the session, with their current status.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ExtensionList {
+    /// Discovered extensions and their current status
+    pub extensions: Vec<Extension>,
+}
+crate::record_serde::wire_record!(ExtensionList {
+    extensions: "extensions"
+});
+
 /// Parameters for starting fleet orchestration: an optional user prompt combined with the fleet instructions, plus the send options forwarded to the resulting turn.
 ///
 /// <div class="warning">
@@ -2649,6 +2666,35 @@ pub struct RemoteSessionRepository {
 }
 crate::record_serde::wire_record!(RemoteSessionRepository { branch: "branch" if is_none, name: "name", owner: "owner" });
 
+/// Conversation records accepted by a semantic session import.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SemanticSessionImportCounts {
+    /// User attachments.
+    pub attachments: i64,
+    /// Message records.
+    pub messages: i64,
+    /// Sessions persisted; zero for a dry run.
+    pub sessions: i64,
+    /// Tool call records.
+    pub tool_calls: i64,
+    /// Tool result records.
+    pub tool_results: i64,
+}
+crate::record_serde::wire_record!(SemanticSessionImportCounts {
+    attachments: "attachments",
+    messages: "messages",
+    sessions: "sessions",
+    tool_calls: "toolCalls",
+    tool_results: "toolResults"
+});
+
 /// Current activity flags for the session.
 ///
 /// <div class="warning">
@@ -3024,6 +3070,87 @@ pub struct SessionEventPublishResult {
 }
 crate::record_serde::wire_record!(SessionEventPublishResult {
     event_id: "eventId"
+});
+
+/// Host launch resources and lifecycle options for the original session's extension service.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionExtensionsConfigureHostRequest {
+    /// Directory that contains the host's CLI distribution.
+    pub cli_dist_dir: String,
+    /// Explicit disabled IDs. When absent, the runtime reads the selected profile.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_ids: Option<Vec<String>>,
+    /// Existing extension host engine. The original session authority must own its session generation.
+    pub host_server_id: i64,
+    /// Opaque token for the original host's eligibility check after native discovery.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_validation_token: Option<String>,
+    /// Explicit source filters. When absent, the runtime uses all allowed sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_sources: Option<Vec<String>>,
+    /// Existing initial startup token, when configuration belongs to startup.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_startup_token: Option<String>,
+    /// Executable that launches extension processes.
+    pub launcher_program: String,
+    /// Whether this configuration permits extension processes to launch.
+    pub launch_processes: bool,
+    /// Host gate for extension management tools.
+    pub management_tools_enabled: bool,
+    /// Host-mounted plugins outside the persisted installation records.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mounted_plugins: Option<Vec<serde_json::Value>>,
+    /// Whether compatible unchanged processes remain active.
+    pub retain_processes_if_unchanged: bool,
+    /// Path to the host's extension SDK.
+    pub sdk_path: String,
+    /// Working directory captured by the host for this configuration.
+    pub working_directory: String,
+}
+
+/// Distinguishes an absent extension service from an installed service with an empty inventory.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionExtensionsInspectServiceResult {
+    /// Whether the original session has an attached extension service.
+    pub configured: bool,
+    /// Current discovered extensions and their status.
+    pub inventory: ExtensionList,
+}
+crate::record_serde::wire_record!(SessionExtensionsInspectServiceResult {
+    configured: "configured",
+    inventory: "inventory"
+});
+
+/// Updates the original host's live management-tool gate without reinstalling its extension service.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionExtensionsSetManagementToolsEnabledRequest {
+    /// Whether the host permits extension management tools.
+    pub enabled: bool,
+}
+crate::record_serde::wire_record!(SessionExtensionsSetManagementToolsEnabledRequest {
+    enabled: "enabled"
 });
 
 ///
@@ -4244,6 +4371,27 @@ crate::record_serde::wire_record!(SessionManagementPolicy {
     scope: "scope"
 });
 
+/// Inspects MCP source configuration without starting servers. The bound session owns workspace trust.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionMcpInspectConfigurationRequest {
+    /// Additional host configuration, used only when includeSessionSources is true.
+    pub additional_config: Option<serde_json::Value>,
+    /// Explicit host-mounted plugin records, without claiming folder trust or managed policy.
+    pub explicit_plugins: Option<Vec<serde_json::Value>>,
+    /// Include the matching session activation snapshot and additional configuration.
+    pub include_session_sources: Option<bool>,
+    /// Directory whose workspace sources to inspect.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(SessionMcpInspectConfigurationRequest { additional_config: "additionalConfig" if is_none, explicit_plugins: "explicitPlugins" if is_none, include_session_sources: "includeSessionSources" if is_none, working_directory: "workingDirectory" });
+
 /// Records which IDE the host is connected to, or clears it.
 ///
 /// <div class="warning">
@@ -5223,6 +5371,55 @@ pub struct SessionOpenResult {
 }
 crate::record_serde::wire_record!(SessionOpenResult { metadata: "metadata" if is_none, native_construction_plan: "nativeConstructionPlan" if is_none, progress: "progress" if is_none, remote_session_id: "remoteSessionId" if is_none, session_api: "sessionApi" if is_none, session_id: "sessionId" if is_none, startup_prompts: "startupPrompts" if is_none, status: "status" });
 
+/// A typed request to the original host's retained persistence resources.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionPersistenceBarrierRequest {
+    /// Whether the original writer must persist an otherwise empty session.
+    pub force: bool,
+    /// Native flush failure, combined with retained callback failures at completion.
+    pub native_failure: Option<String>,
+    /// Runtime-assigned identity for this flush, independent of concurrent flushes.
+    pub operation_id: String,
+    /// Resource barrier to await.
+    #[doc(hidden)]
+    pub(crate) phase: SessionPersistenceBarrierPhase,
+}
+crate::record_serde::wire_record!(SessionPersistenceBarrierRequest { force: "force", native_failure: "nativeFailure" if is_none, operation_id: "operationId", phase: "phase" });
+
+/// Acknowledges completion of one original-host persistence barrier.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionPersistenceBarrierResult {}
+
+/// Flushes durable session state through its original runtime and client owners.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionPersistenceFlushRequest {
+    /// Persist an otherwise empty session when true. Defaults to false.
+    pub force: Option<bool>,
+}
+crate::record_serde::wire_record!(SessionPersistenceFlushRequest { force: "force" if is_none });
+
 ///
 /// <div class="warning">
 ///
@@ -5282,6 +5479,96 @@ crate::record_serde::wire_record!(SessionPluginDefaults {
     extra_known_marketplaces: "extraKnownMarketplaces",
     generation: "generation",
     team_default_enabled_plugins: "teamDefaultEnabledPlugins"
+});
+
+/// Inspects extension directories contributed by a changed plugin under the selected session's activation and profile.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionPluginInspectExtensionContributionsRequest {
+    /// Plugin name or marketplace-qualified spec whose in-place change can require extension restarts.
+    pub changed_plugin_spec: String,
+}
+crate::record_serde::wire_record!(SessionPluginInspectExtensionContributionsRequest {
+    changed_plugin_spec: "changedPluginSpec"
+});
+
+/// Whether a changed active plugin contributes extension directories, including empty directories.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionPluginInspectExtensionContributionsResult {
+    /// True when directories exist or the session has no authoritative activation snapshot.
+    pub ships_extensions: bool,
+    /// Canonical extension discovery diagnostics, in resolver order.
+    #[doc(hidden)]
+    pub(crate) warnings: Vec<PluginPolicyDiagnostic>,
+}
+crate::record_serde::wire_record!(SessionPluginInspectExtensionContributionsResult {
+    ships_extensions: "shipsExtensions",
+    warnings: "warnings"
+});
+
+/// One available plugin, including inactive live plugins and trusted bundled provenance.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginInventoryEntry {
+    /// Manifest description, with surrounding whitespace removed for installed and bundled entries.
+    pub description: Option<String>,
+    /// Current effective enablement, independent of presence on disk.
+    pub enabled: bool,
+    /// Identifies an explicit host mount rather than a persisted installation.
+    pub external: Option<bool>,
+    /// Marketplace directory for a live plugin that has no persisted copy.
+    pub installed_from: Option<String>,
+    /// Marketplace name, or an empty string for a direct or bundled plugin.
+    pub marketplace: String,
+    /// Plugin name from its manifest or installation record.
+    pub name: String,
+    /// Resolved content directory; absent for live plugins whose content is unresolved.
+    /// This path does not grant filesystem access.
+    pub root_path: Option<String>,
+    /// Trusted runtime provenance; bundled plugins use builtin.
+    pub source: Option<String>,
+    /// Version reported by the manifest.
+    pub version: Option<String>,
+}
+crate::record_serde::wire_record!(SessionPluginInventoryEntry { description: "description" if is_none, enabled: "enabled", external: "external" if is_none, installed_from: "installedFrom" if is_none, marketplace: "marketplace", name: "name", root_path: "rootPath" if is_none, source: "source" if is_none, version: "version" if is_none });
+
+/// Available plugin inventory under the selected session's settings, policy, source roots, and trusted bundle registration.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionPluginInventoryResult {
+    /// Registered bundles before shadowing, for availability and trust checks.
+    pub builtin_plugins: Vec<SessionPluginInventoryEntry>,
+    /// Installed, live, and explicit plugins, including disabled entries.
+    pub plugins: Vec<SessionPluginInventoryEntry>,
+}
+crate::record_serde::wire_record!(SessionPluginInventoryResult {
+    builtin_plugins: "builtinPlugins",
+    plugins: "plugins"
 });
 
 /// Plugin names (or specs) to disable in the session's authoritative working directory.
@@ -5483,6 +5770,26 @@ pub struct SessionQuotaProjection {
     pub upgrade_url: Option<String>,
 }
 crate::record_serde::wire_record!(SessionQuotaProjection { can_signup_for_copilot_free: "canSignupForCopilotFree", delegate_available: "delegateAvailable", delegate_warning: "delegateWarning" if is_none, dynamic_workflows_enabled: "dynamicWorkflowsEnabled", dynamic_workflows_ui_visible: "dynamicWorkflowsUiVisible", is_free_user: "isFreeUser", is_tbb_user: "isTbbUser", model_cost_column_visible: "modelCostColumnVisible", plan_tier: "planTier", premium_requests_billable: "premiumRequestsBillable", provider_quotas: "providerQuotas" if is_none, snapshots: "snapshots", upgrade_url: "upgradeUrl" if is_none });
+
+/// Reads repository resource disables using the bound session's configuration and trust authority.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionRepositoryDisabledNamesRequest {
+    /// Resource disable list to inspect.
+    pub key: RepositoryDisabledKey,
+    /// Directory whose repository settings to inspect.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(SessionRepositoryDisabledNamesRequest {
+    key: "key",
+    working_directory: "workingDirectory"
+});
 
 /// Session IDs to close, deactivate, and delete from disk.
 ///
@@ -6259,6 +6566,64 @@ pub struct SessionsHasEventsResult {
 }
 crate::record_serde::wire_record!(SessionsHasEventsResult { exists: "exists" });
 
+/// Semantic conversation input for local import or validation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionsImportSemanticRequest {
+    /// Name of the embedding client.
+    pub client_name: Option<String>,
+    /// Default working directory when the document supplies none.
+    pub default_working_directory: String,
+    /// Validate without authentication, network access, or writes.
+    pub dry_run: Option<bool>,
+    /// Absolute input path used to resolve attachment references.
+    pub input_path: String,
+    /// Semantic session JSONL, not native session events.
+    pub jsonl: String,
+    /// Explicit session name override.
+    pub name: Option<String>,
+    /// Runtime settings overrides, with the original caller's configuration root.
+    pub settings: Option<serde_json::Value>,
+    /// Explicit working directory override.
+    pub working_directory: Option<String>,
+}
+crate::record_serde::wire_record!(SessionsImportSemanticRequest { client_name: "clientName" if is_none, default_working_directory: "defaultWorkingDirectory", dry_run: "dryRun" if is_none, input_path: "inputPath", jsonl: "jsonl", name: "name" if is_none, settings: "settings" if is_none, working_directory: "workingDirectory" if is_none });
+
+/// Semantic session import outcome.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionsImportSemanticResult {
+    /// Stable operation code.
+    pub code: String,
+    /// Input or persistence diagnostics.
+    pub diagnostics: Vec<SemanticImportDiagnostic>,
+    /// Whether the call only validated input.
+    pub dry_run: bool,
+    /// External session identifier from the document.
+    pub external_id: Option<String>,
+    /// Imported or validated record counts.
+    pub imported: SemanticSessionImportCounts,
+    /// Human-readable operation result.
+    pub message: String,
+    /// Whether validation and persistence succeeded.
+    pub ok: bool,
+    /// Runtime session identifier after persistence, or incomplete rollback.
+    pub session_id: Option<SessionId>,
+}
+crate::record_serde::wire_record!(SessionsImportSemanticResult { code: "code", diagnostics: "diagnostics", dry_run: "dryRun", external_id: "externalId" if is_none, imported: "imported", message: "message", ok: "ok", session_id: "sessionId" if is_none });
+
 /// Map of sessionId -> on-disk size in bytes for each session's workspace directory.
 ///
 /// <div class="warning">
@@ -6273,6 +6638,122 @@ pub struct SessionSizes {
     pub sizes: HashMap<String, i64>,
 }
 crate::record_serde::wire_record!(SessionSizes { sizes: "sizes" });
+
+/// A complete skill row for session-owned inspection and catalog publication.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionSkillInventoryEntry {
+    /// Tool names allowed by the skill definition.
+    pub allowed_tools: Option<Vec<String>>,
+    /// Freeform argument hint from the definition.
+    pub argument_hint: Option<String>,
+    /// Local resource directory, when the skill has one.
+    pub base_dir: Option<String>,
+    /// Canonical slash-command identity.
+    pub command_name: Option<String>,
+    /// Loaded definition body, when available.
+    pub content: Option<String>,
+    /// Human-readable skill purpose.
+    pub description: String,
+    /// Whether model invocation is disabled.
+    pub disable_model_invocation: bool,
+    /// Whether the session enables this skill.
+    pub enabled: bool,
+    /// Absolute local definition path, when the skill has one.
+    pub file_path: Option<String>,
+    /// Invocation identity supplied by the source.
+    pub invocation_name: Option<String>,
+    /// Whether this row comes from a plugin command definition.
+    pub is_command: Option<bool>,
+    /// MCP server and resource identity without private activation metadata.
+    pub mcp_origin: Option<McpSkillOrigin>,
+    /// Original skill name.
+    pub name: String,
+    /// Provider's original name before qualification.
+    pub original_name: Option<String>,
+    /// Owning plugin's opaque identity.
+    pub plugin_id: Option<String>,
+    /// Owning plugin's display name.
+    pub plugin_name: Option<String>,
+    /// Owning plugin's version.
+    pub plugin_version: Option<String>,
+    /// Provider-relative resource directory.
+    pub relative_dir: Option<String>,
+    /// Provider-relative definition path.
+    pub relative_path: Option<String>,
+    /// Repository boundary for local resource reads.
+    pub repository_boundary: Option<String>,
+    /// Runtime-owned source classification.
+    pub source: SkillSource,
+    /// Whether the user can invoke this skill.
+    pub user_invocable: bool,
+}
+crate::record_serde::wire_record!(SessionSkillInventoryEntry { allowed_tools: "allowedTools" if is_none, argument_hint: "argumentHint" if is_none, base_dir: "baseDir" if is_none, command_name: "commandName" if is_none, content: "content" if is_none, description: "description", disable_model_invocation: "disableModelInvocation", enabled: "enabled", file_path: "filePath" if is_none, invocation_name: "invocationName" if is_none, is_command: "isCommand" if is_none, mcp_origin: "mcpOrigin" if is_none, name: "name", original_name: "originalName" if is_none, plugin_id: "pluginId" if is_none, plugin_name: "pluginName" if is_none, plugin_version: "pluginVersion" if is_none, relative_dir: "relativeDir" if is_none, relative_path: "relativePath" if is_none, repository_boundary: "repositoryBoundary" if is_none, source: "source", user_invocable: "userInvocable" });
+
+/// Install a skill with the selected session's profile and working directory.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionSkillResourceInstallRequest {
+    /// Install into the preferred project directory instead of personal storage.
+    pub project: Option<bool>,
+    /// Local definition, directory, or HTTPS source.
+    pub source: String,
+}
+crate::record_serde::wire_record!(SessionSkillResourceInstallRequest { project: "project" if is_none, source: "source" });
+
+/// Remove a skill with the selected session's full inventory and profile.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionSkillResourceRemoveRequest {
+    /// Skill name or registered directory.
+    pub target: String,
+}
+crate::record_serde::wire_record!(SessionSkillResourceRemoveRequest { target: "target" });
+
+/// Full inventory under the selected session's discovery and activation policy.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionSkillsInspectInventoryResult {
+    /// Effective disabled identities, including host and MCP aliases.
+    pub disabled_skills: Vec<String>,
+    /// Source failures that make this inventory incomplete.
+    pub errors: Vec<String>,
+    /// Full local and provider rows visible to this session.
+    #[doc(hidden)]
+    pub(crate) skills: Vec<SessionSkillInventoryEntry>,
+    /// Nonfatal loader warnings.
+    pub warnings: Vec<String>,
+}
+crate::record_serde::wire_record!(SessionSkillsInspectInventoryResult {
+    disabled_skills: "disabledSkills",
+    errors: "errors",
+    skills: "skills",
+    warnings: "warnings"
+});
 
 /// Limit for non-empty local session IDs.
 ///
@@ -6686,6 +7167,36 @@ crate::record_serde::wire_record!(SessionsUpdateWorkspaceFieldsRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionsUpdateWorkspaceFieldsResult {}
+
+/// A friendly name to validate before a session mutation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionsValidateNameRequest {
+    /// Original name, without whitespace normalization.
+    pub name: String,
+}
+crate::record_serde::wire_record!(SessionsValidateNameRequest { name: "name" });
+
+/// The shared session-name policy decision.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionsValidateNameResult {
+    /// Validation error; absent when the name is valid.
+    pub error: Option<String>,
+}
+crate::record_serde::wire_record!(SessionsValidateNameResult { error: "error" if is_none });
 
 /// Telemetry engagement ID for the session, when available.
 ///
@@ -8522,53 +9033,6 @@ crate::record_serde::wire_record!(ToolsTaskCompleteEventDataRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ToolsUpdateSubagentSettingsResult {}
 
-/// Which stored location permissions were dropped because their directory is gone.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub(crate) struct PermissionsLocationsCleanupOrphanedResult {
-    /// Location keys whose grants were removed. Empty when every stored location still exists.
-    pub removed_location_keys: Vec<String>,
-}
-crate::record_serde::wire_record!(PermissionsLocationsCleanupOrphanedResult {
-    removed_location_keys: "removedLocationKeys"
-});
-
-/// Folder trust check result.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct PermissionsFolderTrustCheckTrustResult {
-    /// Whether the folder is trusted
-    pub trusted: bool,
-}
-crate::record_serde::wire_record!(PermissionsFolderTrustCheckTrustResult { trusted: "trusted" });
-
-/// Built-in tools available for the requested model, with their parameters and instructions.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct ToolsListResult {
-    /// List of available built-in tools with metadata
-    pub tools: Vec<Tool>,
-}
-crate::record_serde::wire_record!(ToolsListResult { tools: "tools" });
-
 /// Result of opening a session.
 ///
 /// <div class="warning">
@@ -8908,6 +9372,1040 @@ pub struct SessionsForgeProposalsFailStaleResult {
     pub count: i64,
 }
 crate::record_serde::wire_record!(SessionsForgeProposalsFailStaleResult { count: "count" });
+
+/// Which stored location permissions were dropped because their directory is gone.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PermissionsLocationsCleanupOrphanedResult {
+    /// Location keys whose grants were removed. Empty when every stored location still exists.
+    pub removed_location_keys: Vec<String>,
+}
+crate::record_serde::wire_record!(PermissionsLocationsCleanupOrphanedResult {
+    removed_location_keys: "removedLocationKeys"
+});
+
+/// Folder trust check result.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PermissionsFolderTrustCheckTrustResult {
+    /// Whether the folder is trusted
+    pub trusted: bool,
+}
+crate::record_serde::wire_record!(PermissionsFolderTrustCheckTrustResult { trusted: "trusted" });
+
+/// Built-in tools available for the requested model, with their parameters and instructions.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ToolsListResult {
+    /// List of available built-in tools with metadata
+    pub tools: Vec<Tool>,
+}
+crate::record_serde::wire_record!(ToolsListResult { tools: "tools" });
+
+/// Flushes durable session state through its original runtime and client owners.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionPersistenceFlushParams {
+    /// Persist an otherwise empty session when true. Defaults to false.
+    pub force: Option<bool>,
+}
+crate::record_serde::wire_record!(SessionPersistenceFlushParams { force: "force" if is_none });
+
+/// Distinguishes an absent extension service from an installed service with an empty inventory.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionExtensionsConfigureHostResult {
+    /// Whether the original session has an attached extension service.
+    pub configured: bool,
+    /// Current discovered extensions and their status.
+    pub inventory: ExtensionList,
+}
+crate::record_serde::wire_record!(SessionExtensionsConfigureHostResult {
+    configured: "configured",
+    inventory: "inventory"
+});
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionExtensionsInspectServiceParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionExtensionsInspectServiceParams {
+    session_id: "sessionId"
+});
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionExtensionsGetPolicyParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionExtensionsGetPolicyParams {
+    session_id: "sessionId"
+});
+
+/// Runtime support and session-context standalone executable extension policy.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionExtensionsGetPolicyResult {
+    /// Executable entries discovered from this session's runtime-verified eligible plugins. Under plugin_only, independently launched targets must match these entry paths; an external package, a caller-supplied plugin label, or a synthetic transport bootstrap does not establish eligibility. Empty while pending or when no extension controller is configured.
+    pub eligible_plugin_entries: Vec<EligiblePluginExtensionEntry>,
+    /// Extension policy enforcement contract version. Version 1 includes standalone discovery, launch admission, and live-policy revocation.
+    pub enforcement_version: i64,
+    /// Whether standalone extensions are allowed, prohibited by plugin-only policy, or pending unresolved managed policy.
+    pub standalone: StandaloneExtensionAdmission,
+}
+crate::record_serde::wire_record!(SessionExtensionsGetPolicyResult {
+    eligible_plugin_entries: "eligiblePluginEntries",
+    enforcement_version: "enforcementVersion",
+    standalone: "standalone"
+});
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionExtensionsListParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionExtensionsListParams {
+    session_id: "sessionId"
+});
+
+/// Extensions discovered for the session, with their current status.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionExtensionsListResult {
+    /// Discovered extensions and their current status
+    pub extensions: Vec<Extension>,
+}
+crate::record_serde::wire_record!(SessionExtensionsListResult {
+    extensions: "extensions"
+});
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionExtensionsReloadParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionExtensionsReloadParams {
+    session_id: "sessionId"
+});
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionExtensionsReconcileParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionExtensionsReconcileParams {
+    session_id: "sessionId"
+});
+
+/// Extensions discovered for the session, with their current status.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionExtensionsReconcileResult {
+    /// Discovered extensions and their current status
+    pub extensions: Vec<Extension>,
+}
+crate::record_serde::wire_record!(SessionExtensionsReconcileResult {
+    extensions: "extensions"
+});
+
+/// Whether a changed active plugin contributes extension directories, including empty directories.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionPluginsInspectExtensionContributionsResult {
+    /// True when directories exist or the session has no authoritative activation snapshot.
+    pub ships_extensions: bool,
+    /// Canonical extension discovery diagnostics, in resolver order.
+    #[doc(hidden)]
+    pub(crate) warnings: Vec<PluginPolicyDiagnostic>,
+}
+crate::record_serde::wire_record!(SessionPluginsInspectExtensionContributionsResult {
+    ships_extensions: "shipsExtensions",
+    warnings: "warnings"
+});
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsListParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionPluginsListParams {
+    session_id: "sessionId"
+});
+
+/// Plugins installed for the session, with their enabled state and version metadata.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsListResult {
+    /// Installed plugins
+    pub plugins: Vec<Plugin>,
+}
+crate::record_serde::wire_record!(SessionPluginsListResult { plugins: "plugins" });
+
+/// Result of installing a plugin.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsInstallResult {
+    /// Set when the install path is deprecated (e.g. direct repo / URL / local installs). Callers should surface this to end users.
+    pub deprecation_warning: Option<String>,
+    /// The newly installed plugin's metadata
+    pub plugin: InstalledPluginInfo,
+    /// Optional post-install message provided by the plugin (e.g. setup instructions)
+    pub post_install_message: Option<String>,
+    /// Number of skills discovered and installed from the plugin
+    pub skills_installed: i64,
+    /// Where the completed plugin tree was staged before atomic promotion
+    pub staging_mode: Option<PluginInstallStagingMode>,
+    /// Warnings raised while reading the plugin's manifest: a field the manifest's schema does not define, which the loader ignores, or the reason the loader rejects the whole manifest. Callers should surface these to end users: a plugin whose skills sit behind an ignored field, or whose manifest is rejected, otherwise installs, lists, and contributes nothing, with no signal to its author. Absent when the manifest raised none.
+    pub warnings: Option<Vec<String>>,
+}
+crate::record_serde::wire_record!(SessionPluginsInstallResult { deprecation_warning: "deprecationWarning" if is_none, plugin: "plugin", post_install_message: "postInstallMessage" if is_none, skills_installed: "skillsInstalled", staging_mode: "stagingMode" if is_none, warnings: "warnings" if is_none });
+
+/// Result of updating a single plugin.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsUpdateResult {
+    /// Version after the update, when reported by the plugin manifest
+    pub new_version: Option<String>,
+    /// Version that was previously installed, when available
+    pub previous_version: Option<String>,
+    /// Number of skills discovered and installed after the update
+    pub skills_installed: i64,
+    /// Warnings from the updated plugin's manifest, including ignored fields or the reason the loader rejects the plugin. Callers should surface these to end users. Absent when the manifest raised none.
+    pub warnings: Option<Vec<String>>,
+}
+crate::record_serde::wire_record!(SessionPluginsUpdateResult { new_version: "newVersion" if is_none, previous_version: "previousVersion" if is_none, skills_installed: "skillsInstalled", warnings: "warnings" if is_none });
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsMarketplacesListParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionPluginsMarketplacesListParams {
+    session_id: "sessionId"
+});
+
+/// All registered marketplaces, including built-in defaults.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsMarketplacesListResult {
+    /// Registered marketplaces
+    pub marketplaces: Vec<MarketplaceInfo>,
+}
+crate::record_serde::wire_record!(SessionPluginsMarketplacesListResult {
+    marketplaces: "marketplaces"
+});
+
+/// Result of registering a new marketplace.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsMarketplacesAddResult {
+    /// Final name of the marketplace as resolved from its manifest
+    pub name: String,
+}
+crate::record_serde::wire_record!(SessionPluginsMarketplacesAddResult { name: "name" });
+
+/// Outcome of the remove attempt, including dependent-plugin info when applicable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsMarketplacesRemoveResult {
+    /// Names of installed plugins that prevented removal. Populated only when `removed=false`.
+    pub dependent_plugins: Option<Vec<String>>,
+    /// True when the marketplace was actually removed. False when removal was skipped because the marketplace has dependent plugins and `force` was not set.
+    pub removed: bool,
+}
+crate::record_serde::wire_record!(SessionPluginsMarketplacesRemoveResult { dependent_plugins: "dependentPlugins" if is_none, removed: "removed" });
+
+/// Plugins advertised by the marketplace.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsMarketplacesBrowseResult {
+    /// Plugins advertised by the marketplace
+    pub plugins: Vec<MarketplacePluginInfo>,
+}
+crate::record_serde::wire_record!(SessionPluginsMarketplacesBrowseResult { plugins: "plugins" });
+
+/// Result of refreshing one or more marketplace catalogs.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsMarketplacesRefreshResult {
+    /// Per-marketplace refresh results in deterministic order.
+    pub results: Vec<MarketplaceRefreshEntry>,
+}
+crate::record_serde::wire_record!(SessionPluginsMarketplacesRefreshResult { results: "results" });
+
+/// Matching plugins across configured marketplaces, with partial failures.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsMarketplacesSearchResult {
+    /// Catalog or installation-inventory failures that did not prevent other results.
+    pub errors: Vec<PluginMarketplaceSearchError>,
+    /// Matching catalog entries in configured marketplace order.
+    pub plugins: Vec<PluginMarketplaceSearchEntry>,
+}
+crate::record_serde::wire_record!(SessionPluginsMarketplacesSearchResult {
+    errors: "errors",
+    plugins: "plugins"
+});
+
+/// Update availability without installation or checkout mutation. An error means availability is unknown.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsMarketplacesCheckUpdateResult {
+    /// Explanation when availability cannot be established.
+    pub error: Option<String>,
+    /// Installed plugin version, when known.
+    pub installed_version: Option<String>,
+    /// Cached catalog version, when known.
+    pub latest_version: Option<String>,
+    /// True when a marketplace has no cached checkout yet.
+    pub not_fetched: Option<bool>,
+    /// True only when the probe establishes an available update.
+    pub update_available: bool,
+}
+crate::record_serde::wire_record!(SessionPluginsMarketplacesCheckUpdateResult { error: "error" if is_none, installed_version: "installedVersion" if is_none, latest_version: "latestVersion" if is_none, not_fetched: "notFetched" if is_none, update_available: "updateAvailable" });
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsGetDefaultsParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionPluginsGetDefaultsParams {
+    session_id: "sessionId"
+});
+
+/// Soft plugin defaults for this session, without persistent user preferences or hard policy.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsGetDefaultsResult {
+    /// Plugin specs mapped to soft enablement defaults. Managed defaultEnabled assignments override Team defaults for the same spec.
+    pub default_enabled_plugins: HashMap<String, bool>,
+    /// Team marketplace definitions available only as best-effort installation fallbacks.
+    pub extra_known_marketplaces: HashMap<String, TeamPluginMarketplace>,
+    /// Opaque revision of the defaults, assignment reasons, and Team marketplaces.
+    pub generation: String,
+    /// Team-only defaults for hosts that retain activation inputs. Managed assignments are read live by the runtime resolver and must not be retained as Team defaults.
+    pub team_default_enabled_plugins: HashMap<String, bool>,
+}
+crate::record_serde::wire_record!(SessionPluginsGetDefaultsResult {
+    default_enabled_plugins: "defaultEnabledPlugins",
+    extra_known_marketplaces: "extraKnownMarketplaces",
+    generation: "generation",
+    team_default_enabled_plugins: "teamDefaultEnabledPlugins"
+});
+
+/// Update availability without installation or checkout mutation. An error means availability is unknown.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsCheckUpdateResult {
+    /// Explanation when availability cannot be established.
+    pub error: Option<String>,
+    /// Installed plugin version, when known.
+    pub installed_version: Option<String>,
+    /// Cached catalog version, when known.
+    pub latest_version: Option<String>,
+    /// True when a marketplace has no cached checkout yet.
+    pub not_fetched: Option<bool>,
+    /// True only when the probe establishes an available update.
+    pub update_available: bool,
+}
+crate::record_serde::wire_record!(SessionPluginsCheckUpdateResult { error: "error" if is_none, installed_version: "installedVersion" if is_none, latest_version: "latestVersion" if is_none, not_fetched: "notFetched" if is_none, update_available: "updateAvailable" });
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsInspectInventoryParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionPluginsInspectInventoryParams {
+    session_id: "sessionId"
+});
+
+/// Available plugin inventory under the selected session's settings, policy, source roots, and trusted bundle registration.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionPluginsInspectInventoryResult {
+    /// Registered bundles before shadowing, for availability and trust checks.
+    pub builtin_plugins: Vec<SessionPluginInventoryEntry>,
+    /// Installed, live, and explicit plugins, including disabled entries.
+    pub plugins: Vec<SessionPluginInventoryEntry>,
+}
+crate::record_serde::wire_record!(SessionPluginsInspectInventoryResult {
+    builtin_plugins: "builtinPlugins",
+    plugins: "plugins"
+});
+
+/// Input for utility-model session name generation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionNameGenerateParams {
+    /// Conversation text from which to derive a name.
+    pub user_message: String,
+    /// Whether a user explicitly requested the name. Defaults to false.
+    pub manual: Option<bool>,
+}
+crate::record_serde::wire_record!(SessionNameGenerateParams { user_message: "userMessage", manual: "manual" if is_none });
+
+/// Utility generation outcome under the session's model and credential policy.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionNameGenerateResult {
+    /// Whether generation produced a value.
+    #[doc(hidden)]
+    pub(crate) kind: UtilityPromptResultKind,
+    /// User-facing explanation, when the requested operation needs one.
+    pub message: Option<String>,
+    /// Generated value, or absent when the utility model is unavailable.
+    pub value: Option<String>,
+}
+crate::record_serde::wire_record!(SessionNameGenerateResult { kind: "kind", message: "message" if is_none, value: "value" if is_none });
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionNameGetParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionNameGetParams {
+    session_id: "sessionId"
+});
+
+/// The session's friendly name, or null when not yet set.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionNameGetResult {
+    /// The session name (user-set or auto-generated), or null if not yet set
+    pub name: Option<String>,
+}
+crate::record_serde::wire_record!(SessionNameGetResult { name: "name" });
+
+/// Indicates whether the auto-generated summary was applied as the session's name.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionNameSetAutoResult {
+    /// Whether the auto-generated summary was persisted. False if the session already has a user-set name, the summary normalized to empty, the normalized summary already is the session's name, or the session does not have a workspace.
+    pub applied: bool,
+}
+crate::record_serde::wire_record!(SessionNameSetAutoResult { applied: "applied" });
+
+/// Conversation and changes for a utility-model branch slug.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionModelGenerateBranchSlugParams {
+    /// Conversation messages in their original order.
+    pub conversation: Vec<String>,
+    /// Summary of the changes the branch will contain.
+    pub change_summary: String,
+    /// Original task, when available.
+    pub task_prompt: Option<String>,
+    /// Prefix for the established derived-name fallback.
+    pub fallback_prefix: String,
+}
+crate::record_serde::wire_record!(SessionModelGenerateBranchSlugParams { conversation: "conversation", change_summary: "changeSummary", task_prompt: "taskPrompt" if is_none, fallback_prefix: "fallbackPrefix" });
+
+/// A generated or derived branch slug.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionModelGenerateBranchSlugResult {
+    /// Branch slug under the runtime's existing fallback policy.
+    pub slug: String,
+}
+crate::record_serde::wire_record!(SessionModelGenerateBranchSlugResult { slug: "slug" });
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelGetCurrentParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionModelGetCurrentParams {
+    session_id: "sessionId"
+});
+
+/// The session's authoritative model snapshot. Auto preference fields are configuration for the virtual `auto` model and do not change the selected model identifier. The context tier reflects `Session.getContextTier()`, restored from the session journal on resume.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelGetCurrentResult {
+    /// Auto preference currently claimed by an in-progress activation. Null means the activation is returning to provider-default routing.
+    pub activating_auto_tier: Option<AutoTier>,
+    /// Auto preference currently committed for the session. This can remain available while another model is selected so a later switch to `auto` can reuse it.
+    pub auto_tier: Option<AutoTier>,
+    /// Context tier for models that support multiple context-window sizes.
+    pub context_tier: Option<ContextTier>,
+    /// Copilot Fusion tier that the committed autoTier serves, resolved from the session's Auto tier metadata. An open string: known values include `standard`, `high`, and `max`; other provider-defined values may appear. Omitted when autoTier is unset, is not a Fusion tier, or Auto metadata has not been discovered (for example after cold resume, before session.model.list). This snapshot reports only the committed Fusion tier; resolve pendingAutoTier and activatingAutoTier against auto.tiers[].fusionTier from session.model.list.
+    pub fusion_tier: Option<String>,
+    /// Currently active model identifier
+    pub model_id: Option<String>,
+    /// Latest unclaimed Auto preference waiting for a future user turn. Null means the pending request is returning to provider-default routing.
+    pub pending_auto_tier: Option<AutoTier>,
+    /// Captured base model to restore when leaving plan mode. Omitted outside plan mode or when no plan override has captured a base model. Persistent agent model requirements apply to this model rather than the temporary plan model.
+    pub plan_base_model_id: Option<String>,
+    /// Provider of planBaseModelId, when that saved selection is provider-qualified.
+    pub plan_base_provider_id: Option<String>,
+    /// Provider selected for this model. Together with modelId, identifies a catalog entry even when providers serve the same model. Omitted for unattributed legacy selections.
+    pub provider_id: Option<String>,
+    /// Reasoning effort level currently applied to the active model, when one is set. Reads `Session.getReasoningEffort()` synchronously after `getSelectedModel()` resolves so the two values are reported as a snapshot.
+    pub reasoning_effort: Option<String>,
+}
+crate::record_serde::wire_record!(SessionModelGetCurrentResult { activating_auto_tier: "activatingAutoTier" if is_none, auto_tier: "autoTier" if is_none, context_tier: "contextTier" if is_none, fusion_tier: "fusionTier" if is_none, model_id: "modelId" if is_none, pending_auto_tier: "pendingAutoTier" if is_none, plan_base_model_id: "planBaseModelId" if is_none, plan_base_provider_id: "planBaseProviderId" if is_none, provider_id: "providerId" if is_none, reasoning_effort: "reasoningEffort" if is_none });
+
+/// A cached startup model snapshot and an optional one-time enablement prompt. This check never resolves credentials or fetches a catalog.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelStartupAdmissionResult {
+    /// Whether the session has a resolved catalog, including a catalog-free provider.
+    pub catalog_ready: bool,
+    /// Whether this call consumed the session's startup enablement claim.
+    pub claimed_enablement: bool,
+    /// The selected model to enable, only for the first successful prompt claim.
+    pub model_to_enable: Option<String>,
+    /// Whether the cached selected model currently requires enablement.
+    pub requires_enablement: bool,
+    /// The selected model, when the session has one.
+    pub selected_model: Option<String>,
+}
+crate::record_serde::wire_record!(SessionModelStartupAdmissionResult { catalog_ready: "catalogReady", claimed_enablement: "claimedEnablement", model_to_enable: "modelToEnable" if is_none, requires_enablement: "requiresEnablement", selected_model: "selectedModel" if is_none });
+
+/// A serialized provider error from a failed model-catalog request.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelDescribeLoadErrorParams {
+    /// Provider error JSON, when the catalog supplied structured error details.
+    pub wire_error_json: Option<String>,
+}
+crate::record_serde::wire_record!(SessionModelDescribeLoadErrorParams { wire_error_json: "wireErrorJson" if is_none });
+
+/// Model-catalog failure facts without host-specific presentation text.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelDescribeLoadErrorResult {
+    /// Classified authorization failure for an HTTP 403 response, when recognized.
+    pub authorization: Option<ModelLoadAuthorizationError>,
+    /// Request identifier extracted from the provider error.
+    pub request_id: Option<RequestId>,
+    /// Service request identifier extracted from the provider error.
+    pub service_request_id: Option<String>,
+    /// Copilot settings URL for the session's account when a policy refusal needs remediation.
+    pub settings_url: Option<String>,
+    /// HTTP status reported by the provider, if available.
+    pub status: Option<i64>,
+}
+crate::record_serde::wire_record!(SessionModelDescribeLoadErrorResult { authorization: "authorization" if is_none, request_id: "requestId" if is_none, service_request_id: "serviceRequestId" if is_none, settings_url: "settingsUrl" if is_none, status: "status" if is_none });
+
+/// The model identifier active on the session after the switch.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelSwitchToResult {
+    /// Compaction confirmation projection when status is confirmation_required
+    pub confirmation: Option<ModelSwitchConfirmation>,
+    /// True when the switch was deferred (enqueued as a cancellable `/model` command) because a turn was active or another model change was already queued, rather than applied immediately. When true, the session's live model is unchanged until the queued change drains.
+    pub deferred: Option<bool>,
+    /// Deprecation warnings associated with the selected model or options.
+    pub deprecation_warnings: Option<Vec<String>>,
+    /// User-facing outcome message for the model switch.
+    pub message: Option<String>,
+    /// Currently active model identifier after the switch
+    pub model_id: Option<String>,
+    /// Authoritative model and Auto preference state after an immediate switch. For deferred switches this remains the current state until the queued change drains.
+    pub model_state: Option<CurrentModel>,
+    /// Persistence failure encountered after applying the model switch.
+    pub persistence_error: Option<String>,
+    /// Stable queue item identifier when this request was enqueued. Remains present if the item drains before the response is returned.
+    pub queue_id: Option<String>,
+    /// Lifecycle result for the requested switch
+    pub status: Option<String>,
+    /// User-facing warning produced while applying the model switch.
+    pub warning: Option<String>,
+}
+crate::record_serde::wire_record!(SessionModelSwitchToResult { confirmation: "confirmation" if is_none, deferred: "deferred" if is_none, deprecation_warnings: "deprecationWarnings" if is_none, message: "message" if is_none, model_id: "modelId" if is_none, model_state: "modelState" if is_none, persistence_error: "persistenceError" if is_none, queue_id: "queueId" if is_none, status: "status" if is_none, warning: "warning" if is_none });
+
+/// Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelSwitchAutoTierResult {
+    /// Auto preference currently claimed by an in-progress activation. Null means the activation is returning to provider-default routing.
+    pub activating_auto_tier: Option<AutoTier>,
+    /// Auto preference currently committed for the session.
+    pub effective_auto_tier: Option<AutoTier>,
+    /// Copilot Fusion tier that effectiveAutoTier serves, resolved from the session's Auto tier metadata. An open string: known values include `standard`, `high`, and `max`; other provider-defined values may appear. Omitted when no Auto preference is committed, it is not a Fusion tier, or Auto metadata has not been discovered (for example after cold resume, before session.model.list). Fusion fields cover only effective and pending preferences; resolve activatingAutoTier and supersededAutoTier against auto.tiers[].fusionTier from session.model.list.
+    pub effective_fusion_tier: Option<String>,
+    /// Latest unclaimed Auto preference waiting for a future user turn.
+    pub pending_auto_tier: Option<AutoTier>,
+    /// Copilot Fusion tier that pendingAutoTier serves, resolved from the session's Auto tier metadata. An open string: known values include `standard`, `high`, and `max`; other provider-defined values may appear. Omitted when no preference is pending, it is not a Fusion tier, or Auto metadata has not been discovered (for example after cold resume, before session.model.list).
+    pub pending_fusion_tier: Option<String>,
+    /// Immediate request status. `pending` means accepted but not committed.
+    pub status: ModelSwitchAutoTierStatus,
+    /// Earlier unclaimed preference replaced by this request. This can be present with either status, including when selecting the effective preference cancels pending work.
+    pub superseded_auto_tier: Option<AutoTier>,
+}
+crate::record_serde::wire_record!(SessionModelSwitchAutoTierResult { activating_auto_tier: "activatingAutoTier" if is_none, effective_auto_tier: "effectiveAutoTier" if is_none, effective_fusion_tier: "effectiveFusionTier" if is_none, pending_auto_tier: "pendingAutoTier" if is_none, pending_fusion_tier: "pendingFusionTier" if is_none, status: "status", superseded_auto_tier: "supersededAutoTier" if is_none });
+
+/// Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelSwitchFusionTierResult {
+    /// Auto preference currently claimed by an in-progress activation. Null means the activation is returning to provider-default routing.
+    pub activating_auto_tier: Option<AutoTier>,
+    /// Auto preference currently committed for the session.
+    pub effective_auto_tier: Option<AutoTier>,
+    /// Copilot Fusion tier that effectiveAutoTier serves, resolved from the session's Auto tier metadata. An open string: known values include `standard`, `high`, and `max`; other provider-defined values may appear. Omitted when no Auto preference is committed, it is not a Fusion tier, or Auto metadata has not been discovered (for example after cold resume, before session.model.list). Fusion fields cover only effective and pending preferences; resolve activatingAutoTier and supersededAutoTier against auto.tiers[].fusionTier from session.model.list.
+    pub effective_fusion_tier: Option<String>,
+    /// Latest unclaimed Auto preference waiting for a future user turn.
+    pub pending_auto_tier: Option<AutoTier>,
+    /// Copilot Fusion tier that pendingAutoTier serves, resolved from the session's Auto tier metadata. An open string: known values include `standard`, `high`, and `max`; other provider-defined values may appear. Omitted when no preference is pending, it is not a Fusion tier, or Auto metadata has not been discovered (for example after cold resume, before session.model.list).
+    pub pending_fusion_tier: Option<String>,
+    /// Immediate request status. `pending` means accepted but not committed.
+    pub status: ModelSwitchAutoTierStatus,
+    /// Earlier unclaimed preference replaced by this request. This can be present with either status, including when selecting the effective preference cancels pending work.
+    pub superseded_auto_tier: Option<AutoTier>,
+}
+crate::record_serde::wire_record!(SessionModelSwitchFusionTierResult { activating_auto_tier: "activatingAutoTier" if is_none, effective_auto_tier: "effectiveAutoTier" if is_none, effective_fusion_tier: "effectiveFusionTier" if is_none, pending_auto_tier: "pendingAutoTier" if is_none, pending_fusion_tier: "pendingFusionTier" if is_none, status: "status", superseded_auto_tier: "supersededAutoTier" if is_none });
+
+/// The model identifier active on the session after the switch.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelApplyStartupOverlayResult {
+    /// Compaction confirmation projection when status is confirmation_required
+    pub confirmation: Option<ModelSwitchConfirmation>,
+    /// True when the switch was deferred (enqueued as a cancellable `/model` command) because a turn was active or another model change was already queued, rather than applied immediately. When true, the session's live model is unchanged until the queued change drains.
+    pub deferred: Option<bool>,
+    /// Deprecation warnings associated with the selected model or options.
+    pub deprecation_warnings: Option<Vec<String>>,
+    /// User-facing outcome message for the model switch.
+    pub message: Option<String>,
+    /// Currently active model identifier after the switch
+    pub model_id: Option<String>,
+    /// Authoritative model and Auto preference state after an immediate switch. For deferred switches this remains the current state until the queued change drains.
+    pub model_state: Option<CurrentModel>,
+    /// Persistence failure encountered after applying the model switch.
+    pub persistence_error: Option<String>,
+    /// Stable queue item identifier when this request was enqueued. Remains present if the item drains before the response is returned.
+    pub queue_id: Option<String>,
+    /// Lifecycle result for the requested switch
+    pub status: Option<String>,
+    /// User-facing warning produced while applying the model switch.
+    pub warning: Option<String>,
+}
+crate::record_serde::wire_record!(SessionModelApplyStartupOverlayResult { confirmation: "confirmation" if is_none, deferred: "deferred" if is_none, deprecation_warnings: "deprecationWarnings" if is_none, message: "message" if is_none, model_id: "modelId" if is_none, model_state: "modelState" if is_none, persistence_error: "persistenceError" if is_none, queue_id: "queueId" if is_none, status: "status" if is_none, warning: "warning" if is_none });
+
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionModelClearStartupSeedParams {
+    pub expected_model: String,
+    /// Provider captured with the startup seed; omission matches only an unqualified seed.
+    pub expected_provider_id: Option<String>,
+}
+crate::record_serde::wire_record!(SessionModelClearStartupSeedParams { expected_model: "expectedModel", expected_provider_id: "expectedProviderId" if is_none });
+
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionModelClearStartupSeedResult {
+    pub cleared: bool,
+}
+crate::record_serde::wire_record!(SessionModelClearStartupSeedResult { cleared: "cleared" });
+
+/// The applied host allowlist and effective session model policy after intersection.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelSetAllowedModelsResult {
+    /// Normalized host allowlist. Omitted when the host restriction was cleared, or when a relay client does not return the host policy.
+    pub allowed_models: Option<Vec<String>>,
+    /// Effective exact IDs or repository policy patterns after applying the host restriction. Omitted by relay clients that do not return the host policy.
+    pub effective_allowed_models: Option<Vec<String>>,
+    /// Effective deterministic fallback model, when the policy defines one.
+    pub fallback_model: Option<String>,
+    /// Selected session model after reconciling a now-disallowed concrete selection.
+    pub model_id: Option<String>,
+}
+crate::record_serde::wire_record!(SessionModelSetAllowedModelsResult { allowed_models: "allowedModels" if is_none, effective_allowed_models: "effectiveAllowedModels" if is_none, fallback_model: "fallbackModel" if is_none, model_id: "modelId" if is_none });
+
+/// Update the session's reasoning effort without changing the selected model. Use `switchTo` instead when you also need to change the model. The runtime applies the effort to the next new model request, including tool continuations, without changing retries of an already-started request.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelSetReasoningEffortResult {
+    /// Reasoning effort level recorded on the session after the update
+    pub reasoning_effort: String,
+}
+crate::record_serde::wire_record!(SessionModelSetReasoningEffortResult {
+    reasoning_effort: "reasoningEffort"
+});
+
+/// Reasoning-summaries presentation policy for the session's current model.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelGetReasoningSummariesResult {
+    /// Whether the supplied `persistedShowReasoning` setting only restates the model default. This reports a redundancy, not a standing instruction to delete the setting: it stays true for as long as the setting and the model default agree, including for a user who later chose that value deliberately. It exists for a one-time migration of a legacy setting written before the model default made it redundant, so a host that acts on it owns the cleanup and must gate it behind its own persisted `done` marker, delete only a setting whose value still matches the one it read, and never repeat the deletion on a later launch. Under an off-by-default reasoning-summaries experiment an explicit `showReasoning: true` opt-in also reads as redundant on a summary-producing model, so an ungated host would keep deleting that opt-in and hide summaries again on every launch.
+    pub clear_redundant_setting: bool,
+    /// Whether the session's reasoning-summaries experiment assignment has settled. False means this read does not wait for a pending assignment and reports the experiment-derived fields conservatively: `showHiddenHint` is false and `visibility` falls back to `persistedShowReasoning`, or is omitted when none was supplied. A host that wants the assigned answer re-reads until this is true.
+    pub experiment_settled: bool,
+    /// Whether the selected model shows reasoning summaries by default.
+    pub model_default_shows_summaries: bool,
+    /// False until the session has a model catalog and a selected model. This read never resolves the catalog itself, and the runtime emits no readiness notification, so repeating this call alone leaves `ready` false indefinitely on a session that has neither listed models nor run a turn. `session.model.list` is the prerequisite and the signal: it resolves and caches the catalog for the session, so a successful return means the next read is ready. The exception is a session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider: `session.model.list` returns an empty list without caching a catalog, so `ready` stays false and this policy is unavailable there. While false, every model-policy field is false and `visibility` is omitted; `experimentSettled` is independent of readiness and still reports the assignment state.
+    pub ready: bool,
+    /// Whether turns on this session produce reasoning summaries, honouring an explicit session reasoning-summary override.
+    pub session_shows_summaries: bool,
+    /// Whether to show the hint that reasoning summaries are hidden. Always false while `experimentSettled` is false.
+    pub show_hidden_hint: bool,
+    /// Whether the selected model emits reasoning headers.
+    pub show_reasoning_headers: bool,
+    /// Default reasoning visibility, and only meaningful once `ready` is true: false when the session produces no summaries, else the persisted setting, else the experiment's default. While `ready` is true it is omitted only when all three are unavailable, that is when the session produces summaries, no `persistedShowReasoning` was supplied, and `experimentSettled` is false. While `ready` is false there is no model policy to report and this field is always omitted, so an absent value alone does not imply a pending experiment.
+    pub visibility: Option<bool>,
+}
+crate::record_serde::wire_record!(SessionModelGetReasoningSummariesResult { clear_redundant_setting: "clearRedundantSetting", experiment_settled: "experimentSettled", model_default_shows_summaries: "modelDefaultShowsSummaries", ready: "ready", session_shows_summaries: "sessionShowsSummaries", show_hidden_hint: "showHiddenHint", show_reasoning_headers: "showReasoningHeaders", visibility: "visibility" if is_none });
+
+/// The list of models available to this session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelListResult {
+    /// Ordered Auto routing preferences discovered for this session's account.
+    pub auto: Option<AutoTierMetadata>,
+    /// Available models, ordered with the most preferred default first. Includes both Copilot (CAPI) models and any registry BYOK models; a BYOK model appears under its provider-qualified selection id (`provider/id`).
+    pub list: Vec<serde_json::Value>,
+    /// Cost categories for the full CAPI catalog, including picker-disabled models that Auto may select. Metadata only; entries absent from `list` are not manually selectable.
+    pub model_price_categories: Option<Vec<SessionModelPriceCategory>>,
+    /// The model providers available to this session, in ordering order, resolved from the account roster; empty when no provider is entitled (logged out / seatless). Each model in `list` carries its own provider reference; this roster gives the deterministic provider sequence and lets a consumer group by provider without deriving ordering from the model list. Central code never branches on a provider kind.
+    pub providers: Option<Vec<ModelProviderDescriptor>>,
+    /// Per-quota snapshots returned alongside the model list, keyed by quota type.
+    pub quota_snapshots: Option<HashMap<String, serde_json::Value>>,
+}
+crate::record_serde::wire_record!(SessionModelListResult { auto: "auto" if is_none, list: "list", model_price_categories: "modelPriceCategories" if is_none, providers: "providers" if is_none, quota_snapshots: "quotaSnapshots" if is_none });
 
 /// Object envelope for one trusted live-client transport operation.
 ///
@@ -9870,6 +11368,37 @@ pub struct SessionMcpPromptsGetResult {
     pub messages: Vec<McpPromptMessage>,
 }
 crate::record_serde::wire_record!(SessionMcpPromptsGetResult { meta: "_meta" if is_none, additional_properties: "additionalProperties" if is_none, description: "description" if is_none, messages: "messages" });
+
+/// The composed MCP configuration and all omitted-source diagnostics.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionMcpInspectConfigurationResult {
+    /// The complete merged configuration, including source provenance.
+    pub config: serde_json::Value,
+    /// Registry servers disabled because their MSIX container is unavailable.
+    pub odr_msix_disabled_server_names: Vec<String>,
+    /// Server names discovered through the on-device registry.
+    pub odr_server_names: Vec<String>,
+    /// Invalid user entries omitted while valid siblings remained.
+    #[doc(hidden)]
+    pub(crate) user_config_errors: Vec<McpConfigSourceDiagnostic>,
+    /// Workspace files or entries that did not load.
+    #[doc(hidden)]
+    pub(crate) workspace_errors: Vec<McpConfigSourceDiagnostic>,
+}
+crate::record_serde::wire_record!(SessionMcpInspectConfigurationResult {
+    config: "config",
+    odr_msix_disabled_server_names: "odrMsixDisabledServerNames",
+    odr_server_names: "odrServerNames",
+    user_config_errors: "userConfigErrors",
+    workspace_errors: "workspaceErrors"
+});
 
 /// Publishes a controller event through the runtime-owned session log.
 ///
@@ -11637,355 +13166,6 @@ crate::record_serde::wire_record!(SessionWorkflowJournalGetResult { hit: "hit", 
 #[serde(rename_all = "camelCase")]
 pub struct SessionWorkflowJournalPutResult {}
 
-/// Identifies the target session.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelGetCurrentParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-crate::record_serde::wire_record!(SessionModelGetCurrentParams {
-    session_id: "sessionId"
-});
-
-/// The session's authoritative model snapshot. Auto preference fields are configuration for the virtual `auto` model and do not change the selected model identifier. The context tier reflects `Session.getContextTier()`, restored from the session journal on resume.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelGetCurrentResult {
-    /// Auto preference currently claimed by an in-progress activation. Null means the activation is returning to provider-default routing.
-    pub activating_auto_tier: Option<AutoTier>,
-    /// Auto preference currently committed for the session. This can remain available while another model is selected so a later switch to `auto` can reuse it.
-    pub auto_tier: Option<AutoTier>,
-    /// Context tier for models that support multiple context-window sizes.
-    pub context_tier: Option<ContextTier>,
-    /// Copilot Fusion tier that the committed autoTier serves, resolved from the session's Auto tier metadata. An open string: known values include `standard`, `high`, and `max`; other provider-defined values may appear. Omitted when autoTier is unset, is not a Fusion tier, or Auto metadata has not been discovered (for example after cold resume, before session.model.list). This snapshot reports only the committed Fusion tier; resolve pendingAutoTier and activatingAutoTier against auto.tiers[].fusionTier from session.model.list.
-    pub fusion_tier: Option<String>,
-    /// Currently active model identifier
-    pub model_id: Option<String>,
-    /// Latest unclaimed Auto preference waiting for a future user turn. Null means the pending request is returning to provider-default routing.
-    pub pending_auto_tier: Option<AutoTier>,
-    /// Captured base model to restore when leaving plan mode. Omitted outside plan mode or when no plan override has captured a base model. Persistent agent model requirements apply to this model rather than the temporary plan model.
-    pub plan_base_model_id: Option<String>,
-    /// Provider of planBaseModelId, when that saved selection is provider-qualified.
-    pub plan_base_provider_id: Option<String>,
-    /// Provider selected for this model. Together with modelId, identifies a catalog entry even when providers serve the same model. Omitted for unattributed legacy selections.
-    pub provider_id: Option<String>,
-    /// Reasoning effort level currently applied to the active model, when one is set. Reads `Session.getReasoningEffort()` synchronously after `getSelectedModel()` resolves so the two values are reported as a snapshot.
-    pub reasoning_effort: Option<String>,
-}
-crate::record_serde::wire_record!(SessionModelGetCurrentResult { activating_auto_tier: "activatingAutoTier" if is_none, auto_tier: "autoTier" if is_none, context_tier: "contextTier" if is_none, fusion_tier: "fusionTier" if is_none, model_id: "modelId" if is_none, pending_auto_tier: "pendingAutoTier" if is_none, plan_base_model_id: "planBaseModelId" if is_none, plan_base_provider_id: "planBaseProviderId" if is_none, provider_id: "providerId" if is_none, reasoning_effort: "reasoningEffort" if is_none });
-
-/// A cached startup model snapshot and an optional one-time enablement prompt. This check never resolves credentials or fetches a catalog.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelStartupAdmissionResult {
-    /// Whether the session has a resolved catalog, including a catalog-free provider.
-    pub catalog_ready: bool,
-    /// Whether this call consumed the session's startup enablement claim.
-    pub claimed_enablement: bool,
-    /// The selected model to enable, only for the first successful prompt claim.
-    pub model_to_enable: Option<String>,
-    /// Whether the cached selected model currently requires enablement.
-    pub requires_enablement: bool,
-    /// The selected model, when the session has one.
-    pub selected_model: Option<String>,
-}
-crate::record_serde::wire_record!(SessionModelStartupAdmissionResult { catalog_ready: "catalogReady", claimed_enablement: "claimedEnablement", model_to_enable: "modelToEnable" if is_none, requires_enablement: "requiresEnablement", selected_model: "selectedModel" if is_none });
-
-/// A serialized provider error from a failed model-catalog request.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelDescribeLoadErrorParams {
-    /// Provider error JSON, when the catalog supplied structured error details.
-    pub wire_error_json: Option<String>,
-}
-crate::record_serde::wire_record!(SessionModelDescribeLoadErrorParams { wire_error_json: "wireErrorJson" if is_none });
-
-/// Model-catalog failure facts without host-specific presentation text.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelDescribeLoadErrorResult {
-    /// Classified authorization failure for an HTTP 403 response, when recognized.
-    pub authorization: Option<ModelLoadAuthorizationError>,
-    /// Request identifier extracted from the provider error.
-    pub request_id: Option<RequestId>,
-    /// Service request identifier extracted from the provider error.
-    pub service_request_id: Option<String>,
-    /// Copilot settings URL for the session's account when a policy refusal needs remediation.
-    pub settings_url: Option<String>,
-    /// HTTP status reported by the provider, if available.
-    pub status: Option<i64>,
-}
-crate::record_serde::wire_record!(SessionModelDescribeLoadErrorResult { authorization: "authorization" if is_none, request_id: "requestId" if is_none, service_request_id: "serviceRequestId" if is_none, settings_url: "settingsUrl" if is_none, status: "status" if is_none });
-
-/// The model identifier active on the session after the switch.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelSwitchToResult {
-    /// Compaction confirmation projection when status is confirmation_required
-    pub confirmation: Option<ModelSwitchConfirmation>,
-    /// True when the switch was deferred (enqueued as a cancellable `/model` command) because a turn was active or another model change was already queued, rather than applied immediately. When true, the session's live model is unchanged until the queued change drains.
-    pub deferred: Option<bool>,
-    /// Deprecation warnings associated with the selected model or options.
-    pub deprecation_warnings: Option<Vec<String>>,
-    /// User-facing outcome message for the model switch.
-    pub message: Option<String>,
-    /// Currently active model identifier after the switch
-    pub model_id: Option<String>,
-    /// Authoritative model and Auto preference state after an immediate switch. For deferred switches this remains the current state until the queued change drains.
-    pub model_state: Option<CurrentModel>,
-    /// Persistence failure encountered after applying the model switch.
-    pub persistence_error: Option<String>,
-    /// Stable queue item identifier when this request was enqueued. Remains present if the item drains before the response is returned.
-    pub queue_id: Option<String>,
-    /// Lifecycle result for the requested switch
-    pub status: Option<String>,
-    /// User-facing warning produced while applying the model switch.
-    pub warning: Option<String>,
-}
-crate::record_serde::wire_record!(SessionModelSwitchToResult { confirmation: "confirmation" if is_none, deferred: "deferred" if is_none, deprecation_warnings: "deprecationWarnings" if is_none, message: "message" if is_none, model_id: "modelId" if is_none, model_state: "modelState" if is_none, persistence_error: "persistenceError" if is_none, queue_id: "queueId" if is_none, status: "status" if is_none, warning: "warning" if is_none });
-
-/// Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelSwitchAutoTierResult {
-    /// Auto preference currently claimed by an in-progress activation. Null means the activation is returning to provider-default routing.
-    pub activating_auto_tier: Option<AutoTier>,
-    /// Auto preference currently committed for the session.
-    pub effective_auto_tier: Option<AutoTier>,
-    /// Copilot Fusion tier that effectiveAutoTier serves, resolved from the session's Auto tier metadata. An open string: known values include `standard`, `high`, and `max`; other provider-defined values may appear. Omitted when no Auto preference is committed, it is not a Fusion tier, or Auto metadata has not been discovered (for example after cold resume, before session.model.list). Fusion fields cover only effective and pending preferences; resolve activatingAutoTier and supersededAutoTier against auto.tiers[].fusionTier from session.model.list.
-    pub effective_fusion_tier: Option<String>,
-    /// Latest unclaimed Auto preference waiting for a future user turn.
-    pub pending_auto_tier: Option<AutoTier>,
-    /// Copilot Fusion tier that pendingAutoTier serves, resolved from the session's Auto tier metadata. An open string: known values include `standard`, `high`, and `max`; other provider-defined values may appear. Omitted when no preference is pending, it is not a Fusion tier, or Auto metadata has not been discovered (for example after cold resume, before session.model.list).
-    pub pending_fusion_tier: Option<String>,
-    /// Immediate request status. `pending` means accepted but not committed.
-    pub status: ModelSwitchAutoTierStatus,
-    /// Earlier unclaimed preference replaced by this request. This can be present with either status, including when selecting the effective preference cancels pending work.
-    pub superseded_auto_tier: Option<AutoTier>,
-}
-crate::record_serde::wire_record!(SessionModelSwitchAutoTierResult { activating_auto_tier: "activatingAutoTier" if is_none, effective_auto_tier: "effectiveAutoTier" if is_none, effective_fusion_tier: "effectiveFusionTier" if is_none, pending_auto_tier: "pendingAutoTier" if is_none, pending_fusion_tier: "pendingFusionTier" if is_none, status: "status", superseded_auto_tier: "supersededAutoTier" if is_none });
-
-/// Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelSwitchFusionTierResult {
-    /// Auto preference currently claimed by an in-progress activation. Null means the activation is returning to provider-default routing.
-    pub activating_auto_tier: Option<AutoTier>,
-    /// Auto preference currently committed for the session.
-    pub effective_auto_tier: Option<AutoTier>,
-    /// Copilot Fusion tier that effectiveAutoTier serves, resolved from the session's Auto tier metadata. An open string: known values include `standard`, `high`, and `max`; other provider-defined values may appear. Omitted when no Auto preference is committed, it is not a Fusion tier, or Auto metadata has not been discovered (for example after cold resume, before session.model.list). Fusion fields cover only effective and pending preferences; resolve activatingAutoTier and supersededAutoTier against auto.tiers[].fusionTier from session.model.list.
-    pub effective_fusion_tier: Option<String>,
-    /// Latest unclaimed Auto preference waiting for a future user turn.
-    pub pending_auto_tier: Option<AutoTier>,
-    /// Copilot Fusion tier that pendingAutoTier serves, resolved from the session's Auto tier metadata. An open string: known values include `standard`, `high`, and `max`; other provider-defined values may appear. Omitted when no preference is pending, it is not a Fusion tier, or Auto metadata has not been discovered (for example after cold resume, before session.model.list).
-    pub pending_fusion_tier: Option<String>,
-    /// Immediate request status. `pending` means accepted but not committed.
-    pub status: ModelSwitchAutoTierStatus,
-    /// Earlier unclaimed preference replaced by this request. This can be present with either status, including when selecting the effective preference cancels pending work.
-    pub superseded_auto_tier: Option<AutoTier>,
-}
-crate::record_serde::wire_record!(SessionModelSwitchFusionTierResult { activating_auto_tier: "activatingAutoTier" if is_none, effective_auto_tier: "effectiveAutoTier" if is_none, effective_fusion_tier: "effectiveFusionTier" if is_none, pending_auto_tier: "pendingAutoTier" if is_none, pending_fusion_tier: "pendingFusionTier" if is_none, status: "status", superseded_auto_tier: "supersededAutoTier" if is_none });
-
-/// The model identifier active on the session after the switch.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelApplyStartupOverlayResult {
-    /// Compaction confirmation projection when status is confirmation_required
-    pub confirmation: Option<ModelSwitchConfirmation>,
-    /// True when the switch was deferred (enqueued as a cancellable `/model` command) because a turn was active or another model change was already queued, rather than applied immediately. When true, the session's live model is unchanged until the queued change drains.
-    pub deferred: Option<bool>,
-    /// Deprecation warnings associated with the selected model or options.
-    pub deprecation_warnings: Option<Vec<String>>,
-    /// User-facing outcome message for the model switch.
-    pub message: Option<String>,
-    /// Currently active model identifier after the switch
-    pub model_id: Option<String>,
-    /// Authoritative model and Auto preference state after an immediate switch. For deferred switches this remains the current state until the queued change drains.
-    pub model_state: Option<CurrentModel>,
-    /// Persistence failure encountered after applying the model switch.
-    pub persistence_error: Option<String>,
-    /// Stable queue item identifier when this request was enqueued. Remains present if the item drains before the response is returned.
-    pub queue_id: Option<String>,
-    /// Lifecycle result for the requested switch
-    pub status: Option<String>,
-    /// User-facing warning produced while applying the model switch.
-    pub warning: Option<String>,
-}
-crate::record_serde::wire_record!(SessionModelApplyStartupOverlayResult { confirmation: "confirmation" if is_none, deferred: "deferred" if is_none, deprecation_warnings: "deprecationWarnings" if is_none, message: "message" if is_none, model_id: "modelId" if is_none, model_state: "modelState" if is_none, persistence_error: "persistenceError" if is_none, queue_id: "queueId" if is_none, status: "status" if is_none, warning: "warning" if is_none });
-
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub(crate) struct SessionModelClearStartupSeedParams {
-    pub expected_model: String,
-    /// Provider captured with the startup seed; omission matches only an unqualified seed.
-    pub expected_provider_id: Option<String>,
-}
-crate::record_serde::wire_record!(SessionModelClearStartupSeedParams { expected_model: "expectedModel", expected_provider_id: "expectedProviderId" if is_none });
-
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub(crate) struct SessionModelClearStartupSeedResult {
-    pub cleared: bool,
-}
-crate::record_serde::wire_record!(SessionModelClearStartupSeedResult { cleared: "cleared" });
-
-/// The applied host allowlist and effective session model policy after intersection.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelSetAllowedModelsResult {
-    /// Normalized host allowlist. Omitted when the host restriction was cleared, or when a relay client does not return the host policy.
-    pub allowed_models: Option<Vec<String>>,
-    /// Effective exact IDs or repository policy patterns after applying the host restriction. Omitted by relay clients that do not return the host policy.
-    pub effective_allowed_models: Option<Vec<String>>,
-    /// Effective deterministic fallback model, when the policy defines one.
-    pub fallback_model: Option<String>,
-    /// Selected session model after reconciling a now-disallowed concrete selection.
-    pub model_id: Option<String>,
-}
-crate::record_serde::wire_record!(SessionModelSetAllowedModelsResult { allowed_models: "allowedModels" if is_none, effective_allowed_models: "effectiveAllowedModels" if is_none, fallback_model: "fallbackModel" if is_none, model_id: "modelId" if is_none });
-
-/// Update the session's reasoning effort without changing the selected model. Use `switchTo` instead when you also need to change the model. The runtime applies the effort to the next new model request, including tool continuations, without changing retries of an already-started request.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelSetReasoningEffortResult {
-    /// Reasoning effort level recorded on the session after the update
-    pub reasoning_effort: String,
-}
-crate::record_serde::wire_record!(SessionModelSetReasoningEffortResult {
-    reasoning_effort: "reasoningEffort"
-});
-
-/// Reasoning-summaries presentation policy for the session's current model.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelGetReasoningSummariesResult {
-    /// Whether the supplied `persistedShowReasoning` setting only restates the model default. This reports a redundancy, not a standing instruction to delete the setting: it stays true for as long as the setting and the model default agree, including for a user who later chose that value deliberately. It exists for a one-time migration of a legacy setting written before the model default made it redundant, so a host that acts on it owns the cleanup and must gate it behind its own persisted `done` marker, delete only a setting whose value still matches the one it read, and never repeat the deletion on a later launch. Under an off-by-default reasoning-summaries experiment an explicit `showReasoning: true` opt-in also reads as redundant on a summary-producing model, so an ungated host would keep deleting that opt-in and hide summaries again on every launch.
-    pub clear_redundant_setting: bool,
-    /// Whether the session's reasoning-summaries experiment assignment has settled. False means this read does not wait for a pending assignment and reports the experiment-derived fields conservatively: `showHiddenHint` is false and `visibility` falls back to `persistedShowReasoning`, or is omitted when none was supplied. A host that wants the assigned answer re-reads until this is true.
-    pub experiment_settled: bool,
-    /// Whether the selected model shows reasoning summaries by default.
-    pub model_default_shows_summaries: bool,
-    /// False until the session has a model catalog and a selected model. This read never resolves the catalog itself, and the runtime emits no readiness notification, so repeating this call alone leaves `ready` false indefinitely on a session that has neither listed models nor run a turn. `session.model.list` is the prerequisite and the signal: it resolves and caches the catalog for the session, so a successful return means the next read is ready. The exception is a session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider: `session.model.list` returns an empty list without caching a catalog, so `ready` stays false and this policy is unavailable there. While false, every model-policy field is false and `visibility` is omitted; `experimentSettled` is independent of readiness and still reports the assignment state.
-    pub ready: bool,
-    /// Whether turns on this session produce reasoning summaries, honouring an explicit session reasoning-summary override.
-    pub session_shows_summaries: bool,
-    /// Whether to show the hint that reasoning summaries are hidden. Always false while `experimentSettled` is false.
-    pub show_hidden_hint: bool,
-    /// Whether the selected model emits reasoning headers.
-    pub show_reasoning_headers: bool,
-    /// Default reasoning visibility, and only meaningful once `ready` is true: false when the session produces no summaries, else the persisted setting, else the experiment's default. While `ready` is true it is omitted only when all three are unavailable, that is when the session produces summaries, no `persistedShowReasoning` was supplied, and `experimentSettled` is false. While `ready` is false there is no model policy to report and this field is always omitted, so an absent value alone does not imply a pending experiment.
-    pub visibility: Option<bool>,
-}
-crate::record_serde::wire_record!(SessionModelGetReasoningSummariesResult { clear_redundant_setting: "clearRedundantSetting", experiment_settled: "experimentSettled", model_default_shows_summaries: "modelDefaultShowsSummaries", ready: "ready", session_shows_summaries: "sessionShowsSummaries", show_hidden_hint: "showHiddenHint", show_reasoning_headers: "showReasoningHeaders", visibility: "visibility" if is_none });
-
-/// The list of models available to this session.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionModelListResult {
-    /// Ordered Auto routing preferences discovered for this session's account.
-    pub auto: Option<AutoTierMetadata>,
-    /// Available models, ordered with the most preferred default first. Includes both Copilot (CAPI) models and any registry BYOK models; a BYOK model appears under its provider-qualified selection id (`provider/id`).
-    pub list: Vec<serde_json::Value>,
-    /// Cost categories for the full CAPI catalog, including picker-disabled models that Auto may select. Metadata only; entries absent from `list` are not manually selectable.
-    pub model_price_categories: Option<Vec<SessionModelPriceCategory>>,
-    /// The model providers available to this session, in ordering order, resolved from the account roster; empty when no provider is entitled (logged out / seatless). Each model in `list` carries its own provider reference; this roster gives the deterministic provider sequence and lets a consumer group by provider without deriving ordering from the model list. Central code never branches on a provider kind.
-    pub providers: Option<Vec<ModelProviderDescriptor>>,
-    /// Per-quota snapshots returned alongside the model list, keyed by quota type.
-    pub quota_snapshots: Option<HashMap<String, serde_json::Value>>,
-}
-crate::record_serde::wire_record!(SessionModelListResult { auto: "auto" if is_none, list: "list", model_price_categories: "modelPriceCategories" if is_none, providers: "providers" if is_none, quota_snapshots: "quotaSnapshots" if is_none });
-
 /// Evaluation inputs for the bound session's feature service, not authentication claims.
 ///
 /// <div class="warning">
@@ -12260,53 +13440,6 @@ pub struct SessionModeSetResult {
     pub warning: Option<String>,
 }
 crate::record_serde::wire_record!(SessionModeSetResult { arm_interactive_continuation: "armInteractiveContinuation" if is_none, confirmation: "confirmation" if is_none, defer_implementation: "deferImplementation" if is_none, deprecation_warnings: "deprecationWarnings" if is_none, message: "message" if is_none, mode_applied: "modeApplied" if is_none, model_changed: "modelChanged", status: "status", warning: "warning" if is_none });
-
-/// Identifies the target session.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionNameGetParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-crate::record_serde::wire_record!(SessionNameGetParams {
-    session_id: "sessionId"
-});
-
-/// The session's friendly name, or null when not yet set.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionNameGetResult {
-    /// The session name (user-set or auto-generated), or null if not yet set
-    pub name: Option<String>,
-}
-crate::record_serde::wire_record!(SessionNameGetResult { name: "name" });
-
-/// Indicates whether the auto-generated summary was applied as the session's name.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionNameSetAutoResult {
-    /// Whether the auto-generated summary was persisted. False if the session already has a user-set name, the summary normalized to empty, the normalized summary already is the session's name, or the session does not have a workspace.
-    pub applied: bool,
-}
-crate::record_serde::wire_record!(SessionNameSetAutoResult { applied: "applied" });
 
 /// Identifies the target session.
 ///
@@ -13735,6 +14868,63 @@ crate::record_serde::wire_record!(SessionSkillsEnsureLoadedParams {
     session_id: "sessionId"
 });
 
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionSkillsInspectInventoryParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionSkillsInspectInventoryParams {
+    session_id: "sessionId"
+});
+
+/// The persisted result of a skill source installation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionSkillsResourcesInstallResult {
+    /// Source classification.
+    pub kind: SkillResourceInstallKind,
+    /// Skill name, absent for a registered directory.
+    pub name: Option<String>,
+    /// Installed definition path or registered directory.
+    pub path: String,
+    /// Destination scope, absent for a registered directory.
+    pub scope: Option<SkillResourceInstallScope>,
+}
+crate::record_serde::wire_record!(SessionSkillsResourcesInstallResult { kind: "kind", name: "name" if is_none, path: "path", scope: "scope" if is_none });
+
+/// The completed skill removal, with conservative disabled-state cleanup.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionSkillsResourcesRemoveResult {
+    /// Removed storage tier.
+    pub kind: SkillResourceRemoveKind,
+    /// Removed skill name, absent for a registered directory.
+    pub name: Option<String>,
+    /// Removed definition path or unregistered directory.
+    pub path: String,
+}
+crate::record_serde::wire_record!(SessionSkillsResourcesRemoveResult { kind: "kind", name: "name" if is_none, path: "path" });
+
 /// Per-source session diagnostics configuration.
 ///
 /// <div class="warning">
@@ -14274,289 +15464,6 @@ crate::record_serde::wire_record!(SessionManagedSettingsRecheckPolicyHelperParam
     session_id: "sessionId"
 });
 
-/// Identifies the target session.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsListParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-crate::record_serde::wire_record!(SessionPluginsListParams {
-    session_id: "sessionId"
-});
-
-/// Plugins installed for the session, with their enabled state and version metadata.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsListResult {
-    /// Installed plugins
-    pub plugins: Vec<Plugin>,
-}
-crate::record_serde::wire_record!(SessionPluginsListResult { plugins: "plugins" });
-
-/// Result of installing a plugin.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsInstallResult {
-    /// Set when the install path is deprecated (e.g. direct repo / URL / local installs). Callers should surface this to end users.
-    pub deprecation_warning: Option<String>,
-    /// The newly installed plugin's metadata
-    pub plugin: InstalledPluginInfo,
-    /// Optional post-install message provided by the plugin (e.g. setup instructions)
-    pub post_install_message: Option<String>,
-    /// Number of skills discovered and installed from the plugin
-    pub skills_installed: i64,
-    /// Where the completed plugin tree was staged before atomic promotion
-    pub staging_mode: Option<PluginInstallStagingMode>,
-    /// Warnings raised while reading the plugin's manifest: a field the manifest's schema does not define, which the loader ignores, or the reason the loader rejects the whole manifest. Callers should surface these to end users: a plugin whose skills sit behind an ignored field, or whose manifest is rejected, otherwise installs, lists, and contributes nothing, with no signal to its author. Absent when the manifest raised none.
-    pub warnings: Option<Vec<String>>,
-}
-crate::record_serde::wire_record!(SessionPluginsInstallResult { deprecation_warning: "deprecationWarning" if is_none, plugin: "plugin", post_install_message: "postInstallMessage" if is_none, skills_installed: "skillsInstalled", staging_mode: "stagingMode" if is_none, warnings: "warnings" if is_none });
-
-/// Result of updating a single plugin.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsUpdateResult {
-    /// Version after the update, when reported by the plugin manifest
-    pub new_version: Option<String>,
-    /// Version that was previously installed, when available
-    pub previous_version: Option<String>,
-    /// Number of skills discovered and installed after the update
-    pub skills_installed: i64,
-    /// Warnings from the updated plugin's manifest, including ignored fields or the reason the loader rejects the plugin. Callers should surface these to end users. Absent when the manifest raised none.
-    pub warnings: Option<Vec<String>>,
-}
-crate::record_serde::wire_record!(SessionPluginsUpdateResult { new_version: "newVersion" if is_none, previous_version: "previousVersion" if is_none, skills_installed: "skillsInstalled", warnings: "warnings" if is_none });
-
-/// Identifies the target session.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsMarketplacesListParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-crate::record_serde::wire_record!(SessionPluginsMarketplacesListParams {
-    session_id: "sessionId"
-});
-
-/// All registered marketplaces, including built-in defaults.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsMarketplacesListResult {
-    /// Registered marketplaces
-    pub marketplaces: Vec<MarketplaceInfo>,
-}
-crate::record_serde::wire_record!(SessionPluginsMarketplacesListResult {
-    marketplaces: "marketplaces"
-});
-
-/// Result of registering a new marketplace.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsMarketplacesAddResult {
-    /// Final name of the marketplace as resolved from its manifest
-    pub name: String,
-}
-crate::record_serde::wire_record!(SessionPluginsMarketplacesAddResult { name: "name" });
-
-/// Outcome of the remove attempt, including dependent-plugin info when applicable.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsMarketplacesRemoveResult {
-    /// Names of installed plugins that prevented removal. Populated only when `removed=false`.
-    pub dependent_plugins: Option<Vec<String>>,
-    /// True when the marketplace was actually removed. False when removal was skipped because the marketplace has dependent plugins and `force` was not set.
-    pub removed: bool,
-}
-crate::record_serde::wire_record!(SessionPluginsMarketplacesRemoveResult { dependent_plugins: "dependentPlugins" if is_none, removed: "removed" });
-
-/// Plugins advertised by the marketplace.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsMarketplacesBrowseResult {
-    /// Plugins advertised by the marketplace
-    pub plugins: Vec<MarketplacePluginInfo>,
-}
-crate::record_serde::wire_record!(SessionPluginsMarketplacesBrowseResult { plugins: "plugins" });
-
-/// Result of refreshing one or more marketplace catalogs.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsMarketplacesRefreshResult {
-    /// Per-marketplace refresh results in deterministic order.
-    pub results: Vec<MarketplaceRefreshEntry>,
-}
-crate::record_serde::wire_record!(SessionPluginsMarketplacesRefreshResult { results: "results" });
-
-/// Matching plugins across configured marketplaces, with partial failures.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsMarketplacesSearchResult {
-    /// Catalog or installation-inventory failures that did not prevent other results.
-    pub errors: Vec<PluginMarketplaceSearchError>,
-    /// Matching catalog entries in configured marketplace order.
-    pub plugins: Vec<PluginMarketplaceSearchEntry>,
-}
-crate::record_serde::wire_record!(SessionPluginsMarketplacesSearchResult {
-    errors: "errors",
-    plugins: "plugins"
-});
-
-/// Update availability without installation or checkout mutation. An error means availability is unknown.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsMarketplacesCheckUpdateResult {
-    /// Explanation when availability cannot be established.
-    pub error: Option<String>,
-    /// Installed plugin version, when known.
-    pub installed_version: Option<String>,
-    /// Cached catalog version, when known.
-    pub latest_version: Option<String>,
-    /// True when a marketplace has no cached checkout yet.
-    pub not_fetched: Option<bool>,
-    /// True only when the probe establishes an available update.
-    pub update_available: bool,
-}
-crate::record_serde::wire_record!(SessionPluginsMarketplacesCheckUpdateResult { error: "error" if is_none, installed_version: "installedVersion" if is_none, latest_version: "latestVersion" if is_none, not_fetched: "notFetched" if is_none, update_available: "updateAvailable" });
-
-/// Identifies the target session.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsGetDefaultsParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-crate::record_serde::wire_record!(SessionPluginsGetDefaultsParams {
-    session_id: "sessionId"
-});
-
-/// Soft plugin defaults for this session, without persistent user preferences or hard policy.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsGetDefaultsResult {
-    /// Plugin specs mapped to soft enablement defaults. Managed defaultEnabled assignments override Team defaults for the same spec.
-    pub default_enabled_plugins: HashMap<String, bool>,
-    /// Team marketplace definitions available only as best-effort installation fallbacks.
-    pub extra_known_marketplaces: HashMap<String, TeamPluginMarketplace>,
-    /// Opaque revision of the defaults, assignment reasons, and Team marketplaces.
-    pub generation: String,
-    /// Team-only defaults for hosts that retain activation inputs. Managed assignments are read live by the runtime resolver and must not be retained as Team defaults.
-    pub team_default_enabled_plugins: HashMap<String, bool>,
-}
-crate::record_serde::wire_record!(SessionPluginsGetDefaultsResult {
-    default_enabled_plugins: "defaultEnabledPlugins",
-    extra_known_marketplaces: "extraKnownMarketplaces",
-    generation: "generation",
-    team_default_enabled_plugins: "teamDefaultEnabledPlugins"
-});
-
-/// Update availability without installation or checkout mutation. An error means availability is unknown.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionPluginsCheckUpdateResult {
-    /// Explanation when availability cannot be established.
-    pub error: Option<String>,
-    /// Installed plugin version, when known.
-    pub installed_version: Option<String>,
-    /// Cached catalog version, when known.
-    pub latest_version: Option<String>,
-    /// True when a marketplace has no cached checkout yet.
-    pub not_fetched: Option<bool>,
-    /// True only when the probe establishes an available update.
-    pub update_available: bool,
-}
-crate::record_serde::wire_record!(SessionPluginsCheckUpdateResult { error: "error" if is_none, installed_version: "installedVersion" if is_none, latest_version: "latestVersion" if is_none, not_fetched: "notFetched" if is_none, update_available: "updateAvailable" });
-
 /// A snapshot of the provider endpoint the session is currently configured to talk to.
 ///
 /// <div class="warning">
@@ -14854,131 +15761,6 @@ pub struct SessionLspSetParams {
 crate::record_serde::wire_record!(SessionLspSetParams {
     server_id: "serverId",
     enabled: "enabled"
-});
-
-/// Identifies the target session.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionExtensionsGetPolicyParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-crate::record_serde::wire_record!(SessionExtensionsGetPolicyParams {
-    session_id: "sessionId"
-});
-
-/// Runtime support and session-context standalone executable extension policy.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionExtensionsGetPolicyResult {
-    /// Executable entries discovered from this session's runtime-verified eligible plugins. Under plugin_only, independently launched targets must match these entry paths; an external package, a caller-supplied plugin label, or a synthetic transport bootstrap does not establish eligibility. Empty while pending or when no extension controller is configured.
-    pub eligible_plugin_entries: Vec<EligiblePluginExtensionEntry>,
-    /// Extension policy enforcement contract version. Version 1 includes standalone discovery, launch admission, and live-policy revocation.
-    pub enforcement_version: i64,
-    /// Whether standalone extensions are allowed, prohibited by plugin-only policy, or pending unresolved managed policy.
-    pub standalone: StandaloneExtensionAdmission,
-}
-crate::record_serde::wire_record!(SessionExtensionsGetPolicyResult {
-    eligible_plugin_entries: "eligiblePluginEntries",
-    enforcement_version: "enforcementVersion",
-    standalone: "standalone"
-});
-
-/// Identifies the target session.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionExtensionsListParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-crate::record_serde::wire_record!(SessionExtensionsListParams {
-    session_id: "sessionId"
-});
-
-/// Extensions discovered for the session, with their current status.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionExtensionsListResult {
-    /// Discovered extensions and their current status
-    pub extensions: Vec<Extension>,
-}
-crate::record_serde::wire_record!(SessionExtensionsListResult {
-    extensions: "extensions"
-});
-
-/// Identifies the target session.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionExtensionsReloadParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-crate::record_serde::wire_record!(SessionExtensionsReloadParams {
-    session_id: "sessionId"
-});
-
-/// Identifies the target session.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionExtensionsReconcileParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-crate::record_serde::wire_record!(SessionExtensionsReconcileParams {
-    session_id: "sessionId"
-});
-
-/// Extensions discovered for the session, with their current status.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SessionExtensionsReconcileResult {
-    /// Discovered extensions and their current status
-    pub extensions: Vec<Extension>,
-}
-crate::record_serde::wire_record!(SessionExtensionsReconcileResult {
-    extensions: "extensions"
 });
 
 /// Rust-owned built-in tool descriptors for the session.
@@ -16091,6 +16873,23 @@ pub struct SessionPermissionsUrlsSetUnrestrictedModeResult {
 crate::record_serde::wire_record!(SessionPermissionsUrlsSetUnrestrictedModeResult {
     success: "success"
 });
+
+/// The advisory repository disable list. A read failure returns no names and a diagnostic, rather than blocking a listing or mutation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPermissionsRepositoryDisabledNamesResult {
+    /// Repository-owned names, excluding the user contribution.
+    pub names: Vec<String>,
+    /// Debug diagnostic for a repository that could not be inspected.
+    pub warning: Option<String>,
+}
+crate::record_serde::wire_record!(SessionPermissionsRepositoryDisabledNamesResult { names: "names", warning: "warning" if is_none });
 
 /// Working directory context options. Git access follows the original session host's authority.
 ///
@@ -17781,6 +18580,53 @@ crate::record_serde::wire_record!(SessionCafeMetricsDetachParams {
 ///
 /// </div>
 #[derive(Debug, Clone, Default)]
+pub struct SessionResearchListReportsParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionResearchListReportsParams {
+    session_id: "sessionId"
+});
+
+/// Stored Markdown reports, newest first, from the selected session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionResearchListReportsResult {
+    /// Reports sorted by descending modification time with stable ties.
+    pub reports: Vec<ResearchStoredReport>,
+}
+crate::record_serde::wire_record!(SessionResearchListReportsResult { reports: "reports" });
+
+/// The URL returned by GitHub after it creates the secret gist.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionGitHubCreateSecretGistResult {
+    /// The URL of the new secret gist.
+    pub url: String,
+}
+crate::record_serde::wire_record!(SessionGitHubCreateSecretGistResult { url: "url" });
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
 pub struct SessionFsSqliteExistsParams {
     /// Target session identifier
     pub session_id: SessionId,
@@ -17808,6 +18654,15 @@ pub type SessionAuthInfoResult = Option<AuthIdentity>;
 ///
 /// </div>
 pub type SessionsGetClientMetadataResult = Vec<serde_json::Value>;
+
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+pub type SessionExtensionsSetManagementToolsEnabledResult = bool;
 
 /// A standard MCP tool result, or null when the IDE is disconnected.
 ///

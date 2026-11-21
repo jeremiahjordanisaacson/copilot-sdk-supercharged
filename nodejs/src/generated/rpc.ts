@@ -110,6 +110,171 @@ export type AuthInfoType =
   /** Authentication from a Copilot API token. */
   | "copilot-api-token";
 /**
+ * A pre-session login action. Every action after open retains the same credential and persistence owner.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AccountLoginProcessRequest".
+ */
+/** @experimental */
+/** @internal */
+export type AccountLoginProcessRequest =
+  | {
+      operation: "open";
+      /**
+       * The original immutable authentication configuration.
+       */
+      context: ProcessLoginContext;
+    }
+  | {
+      operation: "token";
+      /**
+       * The opaque handle returned by open.
+       */
+      ownerId: string;
+      /**
+       * The normalized GitHub host.
+       */
+      host: string;
+      /**
+       * The user-supplied token. It is never returned.
+       */
+      token: string;
+    }
+  | {
+      operation: "startDevice";
+      /**
+       * The opaque handle returned by open.
+       */
+      ownerId: string;
+      /**
+       * The normalized GitHub host.
+       */
+      host: string;
+    }
+  | {
+      operation: "startWeb";
+      /**
+       * The opaque handle returned by open.
+       */
+      ownerId: string;
+      /**
+       * The normalized GitHub host.
+       */
+      host: string;
+    }
+  | {
+      operation: "complete";
+      /**
+       * The opaque handle returned by open.
+       */
+      ownerId: string;
+    }
+  | {
+      operation: "openBrowser";
+      /**
+       * The opaque handle returned by open.
+       */
+      ownerId: string;
+    }
+  | {
+      operation: "continue";
+      /**
+       * The opaque handle returned by open.
+       */
+      ownerId: string;
+      /**
+       * Whether the user consented to plaintext credential storage.
+       */
+      allowPlaintext: boolean;
+    }
+  | {
+      operation: "policy";
+      /**
+       * The opaque handle returned by open.
+       */
+      ownerId: string;
+      /**
+       * The original host's current policy inputs.
+       */
+      context: ProcessLoginPolicyContext;
+    }
+  | {
+      operation: "discard";
+      /**
+       * The opaque handle returned by open.
+       */
+      ownerId: string;
+    }
+  | {
+      operation: "close";
+      /**
+       * The opaque handle returned by open.
+       */
+      ownerId: string;
+    };
+/**
+ * The result of one connection-owned pre-session login action.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AccountLoginProcessResult".
+ */
+/** @experimental */
+/** @internal */
+export type AccountLoginProcessResult =
+  | {
+      kind: "opened";
+      /**
+       * The opaque owner identifier, usable only by this connection.
+       */
+      ownerId: string;
+    }
+  | {
+      kind: "deviceCode";
+      /**
+       * The code the user enters.
+       */
+      userCode: string;
+      /**
+       * The authorization page.
+       */
+      verificationUri: string;
+    }
+  | {
+      kind: "web";
+      /**
+       * The authorization URL.
+       */
+      url: string;
+    }
+  | {
+      kind: "persistence";
+      /**
+       * The original persistence result.
+       */
+      result: ProcessLoginPersistence;
+    }
+  | {
+      kind: "policy";
+      /**
+       * The verdict from both original policy channels.
+       */
+      decision: ForceLoginOrgsDecision;
+      /**
+       * Original policy warnings for the host's configured logger.
+       */
+      warnings: string[];
+    }
+  | {
+      kind: "discarded";
+      /**
+       * Whether a credential was removed.
+       */
+      removed: boolean;
+    }
+  | {
+      kind: "done";
+    };
+/**
  * User to log out
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -421,9 +586,9 @@ export type AhpConnectionTransport =
        */
       kind: "missionControl";
       /**
-       * Mission Control service URL.
+       * Mission Control service URL. Defaults to the original owner's COPILOT_MC_BASE_URL or GitHub API URL.
        */
-      baseUrl: string;
+      baseUrl?: string | null;
       /**
        * Target environment identifier.
        */
@@ -3905,6 +4070,19 @@ export type GitHubBranchPullRequestLookupStatus =
   /** The search itself could not be completed, so whether a pull request exists is unknown. */
   | "lookup-failed";
 /**
+ * The export purpose that selects existing account policy and error messages.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "GitHubSecretGistUseCase".
+ */
+/** @experimental */
+/** @internal */
+export type GitHubSecretGistUseCase =
+  /** Export a session transcript under the existing session account policy. */
+  | "session"
+  /** Export a research report under the existing research account policy. */
+  | "research";
+/**
  * A runtime-owned GitHub or Copilot operation.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -5281,6 +5459,34 @@ export type MarketplaceMigrationStatus =
   /** The migration registered the marketplace and persisted its completion. */
   | "migrated";
 /**
+ * An additional MCP document supplied as JSON text or a host file.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpAdditionalConfigSource".
+ */
+/** @experimental */
+export type McpAdditionalConfigSource =
+  | {
+      /**
+       * The source format: inline JSON or a host file.
+       */
+      kind: "json";
+      /**
+       * Raw JSON text.
+       */
+      value: string;
+    }
+  | {
+      /**
+       * The source format: inline JSON or a host file.
+       */
+      kind: "file";
+      /**
+       * Absolute path resolved by the caller.
+       */
+      path: string;
+    };
+/**
  * UI theme preference per SEP-1865
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -5594,6 +5800,18 @@ export type McpExternalClientRequest =
        */
       kind: string;
     };
+/**
+ * Controls how availableTools (allowlist) and excludedTools (denylist) combine when both are set.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "OptionsUpdateToolFilterPrecedence".
+ */
+/** @experimental */
+export type OptionsUpdateToolFilterPrecedence =
+  /** If availableTools is set, it is the only constraint that applies (excludedTools is ignored). Explicitly opts into allowlist precedence. */
+  | "available"
+  /** A tool is enabled if and only if it matches the allowlist (or the allowlist is unset) AND it does not match the denylist. Default for new sessions. */
+  | "excluded";
 /**
  * Host response: supply dynamic headers or decline this refresh.
  *
@@ -6409,18 +6627,6 @@ export type McpSetEnvValueModeDetails =
   /** Treat MCP server environment values as host-side references to resolve before launch. */
   | "indirect";
 /**
- * Controls how availableTools (allowlist) and excludedTools (denylist) combine when both are set.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "OptionsUpdateToolFilterPrecedence".
- */
-/** @experimental */
-export type OptionsUpdateToolFilterPrecedence =
-  /** If availableTools is set, it is the only constraint that applies (excludedTools is ignored). Explicitly opts into allowlist precedence. */
-  | "available"
-  /** A tool is enabled if and only if it matches the allowlist (or the allowlist is unset) AND it does not match the denylist. Default for new sessions. */
-  | "excluded";
-/**
  * Server configuration accepted by session.mcp.startServer only.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -6428,6 +6634,34 @@ export type OptionsUpdateToolFilterPrecedence =
  */
 /** @experimental */
 export type McpStartServerConfig = McpSerializableServerConfig | McpServerConfigLocal;
+/**
+ * Conflict handling for a semantic memory import.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SemanticMemoryConflictPolicy".
+ */
+/** @experimental */
+export type SemanticMemoryConflictPolicy =
+  /** Skip duplicate or conflicting memories. */
+  | "skip"
+  /** Report duplicate or conflicting memories as failures. */
+  | "error";
+/**
+ * Outcome for one validated semantic memory record.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SemanticMemoryImportItemStatus".
+ */
+/** @experimental */
+export type SemanticMemoryImportItemStatus =
+  /** The dry run accepted the record without submission. */
+  | "validated"
+  /** The memory service accepted the record. */
+  | "imported"
+  /** The selected conflict policy skipped the record. */
+  | "skipped"
+  /** Validation or submission failed for this record. */
+  | "failed";
 /**
  * Memory injection mode. Defaults to system-prompt.
  *
@@ -7537,6 +7771,18 @@ export type SettingsEditOperation =
   /** Remove the setting without supplying a value. */
   | "remove";
 /**
+ * A resource disable list to which a repository may contribute names.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RepositoryDisabledKey".
+ */
+/** @experimental */
+export type RepositoryDisabledKey =
+  /** MCP servers disabled by the repository. */
+  | "disabledMcpServers"
+  /** Skills disabled by the repository. */
+  | "disabledSkills";
+/**
  * Provider-native structured output format. JSON Schema is forwarded without rewriting or validating the schema or the generated output.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -8170,6 +8416,25 @@ export type SessionsOpenProgressStatus =
   | "in-progress"
   /** The step has completed successfully. */
   | "complete";
+/**
+ * An original-host persistence barrier stage.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionPersistenceBarrierPhase".
+ */
+/** @experimental */
+/** @internal */
+export type SessionPersistenceBarrierPhase =
+  /** Wait for the original owner's initial workspace metadata. */
+  | "prepare"
+  /** Drain the original owner's retained write callbacks. */
+  | "writeCallbacks"
+  /** Release callback results and preserve their original failures. */
+  | "complete"
+  /** Drain the original owner's live tracker or pending teardown. */
+  | "tracking"
+  /** Release results retained by a canceled flush. */
+  | "cancel";
 /**
  * GitHub marketplace source supplied by Team customizations.
  *
@@ -8877,6 +9142,46 @@ export type SkillRemoveSourceKind =
   /** A project skill file or directory. */
   | "project";
 /**
+ * The source of an installed or registered skill.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillResourceInstallKind".
+ */
+/** @experimental */
+export type SkillResourceInstallKind =
+  /** A local skill definition. */
+  | "file"
+  /** An HTTPS skill definition. */
+  | "url"
+  /** A registered skill directory. */
+  | "directory";
+/**
+ * The personal or project destination of an installed skill.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillResourceInstallScope".
+ */
+/** @experimental */
+export type SkillResourceInstallScope =
+  /** The user's personal skill directory. */
+  | "personal"
+  /** The project's skill directory. */
+  | "project";
+/**
+ * The removed skill's storage tier.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillResourceRemoveKind".
+ */
+/** @experimental */
+export type SkillResourceRemoveKind =
+  /** An unregistered skill directory. */
+  | "directory"
+  /** A removed personal skill. */
+  | "personal"
+  /** A removed project skill. */
+  | "project";
+/**
  * Direct removal or a request for the inventory needed to resolve a file.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -9348,6 +9653,19 @@ export type UserSettingsMigrateObsoleteOnDiskStatus =
   /** Obsolete keys were removed and the document was rewritten. */
   | "changed";
 /**
+ * Availability of the utility-model result.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UtilityPromptResultKind".
+ */
+/** @experimental */
+/** @internal */
+export type UtilityPromptResultKind =
+  /** Generation produced a value. */
+  | "success"
+  /** Generation could not produce a value. */
+  | "unavailable";
+/**
  * Execution-critical workflow storage operation.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -9606,6 +9924,14 @@ export type WorkspacesWorkspaceDetailsHostType =
   /** Workspace repository is hosted on Azure DevOps. */
   | "ado";
 /**
+ * List of all authenticated users
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AccountGetAllUsersResult".
+ */
+/** @experimental */
+export type AccountGetAllUsersResult = AccountAllUsers[];
+/**
  * Authentication outcome for each protected resource.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -9710,13 +10036,16 @@ export type SandboxGetUnsupportedSettingDisabledNoticeResult = string;
 /** @experimental */
 export type SandboxCheckEnforcementCommandResult = boolean;
 /**
- * List of all authenticated users
+ * The persisted AHP environment compute identity.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "AccountGetAllUsersResult".
+ * via the `definition` "UserSettingsGetOrCreateAhpEnvironmentComputeIdResult".
  */
 /** @experimental */
-export type AccountGetAllUsersResult = AccountAllUsers[];
+export type UserSettingsGetOrCreateAhpEnvironmentComputeIdResult = string;
+
+/** @experimental */
+export type SessionExtensionsSetManagementToolsEnabledResult = boolean;
 /**
  * Whether the credential operation succeeded.
  *
@@ -10881,6 +11210,148 @@ export interface AccountGetWebUrlResult {
    * Absolute URL for the requested path.
    */
   url: string;
+}
+/**
+ * The immutable configuration for one pre-session authentication owner.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ProcessLoginContext".
+ */
+/** @experimental */
+/** @internal */
+export interface ProcessLoginContext {
+  /**
+   * The original configuration directory. Omission preserves the default root.
+   */
+  configDir?: string;
+  /**
+   * The host environment snapshot used throughout credential resolution.
+   */
+  environment: {
+    [k: string]: string | undefined;
+  };
+}
+/**
+ * The host facts used for the post-login organization policy evaluation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ProcessLoginPolicyContext".
+ */
+/** @experimental */
+/** @internal */
+export interface ProcessLoginPolicyContext {
+  /**
+   * The current host environment, including policy provenance restrictions.
+   */
+  environment: {
+    [k: string]: string | undefined;
+  };
+  /**
+   * The original host platform, such as win32, darwin, or linux.
+   */
+  platform: string;
+  /**
+   * The original user's home directory.
+   */
+  homeDirectory: string;
+  /**
+   * The original host's Node.js version for the existing policy user agent.
+   */
+  processVersion: string;
+}
+/**
+ * The original login persistence result, without credentials.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ProcessLoginPersistence".
+ */
+/** @experimental */
+/** @internal */
+export interface ProcessLoginPersistence {
+  /**
+   * The original completed, needs-plaintext-consent, needs-account-selection, or declined status.
+   */
+  status: string;
+  /**
+   * The authenticated host, when available.
+   */
+  host?: string;
+  /**
+   * The authenticated login, when available.
+   */
+  login?: string;
+  /**
+   * The offered accounts, when account selection is required.
+   */
+  accounts?: ProcessLoginAccount[];
+  /**
+   * The runtime's original user description, when host and login are available.
+   */
+  description?: string;
+}
+/**
+ * An account offered by the original login persistence operation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ProcessLoginAccount".
+ */
+/** @experimental */
+/** @internal */
+export interface ProcessLoginAccount {
+  /**
+   * The opaque account selector.
+   */
+  selectionId: string;
+  /**
+   * The account host.
+   */
+  host: string;
+  /**
+   * The account login.
+   */
+  login: string;
+  /**
+   * The account provider kind.
+   */
+  kind: string;
+}
+/**
+ * The verdict of the `forceLoginOrgs` enterprise sign-in pin for one credential. A managed device may pin Copilot to an approved set of GitHub organizations so a developer cannot sign in with a personal — or another enterprise's — account and escape every control that keys off the signed-in identity. A host must refuse to proceed when `allowed` is false; the remaining fields explain the refusal rather than qualifying it.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ForceLoginOrgsDecision".
+ */
+/** @experimental */
+/** @internal */
+export interface ForceLoginOrgsDecision {
+  /**
+   * Whether the client may proceed. True whenever no pin is in force, so an unmanaged host is never blocked.
+   */
+  allowed: boolean;
+  /**
+   * Whether a pin applies at all. Distinguishes "allowed because unmanaged" from "allowed because the account is approved", which a diagnostics surface needs and which also decides whether a bring-your-own-key provider may serve inference.
+   */
+  enforced: boolean;
+  /**
+   * The approved organization logins, as configured. Enterprise configuration rather than user data, so it is safe to name in a message or a log line.
+   */
+  requiredOrgs: string[];
+  /**
+   * The approved organization the account matched, when allowed under a pin.
+   */
+  matchedOrg?: string;
+  /**
+   * A stable kebab-case reason code when refused: `org-not-approved`, `unverifiable-credential`, `policy-undetermined`, `policy-invalid`, `not-signed-in`, or `membership-unknown`. Omitted when allowed. Treat an unrecognized code as a refusal rather than mapping it to an allow: a code this host has not been taught about still denied the credential.
+   */
+  denial?: string;
+  /**
+   * A developer-facing explanation of the refusal. Omitted when allowed.
+   */
+  message?: string;
+  /**
+   * Error-level detail from managed-policy discovery — which file failed to load, which field failed validation. Carried on the decision rather than left to the log because a refusal can exit the process before a log sink exists, which would discard the only actionable diagnostic a misconfigured managed device produces.
+   */
+  policyDiagnostics: string[];
 }
 /**
  * Credentials to validate and store. Omit login to resolve the authenticated user from the token.
@@ -21812,44 +22283,6 @@ export interface FolderTrustIsTrustedParams {
   configDir?: string;
 }
 /**
- * The verdict of the `forceLoginOrgs` enterprise sign-in pin for one credential. A managed device may pin Copilot to an approved set of GitHub organizations so a developer cannot sign in with a personal — or another enterprise's — account and escape every control that keys off the signed-in identity. A host must refuse to proceed when `allowed` is false; the remaining fields explain the refusal rather than qualifying it.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "ForceLoginOrgsDecision".
- */
-/** @experimental */
-/** @internal */
-export interface ForceLoginOrgsDecision {
-  /**
-   * Whether the client may proceed. True whenever no pin is in force, so an unmanaged host is never blocked.
-   */
-  allowed: boolean;
-  /**
-   * Whether a pin applies at all. Distinguishes "allowed because unmanaged" from "allowed because the account is approved", which a diagnostics surface needs and which also decides whether a bring-your-own-key provider may serve inference.
-   */
-  enforced: boolean;
-  /**
-   * The approved organization logins, as configured. Enterprise configuration rather than user data, so it is safe to name in a message or a log line.
-   */
-  requiredOrgs: string[];
-  /**
-   * The approved organization the account matched, when allowed under a pin.
-   */
-  matchedOrg?: string;
-  /**
-   * A stable kebab-case reason code when refused: `org-not-approved`, `unverifiable-credential`, `policy-undetermined`, `policy-invalid`, `not-signed-in`, or `membership-unknown`. Omitted when allowed. Treat an unrecognized code as a refusal rather than mapping it to an allow: a code this host has not been taught about still denied the credential.
-   */
-  denial?: string;
-  /**
-   * A developer-facing explanation of the refusal. Omitted when allowed.
-   */
-  message?: string;
-  /**
-   * Error-level detail from managed-policy discovery — which file failed to load, which field failed validation. Carried on the decision rather than left to the log because a refusal can exit the process before a log sink exists, which would discard the only actionable diagnostic a misconfigured managed device produces.
-   */
-  policyDiagnostics: string[];
-}
-/**
  * Fails stale generations in one canonical proposal scope.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -22579,6 +23012,58 @@ export interface GitHubBranchPullRequestLookupResult {
    * The matching pull request, or null for every status other than `found`.
    */
   pullRequest?: GitHubBranchPullRequest | null;
+}
+/**
+ * Creates a secret gist through the bound session's original credential owner.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "GitHubCreateSecretGistRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface GitHubCreateSecretGistRequest {
+  /**
+   * File names mapped to their text content.
+   */
+  files: {
+    [k: string]: GitHubSecretGistFile | undefined;
+  };
+  /**
+   * The description that GitHub stores with the gist.
+   */
+  description: string;
+  /**
+   * The purpose that selects account restrictions and error messages.
+   */
+  useCase: GitHubSecretGistUseCase;
+}
+/**
+ * The text content of one secret gist file.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "GitHubSecretGistFile".
+ */
+/** @experimental */
+/** @internal */
+export interface GitHubSecretGistFile {
+  /**
+   * The complete text content of the file.
+   */
+  content: string;
+}
+/**
+ * The URL returned by GitHub after it creates the secret gist.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "GitHubCreateSecretGistResult".
+ */
+/** @experimental */
+/** @internal */
+export interface GitHubCreateSecretGistResult {
+  /**
+   * The URL of the new secret gist.
+   */
+  url: string;
 }
 /**
  * Whether cancellation reached a registered GitHub request.
@@ -26110,6 +26595,10 @@ export interface InstructionsDiscoverRepoSourcesRequest {
 /** @experimental */
 export interface InstructionsDiscoverRequest {
   /**
+   * Optional configuration root for personal instructions and plugins. Omission retains the connection's root.
+   */
+  configDir?: string;
+  /**
    * Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without ambient discovery, subject to instruction/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
    */
   instructionDirectories?: string[];
@@ -29307,6 +29796,46 @@ export interface McpCancelSamplingExecutionResult {
   cancelled: boolean;
 }
 /**
+ * Apply the host's Computer Use platform overlay without starting a server.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpComputerUseApplyConfigurationRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface McpComputerUseApplyConfigurationRequest {
+  /**
+   * Complete server map, including provenance and fields unknown to older clients.
+   */
+  servers: JsonValue;
+  /**
+   * Disabled servers after invocation precedence.
+   */
+  disabledServers: string[];
+  /**
+   * Explicitly enabled servers.
+   */
+  enabledServers: string[];
+}
+/**
+ * Effective configuration after the existing platform overlay.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpComputerUseApplyConfigurationResult".
+ */
+/** @experimental */
+/** @internal */
+export interface McpComputerUseApplyConfigurationResult {
+  /**
+   * Server map with only the platform overlay's changes.
+   */
+  servers: JsonValue;
+  /**
+   * Effective disabled server names.
+   */
+  disabledServers: string[];
+}
+/**
  * MCP server name and configuration to add to user configuration.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -29314,6 +29843,10 @@ export interface McpCancelSamplingExecutionResult {
  */
 /** @experimental */
 export interface McpConfigAddRequest {
+  /**
+   * Configuration root for the user MCP document. Omission retains the connection's root; overrides require a trusted host or direct SDK caller.
+   */
+  configDir?: string;
   /**
    * Unique name for the MCP server
    */
@@ -29324,6 +29857,35 @@ export interface McpConfigAddRequest {
   config: McpSerializableServerConfig;
 }
 /**
+ * Validates and combines additional MCP documents in source order.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpConfigComposeAdditionalRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface McpConfigComposeAdditionalRequest {
+  /**
+   * Documents in low-to-high precedence order.
+   */
+  sources: McpAdditionalConfigSource[];
+}
+/**
+ * Validated additional MCP servers in source precedence order. Runtime-owned filtering remains outside the serialized document.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpConfigComposeAdditionalResult".
+ */
+/** @experimental */
+export interface McpConfigComposeAdditionalResult {
+  /**
+   * Server names mapped to their validated document configuration.
+   */
+  mcpServers: {
+    [k: string]: McpSerializableServerConfig | undefined;
+  };
+}
+/**
  * MCP server names to disable for new sessions.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -29331,6 +29893,10 @@ export interface McpConfigAddRequest {
  */
 /** @experimental */
 export interface McpConfigDisableRequest {
+  /**
+   * Optional configuration root for user settings. Omission retains the connection's root; overrides require a trusted host or direct SDK caller.
+   */
+  configDir?: string | null;
   /**
    * Names of MCP servers to disable. Each server is added to the persisted disabled list so new sessions skip it. Already-disabled names are ignored. Active sessions keep their current connections until they end.
    *
@@ -29347,11 +29913,29 @@ export interface McpConfigDisableRequest {
 /** @experimental */
 export interface McpConfigEnableRequest {
   /**
+   * Optional configuration root for user settings. Omission retains the connection's root; overrides require a trusted host or direct SDK caller.
+   */
+  configDir?: string | null;
+  /**
    * Names of MCP servers to enable. Each server is removed from the persisted disabled list so new sessions spawn it. Unknown or already-enabled names are ignored.
    *
    * Items: MCP server name used as a configuration key.
    */
   names: string[];
+}
+/**
+ * Selects an explicit user MCP configuration root without changing the connection owner.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpConfigForConfigDirRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface McpConfigForConfigDirRequest {
+  /**
+   * Configuration root containing the user MCP document.
+   */
+  configDir: string;
 }
 /**
  * User-configured MCP servers, keyed by server name.
@@ -29369,6 +29953,109 @@ export interface McpConfigList {
   };
 }
 /**
+ * Optional configuration root for user MCP servers. Omission retains the connection's root.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpConfigListRequest".
+ */
+/** @experimental */
+export interface McpConfigListRequest {
+  /**
+   * Configuration root containing the user MCP document. Only trusted hosts or direct SDK callers can override it.
+   */
+  configDir?: string;
+}
+/**
+ * Read-only MCP configuration composition from explicit source inventories. The result grants no execution authority.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpConfigMergeSourcesRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface McpConfigMergeSourcesRequest {
+  /**
+   * Working directory for workspace discovery and relative source references.
+   */
+  workingDirectory: string;
+  /**
+   * Configuration root for the user MCP document.
+   */
+  configDir: string;
+  /**
+   * Repository boundary for upward workspace discovery.
+   */
+  repoRoot?: string;
+  /**
+   * Resolved installed, live, and explicit plugin records in precedence order.
+   */
+  installedPlugins?: JsonValue[];
+  /**
+   * Host-bundled plugin records, below user and workspace configuration.
+   */
+  builtinPlugins?: JsonValue[];
+  /**
+   * Additional MCP configuration, merged after the other sources.
+   */
+  additionalConfig?: JsonValue;
+  /**
+   * Include workspace files only where the runtime confirms folder trust.
+   */
+  includeWorkspaceSources?: boolean;
+}
+/**
+ * The composed MCP configuration and all omitted-source diagnostics.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpConfigMergeSourcesResult".
+ */
+/** @experimental */
+/** @internal */
+export interface McpConfigMergeSourcesResult {
+  /**
+   * The complete merged configuration, including source provenance.
+   */
+  config: JsonValue;
+  /**
+   * Workspace files or entries that did not load.
+   */
+  workspaceErrors: McpConfigSourceDiagnostic[];
+  /**
+   * Invalid user entries omitted while valid siblings remained.
+   */
+  userConfigErrors: McpConfigSourceDiagnostic[];
+  /**
+   * Server names discovered through the on-device registry.
+   */
+  odrServerNames: string[];
+  /**
+   * Registry servers disabled because their MSIX container is unavailable.
+   */
+  odrMsixDisabledServerNames: string[];
+}
+/**
+ * A source file or server entry that the MCP composition omitted.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpConfigSourceDiagnostic".
+ */
+/** @experimental */
+/** @internal */
+export interface McpConfigSourceDiagnostic {
+  /**
+   * Source file that contains the problem.
+   */
+  path: string;
+  /**
+   * Diagnostic from the existing MCP parser.
+   */
+  message: string;
+  /**
+   * Either malformed, unreadable, or invalid-server.
+   */
+  reason: string;
+}
+/**
  * MCP server name to remove from user configuration.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -29376,6 +30063,10 @@ export interface McpConfigList {
  */
 /** @experimental */
 export interface McpConfigRemoveRequest {
+  /**
+   * Configuration root for the user MCP document and credentials. Omission retains the connection's root; overrides require a trusted host or direct SDK caller.
+   */
+  configDir?: string;
   /**
    * Name of the MCP server to remove
    */
@@ -29501,6 +30192,20 @@ export interface McpConfigureGitHubResult {
    * Whether GitHub MCP configuration changed.
    */
   changed: boolean;
+}
+/**
+ * Fresh user MCP server names, including invalid entries but excluding installation-owned entries. This read does not change the validated configuration cache.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpConfigUserServerNamesResult".
+ */
+/** @experimental */
+/** @internal */
+export interface McpConfigUserServerNamesResult {
+  /**
+   * User-owned persisted server names, including entries that validation skips.
+   */
+  names: string[];
 }
 /**
  * Name of the MCP server to disable for the session.
@@ -29799,6 +30504,156 @@ export interface McpFilteredServer {
    * PII-free filter reason
    */
   redactedReason?: string;
+}
+/**
+ * One invocation's GitHub MCP tool overrides.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpGitHubInvocationToolOptions".
+ */
+/** @experimental */
+/** @internal */
+export interface McpGitHubInvocationToolOptions {
+  /**
+   * Expose all supported tools.
+   */
+  enableAllTools?: boolean;
+  /**
+   * Additional toolsets.
+   */
+  additionalToolsets?: string[];
+  /**
+   * Additional tools.
+   */
+  additionalTools?: string[];
+  /**
+   * Select the insiders endpoint.
+   */
+  enableInsidersMode?: boolean;
+  /**
+   * Override form deferral when the shared tool resolver supports it.
+   */
+  disableFormDeferral?: boolean;
+}
+/**
+ * Resolve the authentication-derived built-in without a session or MCP connection.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpGitHubResolveInvocationRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface McpGitHubResolveInvocationRequest {
+  /**
+   * Repository context for host detection and shell availability.
+   */
+  workingDirectory: string;
+  /**
+   * Effective user and trusted repository settings.
+   */
+  userSettings: JsonValue;
+  /**
+   * Invocation tool overrides, above settings.
+   */
+  flags?: McpGitHubInvocationToolOptions;
+  /**
+   * Tool filters used by the session this invocation describes.
+   */
+  toolFilters?: McpShouldExcludeGitHubToolsRequest;
+  /**
+   * Effective disabled servers, after enable overrides.
+   */
+  disabledServers: string[];
+  /**
+   * Client integration identifier for the secret-free descriptor.
+   */
+  integrationId: string;
+  /**
+   * Existing launch populations; account identity comes only from the connection.
+   */
+  audience: McpInvocationAudience;
+}
+/**
+ * The session tool filters that decide whether the session still has a shell to run `gh` with.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpShouldExcludeGitHubToolsRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface McpShouldExcludeGitHubToolsRequest {
+  /**
+   * The session's tool allowlist, when it set one. Omitted means the session constrains nothing this way.
+   */
+  availableTools?: string[];
+  /**
+   * The session's tool denylist, when it set one. Omitted means the session constrains nothing this way.
+   */
+  excludedTools?: string[];
+  /**
+   * How the allowlist and denylist combine when both are set. Omitted uses the default excluded precedence; supply the session's explicit Update selection when present.
+   */
+  toolFilterPrecedence?: OptionsUpdateToolFilterPrecedence | null;
+}
+/**
+ * Feature populations for a sessionless capability inspection.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpInvocationAudience".
+ */
+/** @experimental */
+/** @internal */
+export interface McpInvocationAudience {
+  /**
+   * Whether this installation belongs to staff.
+   */
+  isStaff: boolean;
+  /**
+   * Whether this installation belongs to GitHub staff.
+   */
+  isStaffGithub?: boolean;
+  /**
+   * Whether this installation belongs to Microsoft staff.
+   */
+  isStaffMicrosoft?: boolean;
+  /**
+   * Whether experimental capabilities are enabled.
+   */
+  isExperimental: boolean;
+  /**
+   * Whether team capabilities are enabled.
+   */
+  isTeam: boolean;
+  /**
+   * Whether streamer mode is active.
+   */
+  streamerMode: boolean;
+  /**
+   * First launch time in Unix milliseconds.
+   */
+  firstLaunchAtMillis?: number;
+}
+/**
+ * A secret-free GitHub descriptor, an ordinary signed-out result, or a bounded degraded result.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpGitHubResolveInvocationResult".
+ */
+/** @experimental */
+/** @internal */
+export interface McpGitHubResolveInvocationResult {
+  /**
+   * Built-in descriptor without authentication headers; absent when unavailable.
+   */
+  server?: JsonValue;
+  /**
+   * Whether the existing two-second resolution budget expired.
+   */
+  timedOut: boolean;
+  /**
+   * Resolution failure detail, distinct from an ordinary signed-out result.
+   */
+  warning?: string;
 }
 /**
  * Repository and server state for GitHub MCP exposure.
@@ -32276,28 +33131,6 @@ export interface McpSetEnvValueModeResult {
   mode: McpSetEnvValueModeDetails;
 }
 /**
- * The session tool filters that decide whether the session still has a shell to run `gh` with.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "McpShouldExcludeGitHubToolsRequest".
- */
-/** @experimental */
-/** @internal */
-export interface McpShouldExcludeGitHubToolsRequest {
-  /**
-   * The session's tool allowlist, when it set one. Omitted means the session constrains nothing this way.
-   */
-  availableTools?: string[];
-  /**
-   * The session's tool denylist, when it set one. Omitted means the session constrains nothing this way.
-   */
-  excludedTools?: string[];
-  /**
-   * How the allowlist and denylist combine when both are set. Omitted uses the default excluded precedence; supply the session's explicit Update selection when present.
-   */
-  toolFilterPrecedence?: OptionsUpdateToolFilterPrecedence | null;
-}
-/**
  * Whether the gh-replaceable GitHub MCP tools may be clipped for the session described by the request.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -32413,6 +33246,151 @@ export interface McpUnregisterExternalClientRequest {
    * Server name of the external client to unregister
    */
   serverName: string;
+}
+/**
+ * Memory import input. Authentication remains bound to the calling runtime owner.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "MemoriesImportSemanticRequest".
+ */
+/** @experimental */
+export interface MemoriesImportSemanticRequest {
+  /**
+   * Runtime settings overrides, with the original caller's configuration root.
+   */
+  settings?: JsonValue;
+  /**
+   * Semantic memory JSONL.
+   */
+  jsonl: string;
+  /**
+   * Working directory for temporary, scoped memory sessions.
+   */
+  workingDirectory: string;
+  /**
+   * Validate without authentication, network access, or writes.
+   */
+  dryRun?: boolean;
+  /**
+   * Conflict policy, defaulting to error.
+   */
+  onConflict?: SemanticMemoryConflictPolicy;
+}
+/**
+ * Semantic memory import outcome.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "MemoriesImportSemanticResult".
+ */
+/** @experimental */
+export interface MemoriesImportSemanticResult {
+  /**
+   * Whether every record succeeded or was skipped.
+   */
+  ok: boolean;
+  /**
+   * Stable aggregate result code.
+   */
+  code: string;
+  /**
+   * Human-readable aggregate result.
+   */
+  message: string;
+  /**
+   * Whether the call only validated input.
+   */
+  dryRun: boolean;
+  /**
+   * Record outcome counts.
+   */
+  imported: SemanticMemoryImportCounts;
+  /**
+   * Input validation diagnostics.
+   */
+  diagnostics: SemanticImportDiagnostic[];
+  /**
+   * Individual record outcomes, in input order.
+   */
+  records: SemanticMemoryImportItemResult[];
+}
+/**
+ * Number of submitted memories and their outcomes.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SemanticMemoryImportCounts".
+ */
+/** @experimental */
+export interface SemanticMemoryImportCounts {
+  /**
+   * Total validated input records.
+   */
+  total: number;
+  /**
+   * Successfully stored records.
+   */
+  imported: number;
+  /**
+   * Duplicate or conflicting records skipped by policy.
+   */
+  skipped: number;
+  /**
+   * Failed records.
+   */
+  failed: number;
+}
+/**
+ * One actionable semantic import diagnostic.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SemanticImportDiagnostic".
+ */
+/** @experimental */
+export interface SemanticImportDiagnostic {
+  /**
+   * One-based input line.
+   */
+  line: number;
+  /**
+   * Stable diagnostic code.
+   */
+  code: string;
+  /**
+   * Explanation of the invalid input or failed operation.
+   */
+  message: string;
+  /**
+   * External record identifier, when present.
+   */
+  externalId?: string;
+}
+/**
+ * One semantic memory record outcome.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SemanticMemoryImportItemResult".
+ */
+/** @experimental */
+export interface SemanticMemoryImportItemResult {
+  /**
+   * One-based input line.
+   */
+  line: number;
+  /**
+   * External record identifier, when present.
+   */
+  externalId?: string;
+  /**
+   * Outcome: imported, skipped, failed, or validated.
+   */
+  status: SemanticMemoryImportItemStatus;
+  /**
+   * Stable operation code.
+   */
+  code: string;
+  /**
+   * Human-readable operation result.
+   */
+  message: string;
 }
 /**
  * Memory configuration for this session.
@@ -33141,6 +34119,46 @@ export interface ModelClearStartupSeedRequest {
 /** @internal */
 export interface ModelClearStartupSeedResult {
   cleared: boolean;
+}
+/**
+ * Conversation and changes for a utility-model branch slug.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ModelGenerateBranchSlugRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface ModelGenerateBranchSlugRequest {
+  /**
+   * Conversation messages in their original order.
+   */
+  conversation: string[];
+  /**
+   * Summary of the changes the branch will contain.
+   */
+  changeSummary: string;
+  /**
+   * Original task, when available.
+   */
+  taskPrompt?: string;
+  /**
+   * Prefix for the established derived-name fallback.
+   */
+  fallbackPrefix: string;
+}
+/**
+ * A generated or derived branch slug.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ModelGenerateBranchSlugResult".
+ */
+/** @experimental */
+/** @internal */
+export interface ModelGenerateBranchSlugResult {
+  /**
+   * Branch slug under the runtime's existing fallback policy.
+   */
+  slug: string;
 }
 /**
  * Host presentation state the reasoning-summaries policy depends on.
@@ -34174,6 +35192,24 @@ export interface MoveMcpLoadingToBackgroundResult {
    * Whether an in-flight MCP load was moved to the background, releasing turns that were waiting on it. False when no MCP load was in flight or the waiting turns had already been released.
    */
   movedToBackground: boolean;
+}
+/**
+ * Input for utility-model session name generation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "NameGenerateRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface NameGenerateRequest {
+  /**
+   * Conversation text from which to derive a name.
+   */
+  userMessage: string;
+  /**
+   * Whether a user explicitly requested the name. Defaults to false.
+   */
+  manual?: boolean;
 }
 /**
  * The session's friendly name, or null when not yet set.
@@ -36562,6 +37598,37 @@ export interface PluginApplyInstallRequest {
   policySessionId: string;
 }
 /**
+ * Locates bundled plugin manifests relative to one installed host directory.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginBuiltinDiscoverRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface PluginBuiltinDiscoverRequest {
+  /**
+   * Host module directory used to locate the installed distribution.
+   */
+  baseDirectory: string;
+}
+/**
+ * Bundled plugin records and diagnostics from the original manifest scanner.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginBuiltinDiscoverResult".
+ */
+/** @experimental */
+export interface PluginBuiltinDiscoverResult {
+  /**
+   * Scanned bundled records in host precedence order.
+   */
+  plugins: JsonValue[];
+  /**
+   * Manifest and filesystem diagnostics, including a missing required bundle.
+   */
+  warnings: string[];
+}
+/**
  * Identifies a plugin and its configured marketplace without accepting configuration or policy overrides.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -36577,6 +37644,40 @@ export interface PluginCheckUpdateRequest {
    * Configured marketplace name.
    */
   marketplace: string;
+}
+/**
+ * Inspects persisted and live plugins under an explicit effective configuration without changing the existing user-only plugins.list API.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginInspectInventoryRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface PluginInspectInventoryRequest {
+  /**
+   * Working directory for repository overlay and live marketplace resolution.
+   */
+  workingDirectory: string;
+  /**
+   * Trusted caller-composed read configuration, not persisted by inspection.
+   */
+  configOverride: JsonValue;
+  /**
+   * Seeds pre-migration enablement from installed records below explicit overrides.
+   */
+  seedEnabledPluginsFromInstalled: boolean;
+  /**
+   * Effective policy for read-only inspection; mutation guards retain their own authority.
+   */
+  managedSettings?: JsonValue;
+  /**
+   * Additional plugin directories in host precedence order.
+   */
+  pluginDirectories?: string[];
+  /**
+   * Includes pending managed plugins by default. False excludes uninstalled rows before source merging.
+   */
+  includeUninstalled?: boolean;
 }
 /**
  * A plugin registered from a verified materialisation.
@@ -36647,6 +37748,42 @@ export interface PluginInstallResult {
    * Warnings raised while reading the plugin's manifest: a field the manifest's schema does not define, which the loader ignores, or the reason the loader rejects the whole manifest. Callers should surface these to end users: a plugin whose skills sit behind an ignored field, or whose manifest is rejected, otherwise installs, lists, and contributes nothing, with no signal to its author. Absent when the manifest raised none.
    */
   warnings?: string[];
+}
+/**
+ * One plugin in a host invocation's complete merged inventory.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginInvocationInventoryEntry".
+ */
+/** @experimental */
+/** @internal */
+export interface PluginInvocationInventoryEntry {
+  /**
+   * Plugin metadata and effective activation.
+   */
+  plugin: InstalledPluginInfo;
+  /**
+   * Whether an explicit host directory supplies this plugin.
+   */
+  external: boolean;
+}
+/**
+ * Persisted, live, built-in, and host-directory plugins with canonical shadowing and scan diagnostics.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginInvocationInventoryResult".
+ */
+/** @experimental */
+/** @internal */
+export interface PluginInvocationInventoryResult {
+  /**
+   * Merged inventory in canonical precedence order.
+   */
+  plugins: PluginInvocationInventoryEntry[];
+  /**
+   * Directory scan warnings in source order.
+   */
+  warnings: string[];
 }
 /**
  * Plugins installed for the session, with their enabled state and version metadata.
@@ -36830,6 +37967,124 @@ export interface PluginPlanInstallRequest {
   policySessionId: string;
 }
 /**
+ * A diagnostic from plugin policy resolution.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginPolicyDiagnostic".
+ */
+/** @experimental */
+/** @internal */
+export interface PluginPolicyDiagnostic {
+  /**
+   * Diagnostic severity: debug, info, warning, or error.
+   */
+  level: string;
+  /**
+   * Diagnostic text for the host's private log.
+   */
+  message: string;
+}
+/**
+ * Resolves plugin policy through the requesting connection's original credential owner.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginPolicyResolveInvocationRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface PluginPolicyResolveInvocationRequest {
+  /**
+   * Working directory used by a directory-sensitive policy helper.
+   */
+  workingDirectory: string;
+  /**
+   * Whether a configured policy helper may run.
+   */
+  policyHelperEnabled: boolean;
+  /**
+   * Reads account and server policy from local caches without network access.
+   */
+  cacheOnly: boolean;
+  /**
+   * Retains authoritative source layers for subsequent guarded mutations.
+   */
+  retainPolicy?: boolean;
+  /**
+   * Stops on ingestion exceptions instead of reloading the device layer.
+   */
+  strict: boolean;
+  /**
+   * Host client identity supplied to the policy helper.
+   */
+  clientName: string;
+  /**
+   * Host user agent supplied to policy retrieval.
+   */
+  userAgent: string;
+  /**
+   * Host platform in Node platform spelling.
+   */
+  platform: string;
+  /**
+   * Host home directory for policy and cache locations.
+   */
+  homeDirectory: string;
+  /**
+   * Optional active account identity; credentials still resolve through the original owner.
+   */
+  authInfo?: AuthIdentity;
+}
+/**
+ * Resolved plugin policy and authoritative failure posture. Fresh successful resolutions retain the original policy layers for mutation guards; cache-only inspection never changes retained policy.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginPolicyResolveInvocationResult".
+ */
+/** @experimental */
+/** @internal */
+export interface PluginPolicyResolveInvocationResult {
+  /**
+   * Effective device, server, and helper settings when available.
+   */
+  settings?: JsonValue;
+  /**
+   * Raw server policy for hosts that inspect the account layer alone.
+   */
+  serverResponse?: JsonValue;
+  /**
+   * Whether the server policy could not be resolved.
+   */
+  serverFetchFailed: boolean;
+  /**
+   * Whether no usable credential was available.
+   */
+  serverTokenUnavailable: boolean;
+  /**
+   * Whether required fresh confirmation failed and the caller must refuse.
+   */
+  serverForcedRefreshFailure: boolean;
+  /**
+   * Server resolution error, when present.
+   */
+  serverFetchError?: string;
+  /**
+   * Whether the helper failed.
+   */
+  policyHelperLoadFailed: boolean;
+  /**
+   * Whether helper failure requires refusal.
+   */
+  policyHelperFailClosed: boolean;
+  /**
+   * Whether this host has a configured helper.
+   */
+  policyHelperConfigured: boolean;
+  /**
+   * Resolution diagnostics in source order.
+   */
+  diagnostics: PluginPolicyDiagnostic[];
+}
+/**
  * Built-in plugin to activate.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -36858,6 +38113,50 @@ export interface PluginsActivateResult {
    * The hook error. Present only when status is failed.
    */
   message?: string;
+}
+/**
+ * Resolve managed Browser activation through the connection's original credential owner.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginsBuiltinResolveActivationRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface PluginsBuiltinResolveActivationRequest {
+  /**
+   * Embedding client identity for the policy helper.
+   */
+  clientName: string;
+  /**
+   * Working directory for the policy helper.
+   */
+  workingDirectory: string;
+  /**
+   * Effective user and trusted repository settings.
+   */
+  userSettings: JsonValue;
+  /**
+   * Existing launch populations for the policy-helper gate.
+   */
+  audience: McpInvocationAudience;
+}
+/**
+ * Browser activation after the managed-over-user whole-plugin policy.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginsBuiltinResolveActivationResult".
+ */
+/** @experimental */
+/** @internal */
+export interface PluginsBuiltinResolveActivationResult {
+  /**
+   * Whether the bundled Browser may contribute MCP servers.
+   */
+  browserEnabled: boolean;
+  /**
+   * Whether policy resolution exceeded the existing two-second budget.
+   */
+  timedOut: boolean;
 }
 /**
  * Trusted built-in plugin directories to use for this runtime process.
@@ -36924,6 +38223,27 @@ export interface PluginsInstallRequest {
    * Working directory used to resolve relative local paths in `source`. Defaults to the server's current working directory.
    */
   workingDirectory?: string;
+}
+/**
+ * Optional workspace settings for a plugin catalog or bulk update through the original caller's runtime. Omission retains the server's configuration.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginsInvocationRequest".
+ */
+/** @experimental */
+export interface PluginsInvocationRequest {
+  /**
+   * Working directory whose repository settings and plugin sources apply to this invocation.
+   */
+  workingDirectory?: string;
+  /**
+   * Effective user and repository settings for this invocation. Runtime-owned managed restrictions still apply.
+   */
+  configOverride?: JsonValue;
+  /**
+   * Managed settings supplied by the host for canonical plugin policy evaluation. This value does not select a credential owner.
+   */
+  managedSettings?: JsonValue;
 }
 /**
  * Optional read-only plugin discovery context. The runtime resolves account, policy, and workspace trust. This query does not change settings.
@@ -36996,6 +38316,58 @@ export interface PluginsMarketplacesRemoveRequest {
    * When true, also uninstall every plugin sourced from this marketplace. When false (default), removal is a no-op if any plugin from this marketplace is installed and the dependent plugin names are returned in the result.
    */
   force?: boolean;
+}
+/**
+ * Resolves active plugin sources with runtime-owned folder trust and managed policy.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginSourcesResolveRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface PluginSourcesResolveRequest {
+  /**
+   * Configuration root for user settings and persisted installations.
+   */
+  configDir: string;
+  /**
+   * Working directory for trusted repository overlays and live marketplaces.
+   */
+  workingDirectory: string;
+  /**
+   * Explicit plugin directories in host precedence order.
+   */
+  pluginDirectories?: string[];
+}
+/**
+ * Active plugins and the separate persisted inventory, without persisting live directory records.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginSourcesResolveResult".
+ */
+/** @experimental */
+/** @internal */
+export interface PluginSourcesResolveResult {
+  /**
+   * Active records, including trusted live marketplaces and explicit directories.
+   */
+  plugins: JsonValue[];
+  /**
+   * Persisted ambient records, including disabled or shadowed installations.
+   */
+  persistedPlugins: JsonValue[];
+  /**
+   * Live directory records, including inactive records that still own their names.
+   */
+  livePlugins?: JsonValue[];
+  /**
+   * Whether this pass confirmed the live tier instead of using persisted fallback.
+   */
+  liveTierKnown?: boolean;
+  /**
+   * Scanner and live-marketplace warnings for this exact source pass.
+   */
+  warnings: string[];
 }
 /**
  * Name (or spec) of the plugin to uninstall.
@@ -39239,6 +40611,104 @@ export interface RepoSettingsWriteKeyRequest {
   delete?: boolean;
 }
 /**
+ * Reads only the trusted repository contribution to one resource disable list.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RepositoryDisabledNamesRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface RepositoryDisabledNamesRequest {
+  /**
+   * Host paths and environment that select the user document.
+   */
+  context: UserSettingsHostContext;
+  /**
+   * Directory whose repository and persisted trust determine the overlay.
+   */
+  workingDirectory: string;
+  /**
+   * Resource disable list to inspect.
+   */
+  key: RepositoryDisabledKey;
+}
+/**
+ * The filesystem and environment facts a user-settings file is resolved from. Passed explicitly rather than read from the runtime's own process, so a host whose configuration directory differs from its process environment resolves the file it means.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsHostContext".
+ */
+/** @experimental */
+export interface UserSettingsHostContext {
+  /**
+   * The Copilot configuration directory, when the host set one. Takes precedence over `COPILOT_HOME` and the home directory.
+   */
+  configDir?: string;
+  /**
+   * The user's home directory, used when neither a configuration directory nor `COPILOT_HOME` is set.
+   */
+  homeDirectory: string;
+  /**
+   * The host's environment variables. `COPILOT_HOME` is read from here, as are the variables a settings hook may expand.
+   */
+  environment: {};
+}
+/**
+ * The advisory repository disable list. A read failure returns no names and a diagnostic, rather than blocking a listing or mutation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RepositoryDisabledNamesResult".
+ */
+/** @experimental */
+export interface RepositoryDisabledNamesResult {
+  /**
+   * Repository-owned names, excluding the user contribution.
+   */
+  names: string[];
+  /**
+   * Debug diagnostic for a repository that could not be inspected.
+   */
+  warning?: string;
+}
+/**
+ * Stored Markdown reports, newest first, from the selected session.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ResearchListReportsResult".
+ */
+/** @experimental */
+export interface ResearchListReportsResult {
+  /**
+   * Reports sorted by descending modification time with stable ties.
+   */
+  reports: ResearchStoredReport[];
+}
+/**
+ * A stored Markdown research report in the bound session's authoritative state directory.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ResearchStoredReport".
+ */
+/** @experimental */
+export interface ResearchStoredReport {
+  /**
+   * The file name without its final .md extension.
+   */
+  id: string;
+  /**
+   * The identifier with hyphens replaced by spaces.
+   */
+  topic: string;
+  /**
+   * The file modification time as a UTC ISO timestamp.
+   */
+  timestamp: string;
+  /**
+   * The full report path on the runtime host.
+   */
+  filePath: string;
+}
+/**
  * An authorization URL for the host browser.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -40338,27 +41808,6 @@ export interface SandboxSettingsLoadRequest {
   rejectWarnings?: boolean;
 }
 /**
- * The filesystem and environment facts a user-settings file is resolved from. Passed explicitly rather than read from the runtime's own process, so a host whose configuration directory differs from its process environment resolves the file it means.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "UserSettingsHostContext".
- */
-/** @experimental */
-export interface UserSettingsHostContext {
-  /**
-   * The Copilot configuration directory, when the host set one. Takes precedence over `COPILOT_HOME` and the home directory.
-   */
-  configDir?: string;
-  /**
-   * The user's home directory, used when neither a configuration directory nor `COPILOT_HOME` is set.
-   */
-  homeDirectory: string;
-  /**
-   * The host's environment variables. `COPILOT_HOME` is read from here, as are the variables a settings hook may expand.
-   */
-  environment: {};
-}
-/**
  * The resolved sandbox settings and the user's sparse stored override.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -40898,6 +42347,35 @@ export interface SecretsRemoveFilterValuesResult {
    * Whether removal completed successfully.
    */
   ok: true;
+}
+/**
+ * Conversation records accepted by a semantic session import.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SemanticSessionImportCounts".
+ */
+/** @experimental */
+export interface SemanticSessionImportCounts {
+  /**
+   * Sessions persisted; zero for a dry run.
+   */
+  sessions: number;
+  /**
+   * Message records.
+   */
+  messages: number;
+  /**
+   * Tool call records.
+   */
+  toolCalls: number;
+  /**
+   * Tool result records.
+   */
+  toolResults: number;
+  /**
+   * User attachments.
+   */
+  attachments: number;
 }
 /**
  * Internal request-correlated completion of one submitted message.
@@ -41491,6 +42969,100 @@ export interface SessionEventPublishResult {
    * The accepted event's identity.
    */
   eventId: string;
+}
+/**
+ * Host launch resources and lifecycle options for the original session's extension service.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionExtensionsConfigureHostRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionExtensionsConfigureHostRequest {
+  /**
+   * Existing extension host engine. The original session authority must own its session generation.
+   */
+  hostServerId: number;
+  /**
+   * Path to the host's extension SDK.
+   */
+  sdkPath: string;
+  /**
+   * Directory that contains the host's CLI distribution.
+   */
+  cliDistDir: string;
+  /**
+   * Executable that launches extension processes.
+   */
+  launcherProgram: string;
+  /**
+   * Working directory captured by the host for this configuration.
+   */
+  workingDirectory: string;
+  /**
+   * Existing initial startup token, when configuration belongs to startup.
+   */
+  initialStartupToken?: string;
+  /**
+   * Opaque token for the original host's eligibility check after native discovery.
+   */
+  hostValidationToken?: string;
+  /**
+   * Explicit disabled IDs. When absent, the runtime reads the selected profile.
+   */
+  disabledIds?: string[];
+  /**
+   * Explicit source filters. When absent, the runtime uses all allowed sources.
+   */
+  includeSources?: string[];
+  /**
+   * Host-mounted plugins outside the persisted installation records.
+   */
+  mountedPlugins?: JsonValue[];
+  /**
+   * Whether this configuration permits extension processes to launch.
+   */
+  launchProcesses: boolean;
+  /**
+   * Whether compatible unchanged processes remain active.
+   */
+  retainProcessesIfUnchanged: boolean;
+  /**
+   * Host gate for extension management tools.
+   */
+  managementToolsEnabled: boolean;
+}
+/**
+ * Distinguishes an absent extension service from an installed service with an empty inventory.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionExtensionsInspectServiceResult".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionExtensionsInspectServiceResult {
+  /**
+   * Whether the original session has an attached extension service.
+   */
+  configured: boolean;
+  /**
+   * Current discovered extensions and their status.
+   */
+  inventory: ExtensionList;
+}
+/**
+ * Updates the original host's live management-tool gate without reinstalling its extension service.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionExtensionsSetManagementToolsEnabledRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionExtensionsSetManagementToolsEnabledRequest {
+  /**
+   * Whether the host permits extension management tools.
+   */
+  enabled: boolean;
 }
 
 /** @experimental */
@@ -42752,6 +44324,32 @@ export interface SessionManagementPolicy {
   close: boolean;
 }
 /**
+ * Inspects MCP source configuration without starting servers. The bound session owns workspace trust.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionMcpInspectConfigurationRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionMcpInspectConfigurationRequest {
+  /**
+   * Directory whose workspace sources to inspect.
+   */
+  workingDirectory: string;
+  /**
+   * Include the matching session activation snapshot and additional configuration.
+   */
+  includeSessionSources?: boolean;
+  /**
+   * Explicit host-mounted plugin records, without claiming folder trust or managed policy.
+   */
+  explicitPlugins?: JsonValue[];
+  /**
+   * Additional host configuration, used only when includeSessionSources is true.
+   */
+  additionalConfig?: JsonValue;
+}
+/**
  * Records which IDE the host is connected to, or clears it.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -43931,6 +45529,55 @@ export interface SessionsOpenProgress {
   message?: string;
 }
 /**
+ * A typed request to the original host's retained persistence resources.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionPersistenceBarrierRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionPersistenceBarrierRequest {
+  /**
+   * Resource barrier to await.
+   */
+  phase: SessionPersistenceBarrierPhase;
+  /**
+   * Runtime-assigned identity for this flush, independent of concurrent flushes.
+   */
+  operationId: string;
+  /**
+   * Whether the original writer must persist an otherwise empty session.
+   */
+  force: boolean;
+  /**
+   * Native flush failure, combined with retained callback failures at completion.
+   */
+  nativeFailure?: string;
+}
+/**
+ * Acknowledges completion of one original-host persistence barrier.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionPersistenceBarrierResult".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionPersistenceBarrierResult {}
+/**
+ * Flushes durable session state through its original runtime and client owners.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionPersistenceFlushRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionPersistenceFlushRequest {
+  /**
+   * Persist an otherwise empty session when true. Defaults to false.
+   */
+  force?: boolean;
+}
+/**
  * Soft plugin defaults for this session, without persistent user preferences or hard policy.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -43973,6 +45620,102 @@ export interface TeamPluginMarketplace {
    * Validated GitHub repository source for the marketplace.
    */
   source: TeamPluginMarketplaceSource;
+}
+/**
+ * Inspects extension directories contributed by a changed plugin under the selected session's activation and profile.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionPluginInspectExtensionContributionsRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionPluginInspectExtensionContributionsRequest {
+  /**
+   * Plugin name or marketplace-qualified spec whose in-place change can require extension restarts.
+   */
+  changedPluginSpec: string;
+}
+/**
+ * Whether a changed active plugin contributes extension directories, including empty directories.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionPluginInspectExtensionContributionsResult".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionPluginInspectExtensionContributionsResult {
+  /**
+   * True when directories exist or the session has no authoritative activation snapshot.
+   */
+  shipsExtensions: boolean;
+  /**
+   * Canonical extension discovery diagnostics, in resolver order.
+   */
+  warnings: PluginPolicyDiagnostic[];
+}
+/**
+ * One available plugin, including inactive live plugins and trusted bundled provenance.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionPluginInventoryEntry".
+ */
+/** @experimental */
+export interface SessionPluginInventoryEntry {
+  /**
+   * Plugin name from its manifest or installation record.
+   */
+  name: string;
+  /**
+   * Marketplace name, or an empty string for a direct or bundled plugin.
+   */
+  marketplace: string;
+  /**
+   * Current effective enablement, independent of presence on disk.
+   */
+  enabled: boolean;
+  /**
+   * Version reported by the manifest.
+   */
+  version?: string;
+  /**
+   * Trusted runtime provenance; bundled plugins use builtin.
+   */
+  source?: string;
+  /**
+   * Manifest description, with surrounding whitespace removed for installed and bundled entries.
+   */
+  description?: string;
+  /**
+   * Marketplace directory for a live plugin that has no persisted copy.
+   */
+  installedFrom?: string;
+  /**
+   * Resolved content directory; absent for live plugins whose content is unresolved.
+   * This path does not grant filesystem access.
+   */
+  rootPath?: string;
+  /**
+   * Identifies an explicit host mount rather than a persisted installation.
+   */
+  external?: boolean;
+}
+/**
+ * Available plugin inventory under the selected session's settings, policy, source roots, and trusted bundle registration.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionPluginInventoryResult".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionPluginInventoryResult {
+  /**
+   * Installed, live, and explicit plugins, including disabled entries.
+   */
+  plugins: SessionPluginInventoryEntry[];
+  /**
+   * Registered bundles before shadowing, for availability and trust checks.
+   */
+  builtinPlugins: SessionPluginInventoryEntry[];
 }
 /**
  * Plugin names (or specs) to disable in the session's authoritative working directory.
@@ -44199,6 +45942,24 @@ export interface SessionQuotaSnapshot {
    * Additional-usage budget cap, when provided.
    */
   overageEntitlement?: number;
+}
+/**
+ * Reads repository resource disables using the bound session's configuration and trust authority.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionRepositoryDisabledNamesRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionRepositoryDisabledNamesRequest {
+  /**
+   * Directory whose repository settings to inspect.
+   */
+  workingDirectory: string;
+  /**
+   * Resource disable list to inspect.
+   */
+  key: RepositoryDisabledKey;
 }
 /**
  * Session IDs to close, deactivate, and delete from disk.
@@ -44987,6 +46748,88 @@ export interface SessionsHasEventsResult {
   exists: boolean;
 }
 /**
+ * Semantic conversation input for local import or validation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsImportSemanticRequest".
+ */
+/** @experimental */
+export interface SessionsImportSemanticRequest {
+  /**
+   * Runtime settings overrides, with the original caller's configuration root.
+   */
+  settings?: JsonValue;
+  /**
+   * Semantic session JSONL, not native session events.
+   */
+  jsonl: string;
+  /**
+   * Absolute input path used to resolve attachment references.
+   */
+  inputPath: string;
+  /**
+   * Default working directory when the document supplies none.
+   */
+  defaultWorkingDirectory: string;
+  /**
+   * Validate without authentication, network access, or writes.
+   */
+  dryRun?: boolean;
+  /**
+   * Explicit working directory override.
+   */
+  workingDirectory?: string;
+  /**
+   * Explicit session name override.
+   */
+  name?: string;
+  /**
+   * Name of the embedding client.
+   */
+  clientName?: string;
+}
+/**
+ * Semantic session import outcome.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsImportSemanticResult".
+ */
+/** @experimental */
+export interface SessionsImportSemanticResult {
+  /**
+   * Whether validation and persistence succeeded.
+   */
+  ok: boolean;
+  /**
+   * Stable operation code.
+   */
+  code: string;
+  /**
+   * Human-readable operation result.
+   */
+  message: string;
+  /**
+   * External session identifier from the document.
+   */
+  externalId?: string;
+  /**
+   * Runtime session identifier after persistence, or incomplete rollback.
+   */
+  sessionId?: string;
+  /**
+   * Whether the call only validated input.
+   */
+  dryRun: boolean;
+  /**
+   * Imported or validated record counts.
+   */
+  imported: SemanticSessionImportCounts;
+  /**
+   * Input or persistence diagnostics.
+   */
+  diagnostics: SemanticImportDiagnostic[];
+}
+/**
  * Map of sessionId -> on-disk size in bytes for each session's workspace directory.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -45000,6 +46843,162 @@ export interface SessionSizes {
   sizes: {
     [k: string]: number | undefined;
   };
+}
+/**
+ * A complete skill row for session-owned inspection and catalog publication.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionSkillInventoryEntry".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionSkillInventoryEntry {
+  /**
+   * Original skill name.
+   */
+  name: string;
+  /**
+   * Human-readable skill purpose.
+   */
+  description: string;
+  /**
+   * Runtime-owned source classification.
+   */
+  source: SkillSource;
+  /**
+   * Whether the user can invoke this skill.
+   */
+  userInvocable: boolean;
+  /**
+   * Whether model invocation is disabled.
+   */
+  disableModelInvocation: boolean;
+  /**
+   * Whether the session enables this skill.
+   */
+  enabled: boolean;
+  /**
+   * Tool names allowed by the skill definition.
+   */
+  allowedTools?: string[];
+  /**
+   * Whether this row comes from a plugin command definition.
+   */
+  isCommand?: boolean;
+  /**
+   * Absolute local definition path, when the skill has one.
+   */
+  filePath?: string;
+  /**
+   * Local resource directory, when the skill has one.
+   */
+  baseDir?: string;
+  /**
+   * Loaded definition body, when available.
+   */
+  content?: string;
+  /**
+   * Owning plugin's opaque identity.
+   */
+  pluginId?: string;
+  /**
+   * Owning plugin's display name.
+   */
+  pluginName?: string;
+  /**
+   * Owning plugin's version.
+   */
+  pluginVersion?: string;
+  /**
+   * Invocation identity supplied by the source.
+   */
+  invocationName?: string;
+  /**
+   * Canonical slash-command identity.
+   */
+  commandName?: string;
+  /**
+   * Freeform argument hint from the definition.
+   */
+  argumentHint?: string;
+  /**
+   * MCP server and resource identity without private activation metadata.
+   */
+  mcpOrigin?: McpSkillOrigin;
+  /**
+   * Provider's original name before qualification.
+   */
+  originalName?: string;
+  /**
+   * Provider-relative definition path.
+   */
+  relativePath?: string;
+  /**
+   * Provider-relative resource directory.
+   */
+  relativeDir?: string;
+  /**
+   * Repository boundary for local resource reads.
+   */
+  repositoryBoundary?: string;
+}
+/**
+ * Install a skill with the selected session's profile and working directory.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionSkillResourceInstallRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionSkillResourceInstallRequest {
+  /**
+   * Local definition, directory, or HTTPS source.
+   */
+  source: string;
+  /**
+   * Install into the preferred project directory instead of personal storage.
+   */
+  project?: boolean;
+}
+/**
+ * Remove a skill with the selected session's full inventory and profile.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionSkillResourceRemoveRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionSkillResourceRemoveRequest {
+  /**
+   * Skill name or registered directory.
+   */
+  target: string;
+}
+/**
+ * Full inventory under the selected session's discovery and activation policy.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionSkillsInspectInventoryResult".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionSkillsInspectInventoryResult {
+  /**
+   * Full local and provider rows visible to this session.
+   */
+  skills: SessionSkillInventoryEntry[];
+  /**
+   * Effective disabled identities, including host and MCP aliases.
+   */
+  disabledSkills: string[];
+  /**
+   * Nonfatal loader warnings.
+   */
+  warnings: string[];
+  /**
+   * Source failures that make this inventory incomplete.
+   */
+  errors: string[];
 }
 /**
  * Limit for non-empty local session IDs.
@@ -45381,6 +47380,32 @@ export interface SessionsUpdateWorkspaceFieldsRequest {
  */
 /** @experimental */
 export interface SessionsUpdateWorkspaceFieldsResult {}
+/**
+ * A friendly name to validate before a session mutation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsValidateNameRequest".
+ */
+/** @experimental */
+export interface SessionsValidateNameRequest {
+  /**
+   * Original name, without whitespace normalization.
+   */
+  name: string;
+}
+/**
+ * The shared session-name policy decision.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsValidateNameResult".
+ */
+/** @experimental */
+export interface SessionsValidateNameResult {
+  /**
+   * Validation error; absent when the name is valid.
+   */
+  error?: string;
+}
 /**
  * Telemetry engagement ID for the session, when available.
  *
@@ -46500,6 +48525,179 @@ export interface SkillRemoveSourceEntry {
    * Discovery directory that owns the skill file.
    */
   baseDir: string;
+}
+/**
+ * Host-owned paths and environment for standalone skill management.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillResourceContext".
+ */
+/** @experimental */
+/** @internal */
+export interface SkillResourceContext {
+  /**
+   * Settings paths and hook environment for the original host.
+   */
+  context: UserSettingsHostContext;
+  /**
+   * Workspace directory for repository sources and relative paths.
+   */
+  workingDirectory: string;
+}
+/**
+ * Loads full local skill records, including disabled records and command metadata.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillResourceDiscoverRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SkillResourceDiscoverRequest {
+  /**
+   * Host paths and working directory.
+   */
+  host: SkillResourceContext;
+  /**
+   * Explicit plugin directories, appended after persisted and live plugin sources.
+   */
+  pluginDirectories?: string[];
+}
+/**
+ * Full local skill inventory and report-and-ignore source diagnostics.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillResourceDiscoverResult".
+ */
+/** @experimental */
+export interface SkillResourceDiscoverResult {
+  /**
+   * Local skill records with invocation identity, content paths, and command metadata.
+   */
+  skills: JsonValue[];
+  /**
+   * Nonfatal loader and manifest warnings.
+   */
+  warnings: string[];
+  /**
+   * Explicit plugin scan warnings, separate from skill loader diagnostics.
+   */
+  sourceWarnings: string[];
+  /**
+   * Sources that failed to load; the remaining inventory is incomplete.
+   */
+  errors: string[];
+}
+/**
+ * Registers a skill directory or installs a local or HTTPS skill definition.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillResourceInstallRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SkillResourceInstallRequest {
+  /**
+   * Host paths and working directory.
+   */
+  host: SkillResourceContext;
+  /**
+   * Local file, directory, or HTTPS source.
+   */
+  source: string;
+  /**
+   * Use the preferred project creation directory instead of personal storage.
+   */
+  project?: boolean;
+  /**
+   * User agent for the existing runtime HTTPS fetcher.
+   */
+  userAgent?: string;
+}
+/**
+ * The persisted result of a skill source installation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillResourceInstallResult".
+ */
+/** @experimental */
+export interface SkillResourceInstallResult {
+  /**
+   * Source classification.
+   */
+  kind: SkillResourceInstallKind;
+  /**
+   * Installed definition path or registered directory.
+   */
+  path: string;
+  /**
+   * Skill name, absent for a registered directory.
+   */
+  name?: string;
+  /**
+   * Destination scope, absent for a registered directory.
+   */
+  scope?: SkillResourceInstallScope;
+}
+/**
+ * Removes a personal or project skill, or unregisters a custom directory.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillResourceRemoveRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SkillResourceRemoveRequest {
+  /**
+   * Host paths and working directory.
+   */
+  host: SkillResourceContext;
+  /**
+   * Skill name or registered directory.
+   */
+  target: string;
+}
+/**
+ * The completed skill removal, with conservative disabled-state cleanup.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillResourceRemoveResult".
+ */
+/** @experimental */
+export interface SkillResourceRemoveResult {
+  /**
+   * Removed storage tier.
+   */
+  kind: SkillResourceRemoveKind;
+  /**
+   * Removed definition path or unregistered directory.
+   */
+  path: string;
+  /**
+   * Removed skill name, absent for a registered directory.
+   */
+  name?: string;
+}
+/**
+ * Atomically changes only one user's disabled skill entry under explicit host paths.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillResourceSetEnabledRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SkillResourceSetEnabledRequest {
+  /**
+   * Host paths and working directory.
+   */
+  host: SkillResourceContext;
+  /**
+   * Invocation name to enable or disable.
+   */
+  name: string;
+  /**
+   * Desired user-scope enablement.
+   */
+  enabled: boolean;
 }
 /**
  * Skill names to mark as disabled in global configuration, replacing any previous list.
@@ -49494,6 +51692,42 @@ export interface UserSettingsEditRequest {
    * Required boolean, string or number for set, required string for add-item and remove-item, and forbidden for remove. The runtime rejects all other JSON values.
    */
   value?: UserSettingsJsonValue;
+  /**
+   * Optional trusted-host paths and hook environment. Cannot be combined with configDir.
+   */
+  context?: UserSettingsHostContext;
+}
+/**
+ * Selects the settings document and hook environment for an explicit host.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsForContextRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface UserSettingsForContextRequest {
+  /**
+   * Host paths and environment used instead of the server process defaults.
+   */
+  context: UserSettingsHostContext;
+}
+/**
+ * Reads a contextual user document with trusted repository settings for one working directory.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsForWorkingDirectoryRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface UserSettingsForWorkingDirectoryRequest {
+  /**
+   * Host paths and environment that select the user document.
+   */
+  context: UserSettingsHostContext;
+  /**
+   * Directory whose repository and persisted trust determine the overlay.
+   */
+  workingDirectory: string;
 }
 /**
  * Selects which settings file paths to resolve.
@@ -49667,6 +51901,20 @@ export interface UserSettingsLoadRepoResult {
    * Why part of the document was ignored, as a single human-readable string joining every diagnostic with `; `. Null when the document loaded cleanly. The settings that did load are still reported, so a consumer should surface this and continue rather than treat it as a failure.
    */
   warning?: string | null;
+}
+/**
+ * Selects an optional trusted-host context for settings and parser diagnostics.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsLoadWithWarningRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface UserSettingsLoadWithWarningRequest {
+  /**
+   * Optional host paths and hook environment. Omit to keep the server defaults.
+   */
+  context?: UserSettingsHostContext;
 }
 /**
  * The user's stored settings, together with any diagnostic raised while reading them.
@@ -50182,6 +52430,10 @@ export interface UserSettingsValidateRequest {
    * True to validate a removal of this key. The current settings file is not read.
    */
   delete?: boolean;
+  /**
+   * Optional trusted-host context whose environment controls hook validation.
+   */
+  context?: UserSettingsHostContext;
 }
 /**
  * Outcome of validating one top-level setting subtree.
@@ -50246,6 +52498,66 @@ export interface UserSettingsWriteKeyRequest {
    * Recoverable content can still be repaired when refuseOnReadFailure is false.
    */
   refuseOnUnrecoverableReadFailure?: boolean;
+}
+/**
+ * An atomic set of top-level settings updates that preserves unrelated stored values.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsWriteKeysRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface UserSettingsWriteKeysRequest {
+  /**
+   * Host paths and environment that select the target document.
+   */
+  context: UserSettingsHostContext;
+  /**
+   * Top-level values to write. Stored null remains a value, not deletion.
+   */
+  settings: {
+    [k: string]: JsonValue | undefined;
+  };
+  /**
+   * Top-level keys to remove in the same transaction.
+   */
+  deleteKeys: string[];
+}
+/**
+ * Reports whether the atomic update succeeded or the existing document was invalid.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsWriteKeysResult".
+ */
+/** @experimental */
+/** @internal */
+export interface UserSettingsWriteKeysResult {
+  /**
+   * Either ok, or invalid when no safe document could be read and nothing changed.
+   */
+  status: string;
+}
+/**
+ * Utility generation outcome under the session's model and credential policy.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UtilityPromptResult".
+ */
+/** @experimental */
+/** @internal */
+export interface UtilityPromptResult {
+  /**
+   * Whether generation produced a value.
+   */
+  kind: UtilityPromptResultKind;
+  /**
+   * Generated value, or absent when the utility model is unavailable.
+   */
+  value?: string;
+  /**
+   * User-facing explanation, when the requested operation needs one.
+   */
+  message?: string;
 }
 /**
  * Current sharing status and shareable GitHub URL for a session.
@@ -52047,6 +54359,150 @@ export interface WorkspacesWriteAutopilotObjectiveResult {
   operation: string;
 }
 /**
+ * Stored before-generation capture, or null when no capture exists.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsForgeProposalsWorkspaceBeforeResult".
+ */
+/** @experimental */
+export interface SessionsForgeProposalsWorkspaceBeforeResult {
+  /**
+   * Original path-to-content mapping; an empty map remains distinct from no capture.
+   */
+  contents: {
+    [k: string]: string | undefined;
+  } | null;
+}
+/**
+ * Proposal identifier whose before-generation capture is requested.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsForgeProposalsWorkspaceBeforeRequest".
+ */
+/** @experimental */
+export interface SessionsForgeProposalsWorkspaceBeforeRequest {
+  /**
+   * Canonical proposal identifier.
+   */
+  id: string;
+}
+/**
+ * Existing ready proposal or completed generation; null for an ineligible automatic generation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsForgeProposalsReconcileResult".
+ */
+/** @experimental */
+export interface SessionsForgeProposalsReconcileResult {
+  /**
+   * Canonical proposal selected or completed by reconciliation.
+   */
+  proposal: ForgeProposalRecord | null;
+}
+/**
+ * Reconciles a generated artifact with the configured canonical store.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsForgeProposalsReconcileRequest".
+ */
+/** @experimental */
+export interface SessionsForgeProposalsReconcileRequest {
+  /**
+   * Repository and branch that own the proposal.
+   */
+  scope: ForgeProposalScope;
+  /**
+   * Existing generation identifier, when generation started earlier.
+   */
+  proposalId?: string;
+  /**
+   * Whether a new generation may start when no existing generation completes.
+   */
+  triggerMode: ForgeProposalTriggerMode;
+  /**
+   * Content-addressed artifact identity.
+   */
+  fingerprint: string;
+  /**
+   * Ordered restoration metadata.
+   */
+  manifest: ForgeProposalManifestEntry[];
+  /**
+   * File-change counts.
+   */
+  summary: ForgeProposalSummary;
+  /**
+   * Original workspace capture for an on-demand generation.
+   */
+  workspaceBeforeByPath?: {
+    [k: string]: string | undefined;
+  };
+}
+/**
+ * Number of generations that the canonical store marked failed.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsForgeProposalsFailStaleResult".
+ */
+/** @experimental */
+export interface SessionsForgeProposalsFailStaleResult {
+  /**
+   * Number of changed proposal rows.
+   */
+  count: number;
+}
+/**
+ * Fails stale generations in one canonical proposal scope.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsForgeProposalsFailStaleRequest".
+ */
+/** @experimental */
+export interface SessionsForgeProposalsFailStaleRequest {
+  /**
+   * Repository and branch to inspect.
+   */
+  scope: ForgeProposalScope;
+  /**
+   * Generation age in milliseconds. Defaults to fifteen minutes.
+   */
+  timeoutMs?: number;
+}
+/**
+ * Content after runtime-owned redaction.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SecretsFilterForHostResult".
+ */
+/** @experimental */
+export interface SecretsFilterForHostResult {
+  /**
+   * Redacted content. JSON mode preserves the runtime's JSON serialization behavior.
+   */
+  value: string;
+  /**
+   * Whether the returned content differs from the submitted text.
+   */
+  changed: boolean;
+}
+/**
+ * Content to redact with the runtime's process filter.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SecretsFilterForHostRequest".
+ */
+/** @experimental */
+export interface SecretsFilterForHostRequest {
+  /**
+   * Content to redact. The runtime never returns its registered secret values.
+   */
+  text: string;
+  /**
+   * Content representation. Defaults to plain text.
+   */
+  format?: SecretFilterFormat;
+}
+/**
  * Session host's working directory and optional repository context.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -53133,6 +55589,19 @@ export interface UserSettingsBuildRuntimeResult {
   [k: string]: JsonValue | undefined;
 }
 /**
+ * The normalized user document with trusted repository settings.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsLoadForWorkingDirectoryResult".
+ */
+/** @experimental */
+export interface UserSettingsLoadForWorkingDirectoryResult {
+  /**
+   * One resolved setting value.
+   */
+  [k: string]: JsonValue | undefined;
+}
+/**
  * The resolved gates, keyed by flag name.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -53546,6 +56015,66 @@ export interface ProvidersSourceAddModelRequest {
   configuration: SavedProviderConfigurationAddModelRequest;
 }
 /**
+ * A secret-free GitHub descriptor, an ordinary signed-out result, or a bounded degraded result.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpGitHubResolveForInvocationResult".
+ */
+/** @experimental */
+/** @internal */
+export interface McpGitHubResolveForInvocationResult {
+  /**
+   * Built-in descriptor without authentication headers; absent when unavailable.
+   */
+  server?: JsonValue;
+  /**
+   * Whether the existing two-second resolution budget expired.
+   */
+  timedOut: boolean;
+  /**
+   * Resolution failure detail, distinct from an ordinary signed-out result.
+   */
+  warning?: string;
+}
+/**
+ * Resolve the authentication-derived built-in without a session or MCP connection.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpGitHubResolveForInvocationRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface McpGitHubResolveForInvocationRequest {
+  /**
+   * Repository context for host detection and shell availability.
+   */
+  workingDirectory: string;
+  /**
+   * Effective user and trusted repository settings.
+   */
+  userSettings: JsonValue;
+  /**
+   * Invocation tool overrides, above settings.
+   */
+  flags?: McpGitHubInvocationToolOptions;
+  /**
+   * Tool filters used by the session this invocation describes.
+   */
+  toolFilters?: McpShouldExcludeGitHubToolsRequest;
+  /**
+   * Effective disabled servers, after enable overrides.
+   */
+  disabledServers: string[];
+  /**
+   * Client integration identifier for the secret-free descriptor.
+   */
+  integrationId: string;
+  /**
+   * Existing launch populations; account identity comes only from the connection.
+   */
+  audience: McpInvocationAudience;
+}
+/**
  * An HTTP request through the shared network transport.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -53657,116 +56186,6 @@ export interface FetchCancelRequest {
   requestId: string;
 }
 /**
- * Stored before-generation capture, or null when no capture exists.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionsForgeProposalsWorkspaceBeforeResult".
- */
-/** @experimental */
-export interface SessionsForgeProposalsWorkspaceBeforeResult {
-  /**
-   * Original path-to-content mapping; an empty map remains distinct from no capture.
-   */
-  contents: {
-    [k: string]: string | undefined;
-  } | null;
-}
-/**
- * Proposal identifier whose before-generation capture is requested.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionsForgeProposalsWorkspaceBeforeRequest".
- */
-/** @experimental */
-export interface SessionsForgeProposalsWorkspaceBeforeRequest {
-  /**
-   * Canonical proposal identifier.
-   */
-  id: string;
-}
-/**
- * Existing ready proposal or completed generation; null for an ineligible automatic generation.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionsForgeProposalsReconcileResult".
- */
-/** @experimental */
-export interface SessionsForgeProposalsReconcileResult {
-  /**
-   * Canonical proposal selected or completed by reconciliation.
-   */
-  proposal: ForgeProposalRecord | null;
-}
-/**
- * Reconciles a generated artifact with the configured canonical store.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionsForgeProposalsReconcileRequest".
- */
-/** @experimental */
-export interface SessionsForgeProposalsReconcileRequest {
-  /**
-   * Repository and branch that own the proposal.
-   */
-  scope: ForgeProposalScope;
-  /**
-   * Existing generation identifier, when generation started earlier.
-   */
-  proposalId?: string;
-  /**
-   * Whether a new generation may start when no existing generation completes.
-   */
-  triggerMode: ForgeProposalTriggerMode;
-  /**
-   * Content-addressed artifact identity.
-   */
-  fingerprint: string;
-  /**
-   * Ordered restoration metadata.
-   */
-  manifest: ForgeProposalManifestEntry[];
-  /**
-   * File-change counts.
-   */
-  summary: ForgeProposalSummary;
-  /**
-   * Original workspace capture for an on-demand generation.
-   */
-  workspaceBeforeByPath?: {
-    [k: string]: string | undefined;
-  };
-}
-/**
- * Number of generations that the canonical store marked failed.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionsForgeProposalsFailStaleResult".
- */
-/** @experimental */
-export interface SessionsForgeProposalsFailStaleResult {
-  /**
-   * Number of changed proposal rows.
-   */
-  count: number;
-}
-/**
- * Fails stale generations in one canonical proposal scope.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionsForgeProposalsFailStaleRequest".
- */
-/** @experimental */
-export interface SessionsForgeProposalsFailStaleRequest {
-  /**
-   * Repository and branch to inspect.
-   */
-  scope: ForgeProposalScope;
-  /**
-   * Generation age in milliseconds. Defaults to fifteen minutes.
-   */
-  timeoutMs?: number;
-}
-/**
  * The location of a local agent registry.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -53873,6 +56292,184 @@ export interface LspListRequest {
    * Absolute working directory used for project and plugin discovery.
    */
   workingDirectory: string;
+}
+
+/** @experimental */
+export interface SessionPluginsMarketplacesRefreshRequest {
+  /**
+   * Marketplace name to refresh. When omitted, every registered marketplace is refreshed.
+   */
+  name?: string;
+}
+
+/** @experimental */
+export interface SessionPluginsReloadRequest {
+  /**
+   * Reload MCP server connections after refreshing plugins. Defaults to true.
+   */
+  reloadMcp?: boolean;
+  /**
+   * Re-run custom-agent discovery after refreshing plugins. Defaults to true.
+   */
+  reloadCustomAgents?: boolean;
+  /**
+   * Re-load user, plugin, and (subject to `deferRepoHooks`) repo hooks. Defaults to true. Has no effect when the host has not registered a hook reloader (e.g. remote sessions).
+   */
+  reloadHooks?: boolean;
+  /**
+   * Re-discover and relaunch subprocess extensions (including plugin-shipped extensions) after refreshing plugins. Defaults to true. Has no effect when the session has no active extension controller (e.g. extensions were not requested for the session).
+   */
+  reloadExtensions?: boolean;
+  /**
+   * When true, skip repo-level hooks during the hook reload. Use before folder trust is confirmed; load them post-trust via `sessions.loadDeferredRepoHooks`.
+   */
+  deferRepoHooks?: boolean;
+}
+/**
+ * Utility generation outcome under the session's model and credential policy.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionNameGenerateResult".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionNameGenerateResult {
+  /**
+   * Whether generation produced a value.
+   */
+  kind: UtilityPromptResultKind;
+  /**
+   * Generated value, or absent when the utility model is unavailable.
+   */
+  value?: string;
+  /**
+   * User-facing explanation, when the requested operation needs one.
+   */
+  message?: string;
+}
+/**
+ * Input for utility-model session name generation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionNameGenerateRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionNameGenerateRequest {
+  /**
+   * Conversation text from which to derive a name.
+   */
+  userMessage: string;
+  /**
+   * Whether a user explicitly requested the name. Defaults to false.
+   */
+  manual?: boolean;
+}
+/**
+ * A generated or derived branch slug.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionModelGenerateBranchSlugResult".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionModelGenerateBranchSlugResult {
+  /**
+   * Branch slug under the runtime's existing fallback policy.
+   */
+  slug: string;
+}
+/**
+ * Conversation and changes for a utility-model branch slug.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionModelGenerateBranchSlugRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface SessionModelGenerateBranchSlugRequest {
+  /**
+   * Conversation messages in their original order.
+   */
+  conversation: string[];
+  /**
+   * Summary of the changes the branch will contain.
+   */
+  changeSummary: string;
+  /**
+   * Original task, when available.
+   */
+  taskPrompt?: string;
+  /**
+   * Prefix for the established derived-name fallback.
+   */
+  fallbackPrefix: string;
+}
+/**
+ * Model-catalog failure facts without host-specific presentation text.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionModelDescribeLoadErrorResult".
+ */
+/** @experimental */
+export interface SessionModelDescribeLoadErrorResult {
+  /**
+   * HTTP status reported by the provider, if available.
+   */
+  status?: number;
+  /**
+   * Request identifier extracted from the provider error.
+   */
+  requestId?: string;
+  /**
+   * Service request identifier extracted from the provider error.
+   */
+  serviceRequestId?: string;
+  /**
+   * Classified authorization failure for an HTTP 403 response, when recognized.
+   */
+  authorization?: ModelLoadAuthorizationError;
+  /**
+   * Copilot settings URL for the session's account when a policy refusal needs remediation.
+   */
+  settingsUrl?: string;
+}
+/**
+ * A serialized provider error from a failed model-catalog request.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionModelDescribeLoadErrorRequest".
+ */
+/** @experimental */
+export interface SessionModelDescribeLoadErrorRequest {
+  /**
+   * Provider error JSON, when the catalog supplied structured error details.
+   */
+  wireErrorJson?: string;
+}
+
+/** @experimental */
+/** @internal */
+export interface SessionModelClearStartupSeedResult {
+  cleared: boolean;
+}
+
+/** @experimental */
+/** @internal */
+export interface SessionModelClearStartupSeedRequest {
+  expectedModel: string;
+  /**
+   * Provider captured with the startup seed; omission matches only an unqualified seed.
+   */
+  expectedProviderId?: string;
+}
+
+/** @experimental */
+export interface SessionModelListRequest {
+  /**
+   * If true, bypasses the per-session model list cache and re-fetches from CAPI.
+   */
+  skipCache?: boolean;
 }
 /**
  * Operation-specific reply or a complete live-client callback frame.
@@ -54641,72 +57238,6 @@ export interface SessionWorkflowPauseAtCheckpointResult {
   action: WorkflowPauseCheckpointAction;
 }
 /**
- * Model-catalog failure facts without host-specific presentation text.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionModelDescribeLoadErrorResult".
- */
-/** @experimental */
-export interface SessionModelDescribeLoadErrorResult {
-  /**
-   * HTTP status reported by the provider, if available.
-   */
-  status?: number;
-  /**
-   * Request identifier extracted from the provider error.
-   */
-  requestId?: string;
-  /**
-   * Service request identifier extracted from the provider error.
-   */
-  serviceRequestId?: string;
-  /**
-   * Classified authorization failure for an HTTP 403 response, when recognized.
-   */
-  authorization?: ModelLoadAuthorizationError;
-  /**
-   * Copilot settings URL for the session's account when a policy refusal needs remediation.
-   */
-  settingsUrl?: string;
-}
-/**
- * A serialized provider error from a failed model-catalog request.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SessionModelDescribeLoadErrorRequest".
- */
-/** @experimental */
-export interface SessionModelDescribeLoadErrorRequest {
-  /**
-   * Provider error JSON, when the catalog supplied structured error details.
-   */
-  wireErrorJson?: string;
-}
-
-/** @experimental */
-/** @internal */
-export interface SessionModelClearStartupSeedResult {
-  cleared: boolean;
-}
-
-/** @experimental */
-/** @internal */
-export interface SessionModelClearStartupSeedRequest {
-  expectedModel: string;
-  /**
-   * Provider captured with the startup seed; omission matches only an unqualified seed.
-   */
-  expectedProviderId?: string;
-}
-
-/** @experimental */
-export interface SessionModelListRequest {
-  /**
-   * If true, bypasses the per-session model list cache and re-fetches from CAPI.
-   */
-  skipCache?: boolean;
-}
-/**
  * Current service state, without configuration documents or credentials.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -55005,38 +57536,6 @@ export interface SessionAgentListRequest {
    * When true, request authored base prompt text on each AgentInfo. Prompt text may be omitted when unavailable, such as for agents projected through a relay session.
    */
   includePrompt?: boolean;
-}
-
-/** @experimental */
-export interface SessionPluginsMarketplacesRefreshRequest {
-  /**
-   * Marketplace name to refresh. When omitted, every registered marketplace is refreshed.
-   */
-  name?: string;
-}
-
-/** @experimental */
-export interface SessionPluginsReloadRequest {
-  /**
-   * Reload MCP server connections after refreshing plugins. Defaults to true.
-   */
-  reloadMcp?: boolean;
-  /**
-   * Re-run custom-agent discovery after refreshing plugins. Defaults to true.
-   */
-  reloadCustomAgents?: boolean;
-  /**
-   * Re-load user, plugin, and (subject to `deferRepoHooks`) repo hooks. Defaults to true. Has no effect when the host has not registered a hook reloader (e.g. remote sessions).
-   */
-  reloadHooks?: boolean;
-  /**
-   * Re-discover and relaunch subprocess extensions (including plugin-shipped extensions) after refreshing plugins. Defaults to true. Has no effect when the session has no active extension controller (e.g. extensions were not requested for the session).
-   */
-  reloadExtensions?: boolean;
-  /**
-   * When true, skip repo-level hooks during the hook reload. Use before folder trust is confirmed; load them post-trust via `sessions.loadDeferredRepoHooks`.
-   */
-  deferRepoHooks?: boolean;
 }
 
 /** @experimental */
@@ -55517,6 +58016,45 @@ export interface SessionLimitPredictionPredictRequest {
   clientType?: SessionLimitPredictionClientType;
 }
 /**
+ * Acknowledges completion of one original-host persistence barrier.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PersistenceBarrierResult".
+ */
+/** @experimental */
+/** @internal */
+export interface PersistenceBarrierResult {}
+/**
+ * A typed request to the original host's retained persistence resources.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PersistenceBarrierRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface PersistenceBarrierRequest {
+  /**
+   * Target session identifier
+   */
+  sessionId: string;
+  /**
+   * Resource barrier to await.
+   */
+  phase: SessionPersistenceBarrierPhase;
+  /**
+   * Runtime-assigned identity for this flush, independent of concurrent flushes.
+   */
+  operationId: string;
+  /**
+   * Whether the original writer must persist an otherwise empty session.
+   */
+  force: boolean;
+  /**
+   * Native flush failure, combined with retained callback failures at completion.
+   */
+  nativeFailure?: string;
+}
+/**
  * A decision for one callback, with JavaScript errors retained by its originating client.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -55778,6 +58316,605 @@ export interface InstallationsConfirmRequest {
 /** Create typed server-scoped RPC methods (no session required). */
 export function createServerRpc(connection: MessageConnection) {
     return {
+        /** @experimental */
+        plugins: {
+            /**
+             * Plans installation of an Agent Plugin search candidate from its verified Agent Finder materialisation without writing files. Only candidates that carry a handle can be planned. The review shows only verified data, and installing leaves the plugin disabled until it is enabled through plugins.enable.
+             *
+             * @param params Side-effect-free planning of one Agent Plugin search candidate through its Agent Finder materialisation.
+             *
+             * @returns Agent Plugin installation planning result with the honoured contract, or a typed refusal.
+             */
+            planInstall: async (params: PluginPlanInstallRequest): Promise<PluginInstallationManagementResult> =>
+                connection.sendRequest("plugins.planInstall", params),
+            /**
+             * Consumes one verified Agent Plugin installation plan, requests explicit human consent through installations.confirm on the original connection, then reacquires and verifies every file and registers the plugin, disabled, exactly as a direct plugin install. The installed plugin is listed, enabled and uninstalled through the existing plugins methods.
+             *
+             * @param params Applies exactly one retained verified Agent Plugin installation plan.
+             *
+             * @returns Agent Plugin installation result with the honoured contract, or a typed request/negotiation refusal.
+             */
+            applyInstall: async (params: PluginApplyInstallRequest): Promise<PluginInstallationResult> =>
+                connection.sendRequest("plugins.applyInstall", params),
+            /**
+             * Lists plugins installed in user/global state.
+             *
+             * @param params Optional read-only plugin discovery context. The runtime resolves account, policy, and workspace trust. This query does not change settings.
+             *
+             * @returns Plugins installed in user/global state.
+             */
+            list: async (params?: PluginsListRequest): Promise<PluginListResult> =>
+                connection.sendRequest("plugins.list", params ?? {}),
+            /**
+             * Installs a plugin from a marketplace, GitHub repo, URL, or local path.
+             *
+             * @param params Plugin source and optional working directory for relative-path resolution.
+             *
+             * @returns Result of installing a plugin.
+             */
+            install: async (params: PluginsInstallRequest): Promise<PluginInstallResult> =>
+                connection.sendRequest("plugins.install", params),
+            /**
+             * Uninstalls an installed plugin.
+             *
+             * @param params Name (or spec) of the plugin to uninstall.
+             */
+            uninstall: async (params: PluginsUninstallRequest): Promise<void> =>
+                connection.sendRequest("plugins.uninstall", params),
+            /**
+             * Updates an installed plugin to its latest published version.
+             *
+             * @param params Name (or spec) of the plugin to update.
+             *
+             * @returns Result of updating a single plugin.
+             */
+            update: async (params: PluginsUpdateRequest): Promise<PluginUpdateResult> =>
+                connection.sendRequest("plugins.update", params),
+            /**
+             * Updates every installed plugin to its latest published version.
+             *
+             * @param params Optional workspace settings for a plugin catalog or bulk update through the original caller's runtime. Omission retains the server's configuration.
+             *
+             * @returns Result of updating all installed plugins.
+             */
+            updateAll: async (params?: PluginsInvocationRequest): Promise<PluginUpdateAllResult> =>
+                connection.sendRequest("plugins.updateAll", params ?? {}),
+            /**
+             * Enables installed plugins for new sessions.
+             *
+             * @param params Plugin names (or specs) to enable, plus the optional working directory the repository-controlled guard is evaluated against.
+             */
+            enable: async (params: PluginsEnableRequest): Promise<void> =>
+                connection.sendRequest("plugins.enable", params),
+            /**
+             * Disables installed plugins for new sessions.
+             *
+             * @param params Plugin names (or specs) to disable, plus the optional working directory the repository-controlled guard is evaluated against.
+             */
+            disable: async (params: PluginsDisableRequest): Promise<void> =>
+                connection.sendRequest("plugins.disable", params),
+            /** @experimental */
+            builtin: {
+                /**
+                 * Replaces this server's trusted built-in plugin directories while no sessions are active.
+                 *
+                 * @param params Trusted built-in plugin directories to use for this runtime process.
+                 */
+                set: async (params: PluginsBuiltinSetRequest): Promise<void> =>
+                    connection.sendRequest("plugins.builtin.set", params),
+            },
+            /**
+             * Runs the sessionStart hooks of one built-in plugin without a session, so that the plugin can do its host setup before the first turn. Settings and managed policy that turn off the plugin or its hooks apply. The hooks run on the host, not in a session sandbox, so managed policy that turns on the sandbox prevents activation. The call fails when managed policy cannot be determined. Extension callers cannot use this method.
+             *
+             * @param params Built-in plugin to activate.
+             *
+             * @returns The result of a built-in plugin activation.
+             */
+            activate: async (params: PluginsActivateRequest): Promise<PluginsActivateResult> =>
+                connection.sendRequest("plugins.activate", params),
+            /** @experimental */
+            marketplaces: {
+                /**
+                 * Lists all registered marketplaces (defaults + user-added).
+                 *
+                 * @param params Optional workspace settings for a plugin catalog or bulk update through the original caller's runtime. Omission retains the server's configuration.
+                 *
+                 * @returns All registered marketplaces, including built-in defaults.
+                 */
+                list: async (params?: PluginsInvocationRequest): Promise<MarketplaceListResult> =>
+                    connection.sendRequest("plugins.marketplaces.list", params ?? {}),
+                /**
+                 * Restores a retired default marketplace in the runtime's configured profile when a retained plugin install still needs it. Uses retained managed policy without fetching catalogs or policy. Returns the persisted result so a launcher can report the settings change before opening a session or running a plugin command. Repeated calls are guarded per profile; malformed settings and write failures reject the call.
+                 *
+                 * @returns The retired marketplace migration result for the runtime's configured profile.
+                 */
+                migrateRetiredDefault: async (): Promise<MarketplaceMigrationResult> =>
+                    connection.sendRequest("plugins.marketplaces.migrateRetiredDefault", {}),
+                /**
+                 * Registers a new marketplace from a source (owner/repo, URL, or local path).
+                 *
+                 * @param params Marketplace source and optional working directory for relative-path resolution.
+                 *
+                 * @returns Result of registering a new marketplace.
+                 */
+                add: async (params: PluginsMarketplacesAddRequest): Promise<MarketplaceAddResult> =>
+                    connection.sendRequest("plugins.marketplaces.add", params),
+                /**
+                 * Removes a previously-registered marketplace. When the marketplace has dependent plugins and `force` is not set, the marketplace is left intact and the result lists the dependents so the caller can decide whether to retry with `force=true`.
+                 *
+                 * @param params Name of the marketplace to remove and an optional force flag.
+                 *
+                 * @returns Outcome of the remove attempt, including dependent-plugin info when applicable.
+                 */
+                remove: async (params: PluginsMarketplacesRemoveRequest): Promise<MarketplaceRemoveResult> =>
+                    connection.sendRequest("plugins.marketplaces.remove", params),
+                /**
+                 * Lists plugins advertised by a registered marketplace.
+                 *
+                 * @param params Name of the marketplace whose plugin catalog to fetch.
+                 *
+                 * @returns Plugins advertised by the marketplace.
+                 */
+                browse: async (params: PluginsMarketplacesBrowseRequest): Promise<MarketplaceBrowseResult> =>
+                    connection.sendRequest("plugins.marketplaces.browse", params),
+                /**
+                 * Re-fetches one or all registered marketplace catalogs.
+                 *
+                 * @param params Optional marketplace name; omit to refresh all.
+                 *
+                 * @returns Result of refreshing one or more marketplace catalogs.
+                 */
+                refresh: async (params: PluginsMarketplacesRefreshRequest): Promise<MarketplaceRefreshResult> =>
+                    connection.sendRequest("plugins.marketplaces.refresh", params),
+            },
+        },
+        /** @experimental */
+        skills: {
+            /**
+             * Plans installation of a verified Agent Finder Skill candidate without writing files. The returned review is safe to present to a user and installing always leaves the Skill disabled until separately enabled.
+             *
+             * @param params Side-effect-free planning of one verified Agent Finder Skill candidate.
+             *
+             * @returns Skill installation management result with the honoured contract, or a typed refusal.
+             */
+            planInstall: async (params: SkillPlanInstallRequest): Promise<SkillInstallationManagementResult> =>
+                connection.sendRequest("skills.planInstall", params),
+            /**
+             * Consumes one verified Skill installation plan, requests explicit human consent through installations.confirm on the original connection, then revalidates and installs the Skill disabled.
+             *
+             * @param params Applies exactly one retained verified Skill installation plan.
+             *
+             * @returns Skill installation result with the honoured contract, or a typed request/negotiation refusal.
+             */
+            applyInstall: async (params: SkillApplyInstallRequest): Promise<SkillInstallationResult> =>
+                connection.sendRequest("skills.applyInstall", params),
+            /** @experimental */
+            installations: {
+                /**
+                 * Lists owned verified Agent Finder Skill installations for the selected existing session. Listing is never gated by the Skill-install feature flag.
+                 *
+                 * @param params Inventory request under an explicitly selected existing session.
+                 *
+                 * @returns Skill installation management result with the honoured contract, or a typed refusal.
+                 */
+                list: async (params: SkillInstallationsRequest): Promise<SkillInstallationManagementResult> =>
+                    connection.sendRequest("skills.installations.list", params),
+                /**
+                 * Reconciles interrupted owned Skill installation work for the selected existing session, then inspects owned inventory. Recovery is never gated by the Skill-install feature flag.
+                 *
+                 * @param params Inventory request under an explicitly selected existing session.
+                 *
+                 * @returns Skill installation management result with the honoured contract, or a typed refusal.
+                 */
+                recover: async (params: SkillInstallationsRequest): Promise<SkillInstallationManagementResult> =>
+                    connection.sendRequest("skills.installations.recover", params),
+                /**
+                 * Inspects a known Skill installation operation on its original runtime connection. Status is never gated by the Skill-install feature flag.
+                 *
+                 * @param params Existing-operation control. A new session selector is deliberately not accepted.
+                 *
+                 * @returns Skill installation management result with the honoured contract, or a typed refusal.
+                 */
+                status: async (params: SkillInstallationOperationRequest): Promise<SkillInstallationManagementResult> =>
+                    connection.sendRequest("skills.installations.status", params),
+                /**
+                 * Requests cancellation of a known Skill installation operation before commit. Already-started durable work requires recovery instead of silent replay.
+                 *
+                 * @param params Existing-operation control. A new session selector is deliberately not accepted.
+                 *
+                 * @returns Skill installation management result with the honoured contract, or a typed refusal.
+                 */
+                cancel: async (params: SkillInstallationOperationRequest): Promise<SkillInstallationManagementResult> =>
+                    connection.sendRequest("skills.installations.cancel", params),
+                /**
+                 * Atomically persists enablement for one owned Agent Finder Skill and reconciles the selected bound session. Enablement is installation-scoped by receipt identity and is never gated by the Skill-install feature flag.
+                 *
+                 * @param params Persisted enablement update for one owned Skill installation.
+                 *
+                 * @returns Skill installation management result with the honoured contract, or a typed refusal.
+                 */
+                setEnabled: async (params: SkillSetEnabledRequest): Promise<SkillInstallationManagementResult> =>
+                    connection.sendRequest("skills.installations.setEnabled", params),
+            },
+            /**
+             * Prepares a read-only removal plan for an owned verified Agent Finder Skill installation. Uninstall planning is never gated by the Skill-install feature flag.
+             *
+             * @param params Read-only preparation of one owned Skill removal under fresh selected-session authority.
+             *
+             * @returns Skill installation management result with the honoured contract, or a typed refusal.
+             */
+            planUninstall: async (params: SkillPlanUninstallRequest): Promise<SkillInstallationManagementResult> =>
+                connection.sendRequest("skills.planUninstall", params),
+            /**
+             * Consumes an owned Skill removal plan, requests explicit human consent through installations.confirm, refuses drift, and removes the exact owned files through quarantine.
+             *
+             * @param params One-use application of the exact retained Skill removal plan.
+             *
+             * @returns Skill installation result with the honoured contract, or a typed request/negotiation refusal.
+             */
+            applyUninstall: async (params: SkillApplyUninstallRequest): Promise<SkillInstallationResult> =>
+                connection.sendRequest("skills.applyUninstall", params),
+            /** @experimental */
+            config: {
+                /**
+                 * Replaces the global list of disabled skills.
+                 *
+                 * @param params Skill names to mark as disabled in global configuration, replacing any previous list.
+                 */
+                setDisabledSkills: async (params: SkillsConfigSetDisabledSkillsRequest): Promise<void> =>
+                    connection.sendRequest("skills.config.setDisabledSkills", params),
+                /**
+                 * Atomically adds or removes one skill from the disabled list.
+                 *
+                 * @param params Adds or removes a single skill from the global disabled list, leaving every other entry untouched.
+                 */
+                setSkillDisabled: async (params: SkillsConfigSetSkillDisabledRequest): Promise<void> =>
+                    connection.sendRequest("skills.config.setSkillDisabled", params),
+            },
+            /**
+             * Discovers skills across global and project sources.
+             *
+             * @param params Optional project paths and additional skill directories to include in discovery.
+             *
+             * @returns Skills discovered across global and project sources.
+             */
+            discover: async (params: SkillsDiscoverRequest): Promise<ServerSkillList> =>
+                connection.sendRequest("skills.discover", params),
+            /**
+             * Returns the canonical directories where a client may create skills that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.
+             *
+             * @param params Optional project paths to enumerate.
+             *
+             * @returns Canonical locations where skills can be created so the runtime will recognize them.
+             */
+            getDiscoveryPaths: async (params: SkillsGetDiscoveryPathsRequest): Promise<SkillDiscoveryPathList> =>
+                connection.sendRequest("skills.getDiscoveryPaths", params),
+            /**
+             * Installs a user-selected HTTPS or local skill file into personal or project storage, or registers a local discovery directory. This direct-source operation preserves source installation behavior; it does not accept or replace verified catalog plans, request catalog confirmation, or change skill enablement. The caller persists the returned discovery directories.
+             *
+             * @param params Installs a user-selected skill source without catalog plan semantics.
+             *
+             * @returns Result of direct source installation. Catalog consent and defaults remain separate.
+             */
+            installSource: async (params: SkillsInstallSourceRequest): Promise<SkillsInstallSourceResult> =>
+                connection.sendRequest("skills.installSource", params),
+            /**
+             * Removes a directly installed local skill or unregisters a discovery directory without deleting its contents. Directory removal needs no skill inventory. Other targets return needs-inventory without mutation when inventory is absent. This operation preserves direct-source ownership rules and does not replace receipt-backed verified uninstall plans or their consent. The caller persists returned discovery directories and manages disabled settings.
+             *
+             * @param params Removes a user-selected source without changing verified catalog removal.
+             *
+             * @returns Direct removal or a request for the inventory needed to resolve a file.
+             */
+            removeSource: async (params: SkillsRemoveSourceRequest): Promise<SkillsRemoveSourceOutcome> =>
+                connection.sendRequest("skills.removeSource", params),
+        },
+        /** @experimental */
+        account: {
+            /**
+             * Gets Copilot quota usage for the current or opaquely selected authenticated user.
+             *
+             * @param params Optional opaque account selection or compatibility GitHub token used to look up quota.
+             *
+             * @returns Quota usage snapshots for the resolved user, keyed by quota type.
+             */
+            getQuota: async (params: AccountGetQuotaRequest): Promise<AccountGetQuotaResult> =>
+                connection.sendRequest("account.getQuota", params),
+            /**
+             * Gets the currently active authentication credentials from the global auth manager.
+             *
+             * @returns Current authentication state
+             */
+            getCurrentAuth: async (): Promise<AccountGetCurrentAuthResult> =>
+                connection.sendRequest("account.getCurrentAuth", {}),
+            /**
+             * Gets all authenticated users available for account switching.
+             *
+             * @returns List of all authenticated users
+             */
+            getAllUsers: async (): Promise<AccountGetAllUsersResult> =>
+                connection.sendRequest("account.getAllUsers", {}),
+            /**
+             * Validates and stores authentication credentials. When login is omitted, resolves the authenticated user from the token before persistence.
+             *
+             * @param params Credentials to validate and store. Omit login to resolve the authenticated user from the token.
+             *
+             * @returns Result of a successful login; throws on failure
+             */
+            login: async (params: AccountLoginRequest): Promise<AccountLoginResult> =>
+                connection.sendRequest("account.login", params),
+            /**
+             * Removes user authentication from keychain and persisted state.
+             *
+             * @param params User to log out
+             *
+             * @returns Logout result indicating if more users remain
+             */
+            logout: async (params: AccountLogoutRequest): Promise<AccountLogoutResult> =>
+                connection.sendRequest("account.logout", params),
+        },
+        /** @experimental */
+        sessions: {
+            /**
+             * Creates or resumes a local session and returns the opened session ID.
+             *
+             * @param params Open a session by creating, resuming, attaching, connecting to a remote, or handing off.
+             *
+             * @returns Result of opening a session.
+             */
+            open: async (params: SessionOpenParams): Promise<SessionOpenResult> =>
+                connection.sendRequest("sessions.open", params),
+            /**
+             * Creates a new session by forking persisted history from an existing session.
+             *
+             * @param params Source session identifier to fork from, optional event-ID boundary, and optional friendly name for the new session.
+             *
+             * @returns Identifier and optional friendly name assigned to the newly forked session.
+             */
+            fork: async (params: SessionsForkRequest): Promise<SessionsForkResult> =>
+                connection.sendRequest("sessions.fork", params),
+            /**
+             * Connects to an existing remote session and exposes it as an SDK session.
+             *
+             * @param params Remote session connection parameters.
+             *
+             * @returns Remote session connection result.
+             */
+            connect: async (params: ConnectRemoteSessionParams): Promise<RemoteSessionConnectionResult> =>
+                connection.sendRequest("sessions.connect", params),
+            /**
+             * Lists sessions, optionally filtered by source and working-directory context. Returned entries are discriminated by `isRemote`: local entries carry only the lightweight `LocalSessionMetadataValue` shape; remote entries carry the full `RemoteSessionMetadataValue` shape (repository, PR number, taskType, etc.).
+             *
+             * @param params Optional source filter, metadata-load limit, and context filter applied to the returned sessions.
+             *
+             * @returns Sessions matching the filter, ordered most-recently-modified first.
+             */
+            list: async (params: SessionsListRequest): Promise<SessionList> =>
+                connection.sendRequest("sessions.list", params),
+            /**
+             * Reads client-owned metadata for multiple persisted local sessions without opening them. Results preserve request order and report missing, corrupt, unsupported, or temporarily unavailable sessions independently.
+             *
+             * @param params Bounded batch request for client-owned metadata from persisted local sessions.
+             *
+             * @returns Ordered client metadata outcomes for the requested local sessions.
+             */
+            getClientMetadata: async (params: SessionsGetClientMetadataRequest): Promise<SessionsGetClientMetadataResult> =>
+                connection.sendRequest("sessions.getClientMetadata", params),
+            /**
+             * Reads a page of durable events directly from a local session's persisted journal without creating, resuming, or activating the session. The first read pins the currently opened journal generation and its byte-length boundary; opaque cursor continuations remain on that generation across runtime-owned compaction, truncation, and rewrite operations, which replace the live path atomically, and events appended after the boundary are excluded. For cold hydration, await the first successful page before activation and establish lossless live-event buffering before resume; merge subsequent live events by ID, preserving persisted order and letting live payloads win. Continuations are process-local, single-use capabilities bound to the originating session and storage context and must be paged sequentially; concurrent or repeated use of the same cursor expires that duplicate read rather than reading the generation twice. A complete snapshot has cursorStatus 'ok' and hasMore false. Snapshots expire after five idle minutes, with at most eight retained per process and idle-only eviction under pressure; completion and cancelled-worker exit release their handles. No transcript copy is created, but retained handles may keep replaced files' disk blocks alive until release. Pages have a soft 1 MiB serialized event-array budget including resolved binary assets; one oversized event is returned alone to guarantee progress. Working memory also includes a record/lookahead and asset resolution; resolving the first binary reference may scan the full pinned generation to build a bounded offset index. If the snapshot expires, is evicted, is cancelled before a continuation is established, or becomes unreadable after an observable unsupported in-place shortening, the continuation returns cursorStatus 'expired' with an empty terminal page and never falls back to a different generation. A missing or initially unreadable journal is an RPC error. Persisted history excludes ephemeral events and may omit payloads that are reconstructed only for an active session; use the active session event stream for post-resume live events.
+             *
+             * @param params Pagination options for reading an inactive or active local session's persisted event journal.
+             *
+             * @returns Batch of session events returned by a read, with cursor and continuation metadata.
+             */
+            readPersistedEvents: async (params: SessionsReadPersistedEventsRequest): Promise<EventsReadResult> =>
+                connection.sendRequest("sessions.readPersistedEvents", params),
+            /**
+             * Finds the local session bound to a GitHub task ID, if any.
+             *
+             * @param params GitHub task ID to look up.
+             *
+             * @returns ID of the local session bound to the given GitHub task, or omitted when none.
+             */
+            findByTaskId: async (params: SessionsFindByTaskIDRequest): Promise<SessionsFindByTaskIDResult> =>
+                connection.sendRequest("sessions.findByTaskId", params),
+            /**
+             * Resolves a UUID prefix to a unique session ID, if exactly one session matches.
+             *
+             * @param params UUID prefix to resolve to a unique session ID.
+             *
+             * @returns Session ID matching the prefix, omitted when no unique match exists.
+             */
+            findByPrefix: async (params: SessionsFindByPrefixRequest): Promise<SessionsFindByPrefixResult> =>
+                connection.sendRequest("sessions.findByPrefix", params),
+            /**
+             * Returns the most-relevant prior session for a given working-directory context.
+             *
+             * @param params Optional working-directory context used to score session relevance.
+             *
+             * @returns Most-relevant session ID for the supplied context, or omitted when no sessions exist.
+             */
+            getLastForContext: async (params: SessionsGetLastForContextRequest): Promise<SessionsGetLastForContextResult> =>
+                connection.sendRequest("sessions.getLastForContext", params),
+            /**
+             * Checks whether a local session's persisted event-log path exists, including an empty log, without opening the session or scanning the session catalog. Hosts use this to prefer an exact local session over a remote task or a UUID-prefix lookup. Metadata-only sessions without a log return false.
+             *
+             * @param params Local session whose persisted event-log presence to check without opening or scanning it.
+             *
+             * @returns Whether the local session has a persisted event-log path, including an empty log.
+             */
+            hasEvents: async (params: SessionsHasEventsRequest): Promise<SessionsHasEventsResult> =>
+                connection.sendRequest("sessions.hasEvents", params),
+            /**
+             * Returns the on-disk byte size of each session's workspace directory.
+             *
+             * @returns Map of sessionId -> on-disk size in bytes for each session's workspace directory.
+             */
+            getSizes: async (): Promise<SessionSizes> =>
+                connection.sendRequest("sessions.getSizes", {}),
+            /**
+             * Returns the subset of the supplied session IDs that are currently held by another running process.
+             *
+             * @param params Session IDs to test for live in-use locks.
+             *
+             * @returns Session IDs from the input set that are currently in use by another process.
+             */
+            checkInUse: async (params: SessionsCheckInUseRequest): Promise<SessionsCheckInUseResult> =>
+                connection.sendRequest("sessions.checkInUse", params),
+            /**
+             * Closes a session: emits shutdown, flushes pending events, releases the in-use lock, and disposes the active session.
+             *
+             * @param params Session ID to close.
+             *
+             * @returns Closes a session: emits shutdown, flushes pending events to disk, releases the in-use lock, disposes the active session. Idempotent: succeeds even if the session is not currently active.
+             */
+            close: async (params: SessionsCloseRequest): Promise<SessionsCloseResult> =>
+                connection.sendRequest("sessions.close", params),
+            /**
+             * Closes, deactivates, and deletes a set of sessions, returning the bytes freed per session.
+             *
+             * @param params Session IDs to close, deactivate, and delete from disk.
+             *
+             * @returns Map of sessionId -> bytes freed by removing the session's workspace directory.
+             */
+            bulkDelete: async (params: SessionsBulkDeleteRequest): Promise<SessionBulkDeleteResult> =>
+                connection.sendRequest("sessions.bulkDelete", params),
+            /**
+             * Deletes sessions older than the given threshold, with optional dry-run and exclusion list.
+             *
+             * @param params Age threshold and optional flags controlling which old sessions are pruned (or simulated when dryRun is true).
+             *
+             * @returns Outcome of the prune operation: deleted IDs, dry-run candidates, skipped IDs, total bytes freed, and the dry-run flag.
+             */
+            pruneOld: async (params: SessionsPruneOldRequest): Promise<SessionPruneResult> =>
+                connection.sendRequest("sessions.pruneOld", params),
+            /**
+             * Flushes a session's pending events to disk.
+             *
+             * @param params Session ID whose pending events should be flushed to disk.
+             *
+             * @returns Flush a session's pending events to disk. No-op when no writer exists for the session (e.g., already closed).
+             */
+            save: async (params: SessionsSaveRequest): Promise<SessionsSaveResult> =>
+                connection.sendRequest("sessions.save", params),
+            /**
+             * Releases the in-use lock held by this process for a session.
+             *
+             * @param params Session ID whose in-use lock should be released.
+             *
+             * @returns Release the in-use lock held by this process for the given session. No-op when this process does not currently hold a lock for the session.
+             */
+            releaseLock: async (params: SessionsReleaseLockRequest): Promise<SessionsReleaseLockResult> =>
+                connection.sendRequest("sessions.releaseLock", params),
+            /**
+             * Backfills missing summary and context fields on the supplied session metadata records.
+             *
+             * @param params Session metadata records to enrich with summary and context information.
+             *
+             * @returns The enriched metadata records, with summary and context fields backfilled where available. Sessions confirmed empty and unnamed are omitted.
+             */
+            enrichMetadata: async (params: SessionsEnrichMetadataRequest): Promise<SessionEnrichMetadataResult> =>
+                connection.sendRequest("sessions.enrichMetadata", params),
+            /**
+             * Reloads user, plugin, and (optionally) repo hooks on the active session.
+             *
+             * @param params Active session ID and an optional flag for deferring repo-level hooks until folder trust.
+             *
+             * @returns Reload all hooks (user, plugin, optionally repo) and apply them to the active session. Call after installing or removing plugins so their hooks take effect immediately. No-op when no active session matches the given sessionId.
+             */
+            reloadPluginHooks: async (params: SessionsReloadPluginHooksRequest): Promise<SessionsReloadPluginHooksResult> =>
+                connection.sendRequest("sessions.reloadPluginHooks", params),
+            /**
+             * Loads previously-deferred repo-level hooks on the active session, returning queued startup prompts.
+             *
+             * @param params Active session ID whose deferred repo-level hooks should be loaded.
+             *
+             * @returns Queued repo-level startup prompts and the total hook command count after loading.
+             */
+            loadDeferredRepoHooks: async (params: SessionsLoadDeferredRepoHooksRequest): Promise<SessionLoadDeferredRepoHooksResult> =>
+                connection.sendRequest("sessions.loadDeferredRepoHooks", params),
+            /**
+             * Replaces the manager-wide additional plugins registered with the session manager.
+             *
+             * @param params Manager-wide additional plugins to register; replaces any previously-configured set.
+             *
+             * @returns Replace the manager-wide additional plugins. New session creations and subsequent hook reloads see the new set; already-running sessions keep their existing hook installation until the next reload.
+             */
+            setAdditionalPlugins: async (params: SessionsSetAdditionalPluginsRequest): Promise<SessionsSetAdditionalPluginsResult> =>
+                connection.sendRequest("sessions.setAdditionalPlugins", params),
+            /**
+             * Attaches the runtime-managed remote-control singleton to a session, awaiting initial setup. If remote control is already attached to a different session, the singleton is transferred (preserving the underlying Mission Control connection). Returns the final status.
+             *
+             * @param params Parameters for attaching the remote-control singleton to a session.
+             *
+             * @returns Wrapper for the singleton's current status.
+             */
+            startRemoteControl: async (params: SessionsStartRemoteControlRequest): Promise<RemoteControlStatusResult> =>
+                connection.sendRequest("sessions.startRemoteControl", params),
+            /**
+             * Atomically rebinds the remote-control singleton to a different session, preserving the underlying Mission Control connection. When `expectedFromSessionId` is provided and does not match the singleton's current `attachedSessionId`, the transfer is rejected with `transferred: false` and the current status is returned unchanged.
+             *
+             * @param params Parameters for atomically rebinding the remote-control singleton.
+             *
+             * @returns Outcome of a transferRemoteControl call.
+             */
+            transferRemoteControl: async (params: SessionsTransferRemoteControlRequest): Promise<RemoteControlTransferResult> =>
+                connection.sendRequest("sessions.transferRemoteControl", params),
+            /**
+             * Patches the steering state of the active remote-control singleton. When remote control is off, this is a no-op and the off status is returned. Today only `enabled: true` is actionable on the underlying exporter; passing `false` is reserved for future use.
+             *
+             * @param params Patch for the singleton's steering state.
+             *
+             * @returns Wrapper for the singleton's current status.
+             */
+            setRemoteControlSteering: async (params: SessionsSetRemoteControlSteeringRequest): Promise<RemoteControlStatusResult> =>
+                connection.sendRequest("sessions.setRemoteControlSteering", params),
+            /**
+             * Stops the remote-control singleton. When `expectedSessionId` is provided and does not match the singleton's current `attachedSessionId`, the stop is rejected with `stopped: false` and the current status is returned unchanged (unless `force` is set, in which case the singleton is unconditionally torn down).
+             *
+             * @param params Parameters for stopping the remote-control singleton.
+             *
+             * @returns Outcome of a stopRemoteControl call.
+             */
+            stopRemoteControl: async (params: SessionsStopRemoteControlRequest): Promise<RemoteControlStopResult> =>
+                connection.sendRequest("sessions.stopRemoteControl", params),
+            /**
+             * Returns the current state of the remote-control singleton, including the attached session id and frontend URL when active.
+             *
+             * @returns Wrapper for the singleton's current status.
+             */
+            getRemoteControlStatus: async (): Promise<RemoteControlStatusResult> =>
+                connection.sendRequest("sessions.getRemoteControlStatus", {}),
+        },
+        /** @experimental */
+        secrets: {
+            /**
+             * Registers secret values for best-effort redaction in session logs and exports while this client remains connected. Repeated adds are idempotent. Discouraged for runtime code: retain an owned secret registration instead. Remove rotating or unused values with secrets.removeFilterValues; historical output and late echoes may no longer be redacted after removal or disconnect.
+             *
+             * @param params Secret values to add to the redaction filter.
+             *
+             * @returns Confirmation that the secret values were registered.
+             */
+            addFilterValues: async (params: SecretsAddFilterValuesRequest): Promise<SecretsAddFilterValuesResult> =>
+                connection.sendRequest("secrets.addFilterValues", params),
+            /**
+             * Releases values previously added by this client. Repeated or unmatched removals are no-ops; other live registrations remain effective. Only remove values once they are reasonably unlikely to be logged again: historical output and late echoes may no longer be redacted.
+             *
+             * @param params Secret values this client no longer needs redacted.
+             *
+             * @returns Confirmation that this client's registrations were released.
+             */
+            removeFilterValues: async (params: SecretsRemoveFilterValuesRequest): Promise<SecretsRemoveFilterValuesResult> =>
+                connection.sendRequest("secrets.removeFilterValues", params),
+            /**
+             * Redacts text or JSON with the runtime's process filter, including registered values and live environment sources. Requires COPILOT_ENABLE_SECRET_FILTERING=true in the runtime's environment, as for secrets.addFilterValues.
+             *
+             * @param params Content to redact with the runtime's process filter.
+             *
+             * @returns Content after runtime-owned redaction.
+             */
+            filter: async (params: SecretsFilterRequest): Promise<SecretsFilterResult> =>
+                connection.sendRequest("secrets.filter", params),
+        },
         /** @experimental */
         providers: {
             /** @experimental */
@@ -56460,90 +59597,18 @@ export function createServerRpc(connection: MessageConnection) {
                 connection.sendRequest("tools.list", params),
         },
         /** @experimental */
-        account: {
-            /**
-             * Gets Copilot quota usage for the current or opaquely selected authenticated user.
-             *
-             * @param params Optional opaque account selection or compatibility GitHub token used to look up quota.
-             *
-             * @returns Quota usage snapshots for the resolved user, keyed by quota type.
-             */
-            getQuota: async (params: AccountGetQuotaRequest): Promise<AccountGetQuotaResult> =>
-                connection.sendRequest("account.getQuota", params),
-            /**
-             * Gets the currently active authentication credentials from the global auth manager.
-             *
-             * @returns Current authentication state
-             */
-            getCurrentAuth: async (): Promise<AccountGetCurrentAuthResult> =>
-                connection.sendRequest("account.getCurrentAuth", {}),
-            /**
-             * Gets all authenticated users available for account switching.
-             *
-             * @returns List of all authenticated users
-             */
-            getAllUsers: async (): Promise<AccountGetAllUsersResult> =>
-                connection.sendRequest("account.getAllUsers", {}),
-            /**
-             * Validates and stores authentication credentials. When login is omitted, resolves the authenticated user from the token before persistence.
-             *
-             * @param params Credentials to validate and store. Omit login to resolve the authenticated user from the token.
-             *
-             * @returns Result of a successful login; throws on failure
-             */
-            login: async (params: AccountLoginRequest): Promise<AccountLoginResult> =>
-                connection.sendRequest("account.login", params),
-            /**
-             * Removes user authentication from keychain and persisted state.
-             *
-             * @param params User to log out
-             *
-             * @returns Logout result indicating if more users remain
-             */
-            logout: async (params: AccountLogoutRequest): Promise<AccountLogoutResult> =>
-                connection.sendRequest("account.logout", params),
-        },
-        /** @experimental */
-        secrets: {
-            /**
-             * Registers secret values for best-effort redaction in session logs and exports while this client remains connected. Repeated adds are idempotent. Discouraged for runtime code: retain an owned secret registration instead. Remove rotating or unused values with secrets.removeFilterValues; historical output and late echoes may no longer be redacted after removal or disconnect.
-             *
-             * @param params Secret values to add to the redaction filter.
-             *
-             * @returns Confirmation that the secret values were registered.
-             */
-            addFilterValues: async (params: SecretsAddFilterValuesRequest): Promise<SecretsAddFilterValuesResult> =>
-                connection.sendRequest("secrets.addFilterValues", params),
-            /**
-             * Releases values previously added by this client. Repeated or unmatched removals are no-ops; other live registrations remain effective. Only remove values once they are reasonably unlikely to be logged again: historical output and late echoes may no longer be redacted.
-             *
-             * @param params Secret values this client no longer needs redacted.
-             *
-             * @returns Confirmation that this client's registrations were released.
-             */
-            removeFilterValues: async (params: SecretsRemoveFilterValuesRequest): Promise<SecretsRemoveFilterValuesResult> =>
-                connection.sendRequest("secrets.removeFilterValues", params),
-            /**
-             * Redacts text or JSON with the runtime's process filter, including registered values and live environment sources. Requires COPILOT_ENABLE_SECRET_FILTERING=true in the runtime's environment, as for secrets.addFilterValues.
-             *
-             * @param params Content to redact with the runtime's process filter.
-             *
-             * @returns Content after runtime-owned redaction.
-             */
-            filter: async (params: SecretsFilterRequest): Promise<SecretsFilterResult> =>
-                connection.sendRequest("secrets.filter", params),
-        },
-        /** @experimental */
         mcp: {
             /** @experimental */
             config: {
                 /**
                  * Lists MCP servers from user configuration.
                  *
+                 * @param params Optional configuration root for user MCP servers. Omission retains the connection's root.
+                 *
                  * @returns User-configured MCP servers, keyed by server name.
                  */
-                list: async (): Promise<McpConfigList> =>
-                    connection.sendRequest("mcp.config.list", {}),
+                list: async (params?: McpConfigListRequest): Promise<McpConfigList> =>
+                    connection.sendRequest("mcp.config.list", params ?? {}),
                 /**
                  * Adds an MCP server to user configuration.
                  *
@@ -56723,294 +59788,6 @@ export function createServerRpc(connection: MessageConnection) {
              */
             getDiscoveryPaths: async (params: InstructionsGetDiscoveryPathsRequest): Promise<InstructionDiscoveryPathList> =>
                 connection.sendRequest("instructions.getDiscoveryPaths", params),
-        },
-        /** @experimental */
-        skills: {
-            /**
-             * Plans installation of a verified Agent Finder Skill candidate without writing files. The returned review is safe to present to a user and installing always leaves the Skill disabled until separately enabled.
-             *
-             * @param params Side-effect-free planning of one verified Agent Finder Skill candidate.
-             *
-             * @returns Skill installation management result with the honoured contract, or a typed refusal.
-             */
-            planInstall: async (params: SkillPlanInstallRequest): Promise<SkillInstallationManagementResult> =>
-                connection.sendRequest("skills.planInstall", params),
-            /**
-             * Consumes one verified Skill installation plan, requests explicit human consent through installations.confirm on the original connection, then revalidates and installs the Skill disabled.
-             *
-             * @param params Applies exactly one retained verified Skill installation plan.
-             *
-             * @returns Skill installation result with the honoured contract, or a typed request/negotiation refusal.
-             */
-            applyInstall: async (params: SkillApplyInstallRequest): Promise<SkillInstallationResult> =>
-                connection.sendRequest("skills.applyInstall", params),
-            /** @experimental */
-            installations: {
-                /**
-                 * Lists owned verified Agent Finder Skill installations for the selected existing session. Listing is never gated by the Skill-install feature flag.
-                 *
-                 * @param params Inventory request under an explicitly selected existing session.
-                 *
-                 * @returns Skill installation management result with the honoured contract, or a typed refusal.
-                 */
-                list: async (params: SkillInstallationsRequest): Promise<SkillInstallationManagementResult> =>
-                    connection.sendRequest("skills.installations.list", params),
-                /**
-                 * Reconciles interrupted owned Skill installation work for the selected existing session, then inspects owned inventory. Recovery is never gated by the Skill-install feature flag.
-                 *
-                 * @param params Inventory request under an explicitly selected existing session.
-                 *
-                 * @returns Skill installation management result with the honoured contract, or a typed refusal.
-                 */
-                recover: async (params: SkillInstallationsRequest): Promise<SkillInstallationManagementResult> =>
-                    connection.sendRequest("skills.installations.recover", params),
-                /**
-                 * Inspects a known Skill installation operation on its original runtime connection. Status is never gated by the Skill-install feature flag.
-                 *
-                 * @param params Existing-operation control. A new session selector is deliberately not accepted.
-                 *
-                 * @returns Skill installation management result with the honoured contract, or a typed refusal.
-                 */
-                status: async (params: SkillInstallationOperationRequest): Promise<SkillInstallationManagementResult> =>
-                    connection.sendRequest("skills.installations.status", params),
-                /**
-                 * Requests cancellation of a known Skill installation operation before commit. Already-started durable work requires recovery instead of silent replay.
-                 *
-                 * @param params Existing-operation control. A new session selector is deliberately not accepted.
-                 *
-                 * @returns Skill installation management result with the honoured contract, or a typed refusal.
-                 */
-                cancel: async (params: SkillInstallationOperationRequest): Promise<SkillInstallationManagementResult> =>
-                    connection.sendRequest("skills.installations.cancel", params),
-                /**
-                 * Atomically persists enablement for one owned Agent Finder Skill and reconciles the selected bound session. Enablement is installation-scoped by receipt identity and is never gated by the Skill-install feature flag.
-                 *
-                 * @param params Persisted enablement update for one owned Skill installation.
-                 *
-                 * @returns Skill installation management result with the honoured contract, or a typed refusal.
-                 */
-                setEnabled: async (params: SkillSetEnabledRequest): Promise<SkillInstallationManagementResult> =>
-                    connection.sendRequest("skills.installations.setEnabled", params),
-            },
-            /**
-             * Prepares a read-only removal plan for an owned verified Agent Finder Skill installation. Uninstall planning is never gated by the Skill-install feature flag.
-             *
-             * @param params Read-only preparation of one owned Skill removal under fresh selected-session authority.
-             *
-             * @returns Skill installation management result with the honoured contract, or a typed refusal.
-             */
-            planUninstall: async (params: SkillPlanUninstallRequest): Promise<SkillInstallationManagementResult> =>
-                connection.sendRequest("skills.planUninstall", params),
-            /**
-             * Consumes an owned Skill removal plan, requests explicit human consent through installations.confirm, refuses drift, and removes the exact owned files through quarantine.
-             *
-             * @param params One-use application of the exact retained Skill removal plan.
-             *
-             * @returns Skill installation result with the honoured contract, or a typed request/negotiation refusal.
-             */
-            applyUninstall: async (params: SkillApplyUninstallRequest): Promise<SkillInstallationResult> =>
-                connection.sendRequest("skills.applyUninstall", params),
-            /** @experimental */
-            config: {
-                /**
-                 * Replaces the global list of disabled skills.
-                 *
-                 * @param params Skill names to mark as disabled in global configuration, replacing any previous list.
-                 */
-                setDisabledSkills: async (params: SkillsConfigSetDisabledSkillsRequest): Promise<void> =>
-                    connection.sendRequest("skills.config.setDisabledSkills", params),
-                /**
-                 * Atomically adds or removes one skill from the disabled list.
-                 *
-                 * @param params Adds or removes a single skill from the global disabled list, leaving every other entry untouched.
-                 */
-                setSkillDisabled: async (params: SkillsConfigSetSkillDisabledRequest): Promise<void> =>
-                    connection.sendRequest("skills.config.setSkillDisabled", params),
-            },
-            /**
-             * Discovers skills across global and project sources.
-             *
-             * @param params Optional project paths and additional skill directories to include in discovery.
-             *
-             * @returns Skills discovered across global and project sources.
-             */
-            discover: async (params: SkillsDiscoverRequest): Promise<ServerSkillList> =>
-                connection.sendRequest("skills.discover", params),
-            /**
-             * Returns the canonical directories where a client may create skills that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.
-             *
-             * @param params Optional project paths to enumerate.
-             *
-             * @returns Canonical locations where skills can be created so the runtime will recognize them.
-             */
-            getDiscoveryPaths: async (params: SkillsGetDiscoveryPathsRequest): Promise<SkillDiscoveryPathList> =>
-                connection.sendRequest("skills.getDiscoveryPaths", params),
-            /**
-             * Installs a user-selected HTTPS or local skill file into personal or project storage, or registers a local discovery directory. This direct-source operation preserves source installation behavior; it does not accept or replace verified catalog plans, request catalog confirmation, or change skill enablement. The caller persists the returned discovery directories.
-             *
-             * @param params Installs a user-selected skill source without catalog plan semantics.
-             *
-             * @returns Result of direct source installation. Catalog consent and defaults remain separate.
-             */
-            installSource: async (params: SkillsInstallSourceRequest): Promise<SkillsInstallSourceResult> =>
-                connection.sendRequest("skills.installSource", params),
-            /**
-             * Removes a directly installed local skill or unregisters a discovery directory without deleting its contents. Directory removal needs no skill inventory. Other targets return needs-inventory without mutation when inventory is absent. This operation preserves direct-source ownership rules and does not replace receipt-backed verified uninstall plans or their consent. The caller persists returned discovery directories and manages disabled settings.
-             *
-             * @param params Removes a user-selected source without changing verified catalog removal.
-             *
-             * @returns Direct removal or a request for the inventory needed to resolve a file.
-             */
-            removeSource: async (params: SkillsRemoveSourceRequest): Promise<SkillsRemoveSourceOutcome> =>
-                connection.sendRequest("skills.removeSource", params),
-        },
-        /** @experimental */
-        plugins: {
-            /**
-             * Plans installation of an Agent Plugin search candidate from its verified Agent Finder materialisation without writing files. Only candidates that carry a handle can be planned. The review shows only verified data, and installing leaves the plugin disabled until it is enabled through plugins.enable.
-             *
-             * @param params Side-effect-free planning of one Agent Plugin search candidate through its Agent Finder materialisation.
-             *
-             * @returns Agent Plugin installation planning result with the honoured contract, or a typed refusal.
-             */
-            planInstall: async (params: PluginPlanInstallRequest): Promise<PluginInstallationManagementResult> =>
-                connection.sendRequest("plugins.planInstall", params),
-            /**
-             * Consumes one verified Agent Plugin installation plan, requests explicit human consent through installations.confirm on the original connection, then reacquires and verifies every file and registers the plugin, disabled, exactly as a direct plugin install. The installed plugin is listed, enabled and uninstalled through the existing plugins methods.
-             *
-             * @param params Applies exactly one retained verified Agent Plugin installation plan.
-             *
-             * @returns Agent Plugin installation result with the honoured contract, or a typed request/negotiation refusal.
-             */
-            applyInstall: async (params: PluginApplyInstallRequest): Promise<PluginInstallationResult> =>
-                connection.sendRequest("plugins.applyInstall", params),
-            /**
-             * Lists plugins installed in user/global state.
-             *
-             * @param params Optional read-only plugin discovery context. The runtime resolves account, policy, and workspace trust. This query does not change settings.
-             *
-             * @returns Plugins installed in user/global state.
-             */
-            list: async (params?: PluginsListRequest): Promise<PluginListResult> =>
-                connection.sendRequest("plugins.list", params ?? {}),
-            /**
-             * Installs a plugin from a marketplace, GitHub repo, URL, or local path.
-             *
-             * @param params Plugin source and optional working directory for relative-path resolution.
-             *
-             * @returns Result of installing a plugin.
-             */
-            install: async (params: PluginsInstallRequest): Promise<PluginInstallResult> =>
-                connection.sendRequest("plugins.install", params),
-            /**
-             * Uninstalls an installed plugin.
-             *
-             * @param params Name (or spec) of the plugin to uninstall.
-             */
-            uninstall: async (params: PluginsUninstallRequest): Promise<void> =>
-                connection.sendRequest("plugins.uninstall", params),
-            /**
-             * Updates an installed plugin to its latest published version.
-             *
-             * @param params Name (or spec) of the plugin to update.
-             *
-             * @returns Result of updating a single plugin.
-             */
-            update: async (params: PluginsUpdateRequest): Promise<PluginUpdateResult> =>
-                connection.sendRequest("plugins.update", params),
-            /**
-             * Updates every installed plugin to its latest published version.
-             *
-             * @returns Result of updating all installed plugins.
-             */
-            updateAll: async (): Promise<PluginUpdateAllResult> =>
-                connection.sendRequest("plugins.updateAll", {}),
-            /**
-             * Enables installed plugins for new sessions.
-             *
-             * @param params Plugin names (or specs) to enable, plus the optional working directory the repository-controlled guard is evaluated against.
-             */
-            enable: async (params: PluginsEnableRequest): Promise<void> =>
-                connection.sendRequest("plugins.enable", params),
-            /**
-             * Disables installed plugins for new sessions.
-             *
-             * @param params Plugin names (or specs) to disable, plus the optional working directory the repository-controlled guard is evaluated against.
-             */
-            disable: async (params: PluginsDisableRequest): Promise<void> =>
-                connection.sendRequest("plugins.disable", params),
-            /** @experimental */
-            builtin: {
-                /**
-                 * Replaces this server's trusted built-in plugin directories while no sessions are active.
-                 *
-                 * @param params Trusted built-in plugin directories to use for this runtime process.
-                 */
-                set: async (params: PluginsBuiltinSetRequest): Promise<void> =>
-                    connection.sendRequest("plugins.builtin.set", params),
-            },
-            /**
-             * Runs the sessionStart hooks of one built-in plugin without a session, so that the plugin can do its host setup before the first turn. Settings and managed policy that turn off the plugin or its hooks apply. The hooks run on the host, not in a session sandbox, so managed policy that turns on the sandbox prevents activation. The call fails when managed policy cannot be determined. Extension callers cannot use this method.
-             *
-             * @param params Built-in plugin to activate.
-             *
-             * @returns The result of a built-in plugin activation.
-             */
-            activate: async (params: PluginsActivateRequest): Promise<PluginsActivateResult> =>
-                connection.sendRequest("plugins.activate", params),
-            /** @experimental */
-            marketplaces: {
-                /**
-                 * Lists all registered marketplaces (defaults + user-added).
-                 *
-                 * @returns All registered marketplaces, including built-in defaults.
-                 */
-                list: async (): Promise<MarketplaceListResult> =>
-                    connection.sendRequest("plugins.marketplaces.list", {}),
-                /**
-                 * Restores a retired default marketplace in the runtime's configured profile when a retained plugin install still needs it. Uses retained managed policy without fetching catalogs or policy. Returns the persisted result so a launcher can report the settings change before opening a session or running a plugin command. Repeated calls are guarded per profile; malformed settings and write failures reject the call.
-                 *
-                 * @returns The retired marketplace migration result for the runtime's configured profile.
-                 */
-                migrateRetiredDefault: async (): Promise<MarketplaceMigrationResult> =>
-                    connection.sendRequest("plugins.marketplaces.migrateRetiredDefault", {}),
-                /**
-                 * Registers a new marketplace from a source (owner/repo, URL, or local path).
-                 *
-                 * @param params Marketplace source and optional working directory for relative-path resolution.
-                 *
-                 * @returns Result of registering a new marketplace.
-                 */
-                add: async (params: PluginsMarketplacesAddRequest): Promise<MarketplaceAddResult> =>
-                    connection.sendRequest("plugins.marketplaces.add", params),
-                /**
-                 * Removes a previously-registered marketplace. When the marketplace has dependent plugins and `force` is not set, the marketplace is left intact and the result lists the dependents so the caller can decide whether to retry with `force=true`.
-                 *
-                 * @param params Name of the marketplace to remove and an optional force flag.
-                 *
-                 * @returns Outcome of the remove attempt, including dependent-plugin info when applicable.
-                 */
-                remove: async (params: PluginsMarketplacesRemoveRequest): Promise<MarketplaceRemoveResult> =>
-                    connection.sendRequest("plugins.marketplaces.remove", params),
-                /**
-                 * Lists plugins advertised by a registered marketplace.
-                 *
-                 * @param params Name of the marketplace whose plugin catalog to fetch.
-                 *
-                 * @returns Plugins advertised by the marketplace.
-                 */
-                browse: async (params: PluginsMarketplacesBrowseRequest): Promise<MarketplaceBrowseResult> =>
-                    connection.sendRequest("plugins.marketplaces.browse", params),
-                /**
-                 * Re-fetches one or all registered marketplace catalogs.
-                 *
-                 * @param params Optional marketplace name; omit to refresh all.
-                 *
-                 * @returns Result of refreshing one or more marketplace catalogs.
-                 */
-                refresh: async (params: PluginsMarketplacesRefreshRequest): Promise<MarketplaceRefreshResult> =>
-                    connection.sendRequest("plugins.marketplaces.refresh", params),
-            },
         },
         /**
          * Registers the calling SDK client as the per-entrypoint extension launch provider. Call before creating any sessions. When omitted, the runtime uses its built-in extension launcher.
@@ -57246,239 +60023,6 @@ export function createServerRpc(connection: MessageConnection) {
                 connection.sendRequest("network.setProvider", params),
         },
         /** @experimental */
-        sessions: {
-            /**
-             * Creates or resumes a local session and returns the opened session ID.
-             *
-             * @param params Open a session by creating, resuming, attaching, connecting to a remote, or handing off.
-             *
-             * @returns Result of opening a session.
-             */
-            open: async (params: SessionOpenParams): Promise<SessionOpenResult> =>
-                connection.sendRequest("sessions.open", params),
-            /**
-             * Creates a new session by forking persisted history from an existing session.
-             *
-             * @param params Source session identifier to fork from, optional event-ID boundary, and optional friendly name for the new session.
-             *
-             * @returns Identifier and optional friendly name assigned to the newly forked session.
-             */
-            fork: async (params: SessionsForkRequest): Promise<SessionsForkResult> =>
-                connection.sendRequest("sessions.fork", params),
-            /**
-             * Connects to an existing remote session and exposes it as an SDK session.
-             *
-             * @param params Remote session connection parameters.
-             *
-             * @returns Remote session connection result.
-             */
-            connect: async (params: ConnectRemoteSessionParams): Promise<RemoteSessionConnectionResult> =>
-                connection.sendRequest("sessions.connect", params),
-            /**
-             * Lists sessions, optionally filtered by source and working-directory context. Returned entries are discriminated by `isRemote`: local entries carry only the lightweight `LocalSessionMetadataValue` shape; remote entries carry the full `RemoteSessionMetadataValue` shape (repository, PR number, taskType, etc.).
-             *
-             * @param params Optional source filter, metadata-load limit, and context filter applied to the returned sessions.
-             *
-             * @returns Sessions matching the filter, ordered most-recently-modified first.
-             */
-            list: async (params: SessionsListRequest): Promise<SessionList> =>
-                connection.sendRequest("sessions.list", params),
-            /**
-             * Reads client-owned metadata for multiple persisted local sessions without opening them. Results preserve request order and report missing, corrupt, unsupported, or temporarily unavailable sessions independently.
-             *
-             * @param params Bounded batch request for client-owned metadata from persisted local sessions.
-             *
-             * @returns Ordered client metadata outcomes for the requested local sessions.
-             */
-            getClientMetadata: async (params: SessionsGetClientMetadataRequest): Promise<SessionsGetClientMetadataResult> =>
-                connection.sendRequest("sessions.getClientMetadata", params),
-            /**
-             * Reads a page of durable events directly from a local session's persisted journal without creating, resuming, or activating the session. The first read pins the currently opened journal generation and its byte-length boundary; opaque cursor continuations remain on that generation across runtime-owned compaction, truncation, and rewrite operations, which replace the live path atomically, and events appended after the boundary are excluded. For cold hydration, await the first successful page before activation and establish lossless live-event buffering before resume; merge subsequent live events by ID, preserving persisted order and letting live payloads win. Continuations are process-local, single-use capabilities bound to the originating session and storage context and must be paged sequentially; concurrent or repeated use of the same cursor expires that duplicate read rather than reading the generation twice. A complete snapshot has cursorStatus 'ok' and hasMore false. Snapshots expire after five idle minutes, with at most eight retained per process and idle-only eviction under pressure; completion and cancelled-worker exit release their handles. No transcript copy is created, but retained handles may keep replaced files' disk blocks alive until release. Pages have a soft 1 MiB serialized event-array budget including resolved binary assets; one oversized event is returned alone to guarantee progress. Working memory also includes a record/lookahead and asset resolution; resolving the first binary reference may scan the full pinned generation to build a bounded offset index. If the snapshot expires, is evicted, is cancelled before a continuation is established, or becomes unreadable after an observable unsupported in-place shortening, the continuation returns cursorStatus 'expired' with an empty terminal page and never falls back to a different generation. A missing or initially unreadable journal is an RPC error. Persisted history excludes ephemeral events and may omit payloads that are reconstructed only for an active session; use the active session event stream for post-resume live events.
-             *
-             * @param params Pagination options for reading an inactive or active local session's persisted event journal.
-             *
-             * @returns Batch of session events returned by a read, with cursor and continuation metadata.
-             */
-            readPersistedEvents: async (params: SessionsReadPersistedEventsRequest): Promise<EventsReadResult> =>
-                connection.sendRequest("sessions.readPersistedEvents", params),
-            /**
-             * Finds the local session bound to a GitHub task ID, if any.
-             *
-             * @param params GitHub task ID to look up.
-             *
-             * @returns ID of the local session bound to the given GitHub task, or omitted when none.
-             */
-            findByTaskId: async (params: SessionsFindByTaskIDRequest): Promise<SessionsFindByTaskIDResult> =>
-                connection.sendRequest("sessions.findByTaskId", params),
-            /**
-             * Resolves a UUID prefix to a unique session ID, if exactly one session matches.
-             *
-             * @param params UUID prefix to resolve to a unique session ID.
-             *
-             * @returns Session ID matching the prefix, omitted when no unique match exists.
-             */
-            findByPrefix: async (params: SessionsFindByPrefixRequest): Promise<SessionsFindByPrefixResult> =>
-                connection.sendRequest("sessions.findByPrefix", params),
-            /**
-             * Returns the most-relevant prior session for a given working-directory context.
-             *
-             * @param params Optional working-directory context used to score session relevance.
-             *
-             * @returns Most-relevant session ID for the supplied context, or omitted when no sessions exist.
-             */
-            getLastForContext: async (params: SessionsGetLastForContextRequest): Promise<SessionsGetLastForContextResult> =>
-                connection.sendRequest("sessions.getLastForContext", params),
-            /**
-             * Checks whether a local session's persisted event-log path exists, including an empty log, without opening the session or scanning the session catalog. Hosts use this to prefer an exact local session over a remote task or a UUID-prefix lookup. Metadata-only sessions without a log return false.
-             *
-             * @param params Local session whose persisted event-log presence to check without opening or scanning it.
-             *
-             * @returns Whether the local session has a persisted event-log path, including an empty log.
-             */
-            hasEvents: async (params: SessionsHasEventsRequest): Promise<SessionsHasEventsResult> =>
-                connection.sendRequest("sessions.hasEvents", params),
-            /**
-             * Returns the on-disk byte size of each session's workspace directory.
-             *
-             * @returns Map of sessionId -> on-disk size in bytes for each session's workspace directory.
-             */
-            getSizes: async (): Promise<SessionSizes> =>
-                connection.sendRequest("sessions.getSizes", {}),
-            /**
-             * Returns the subset of the supplied session IDs that are currently held by another running process.
-             *
-             * @param params Session IDs to test for live in-use locks.
-             *
-             * @returns Session IDs from the input set that are currently in use by another process.
-             */
-            checkInUse: async (params: SessionsCheckInUseRequest): Promise<SessionsCheckInUseResult> =>
-                connection.sendRequest("sessions.checkInUse", params),
-            /**
-             * Closes a session: emits shutdown, flushes pending events, releases the in-use lock, and disposes the active session.
-             *
-             * @param params Session ID to close.
-             *
-             * @returns Closes a session: emits shutdown, flushes pending events to disk, releases the in-use lock, disposes the active session. Idempotent: succeeds even if the session is not currently active.
-             */
-            close: async (params: SessionsCloseRequest): Promise<SessionsCloseResult> =>
-                connection.sendRequest("sessions.close", params),
-            /**
-             * Closes, deactivates, and deletes a set of sessions, returning the bytes freed per session.
-             *
-             * @param params Session IDs to close, deactivate, and delete from disk.
-             *
-             * @returns Map of sessionId -> bytes freed by removing the session's workspace directory.
-             */
-            bulkDelete: async (params: SessionsBulkDeleteRequest): Promise<SessionBulkDeleteResult> =>
-                connection.sendRequest("sessions.bulkDelete", params),
-            /**
-             * Deletes sessions older than the given threshold, with optional dry-run and exclusion list.
-             *
-             * @param params Age threshold and optional flags controlling which old sessions are pruned (or simulated when dryRun is true).
-             *
-             * @returns Outcome of the prune operation: deleted IDs, dry-run candidates, skipped IDs, total bytes freed, and the dry-run flag.
-             */
-            pruneOld: async (params: SessionsPruneOldRequest): Promise<SessionPruneResult> =>
-                connection.sendRequest("sessions.pruneOld", params),
-            /**
-             * Flushes a session's pending events to disk.
-             *
-             * @param params Session ID whose pending events should be flushed to disk.
-             *
-             * @returns Flush a session's pending events to disk. No-op when no writer exists for the session (e.g., already closed).
-             */
-            save: async (params: SessionsSaveRequest): Promise<SessionsSaveResult> =>
-                connection.sendRequest("sessions.save", params),
-            /**
-             * Releases the in-use lock held by this process for a session.
-             *
-             * @param params Session ID whose in-use lock should be released.
-             *
-             * @returns Release the in-use lock held by this process for the given session. No-op when this process does not currently hold a lock for the session.
-             */
-            releaseLock: async (params: SessionsReleaseLockRequest): Promise<SessionsReleaseLockResult> =>
-                connection.sendRequest("sessions.releaseLock", params),
-            /**
-             * Backfills missing summary and context fields on the supplied session metadata records.
-             *
-             * @param params Session metadata records to enrich with summary and context information.
-             *
-             * @returns The enriched metadata records, with summary and context fields backfilled where available. Sessions confirmed empty and unnamed are omitted.
-             */
-            enrichMetadata: async (params: SessionsEnrichMetadataRequest): Promise<SessionEnrichMetadataResult> =>
-                connection.sendRequest("sessions.enrichMetadata", params),
-            /**
-             * Reloads user, plugin, and (optionally) repo hooks on the active session.
-             *
-             * @param params Active session ID and an optional flag for deferring repo-level hooks until folder trust.
-             *
-             * @returns Reload all hooks (user, plugin, optionally repo) and apply them to the active session. Call after installing or removing plugins so their hooks take effect immediately. No-op when no active session matches the given sessionId.
-             */
-            reloadPluginHooks: async (params: SessionsReloadPluginHooksRequest): Promise<SessionsReloadPluginHooksResult> =>
-                connection.sendRequest("sessions.reloadPluginHooks", params),
-            /**
-             * Loads previously-deferred repo-level hooks on the active session, returning queued startup prompts.
-             *
-             * @param params Active session ID whose deferred repo-level hooks should be loaded.
-             *
-             * @returns Queued repo-level startup prompts and the total hook command count after loading.
-             */
-            loadDeferredRepoHooks: async (params: SessionsLoadDeferredRepoHooksRequest): Promise<SessionLoadDeferredRepoHooksResult> =>
-                connection.sendRequest("sessions.loadDeferredRepoHooks", params),
-            /**
-             * Replaces the manager-wide additional plugins registered with the session manager.
-             *
-             * @param params Manager-wide additional plugins to register; replaces any previously-configured set.
-             *
-             * @returns Replace the manager-wide additional plugins. New session creations and subsequent hook reloads see the new set; already-running sessions keep their existing hook installation until the next reload.
-             */
-            setAdditionalPlugins: async (params: SessionsSetAdditionalPluginsRequest): Promise<SessionsSetAdditionalPluginsResult> =>
-                connection.sendRequest("sessions.setAdditionalPlugins", params),
-            /**
-             * Attaches the runtime-managed remote-control singleton to a session, awaiting initial setup. If remote control is already attached to a different session, the singleton is transferred (preserving the underlying Mission Control connection). Returns the final status.
-             *
-             * @param params Parameters for attaching the remote-control singleton to a session.
-             *
-             * @returns Wrapper for the singleton's current status.
-             */
-            startRemoteControl: async (params: SessionsStartRemoteControlRequest): Promise<RemoteControlStatusResult> =>
-                connection.sendRequest("sessions.startRemoteControl", params),
-            /**
-             * Atomically rebinds the remote-control singleton to a different session, preserving the underlying Mission Control connection. When `expectedFromSessionId` is provided and does not match the singleton's current `attachedSessionId`, the transfer is rejected with `transferred: false` and the current status is returned unchanged.
-             *
-             * @param params Parameters for atomically rebinding the remote-control singleton.
-             *
-             * @returns Outcome of a transferRemoteControl call.
-             */
-            transferRemoteControl: async (params: SessionsTransferRemoteControlRequest): Promise<RemoteControlTransferResult> =>
-                connection.sendRequest("sessions.transferRemoteControl", params),
-            /**
-             * Patches the steering state of the active remote-control singleton. When remote control is off, this is a no-op and the off status is returned. Today only `enabled: true` is actionable on the underlying exporter; passing `false` is reserved for future use.
-             *
-             * @param params Patch for the singleton's steering state.
-             *
-             * @returns Wrapper for the singleton's current status.
-             */
-            setRemoteControlSteering: async (params: SessionsSetRemoteControlSteeringRequest): Promise<RemoteControlStatusResult> =>
-                connection.sendRequest("sessions.setRemoteControlSteering", params),
-            /**
-             * Stops the remote-control singleton. When `expectedSessionId` is provided and does not match the singleton's current `attachedSessionId`, the stop is rejected with `stopped: false` and the current status is returned unchanged (unless `force` is set, in which case the singleton is unconditionally torn down).
-             *
-             * @param params Parameters for stopping the remote-control singleton.
-             *
-             * @returns Outcome of a stopRemoteControl call.
-             */
-            stopRemoteControl: async (params: SessionsStopRemoteControlRequest): Promise<RemoteControlStopResult> =>
-                connection.sendRequest("sessions.stopRemoteControl", params),
-            /**
-             * Returns the current state of the remote-control singleton, including the attached session id and frontend URL when active.
-             *
-             * @returns Wrapper for the singleton's current status.
-             */
-            getRemoteControlStatus: async (): Promise<RemoteControlStatusResult> =>
-                connection.sendRequest("sessions.getRemoteControlStatus", {}),
-        },
-        /** @experimental */
         shell: {
             /**
              * Filters the supplied host environment with the runtime's mandatory interactive-shell credential and telemetry exclusions, adds Git hardening, and removes any extra names the host supplies. An IDE terminal host or an in-process CLI uses this before launching an inherited terminal. The result derives only from the caller's supplied environment, never the runtime process environment.
@@ -57573,6 +60117,337 @@ export function createServerRpc(connection: MessageConnection) {
  */
 export function createInternalServerRpc(connection: MessageConnection) {
     return {
+        /** @experimental */
+        plugins: {
+            /** @experimental */
+            policy: {
+                /**
+                 * Resolves plugin policy through the original connection's credential owner and retains the effective managed settings layers.
+                 *
+                 * @param params Resolves plugin policy through the requesting connection's original credential owner.
+                 *
+                 * @returns Resolved plugin policy and authoritative failure posture. Fresh successful resolutions retain the original policy layers for mutation guards; cache-only inspection never changes retained policy.
+                 */
+                resolveForInvocation: async (params: PluginPolicyResolveInvocationRequest): Promise<PluginPolicyResolveInvocationResult> =>
+                    connection.sendRequest("plugins.policy.resolveForInvocation", params),
+            },
+            /**
+             * Lists plugin inventory with invocation settings and policy without changing the existing plugin list operation.
+             *
+             * @param params Inspects persisted and live plugins under an explicit effective configuration without changing the existing user-only plugins.list API.
+             *
+             * @returns Persisted, live, built-in, and host-directory plugins with canonical shadowing and scan diagnostics.
+             */
+            inspectInventory: async (params: PluginInspectInventoryRequest): Promise<PluginInvocationInventoryResult> =>
+                connection.sendRequest("plugins.inspectInventory", params),
+            /** @experimental */
+            builtin: {
+                /**
+                 * Discovers bundled plugins through the installed distribution resolver and authoritative manifest scanner.
+                 *
+                 * @param params Locates bundled plugin manifests relative to one installed host directory.
+                 *
+                 * @returns Bundled plugin records and diagnostics from the original manifest scanner.
+                 */
+                discover: async (params: PluginBuiltinDiscoverRequest): Promise<PluginBuiltinDiscoverResult> =>
+                    connection.sendRequest("plugins.builtin.discover", params),
+                /**
+                 * Resolves bundled Browser activation from managed-over-user whole-plugin policy through this connection's original credential owner. Preserves policy-helper and forced-refresh failures and the existing two-second inspection budget.
+                 *
+                 * @param params Resolve managed Browser activation through the connection's original credential owner.
+                 *
+                 * @returns Browser activation after the managed-over-user whole-plugin policy.
+                 */
+                resolveActivation: async (params: PluginsBuiltinResolveActivationRequest): Promise<PluginsBuiltinResolveActivationResult> =>
+                    connection.sendRequest("plugins.builtin.resolveActivation", params),
+            },
+            /** @experimental */
+            sources: {
+                /**
+                 * Resolves persisted, explicit, and trusted live plugins with runtime-owned managed policy. Live records remain separate from persisted installations.
+                 *
+                 * @param params Resolves active plugin sources with runtime-owned folder trust and managed policy.
+                 *
+                 * @returns Active plugins and the separate persisted inventory, without persisting live directory records.
+                 */
+                resolve: async (params: PluginSourcesResolveRequest): Promise<PluginSourcesResolveResult> =>
+                    connection.sendRequest("plugins.sources.resolve", params),
+            },
+        },
+        /** @experimental */
+        skills: {
+            /** @experimental */
+            resources: {
+                /**
+                 * Loads standalone skill records and diagnostics with explicit host settings, workspace paths, and plugin sources.
+                 *
+                 * @param params Loads full local skill records, including disabled records and command metadata.
+                 *
+                 * @returns Full local skill inventory and report-and-ignore source diagnostics.
+                 */
+                discover: async (params: SkillResourceDiscoverRequest): Promise<SkillResourceDiscoverResult> =>
+                    connection.sendRequest("skills.resources.discover", params),
+                /**
+                 * Registers a skill directory or installs a local or HTTPS definition through the original runtime owner.
+                 *
+                 * @param params Registers a skill directory or installs a local or HTTPS skill definition.
+                 *
+                 * @returns The persisted result of a skill source installation.
+                 */
+                install: async (params: SkillResourceInstallRequest): Promise<SkillResourceInstallResult> =>
+                    connection.sendRequest("skills.resources.install", params),
+                /**
+                 * Removes a personal or project skill or unregisters a directory with the existing scoped removal rules.
+                 *
+                 * @param params Removes a personal or project skill, or unregisters a custom directory.
+                 *
+                 * @returns The completed skill removal, with conservative disabled-state cleanup.
+                 */
+                remove: async (params: SkillResourceRemoveRequest): Promise<SkillResourceRemoveResult> =>
+                    connection.sendRequest("skills.resources.remove", params),
+                /**
+                 * Atomically changes one user's skill disable entry under explicit host settings paths.
+                 *
+                 * @param params Atomically changes only one user's disabled skill entry under explicit host paths.
+                 */
+                setEnabled: async (params: SkillResourceSetEnabledRequest): Promise<void> =>
+                    connection.sendRequest("skills.resources.setEnabled", params),
+            },
+        },
+        /** @experimental */
+        account: {
+            /**
+             * Runs a connection-owned interactive account login through the original process authentication handle, preserving device and browser flows, policy, persistence, and cancellation.
+             *
+             * @param params A pre-session login action. Every action after open retains the same credential and persistence owner.
+             *
+             * @returns The result of one connection-owned pre-session login action.
+             */
+            loginProcess: async (params: AccountLoginProcessRequest): Promise<AccountLoginProcessResult> =>
+                connection.sendRequest("account.loginProcess", params),
+            /**
+             * Renders the sign-in banner and the one-line account description the runtime uses for an authentication identity. The runtime words these in several places for its own callers, so a host that announces a sign-in or an account switch should render them from here rather than composing its own, which would let the two spellings drift apart.
+             *
+             * @param params The authentication identity whose shared wording should be rendered.
+             *
+             * @returns The wording the runtime uses for an authentication identity.
+             */
+            describeAuthInfo: async (params: AccountDescribeAuthInfoRequest): Promise<AccountDescribeAuthInfoResult> =>
+                connection.sendRequest("account.describeAuthInfo", params),
+            /**
+             * Reports whether the supplied identity can create gists. Gists are unavailable on GitHub Enterprise Cloud with data residency, and to Enterprise Managed Users on github.com, so a host that offers gist actions should hide or disable them when this reports no support.
+             *
+             * @param params The authentication identity whose gist support should be reported.
+             *
+             * @returns Whether the identity can create gists, and why not when it cannot.
+             */
+            getGistSupport: async (params: AccountGetGistSupportRequest): Promise<AccountGetGistSupportResult> =>
+                connection.sendRequest("account.getGistSupport", params),
+            /**
+             * Resolves a path on the identity's GitHub host into an absolute URL. A bound host can instead select its live credential owner with authOwnerId; this form rejects extensions, foreign owners, and a simultaneous identity. Falls back to the public host only when neither identity nor authOwnerId is supplied.
+             *
+             * @param params A path to resolve against the selected GitHub host.
+             *
+             * @returns An absolute URL on the selected GitHub host.
+             */
+            getWebUrl: async (params: AccountGetWebUrlRequest): Promise<AccountGetWebUrlResult> =>
+                connection.sendRequest("account.getWebUrl", params),
+            /**
+             * Names the environment variable supplying a classic personal access token, if one is set. A classic token cannot be upgraded in place, so a host that finds one should tell the user which variable to unset rather than starting an interactive sign-in that the variable would override.
+             *
+             * @returns The environment variable supplying a classic personal access token, when one is set.
+             */
+            getTokenEnvVar: async (): Promise<AccountGetTokenEnvVarResult> =>
+                connection.sendRequest("account.getTokenEnvVar", {}),
+            /**
+             * Enrolls the supplied identity in Copilot Free. A host offers this when a signed-in user has no Copilot subscription, so that signing up does not mean leaving for a browser. The runtime resolves the identity's credential itself, so the caller sends none. Read `kind` before `status`: an identity whose credential cannot be resolved answers `no-token` rather than failing the call, because that asks the user to sign in again rather than reporting that enrollment broke. Enrolling an already-enrolled account succeeds and reports `already_subscribed`. This does not refresh the caller's cached account state; a host that shows subscription status should re-read it afterwards.
+             *
+             * @param params The authentication identity to enroll in Copilot Free.
+             *
+             * @returns What came of a Copilot Free enrollment attempt.
+             */
+            subscribeCopilotFree: async (params: AccountSubscribeCopilotFreeRequest): Promise<AccountSubscribeCopilotFreeResult> =>
+                connection.sendRequest("account.subscribeCopilotFree", params),
+            /**
+             * Resolves the base URL of the GitHub host from its configured names, normalizing a bare hostname into an `https://` URL and falling back to the public github.com host when neither name is set. Unlike `account.getWebUrl` this needs no identity, so a host can reach it before anyone has signed in -- which is when an enterprise instance must already be known.
+             *
+             * @param params Configured names of the GitHub host to resolve.
+             *
+             * @returns Absolute base URL of the GitHub host.
+             */
+            getHostUrl: async (params: AccountGetHostUrlRequest): Promise<AccountGetHostUrlResult> =>
+                connection.sendRequest("account.getHostUrl", params),
+        },
+        /** @experimental */
+        sessions: {
+            /**
+             * Validates an explicit session name with the canonical session naming rules and returns an optional error.
+             *
+             * @param params A friendly name to validate before a session mutation.
+             *
+             * @returns The shared session-name policy decision.
+             */
+            validateName: async (params: SessionsValidateNameRequest): Promise<SessionsValidateNameResult> =>
+                connection.sendRequest("sessions.validateName", params),
+            /**
+             * Validates semantic session JSONL and imports canonical events into a fresh local session with rollback. Dry runs perform no authentication, network calls, or writes.
+             *
+             * @param params Semantic conversation input for local import or validation.
+             *
+             * @returns Semantic session import outcome.
+             */
+            importSemantic: async (params: SessionsImportSemanticRequest): Promise<SessionsImportSemanticResult> =>
+                connection.sendRequest("sessions.importSemantic", params),
+            /**
+             * Reads lightweight persisted metadata for one local session without opening it.
+             *
+             * @param params Session ID whose persisted metadata should be read.
+             *
+             * @returns Persisted local session metadata when the session exists.
+             */
+            getMetadata: async (params: SessionsGetMetadataRequest): Promise<SessionsGetMetadataResult> =>
+                connection.sendRequest("sessions.getMetadata", params),
+            /**
+             * Lists one step of the signed-in user's Mission Control tasks, including archived tasks, as remote session metadata. Each step follows the task list's `Link: rel="next"` header (falling back to the next page number when there is none) for up to one active and one archived page, and returns a continuation for the next step. HTTP failures are reported in `failure` rather than as an RPC error so callers keep the status, payload and `retryAfterMs`.
+             *
+             * @param params Requests the next step of a Mission Control task listing that follows `Link: rel="next"` pagination.
+             *
+             * @returns One step of a Mission Control task listing: up to one active page and one archived page.
+             */
+            listRemotePage: async (params: SessionsListRemotePageRequest): Promise<SessionsListRemotePageResult> =>
+                connection.sendRequest("sessions.listRemotePage", params),
+            /**
+             * Lists recent local session IDs that contain user-visible history, omitting housekeeping-only sessions.
+             *
+             * @param params Limit for non-empty local session IDs.
+             *
+             * @returns Recent local session IDs that contain user-visible history.
+             */
+            listNonEmptySessionIds: async (params: SessionsListNonEmptySessionIdsRequest): Promise<SessionsListNonEmptySessionIdsResult> =>
+                connection.sendRequest("sessions.listNonEmptySessionIds", params),
+            /**
+             * Computes the absolute path to a session's persisted events.jsonl file. Internal: filesystem paths are only meaningful in-process (CLI and runtime share a filesystem). Currently used by the CLI's contribution-graph feature to read historical events directly. Remote SDK consumers must not depend on this; a proper event-query API would replace it if the contribution graph ever needed to work over the wire.
+             *
+             * @param params Session ID whose event-log file path to compute.
+             *
+             * @returns Absolute path to the session's events.jsonl file on disk.
+             */
+            getEventFilePath: async (params: SessionsGetEventFilePathRequest): Promise<SessionsGetEventFilePathResult> =>
+                connection.sendRequest("sessions.getEventFilePath", params),
+            /**
+             * Returns a session's persisted remote-steerable flag, if any has been recorded. Internal: this is CLI-specific book-keeping used by `--continue` / `--resume` to inherit the prior session's remote-steerable preference. SDK consumers that want similar behavior should manage their own persistence around start/stop calls rather than relying on this runtime-side flag.
+             *
+             * @param params Session ID to look up the persisted remote-steerable flag for.
+             *
+             * @returns The session's persisted remote-steerable flag, or omitted when no value has been persisted.
+             */
+            getPersistedRemoteSteerable: async (params: SessionsGetPersistedRemoteSteerableRequest): Promise<SessionsGetPersistedRemoteSteerableResult> =>
+                connection.sendRequest("sessions.getPersistedRemoteSteerable", params),
+            /**
+             * Deletes one local session from disk after running the same lifecycle hooks as the session manager.
+             *
+             * @param params Session ID to delete from disk.
+             */
+            delete: async (params: SessionsDeleteRequest): Promise<void> =>
+                connection.sendRequest("sessions.delete", params),
+            /**
+             * Creates the workspace record for a session that has not been opened yet. A host that hands a session off to another application — writing the record and then launching that application against the session ID — needs the record on disk before any session exists to carry it, which the session-scoped workspace methods cannot do. Replaces any existing record and resets the checkpoint index. When writing to the local filesystem, a stored `fork_count` survives on disk. Returns the record it built, so a surviving stored `fork_count` can differ from the answer.
+             *
+             * @param params Identity, state location and starting context for a workspace record.
+             *
+             * @returns The workspace record that was written.
+             */
+            createWorkspace: async (params: SessionsCreateWorkspaceRequest): Promise<SessionsCreateWorkspaceResult> =>
+                connection.sendRequest("sessions.createWorkspace", params),
+            /**
+             * Reads a session's workspace record straight from disk, without opening the session. Resuming by session ID has to know where the session lives before it can connect, so the lookup cannot come from the session-scoped workspace methods, which resolve their location from a live session's context. Returns no record when the file is absent.
+             *
+             * @param params Where the session's state lives, as a root directory and the session ID under it.
+             *
+             * @returns The workspace record on disk, omitted when the session has none.
+             */
+            loadWorkspace: async (params: SessionsLoadWorkspaceRequest): Promise<SessionsLoadWorkspaceResult> =>
+                connection.sendRequest("sessions.loadWorkspace", params),
+            /**
+             * Merges fields into a session's workspace record on disk, creating the record when it is absent. The counterpart to `sessions.loadWorkspace`, for the same before-the-session-exists case. It preserves stored workspace-schema fields the request does not supply, does not preserve stored keys outside the workspace schema, and never replaces a stored `fork_count`.
+             *
+             * @param params Where the session's state lives, plus workspace-schema fields to merge into its workspace record. Stored keys outside the schema are not preserved, and a stored `fork_count` is never replaced.
+             *
+             * @returns The merge completed. The record carries the supplied workspace-schema fields, but a stored `fork_count` stays.
+             */
+            updateWorkspaceFields: async (params: SessionsUpdateWorkspaceFieldsRequest): Promise<SessionsUpdateWorkspaceFieldsResult> =>
+                connection.sendRequest("sessions.updateWorkspaceFields", params),
+            /**
+             * Gets the dynamic-context board entry count associated with a session, when available. Internal: this exists solely so CLI telemetry events (`rem_spawn_gate`, `rem_consolidation_complete`) can pair START / END board counts around the detached rem-agent spawn. "Dynamic context board" is a runtime-internal concept that is not part of the public SDK contract; the long-term plan is to relocate the telemetry emission into the runtime so this method can be deleted entirely.
+             *
+             * @param params Session ID whose board entry count should be returned.
+             *
+             * @returns Dynamic-context board entry count, when available.
+             */
+            getBoardEntryCount: async (params: SessionsGetBoardEntryCountRequest): Promise<SessionsGetBoardEntryCountResult> =>
+                connection.sendRequest("sessions.getBoardEntryCount", params),
+            /**
+             * Attaches (or detaches) an in-process ExtensionController delegate for the given session in a local host adapter. Pass `controller: undefined` to detach. Internal because the controller cannot cross the JSON-RPC boundary; the runtime manages its own session extension service.
+             *
+             * @param params Params to attach or detach an in-process ExtensionController delegate.
+             */
+            configureSessionExtensions: async (params: ConfigureSessionExtensionsParams): Promise<void> =>
+                connection.sendRequest("sessions.configureSessionExtensions", params),
+            /** @experimental */
+            forgeProposals: {
+                /**
+                 * Reads a Forge proposal's before-generation capture from the canonical store owned by the configured runtime host. The request cannot select a database.
+                 *
+                 * @param params Proposal identifier whose before-generation capture is requested.
+                 *
+                 * @returns Stored before-generation capture, or null when no capture exists.
+                 */
+                workspaceBefore: async (params: SessionsForgeProposalsWorkspaceBeforeRequest): Promise<SessionsForgeProposalsWorkspaceBeforeResult> =>
+                    connection.sendRequest("sessions.forgeProposals.workspaceBefore", params),
+                /**
+                 * Reconciles a generated artifact with canonical Forge proposals. Reuses a ready or reviewing fingerprint, completes an eligible generation, or creates and completes an on-demand generation. Existing store transitions retain their transaction and persisted compatibility semantics. SDK skill-review clients can use the same canonical lifecycle without implementing another store.
+                 *
+                 * @param params Reconciles a generated artifact with the configured canonical store.
+                 *
+                 * @returns Existing ready proposal or completed generation; null for an ineligible automatic generation.
+                 */
+                reconcile: async (params: SessionsForgeProposalsReconcileRequest): Promise<SessionsForgeProposalsReconcileResult> =>
+                    connection.sendRequest("sessions.forgeProposals.reconcile", params),
+                /**
+                 * Marks stale generating proposals failed in the configured canonical store. The runtime clock and existing store transition own the cutoff and persisted update.
+                 *
+                 * @param params Fails stale generations in one canonical proposal scope.
+                 *
+                 * @returns Number of generations that the canonical store marked failed.
+                 */
+                failStale: async (params: SessionsForgeProposalsFailStaleRequest): Promise<SessionsForgeProposalsFailStaleResult> =>
+                    connection.sendRequest("sessions.forgeProposals.failStale", params),
+            },
+        },
+        /** @experimental */
+        memories: {
+            /**
+             * Validates and imports semantic memory JSONL through original-owner credentials and scoped runtime sessions. Preserves account policy and conflicts. Dry runs perform no authentication, network calls, or writes.
+             *
+             * @param params Memory import input. Authentication remains bound to the calling runtime owner.
+             *
+             * @returns Semantic memory import outcome.
+             */
+            importSemantic: async (params: MemoriesImportSemanticRequest): Promise<MemoriesImportSemanticResult> =>
+                connection.sendRequest("memories.importSemantic", params),
+        },
+        /** @experimental */
+        secrets: {
+            /**
+             * Redacts host output with the runtime's current secret sources, including when SDK-managed secret registration is disabled. Extensions cannot call this method. Does not retain the input.
+             *
+             * @param params Content to redact with the runtime's process filter.
+             *
+             * @returns Content after runtime-owned redaction.
+             */
+            filterForHost: async (params: SecretsFilterForHostRequest): Promise<SecretsFilterForHostResult> =>
+                connection.sendRequest("secrets.filterForHost", params),
+        },
         /** @experimental */
         git: {
             /**
@@ -58326,16 +61201,18 @@ export function createInternalServerRpc(connection: MessageConnection) {
                 getPath: async (): Promise<UserSettingsPathResult> =>
                     connection.sendRequest("user.settings.getPath", {}),
                 /**
-                 * Reads the user's stored settings together with the diagnostic raised while reading them. This is `user.settings.loadForConfigDir` without a `configDir` plus the reason part of the document was ignored: that one answers the document alone, so a caller cannot tell a clean read from a salvaged one. Read this when the caller is about to write the file back, where accepting a partial parse would discard every value the loader could not read. The settings that did load are still reported alongside the warning, so a consumer may surface it and continue instead of failing.
+                 * Reads stored settings together with parser diagnostics. Omit context to keep the server's paths and hook environment. An optional trusted-host context selects both instead. The settings that did load remain available alongside the warning, so a consumer can report a partial read without discarding its result.
+                 *
+                 * @param params Selects an optional trusted-host context for settings and parser diagnostics.
                  *
                  * @returns The user's stored settings, together with any diagnostic raised while reading them.
                  * @param options Select "exact" to preserve unsafe integers as bigint. Ordinary reads reject unsafe integers.
                  */
                 loadWithWarning: (() => {
-                    function read<Mode extends "json" | "exact">(options: SettingsResponseOptions<Mode>): Promise<SettingsResponse<UserSettingsLoadWithWarningResult, Mode>>;
-                    function read(options?: SettingsResponseOptions<"json">): Promise<UserSettingsLoadWithWarningResult>;
-                    async function read(...[options]: [SettingsResponseOptions<"json" | "exact">?]): Promise<SettingsResponse<UserSettingsLoadWithWarningResult, "json" | "exact">> {
-                        return connection.sendRequest("user.settings.loadWithWarning", settingsResponseParams({}, options));
+                    function read<Mode extends "json" | "exact">(params: UserSettingsLoadWithWarningRequest | undefined, options: SettingsResponseOptions<Mode>): Promise<SettingsResponse<UserSettingsLoadWithWarningResult, Mode>>;
+                    function read(params?: UserSettingsLoadWithWarningRequest, options?: SettingsResponseOptions<"json">): Promise<UserSettingsLoadWithWarningResult>;
+                    async function read(params?: UserSettingsLoadWithWarningRequest, ...[options]: [SettingsResponseOptions<"json" | "exact">?]): Promise<SettingsResponse<UserSettingsLoadWithWarningResult, "json" | "exact">> {
+                        return connection.sendRequest("user.settings.loadWithWarning", settingsResponseParams(params ?? {}, options));
                     }
                     return read;
                 })(),
@@ -58449,7 +61326,7 @@ export function createInternalServerRpc(connection: MessageConnection) {
                 listGovernanceKeys: async (): Promise<UserSettingsGovernanceKeysResult> =>
                     connection.sendRequest("user.settings.listGovernanceKeys", {}),
                 /**
-                 * Atomically edits one canonical user setting inside its settings-file lock. Reads, canonicalizes touched aliases, applies the edit, validates the resulting top-level setting and writes before releasing the lock. An explicit autoUpdatesChannel set completes the staff migration in the same transaction. Only a malformed existing file returns `invalid`; refused keys, invalid values and I/O errors reject the call.
+                 * Atomically edits one canonical user setting inside its settings-file lock. Reads, canonicalizes touched aliases, applies the edit, validates the resulting top-level setting and writes before releasing the lock. An explicit autoUpdatesChannel set completes the staff migration in the same transaction. Only a malformed existing file returns `invalid`; refused keys, invalid values and I/O errors reject the call. Optional trusted-host context selects paths and hook environment; configDir and context cannot be combined.
                  *
                  * @param params One atomic edit of a canonical setting in settings.json.
                  *
@@ -58545,7 +61422,7 @@ export function createInternalServerRpc(connection: MessageConnection) {
                     return read;
                 })(),
                 /**
-                 * Validates one top-level setting subtree without writing it, reporting each problem with the path it applies to. Scoped to a single top-level key on purpose: validating the whole file would reject an edit whenever an unrelated pre-existing field is malformed, locking the user out of the very tool that could fix it.
+                 * Validates one top-level setting subtree without writing it, reporting each problem with the path it applies to. Scoped to a single top-level key on purpose: validating the whole file would reject an edit whenever an unrelated pre-existing field is malformed, locking the user out of the very tool that could fix it. Optional trusted-host context supplies the hook environment; omission keeps the existing process defaults.
                  *
                  * @param params A single top-level setting subtree to validate.
                  *
@@ -58553,6 +61430,42 @@ export function createInternalServerRpc(connection: MessageConnection) {
                  */
                 validate: async (params: UserSettingsValidateRequest): Promise<UserSettingsValidateResult> =>
                     connection.sendRequest("user.settings.validate", params),
+                /**
+                 * Reads advisory repository-owned resource disables under explicit host paths and persisted workspace trust.
+                 *
+                 * @param params Reads only the trusted repository contribution to one resource disable list.
+                 *
+                 * @returns The advisory repository disable list. A read failure returns no names and a diagnostic, rather than blocking a listing or mutation.
+                 */
+                repositoryDisabledNames: async (params: RepositoryDisabledNamesRequest): Promise<RepositoryDisabledNamesResult> =>
+                    connection.sendRequest("user.settings.repositoryDisabledNames", params),
+                /**
+                 * Reads contextual user settings with the trusted repository overlay for one working directory.
+                 *
+                 * @param params Reads a contextual user document with trusted repository settings for one working directory.
+                 *
+                 * @returns The normalized user document with trusted repository settings.
+                 */
+                loadForWorkingDirectory: async (params: UserSettingsForWorkingDirectoryRequest): Promise<UserSettingsLoadForWorkingDirectoryResult> =>
+                    connection.sendRequest("user.settings.loadForWorkingDirectory", params),
+                /**
+                 * Atomically writes and deletes top-level settings keys without replacing unrelated stored values or malformed documents.
+                 *
+                 * @param params An atomic set of top-level settings updates that preserves unrelated stored values.
+                 *
+                 * @returns Reports whether the atomic update succeeded or the existing document was invalid.
+                 */
+                writeKeys: async (params: UserSettingsWriteKeysRequest): Promise<UserSettingsWriteKeysResult> =>
+                    connection.sendRequest("user.settings.writeKeys", params),
+                /**
+                 * Atomically returns or creates the AHP environment compute identity under the explicit host settings context.
+                 *
+                 * @param params Selects the settings document and hook environment for an explicit host.
+                 *
+                 * @returns The persisted AHP environment compute identity.
+                 */
+                getOrCreateAhpEnvironmentComputeId: async (params: UserSettingsForContextRequest): Promise<UserSettingsGetOrCreateAhpEnvironmentComputeIdResult> =>
+                    connection.sendRequest("user.settings.getOrCreateAhpEnvironmentComputeId", params),
             },
         },
         /** @experimental */
@@ -58866,62 +61779,37 @@ export function createInternalServerRpc(connection: MessageConnection) {
             },
         },
         /** @experimental */
-        account: {
-            /**
-             * Renders the sign-in banner and the one-line account description the runtime uses for an authentication identity. The runtime words these in several places for its own callers, so a host that announces a sign-in or an account switch should render them from here rather than composing its own, which would let the two spellings drift apart.
-             *
-             * @param params The authentication identity whose shared wording should be rendered.
-             *
-             * @returns The wording the runtime uses for an authentication identity.
-             */
-            describeAuthInfo: async (params: AccountDescribeAuthInfoRequest): Promise<AccountDescribeAuthInfoResult> =>
-                connection.sendRequest("account.describeAuthInfo", params),
-            /**
-             * Reports whether the supplied identity can create gists. Gists are unavailable on GitHub Enterprise Cloud with data residency, and to Enterprise Managed Users on github.com, so a host that offers gist actions should hide or disable them when this reports no support.
-             *
-             * @param params The authentication identity whose gist support should be reported.
-             *
-             * @returns Whether the identity can create gists, and why not when it cannot.
-             */
-            getGistSupport: async (params: AccountGetGistSupportRequest): Promise<AccountGetGistSupportResult> =>
-                connection.sendRequest("account.getGistSupport", params),
-            /**
-             * Resolves a path on the identity's GitHub host into an absolute URL. A bound host can instead select its live credential owner with authOwnerId; this form rejects extensions, foreign owners, and a simultaneous identity. Falls back to the public host only when neither identity nor authOwnerId is supplied.
-             *
-             * @param params A path to resolve against the selected GitHub host.
-             *
-             * @returns An absolute URL on the selected GitHub host.
-             */
-            getWebUrl: async (params: AccountGetWebUrlRequest): Promise<AccountGetWebUrlResult> =>
-                connection.sendRequest("account.getWebUrl", params),
-            /**
-             * Names the environment variable supplying a classic personal access token, if one is set. A classic token cannot be upgraded in place, so a host that finds one should tell the user which variable to unset rather than starting an interactive sign-in that the variable would override.
-             *
-             * @returns The environment variable supplying a classic personal access token, when one is set.
-             */
-            getTokenEnvVar: async (): Promise<AccountGetTokenEnvVarResult> =>
-                connection.sendRequest("account.getTokenEnvVar", {}),
-            /**
-             * Enrolls the supplied identity in Copilot Free. A host offers this when a signed-in user has no Copilot subscription, so that signing up does not mean leaving for a browser. The runtime resolves the identity's credential itself, so the caller sends none. Read `kind` before `status`: an identity whose credential cannot be resolved answers `no-token` rather than failing the call, because that asks the user to sign in again rather than reporting that enrollment broke. Enrolling an already-enrolled account succeeds and reports `already_subscribed`. This does not refresh the caller's cached account state; a host that shows subscription status should re-read it afterwards.
-             *
-             * @param params The authentication identity to enroll in Copilot Free.
-             *
-             * @returns What came of a Copilot Free enrollment attempt.
-             */
-            subscribeCopilotFree: async (params: AccountSubscribeCopilotFreeRequest): Promise<AccountSubscribeCopilotFreeResult> =>
-                connection.sendRequest("account.subscribeCopilotFree", params),
-            /**
-             * Resolves the base URL of the GitHub host from its configured names, normalizing a bare hostname into an `https://` URL and falling back to the public github.com host when neither name is set. Unlike `account.getWebUrl` this needs no identity, so a host can reach it before anyone has signed in -- which is when an enterprise instance must already be known.
-             *
-             * @param params Configured names of the GitHub host to resolve.
-             *
-             * @returns Absolute base URL of the GitHub host.
-             */
-            getHostUrl: async (params: AccountGetHostUrlRequest): Promise<AccountGetHostUrlResult> =>
-                connection.sendRequest("account.getHostUrl", params),
-        },
-        /** @experimental */
         mcp: {
+            /** @experimental */
+            config: {
+                /**
+                 * Validates and composes additional MCP documents in precedence order without modifying persisted configuration.
+                 *
+                 * @param params Validates and combines additional MCP documents in source order.
+                 *
+                 * @returns Validated additional MCP servers in source precedence order. Runtime-owned filtering remains outside the serialized document.
+                 */
+                composeAdditional: async (params: McpConfigComposeAdditionalRequest): Promise<McpConfigComposeAdditionalResult> =>
+                    connection.sendRequest("mcp.config.composeAdditional", params),
+                /**
+                 * Reads fresh persisted user MCP server names under an explicit configuration root, including invalid entries but excluding installation-owned entries. Leaves the validated cache unchanged and requires a trusted host or direct SDK caller.
+                 *
+                 * @param params Selects an explicit user MCP configuration root without changing the connection owner.
+                 *
+                 * @returns Fresh user MCP server names, including invalid entries but excluding installation-owned entries. This read does not change the validated configuration cache.
+                 */
+                userServerNamesForConfigDir: async (params: McpConfigForConfigDirRequest): Promise<McpConfigUserServerNamesResult> =>
+                    connection.sendRequest("mcp.config.userServerNamesForConfigDir", params),
+                /**
+                 * Composes explicit MCP source inventories through the shared loader, including trusted workspace and on-device sources. This read-only result grants no execution authority.
+                 *
+                 * @param params Read-only MCP configuration composition from explicit source inventories. The result grants no execution authority.
+                 *
+                 * @returns The composed MCP configuration and all omitted-source diagnostics.
+                 */
+                mergeSources: async (params: McpConfigMergeSourcesRequest): Promise<McpConfigMergeSourcesResult> =>
+                    connection.sendRequest("mcp.config.mergeSources", params),
+            },
             /** @experimental */
             registry: {
                 /**
@@ -59013,6 +61901,30 @@ export function createInternalServerRpc(connection: MessageConnection) {
                  */
                 isMicrosoftAuthorizationServer: async (params: McpOauthIsMicrosoftAuthorizationServerRequest): Promise<McpOauthIsMicrosoftAuthorizationServerResult> =>
                     connection.sendRequest("mcp.oauth.isMicrosoftAuthorizationServer", params),
+            },
+            /** @experimental */
+            github: {
+                /**
+                 * Resolves a secret-free built-in GitHub MCP descriptor through this connection's original credential owner. Preserves invocation tool overrides, shell filters, Azure DevOps narrowing, and cached GitHub IQ selection within the existing two-second inspection budget. Does not start an MCP connection.
+                 *
+                 * @param params Resolve the authentication-derived built-in without a session or MCP connection.
+                 *
+                 * @returns A secret-free GitHub descriptor, an ordinary signed-out result, or a bounded degraded result.
+                 */
+                resolveForInvocation: async (params: McpGitHubResolveForInvocationRequest): Promise<McpGitHubResolveForInvocationResult> =>
+                    connection.sendRequest("mcp.github.resolveForInvocation", params),
+            },
+            /** @experimental */
+            computerUse: {
+                /**
+                 * Applies the runtime host's existing Computer Use platform overlay to a complete MCP server map and effective disabled list. Preserves configuration and provenance outside that overlay and starts no server.
+                 *
+                 * @param params Apply the host's Computer Use platform overlay without starting a server.
+                 *
+                 * @returns Effective configuration after the existing platform overlay.
+                 */
+                applyConfiguration: async (params: McpComputerUseApplyConfigurationRequest): Promise<McpComputerUseApplyConfigurationResult> =>
+                    connection.sendRequest("mcp.computerUse.applyConfiguration", params),
             },
         },
         /** @experimental */
@@ -59206,134 +62118,6 @@ export function createInternalServerRpc(connection: MessageConnection) {
              */
             openBrowser: async (params: RuntimeOpenBrowserRequest): Promise<void> =>
                 connection.sendRequest("runtime.openBrowser", params),
-        },
-        /** @experimental */
-        sessions: {
-            /**
-             * Reads lightweight persisted metadata for one local session without opening it.
-             *
-             * @param params Session ID whose persisted metadata should be read.
-             *
-             * @returns Persisted local session metadata when the session exists.
-             */
-            getMetadata: async (params: SessionsGetMetadataRequest): Promise<SessionsGetMetadataResult> =>
-                connection.sendRequest("sessions.getMetadata", params),
-            /**
-             * Lists one step of the signed-in user's Mission Control tasks, including archived tasks, as remote session metadata. Each step follows the task list's `Link: rel="next"` header (falling back to the next page number when there is none) for up to one active and one archived page, and returns a continuation for the next step. HTTP failures are reported in `failure` rather than as an RPC error so callers keep the status, payload and `retryAfterMs`.
-             *
-             * @param params Requests the next step of a Mission Control task listing that follows `Link: rel="next"` pagination.
-             *
-             * @returns One step of a Mission Control task listing: up to one active page and one archived page.
-             */
-            listRemotePage: async (params: SessionsListRemotePageRequest): Promise<SessionsListRemotePageResult> =>
-                connection.sendRequest("sessions.listRemotePage", params),
-            /**
-             * Lists recent local session IDs that contain user-visible history, omitting housekeeping-only sessions.
-             *
-             * @param params Limit for non-empty local session IDs.
-             *
-             * @returns Recent local session IDs that contain user-visible history.
-             */
-            listNonEmptySessionIds: async (params: SessionsListNonEmptySessionIdsRequest): Promise<SessionsListNonEmptySessionIdsResult> =>
-                connection.sendRequest("sessions.listNonEmptySessionIds", params),
-            /**
-             * Computes the absolute path to a session's persisted events.jsonl file. Internal: filesystem paths are only meaningful in-process (CLI and runtime share a filesystem). Currently used by the CLI's contribution-graph feature to read historical events directly. Remote SDK consumers must not depend on this; a proper event-query API would replace it if the contribution graph ever needed to work over the wire.
-             *
-             * @param params Session ID whose event-log file path to compute.
-             *
-             * @returns Absolute path to the session's events.jsonl file on disk.
-             */
-            getEventFilePath: async (params: SessionsGetEventFilePathRequest): Promise<SessionsGetEventFilePathResult> =>
-                connection.sendRequest("sessions.getEventFilePath", params),
-            /**
-             * Returns a session's persisted remote-steerable flag, if any has been recorded. Internal: this is CLI-specific book-keeping used by `--continue` / `--resume` to inherit the prior session's remote-steerable preference. SDK consumers that want similar behavior should manage their own persistence around start/stop calls rather than relying on this runtime-side flag.
-             *
-             * @param params Session ID to look up the persisted remote-steerable flag for.
-             *
-             * @returns The session's persisted remote-steerable flag, or omitted when no value has been persisted.
-             */
-            getPersistedRemoteSteerable: async (params: SessionsGetPersistedRemoteSteerableRequest): Promise<SessionsGetPersistedRemoteSteerableResult> =>
-                connection.sendRequest("sessions.getPersistedRemoteSteerable", params),
-            /**
-             * Deletes one local session from disk after running the same lifecycle hooks as the session manager.
-             *
-             * @param params Session ID to delete from disk.
-             */
-            delete: async (params: SessionsDeleteRequest): Promise<void> =>
-                connection.sendRequest("sessions.delete", params),
-            /**
-             * Creates the workspace record for a session that has not been opened yet. A host that hands a session off to another application — writing the record and then launching that application against the session ID — needs the record on disk before any session exists to carry it, which the session-scoped workspace methods cannot do. Replaces any existing record and resets the checkpoint index. When writing to the local filesystem, a stored `fork_count` survives on disk. Returns the record it built, so a surviving stored `fork_count` can differ from the answer.
-             *
-             * @param params Identity, state location and starting context for a workspace record.
-             *
-             * @returns The workspace record that was written.
-             */
-            createWorkspace: async (params: SessionsCreateWorkspaceRequest): Promise<SessionsCreateWorkspaceResult> =>
-                connection.sendRequest("sessions.createWorkspace", params),
-            /**
-             * Reads a session's workspace record straight from disk, without opening the session. Resuming by session ID has to know where the session lives before it can connect, so the lookup cannot come from the session-scoped workspace methods, which resolve their location from a live session's context. Returns no record when the file is absent.
-             *
-             * @param params Where the session's state lives, as a root directory and the session ID under it.
-             *
-             * @returns The workspace record on disk, omitted when the session has none.
-             */
-            loadWorkspace: async (params: SessionsLoadWorkspaceRequest): Promise<SessionsLoadWorkspaceResult> =>
-                connection.sendRequest("sessions.loadWorkspace", params),
-            /**
-             * Merges fields into a session's workspace record on disk, creating the record when it is absent. The counterpart to `sessions.loadWorkspace`, for the same before-the-session-exists case. It preserves stored workspace-schema fields the request does not supply, does not preserve stored keys outside the workspace schema, and never replaces a stored `fork_count`.
-             *
-             * @param params Where the session's state lives, plus workspace-schema fields to merge into its workspace record. Stored keys outside the schema are not preserved, and a stored `fork_count` is never replaced.
-             *
-             * @returns The merge completed. The record carries the supplied workspace-schema fields, but a stored `fork_count` stays.
-             */
-            updateWorkspaceFields: async (params: SessionsUpdateWorkspaceFieldsRequest): Promise<SessionsUpdateWorkspaceFieldsResult> =>
-                connection.sendRequest("sessions.updateWorkspaceFields", params),
-            /**
-             * Gets the dynamic-context board entry count associated with a session, when available. Internal: this exists solely so CLI telemetry events (`rem_spawn_gate`, `rem_consolidation_complete`) can pair START / END board counts around the detached rem-agent spawn. "Dynamic context board" is a runtime-internal concept that is not part of the public SDK contract; the long-term plan is to relocate the telemetry emission into the runtime so this method can be deleted entirely.
-             *
-             * @param params Session ID whose board entry count should be returned.
-             *
-             * @returns Dynamic-context board entry count, when available.
-             */
-            getBoardEntryCount: async (params: SessionsGetBoardEntryCountRequest): Promise<SessionsGetBoardEntryCountResult> =>
-                connection.sendRequest("sessions.getBoardEntryCount", params),
-            /**
-             * Attaches (or detaches) an in-process ExtensionController delegate for the given session in a local host adapter. Pass `controller: undefined` to detach. Internal because the controller cannot cross the JSON-RPC boundary; the runtime manages its own session extension service.
-             *
-             * @param params Params to attach or detach an in-process ExtensionController delegate.
-             */
-            configureSessionExtensions: async (params: ConfigureSessionExtensionsParams): Promise<void> =>
-                connection.sendRequest("sessions.configureSessionExtensions", params),
-            /** @experimental */
-            forgeProposals: {
-                /**
-                 * Reads a Forge proposal's before-generation capture from the canonical store owned by the configured runtime host. The request cannot select a database.
-                 *
-                 * @param params Proposal identifier whose before-generation capture is requested.
-                 *
-                 * @returns Stored before-generation capture, or null when no capture exists.
-                 */
-                workspaceBefore: async (params: SessionsForgeProposalsWorkspaceBeforeRequest): Promise<SessionsForgeProposalsWorkspaceBeforeResult> =>
-                    connection.sendRequest("sessions.forgeProposals.workspaceBefore", params),
-                /**
-                 * Reconciles a generated artifact with canonical Forge proposals. Reuses a ready or reviewing fingerprint, completes an eligible generation, or creates and completes an on-demand generation. Existing store transitions retain their transaction and persisted compatibility semantics. SDK skill-review clients can use the same canonical lifecycle without implementing another store.
-                 *
-                 * @param params Reconciles a generated artifact with the configured canonical store.
-                 *
-                 * @returns Existing ready proposal or completed generation; null for an ineligible automatic generation.
-                 */
-                reconcile: async (params: SessionsForgeProposalsReconcileRequest): Promise<SessionsForgeProposalsReconcileResult> =>
-                    connection.sendRequest("sessions.forgeProposals.reconcile", params),
-                /**
-                 * Marks stale generating proposals failed in the configured canonical store. The runtime clock and existing store transition own the cutoff and persisted update.
-                 *
-                 * @param params Fails stale generations in one canonical proposal scope.
-                 *
-                 * @returns Number of generations that the canonical store marked failed.
-                 */
-                failStale: async (params: SessionsForgeProposalsFailStaleRequest): Promise<SessionsForgeProposalsFailStaleResult> =>
-                    connection.sendRequest("sessions.forgeProposals.failStale", params),
-            },
         },
         /** @experimental */
         agentRegistry: {
@@ -59598,6 +62382,309 @@ export function createInternalServerRpc(connection: MessageConnection) {
 /** Create typed session-scoped RPC methods. */
 export function createSessionRpc(connection: MessageConnection, sessionId: string) {
     return {
+        /** @experimental */
+        extensions: {
+            /**
+             * Returns the runtime-derived standalone extension admission policy for the session's actual project and managed-settings context. enforcementVersion 1 means this runtime enforces strictPluginOnlyCustomization for executable extensions. Hosts executing independent extension targets must deny standalone targets unless standalone is allowed; plugin_only requires runtime-verified eligible plugin provenance, not a caller-supplied source label or transport bridge. pending is not confirmed absence. Older runtimes return method-not-found and must not be represented as enforcing this restriction. Re-read on managed-settings changes; a snapshot is not a launch authorization token.
+             *
+             * @returns Runtime support and session-context standalone executable extension policy.
+             */
+            getPolicy: async (): Promise<ExtensionManagedPolicy> =>
+                connection.sendRequest("session.extensions.getPolicy", { sessionId }),
+            /**
+             * Lists extensions discovered for the session and their current status.
+             *
+             * @returns Extensions discovered for the session, with their current status.
+             */
+            list: async (): Promise<ExtensionList> =>
+                connection.sendRequest("session.extensions.list", { sessionId }),
+            /**
+             * Enables an extension for the session and persists the preference when the session has a settings store. Hosts synchronizing effective membership should use extensions.reconcile instead.
+             *
+             * @param params Source-qualified extension identifier to enable for the session.
+             */
+            enable: async (params: ExtensionsEnableRequest): Promise<void> =>
+                connection.sendRequest("session.extensions.enable", { ...params, sessionId }),
+            /**
+             * Disables an extension for the session and persists the preference when the session has a settings store. Hosts synchronizing effective membership should use extensions.reconcile instead.
+             *
+             * @param params Source-qualified extension identifier to disable for the session.
+             */
+            disable: async (params: ExtensionsDisableRequest): Promise<void> =>
+                connection.sendRequest("session.extensions.disable", { ...params, sessionId }),
+            /**
+             * Reloads extension definitions and processes for the session.
+             */
+            reload: async (): Promise<void> =>
+                connection.sendRequest("session.extensions.reload", { sessionId }),
+            /**
+             * Host-only reconciliation of authoritative session-effective extension membership and enablement. Refreshes runtime-owned discovery and preferences without persisting settings, installing plugins, or restarting unchanged activations. Returns ExtensionList only after required starts and process/contribution cleanup settle. Success means every stop, cleanup, contribution refresh and revalidation completed; an enabled extension that fails to start does not fail reconciliation and is reported with status failed, so read statuses rather than assuming every enabled extension is running. Takes no caller inventory or overrides. Missing controllers, unready/incomplete discovery, unavailable workspaces, superseded inputs, and other lifecycle failures (including managed-policy launch denials and failed stops or cleanup) are errors, not empty membership. Independently proven revocations may be applied before an error; retry converges without restarting healthy activations. Error data contains lifecycleChangesApplied and code: extension_reconciliation_host_required, extension_reconciliation_unavailable, extension_reconciliation_not_ready, extension_reconciliation_discovery_failed, extension_reconciliation_workspace_unavailable, extension_reconciliation_superseded, or extension_reconciliation_lifecycle_failed. Mark host reconciliation state applied only on success. On older runtimes, method-not-found must not fall back to global discovery and persistent extension disables.
+             *
+             * @returns Extensions discovered for the session, with their current status.
+             */
+            reconcile: async (): Promise<ExtensionList> =>
+                connection.sendRequest("session.extensions.reconcile", { sessionId }),
+            /**
+             * Push attachments into the next user-message turn from an extension. The host should surface them as composer pills and forward them via the next session.send call. Callable only by extension-owned connections.
+             *
+             * @param params Parameters for session.extensions.sendAttachmentsToMessage.
+             */
+            sendAttachmentsToMessage: async (params: SendAttachmentsToMessageParams): Promise<void> =>
+                connection.sendRequest("session.extensions.sendAttachmentsToMessage", { ...params, sessionId }),
+        },
+        /** @experimental */
+        plugins: {
+            /**
+             * Lists globally installed, live, built-in, and enterprise-managed desired plugins using the live session's authoritative account, working directory, and retained managed policy.
+             *
+             * @returns Plugins installed for the session, with their enabled state and version metadata.
+             */
+            list: async (): Promise<PluginList> =>
+                connection.sendRequest("session.plugins.list", { sessionId }),
+            /**
+             * Installs a plugin using the live session's authoritative account, working directory, and retained managed policy.
+             *
+             * @param params Plugin source resolved relative to the session's authoritative working directory.
+             *
+             * @returns Result of installing a plugin.
+             */
+            install: async (params: SessionPluginsInstallRequest): Promise<PluginInstallResult> =>
+                connection.sendRequest("session.plugins.install", { ...params, sessionId }),
+            /**
+             * Uninstalls a plugin when permitted by the live session's retained managed policy.
+             *
+             * @param params Name (or spec) of the plugin to uninstall.
+             */
+            uninstall: async (params: PluginsUninstallRequest): Promise<void> =>
+                connection.sendRequest("session.plugins.uninstall", { ...params, sessionId }),
+            /**
+             * Updates an installed plugin using the live session's authoritative account, working directory, and retained managed policy.
+             *
+             * @param params Name (or spec) of the plugin to update.
+             *
+             * @returns Result of updating a single plugin.
+             */
+            update: async (params: PluginsUpdateRequest): Promise<PluginUpdateResult> =>
+                connection.sendRequest("session.plugins.update", { ...params, sessionId }),
+            /**
+             * Enables installed plugins when permitted by the live session's retained managed policy.
+             *
+             * @param params Plugin names (or specs) to enable in the session's authoritative working directory.
+             */
+            enable: async (params: SessionPluginsEnableRequest): Promise<void> =>
+                connection.sendRequest("session.plugins.enable", { ...params, sessionId }),
+            /**
+             * Disables installed plugins when permitted by the live session's retained managed policy.
+             *
+             * @param params Plugin names (or specs) to disable in the session's authoritative working directory.
+             */
+            disable: async (params: SessionPluginsDisableRequest): Promise<void> =>
+                connection.sendRequest("session.plugins.disable", { ...params, sessionId }),
+            /** @experimental */
+            marketplaces: {
+                /**
+                 * Lists registered and enterprise-managed desired marketplaces using the live session's retained policy.
+                 *
+                 * @returns All registered marketplaces, including built-in defaults.
+                 */
+                list: async (): Promise<MarketplaceListResult> =>
+                    connection.sendRequest("session.plugins.marketplaces.list", { sessionId }),
+                /**
+                 * Adds a marketplace when permitted by the live session's retained managed policy.
+                 *
+                 * @param params Marketplace source and optional working directory for relative-path resolution.
+                 *
+                 * @returns Result of registering a new marketplace.
+                 */
+                add: async (params: PluginsMarketplacesAddRequest): Promise<MarketplaceAddResult> =>
+                    connection.sendRequest("session.plugins.marketplaces.add", { ...params, sessionId }),
+                /**
+                 * Removes a marketplace when permitted by the live session's retained managed policy.
+                 *
+                 * @param params Name of the marketplace to remove and an optional force flag.
+                 *
+                 * @returns Outcome of the remove attempt, including dependent-plugin info when applicable.
+                 */
+                remove: async (params: PluginsMarketplacesRemoveRequest): Promise<MarketplaceRemoveResult> =>
+                    connection.sendRequest("session.plugins.marketplaces.remove", { ...params, sessionId }),
+                /**
+                 * Browses a marketplace resolved through the live session's working directory and retained managed policy.
+                 *
+                 * @param params Name of the marketplace whose plugin catalog to fetch.
+                 *
+                 * @returns Plugins advertised by the marketplace.
+                 */
+                browse: async (params: PluginsMarketplacesBrowseRequest): Promise<MarketplaceBrowseResult> =>
+                    connection.sendRequest("session.plugins.marketplaces.browse", { ...params, sessionId }),
+                /**
+                 * Refreshes marketplaces resolved through the live session's working directory and retained managed policy.
+                 *
+                 * @param params Optional marketplace name; omit to refresh all.
+                 *
+                 * @returns Result of refreshing one or more marketplace catalogs.
+                 */
+                refresh: async (params?: SessionPluginsMarketplacesRefreshRequest): Promise<MarketplaceRefreshResult> =>
+                    connection.sendRequest("session.plugins.marketplaces.refresh", { ...params, sessionId }),
+                /**
+                 * Searches all configured plugin marketplaces using the session's authoritative configuration, credentials, working directory, and managed policy. Returns installation state and partial errors. This is not Agent Finder search.
+                 *
+                 * @param params Searches all configured plugin marketplaces, not the Agent Finder catalog.
+                 *
+                 * @returns Matching plugins across configured marketplaces, with partial failures.
+                 */
+                search: async (params: PluginMarketplaceSearchRequest): Promise<PluginMarketplaceSearchResult> =>
+                    connection.sendRequest("session.plugins.marketplaces.search", { ...params, sessionId }),
+                /**
+                 * Probes a configured marketplace's revision without refreshing or creating its cached checkout.
+                 *
+                 * @param params Identifies a marketplace to probe without refreshing its checkout.
+                 *
+                 * @returns Update availability without installation or checkout mutation. An error means availability is unknown.
+                 */
+                checkUpdate: async (params: PluginMarketplaceCheckUpdateRequest): Promise<PluginUpdateCheckResult> =>
+                    connection.sendRequest("session.plugins.marketplaces.checkUpdate", { ...params, sessionId }),
+            },
+            /**
+             * Reads Team and managed soft plugin defaults for the live session. Does not install plugins or persist user preferences.
+             *
+             * @returns Soft plugin defaults for this session, without persistent user preferences or hard policy.
+             */
+            getDefaults: async (): Promise<SessionPluginDefaults> =>
+                connection.sendRequest("session.plugins.getDefaults", { sessionId }),
+            /**
+             * Compares an installed plugin version with its cached marketplace catalog. Never fetches or refreshes the checkout.
+             *
+             * @param params Identifies a plugin and its configured marketplace without accepting configuration or policy overrides.
+             *
+             * @returns Update availability without installation or checkout mutation. An error means availability is unknown.
+             */
+            checkUpdate: async (params: PluginCheckUpdateRequest): Promise<PluginUpdateCheckResult> =>
+                connection.sendRequest("session.plugins.checkUpdate", { ...params, sessionId }),
+            /**
+             * Reloads the session's plugin set, refreshing MCP servers, custom agents, hooks, and skills cache so SDK-driven changes via `server.plugins.*` take effect immediately.
+             *
+             * @param params Optional flags controlling which side effects the reload performs.
+             */
+            reload: async (params?: SessionPluginsReloadRequest): Promise<void> =>
+                connection.sendRequest("session.plugins.reload", { ...params, sessionId }),
+            /**
+             * Installs or updates the plugins the session's managed settings require now, without waiting for the next automatic attempt after a failure, then reloads plugins. Reports progress and failures with the same `session.info` and `session.warning` events as automatic preparation. Fails when the runtime does not prepare managed plugins for the session.
+             *
+             * @param params Plugins required by the session's managed settings to install or update again.
+             *
+             * @returns Per-plugin outcomes of retrying the plugins required by the session's managed settings.
+             */
+            retryManaged: async (params?: SessionPluginsRetryManagedRequest): Promise<SessionPluginsRetryManagedResult> =>
+                connection.sendRequest("session.plugins.retryManaged", { ...params, sessionId }),
+        },
+        /** @experimental */
+        name: {
+            /**
+             * Gets the session's friendly name.
+             *
+             * @returns The session's friendly name, or null when not yet set.
+             */
+            get: async (): Promise<NameGetResult> =>
+                connection.sendRequest("session.name.get", { sessionId }),
+            /**
+             * Sets the session's friendly name.
+             *
+             * @param params New friendly name to apply to the session.
+             */
+            set: async (params: NameSetRequest): Promise<void> =>
+                connection.sendRequest("session.name.set", { ...params, sessionId }),
+            /**
+             * Persists an auto-generated session summary as the session's name when no user-set name exists.
+             *
+             * @param params Auto-generated session summary to apply as the session's name when no user-set name exists.
+             *
+             * @returns Indicates whether the auto-generated summary was applied as the session's name.
+             */
+            setAuto: async (params: NameSetAutoRequest): Promise<NameSetAutoResult> =>
+                connection.sendRequest("session.name.setAuto", { ...params, sessionId }),
+        },
+        /** @experimental */
+        model: {
+            /**
+             * Gets the session's authoritative model snapshot, including the committed Auto preference and any newer unclaimed Auto preference waiting for a future user turn.
+             *
+             * @returns The session's authoritative model snapshot. Auto preference fields are configuration for the virtual `auto` model and do not change the selected model identifier. The context tier reflects `Session.getContextTier()`, restored from the session journal on resume.
+             */
+            getCurrent: async (): Promise<CurrentModel> =>
+                connection.sendRequest("session.model.getCurrent", { sessionId }),
+            /**
+             * Reads the session's cached startup model state without fetching a catalog or resolving credentials. An interactive host can claim the one-time enablement prompt after applying its startup configuration. Claims remain shared with the owning host and are scoped to this session's lifetime.
+             *
+             * @param params Options for a host's startup model admission check.
+             *
+             * @returns A cached startup model snapshot and an optional one-time enablement prompt. This check never resolves credentials or fetches a catalog.
+             */
+            startupAdmission: async (params: ModelStartupAdmissionRequest): Promise<ModelStartupAdmissionResult> =>
+                connection.sendRequest("session.model.startupAdmission", { ...params, sessionId }),
+            /**
+             * Switches the session to a model and optional reasoning configuration.
+             *
+             * @param params Target model identifier and optional reasoning effort, summary, capability overrides, and context tier.
+             *
+             * @returns The model identifier active on the session after the switch.
+             */
+            switchTo: async (params: ModelSwitchToRequest): Promise<ModelSwitchToResult> =>
+                connection.sendRequest("session.model.switchTo", { ...params, sessionId }),
+            /**
+             * Requests an Auto preference change without changing the session's selected model. The latest unclaimed request wins; the runtime commits it only after a later prompt using the `auto` model mints a usable model and token pair. A `pending` response confirms that the request was accepted, not that it committed. Observe eventual success through `session.model_change`, failure through the ephemeral `session.auto_tier_switch_failed` event, or current unclaimed state through `session.model.getCurrent`.
+             *
+             * @param params An Auto preference request for the session. This updates Auto configuration only; it does not change the selected model to `auto`.
+             *
+             * @returns Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed.
+             */
+            switchAutoTier: async (params: ModelSwitchAutoTierRequest): Promise<ModelSwitchAutoTierResult> =>
+                connection.sendRequest("session.model.switchAutoTier", { ...params, sessionId }),
+            /**
+             * Requests a Copilot Fusion tier without changing the session's selected model, naming the tier as the CLI's `--fusion-tier` does. The runtime resolves the tier to the Auto routing preference it stands for and then behaves exactly like `switchAutoTier`: the latest unclaimed request wins, and the runtime commits it only after a later prompt using the `auto` model mints a usable model and token pair.
+             *
+             * @param params A Copilot Fusion tier request for the session, named as the CLI's `--fusion-tier` names it. The runtime resolves the tier to the Auto routing preference it stands for and requests that preference exactly as `switchAutoTier` does. This updates Auto configuration only; it does not change the selected model to `auto`.
+             *
+             * @returns Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed.
+             */
+            switchFusionTier: async (params: ModelSwitchFusionTierRequest): Promise<ModelSwitchAutoTierResult> =>
+                connection.sendRequest("session.model.switchFusionTier", { ...params, sessionId }),
+            /**
+             * Replaces or clears the host-supplied model allowlist for a running session.
+             *
+             * @param params Host-supplied exact model selection IDs to allow for this running session. CAPI IDs are intersected with repository `.github/allowed_models.txt` policy; provider-qualified IDs remain exempt from repository-only policy but are restricted by this host list. Omit or pass null to clear the host restriction; an explicit empty or disjoint list is rejected. Validation and pre-selection fallback failures preserve the previous restriction. Failures after a fallback selection commits retain the new restriction and selected model; callers should inspect current session state after such an error.
+             *
+             * @returns The applied host allowlist and effective session model policy after intersection.
+             */
+            setAllowedModels: async (params: ModelSetAllowedModelsRequest): Promise<ModelSetAllowedModelsResult> =>
+                connection.sendRequest("session.model.setAllowedModels", { ...params, sessionId }),
+            /**
+             * Updates the session's reasoning effort without changing the selected model.
+             *
+             * @param params Reasoning effort level to apply to the currently selected model.
+             *
+             * @returns Update the session's reasoning effort without changing the selected model. Use `switchTo` instead when you also need to change the model. The runtime applies the effort to the next new model request, including tool continuations, without changing retries of an already-started request.
+             */
+            setReasoningEffort: async (params: ModelSetReasoningEffortRequest): Promise<ModelSetReasoningEffortResult> =>
+                connection.sendRequest("session.model.setReasoningEffort", { ...params, sessionId }),
+            /**
+             * Computes whether the session's current model shows reasoning summaries and how a host should present them: the default Ctrl+T visibility, reasoning headers, the hidden-summaries hint, and whether a persisted `showReasoning` setting is redundant. The runtime folds in the session's model catalog, selection and reasoning-summaries experiment assignment; the host supplies only its own persisted setting and current visibility. This method reads the session's resolved model catalog rather than resolving it, so call `session.model.list` first on a session that has not listed models or run a turn; until then the result is `ready: false`. A session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider, never caches one and stays `ready: false`.
+             *
+             * @param params Host presentation state the reasoning-summaries policy depends on.
+             *
+             * @returns Reasoning-summaries presentation policy for the session's current model.
+             */
+            getReasoningSummaries: async (params: ModelGetReasoningSummariesRequest): Promise<ModelGetReasoningSummariesResult> =>
+                connection.sendRequest("session.model.getReasoningSummaries", { ...params, sessionId }),
+            /**
+             * Lists models available to this session using its own auth and integration context. Connected hosts (CLI TUI, GitHub App) should call this through the session client so remote sessions return the remote CLI's available models rather than the caller's.
+             *
+             * @param params Optional listing options.
+             *
+             * @returns The list of models available to this session.
+             */
+            list: async (params?: SessionModelListRequest): Promise<SessionModelList> =>
+                connection.sendRequest("session.model.list", { ...params, sessionId }),
+        },
         /** @experimental */
         mcp: {
             /** @experimental */
@@ -60517,88 +63604,6 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             },
         },
         /** @experimental */
-        model: {
-            /**
-             * Gets the session's authoritative model snapshot, including the committed Auto preference and any newer unclaimed Auto preference waiting for a future user turn.
-             *
-             * @returns The session's authoritative model snapshot. Auto preference fields are configuration for the virtual `auto` model and do not change the selected model identifier. The context tier reflects `Session.getContextTier()`, restored from the session journal on resume.
-             */
-            getCurrent: async (): Promise<CurrentModel> =>
-                connection.sendRequest("session.model.getCurrent", { sessionId }),
-            /**
-             * Reads the session's cached startup model state without fetching a catalog or resolving credentials. An interactive host can claim the one-time enablement prompt after applying its startup configuration. Claims remain shared with the owning host and are scoped to this session's lifetime.
-             *
-             * @param params Options for a host's startup model admission check.
-             *
-             * @returns A cached startup model snapshot and an optional one-time enablement prompt. This check never resolves credentials or fetches a catalog.
-             */
-            startupAdmission: async (params: ModelStartupAdmissionRequest): Promise<ModelStartupAdmissionResult> =>
-                connection.sendRequest("session.model.startupAdmission", { ...params, sessionId }),
-            /**
-             * Switches the session to a model and optional reasoning configuration.
-             *
-             * @param params Target model identifier and optional reasoning effort, summary, capability overrides, and context tier.
-             *
-             * @returns The model identifier active on the session after the switch.
-             */
-            switchTo: async (params: ModelSwitchToRequest): Promise<ModelSwitchToResult> =>
-                connection.sendRequest("session.model.switchTo", { ...params, sessionId }),
-            /**
-             * Requests an Auto preference change without changing the session's selected model. The latest unclaimed request wins; the runtime commits it only after a later prompt using the `auto` model mints a usable model and token pair. A `pending` response confirms that the request was accepted, not that it committed. Observe eventual success through `session.model_change`, failure through the ephemeral `session.auto_tier_switch_failed` event, or current unclaimed state through `session.model.getCurrent`.
-             *
-             * @param params An Auto preference request for the session. This updates Auto configuration only; it does not change the selected model to `auto`.
-             *
-             * @returns Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed.
-             */
-            switchAutoTier: async (params: ModelSwitchAutoTierRequest): Promise<ModelSwitchAutoTierResult> =>
-                connection.sendRequest("session.model.switchAutoTier", { ...params, sessionId }),
-            /**
-             * Requests a Copilot Fusion tier without changing the session's selected model, naming the tier as the CLI's `--fusion-tier` does. The runtime resolves the tier to the Auto routing preference it stands for and then behaves exactly like `switchAutoTier`: the latest unclaimed request wins, and the runtime commits it only after a later prompt using the `auto` model mints a usable model and token pair.
-             *
-             * @param params A Copilot Fusion tier request for the session, named as the CLI's `--fusion-tier` names it. The runtime resolves the tier to the Auto routing preference it stands for and requests that preference exactly as `switchAutoTier` does. This updates Auto configuration only; it does not change the selected model to `auto`.
-             *
-             * @returns Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed.
-             */
-            switchFusionTier: async (params: ModelSwitchFusionTierRequest): Promise<ModelSwitchAutoTierResult> =>
-                connection.sendRequest("session.model.switchFusionTier", { ...params, sessionId }),
-            /**
-             * Replaces or clears the host-supplied model allowlist for a running session.
-             *
-             * @param params Host-supplied exact model selection IDs to allow for this running session. CAPI IDs are intersected with repository `.github/allowed_models.txt` policy; provider-qualified IDs remain exempt from repository-only policy but are restricted by this host list. Omit or pass null to clear the host restriction; an explicit empty or disjoint list is rejected. Validation and pre-selection fallback failures preserve the previous restriction. Failures after a fallback selection commits retain the new restriction and selected model; callers should inspect current session state after such an error.
-             *
-             * @returns The applied host allowlist and effective session model policy after intersection.
-             */
-            setAllowedModels: async (params: ModelSetAllowedModelsRequest): Promise<ModelSetAllowedModelsResult> =>
-                connection.sendRequest("session.model.setAllowedModels", { ...params, sessionId }),
-            /**
-             * Updates the session's reasoning effort without changing the selected model.
-             *
-             * @param params Reasoning effort level to apply to the currently selected model.
-             *
-             * @returns Update the session's reasoning effort without changing the selected model. Use `switchTo` instead when you also need to change the model. The runtime applies the effort to the next new model request, including tool continuations, without changing retries of an already-started request.
-             */
-            setReasoningEffort: async (params: ModelSetReasoningEffortRequest): Promise<ModelSetReasoningEffortResult> =>
-                connection.sendRequest("session.model.setReasoningEffort", { ...params, sessionId }),
-            /**
-             * Computes whether the session's current model shows reasoning summaries and how a host should present them: the default Ctrl+T visibility, reasoning headers, the hidden-summaries hint, and whether a persisted `showReasoning` setting is redundant. The runtime folds in the session's model catalog, selection and reasoning-summaries experiment assignment; the host supplies only its own persisted setting and current visibility. This method reads the session's resolved model catalog rather than resolving it, so call `session.model.list` first on a session that has not listed models or run a turn; until then the result is `ready: false`. A session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider, never caches one and stays `ready: false`.
-             *
-             * @param params Host presentation state the reasoning-summaries policy depends on.
-             *
-             * @returns Reasoning-summaries presentation policy for the session's current model.
-             */
-            getReasoningSummaries: async (params: ModelGetReasoningSummariesRequest): Promise<ModelGetReasoningSummariesResult> =>
-                connection.sendRequest("session.model.getReasoningSummaries", { ...params, sessionId }),
-            /**
-             * Lists models available to this session using its own auth and integration context. Connected hosts (CLI TUI, GitHub App) should call this through the session client so remote sessions return the remote CLI's available models rather than the caller's.
-             *
-             * @param params Optional listing options.
-             *
-             * @returns The list of models available to this session.
-             */
-            list: async (params?: SessionModelListRequest): Promise<SessionModelList> =>
-                connection.sendRequest("session.model.list", { ...params, sessionId }),
-        },
-        /** @experimental */
         featureFlags: {
             /**
              * Configures the bound session's original feature service without changing its owner or assignment account. Explicit assignments disable online fetching. Configuration does not write user settings. Extensions and unrelated external peers cannot access this service.
@@ -60663,32 +63668,6 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              */
             set: async (params: ModeSetRequest): Promise<ModeSetResult> =>
                 connection.sendRequest("session.mode.set", { ...params, sessionId }),
-        },
-        /** @experimental */
-        name: {
-            /**
-             * Gets the session's friendly name.
-             *
-             * @returns The session's friendly name, or null when not yet set.
-             */
-            get: async (): Promise<NameGetResult> =>
-                connection.sendRequest("session.name.get", { sessionId }),
-            /**
-             * Sets the session's friendly name.
-             *
-             * @param params New friendly name to apply to the session.
-             */
-            set: async (params: NameSetRequest): Promise<void> =>
-                connection.sendRequest("session.name.set", { ...params, sessionId }),
-            /**
-             * Persists an auto-generated session summary as the session's name when no user-set name exists.
-             *
-             * @param params Auto-generated session summary to apply as the session's name when no user-set name exists.
-             *
-             * @returns Indicates whether the auto-generated summary was applied as the session's name.
-             */
-            setAuto: async (params: NameSetAutoRequest): Promise<NameSetAutoResult> =>
-                connection.sendRequest("session.name.setAuto", { ...params, sessionId }),
         },
         /** @experimental */
         plan: {
@@ -61323,151 +64302,6 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
                 connection.sendRequest("session.managedSettings.recheckPolicyHelper", { sessionId }),
         },
         /** @experimental */
-        plugins: {
-            /**
-             * Lists globally installed, live, built-in, and enterprise-managed desired plugins using the live session's authoritative account, working directory, and retained managed policy.
-             *
-             * @returns Plugins installed for the session, with their enabled state and version metadata.
-             */
-            list: async (): Promise<PluginList> =>
-                connection.sendRequest("session.plugins.list", { sessionId }),
-            /**
-             * Installs a plugin using the live session's authoritative account, working directory, and retained managed policy.
-             *
-             * @param params Plugin source resolved relative to the session's authoritative working directory.
-             *
-             * @returns Result of installing a plugin.
-             */
-            install: async (params: SessionPluginsInstallRequest): Promise<PluginInstallResult> =>
-                connection.sendRequest("session.plugins.install", { ...params, sessionId }),
-            /**
-             * Uninstalls a plugin when permitted by the live session's retained managed policy.
-             *
-             * @param params Name (or spec) of the plugin to uninstall.
-             */
-            uninstall: async (params: PluginsUninstallRequest): Promise<void> =>
-                connection.sendRequest("session.plugins.uninstall", { ...params, sessionId }),
-            /**
-             * Updates an installed plugin using the live session's authoritative account, working directory, and retained managed policy.
-             *
-             * @param params Name (or spec) of the plugin to update.
-             *
-             * @returns Result of updating a single plugin.
-             */
-            update: async (params: PluginsUpdateRequest): Promise<PluginUpdateResult> =>
-                connection.sendRequest("session.plugins.update", { ...params, sessionId }),
-            /**
-             * Enables installed plugins when permitted by the live session's retained managed policy.
-             *
-             * @param params Plugin names (or specs) to enable in the session's authoritative working directory.
-             */
-            enable: async (params: SessionPluginsEnableRequest): Promise<void> =>
-                connection.sendRequest("session.plugins.enable", { ...params, sessionId }),
-            /**
-             * Disables installed plugins when permitted by the live session's retained managed policy.
-             *
-             * @param params Plugin names (or specs) to disable in the session's authoritative working directory.
-             */
-            disable: async (params: SessionPluginsDisableRequest): Promise<void> =>
-                connection.sendRequest("session.plugins.disable", { ...params, sessionId }),
-            /** @experimental */
-            marketplaces: {
-                /**
-                 * Lists registered and enterprise-managed desired marketplaces using the live session's retained policy.
-                 *
-                 * @returns All registered marketplaces, including built-in defaults.
-                 */
-                list: async (): Promise<MarketplaceListResult> =>
-                    connection.sendRequest("session.plugins.marketplaces.list", { sessionId }),
-                /**
-                 * Adds a marketplace when permitted by the live session's retained managed policy.
-                 *
-                 * @param params Marketplace source and optional working directory for relative-path resolution.
-                 *
-                 * @returns Result of registering a new marketplace.
-                 */
-                add: async (params: PluginsMarketplacesAddRequest): Promise<MarketplaceAddResult> =>
-                    connection.sendRequest("session.plugins.marketplaces.add", { ...params, sessionId }),
-                /**
-                 * Removes a marketplace when permitted by the live session's retained managed policy.
-                 *
-                 * @param params Name of the marketplace to remove and an optional force flag.
-                 *
-                 * @returns Outcome of the remove attempt, including dependent-plugin info when applicable.
-                 */
-                remove: async (params: PluginsMarketplacesRemoveRequest): Promise<MarketplaceRemoveResult> =>
-                    connection.sendRequest("session.plugins.marketplaces.remove", { ...params, sessionId }),
-                /**
-                 * Browses a marketplace resolved through the live session's working directory and retained managed policy.
-                 *
-                 * @param params Name of the marketplace whose plugin catalog to fetch.
-                 *
-                 * @returns Plugins advertised by the marketplace.
-                 */
-                browse: async (params: PluginsMarketplacesBrowseRequest): Promise<MarketplaceBrowseResult> =>
-                    connection.sendRequest("session.plugins.marketplaces.browse", { ...params, sessionId }),
-                /**
-                 * Refreshes marketplaces resolved through the live session's working directory and retained managed policy.
-                 *
-                 * @param params Optional marketplace name; omit to refresh all.
-                 *
-                 * @returns Result of refreshing one or more marketplace catalogs.
-                 */
-                refresh: async (params?: SessionPluginsMarketplacesRefreshRequest): Promise<MarketplaceRefreshResult> =>
-                    connection.sendRequest("session.plugins.marketplaces.refresh", { ...params, sessionId }),
-                /**
-                 * Searches all configured plugin marketplaces using the session's authoritative configuration, credentials, working directory, and managed policy. Returns installation state and partial errors. This is not Agent Finder search.
-                 *
-                 * @param params Searches all configured plugin marketplaces, not the Agent Finder catalog.
-                 *
-                 * @returns Matching plugins across configured marketplaces, with partial failures.
-                 */
-                search: async (params: PluginMarketplaceSearchRequest): Promise<PluginMarketplaceSearchResult> =>
-                    connection.sendRequest("session.plugins.marketplaces.search", { ...params, sessionId }),
-                /**
-                 * Probes a configured marketplace's revision without refreshing or creating its cached checkout.
-                 *
-                 * @param params Identifies a marketplace to probe without refreshing its checkout.
-                 *
-                 * @returns Update availability without installation or checkout mutation. An error means availability is unknown.
-                 */
-                checkUpdate: async (params: PluginMarketplaceCheckUpdateRequest): Promise<PluginUpdateCheckResult> =>
-                    connection.sendRequest("session.plugins.marketplaces.checkUpdate", { ...params, sessionId }),
-            },
-            /**
-             * Reads Team and managed soft plugin defaults for the live session. Does not install plugins or persist user preferences.
-             *
-             * @returns Soft plugin defaults for this session, without persistent user preferences or hard policy.
-             */
-            getDefaults: async (): Promise<SessionPluginDefaults> =>
-                connection.sendRequest("session.plugins.getDefaults", { sessionId }),
-            /**
-             * Compares an installed plugin version with its cached marketplace catalog. Never fetches or refreshes the checkout.
-             *
-             * @param params Identifies a plugin and its configured marketplace without accepting configuration or policy overrides.
-             *
-             * @returns Update availability without installation or checkout mutation. An error means availability is unknown.
-             */
-            checkUpdate: async (params: PluginCheckUpdateRequest): Promise<PluginUpdateCheckResult> =>
-                connection.sendRequest("session.plugins.checkUpdate", { ...params, sessionId }),
-            /**
-             * Reloads the session's plugin set, refreshing MCP servers, custom agents, hooks, and skills cache so SDK-driven changes via `server.plugins.*` take effect immediately.
-             *
-             * @param params Optional flags controlling which side effects the reload performs.
-             */
-            reload: async (params?: SessionPluginsReloadRequest): Promise<void> =>
-                connection.sendRequest("session.plugins.reload", { ...params, sessionId }),
-            /**
-             * Installs or updates the plugins the session's managed settings require now, without waiting for the next automatic attempt after a failure, then reloads plugins. Reports progress and failures with the same `session.info` and `session.warning` events as automatic preparation. Fails when the runtime does not prepare managed plugins for the session.
-             *
-             * @param params Plugins required by the session's managed settings to install or update again.
-             *
-             * @returns Per-plugin outcomes of retrying the plugins required by the session's managed settings.
-             */
-            retryManaged: async (params?: SessionPluginsRetryManagedRequest): Promise<SessionPluginsRetryManagedResult> =>
-                connection.sendRequest("session.plugins.retryManaged", { ...params, sessionId }),
-        },
-        /** @experimental */
         provider: {
             /**
              * Returns the provider endpoint and credentials the session is currently configured to talk to, so the caller can make inference calls directly against the same backend the session uses.
@@ -61587,56 +64421,6 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              */
             set: async (params: SessionLspSetRequest): Promise<void> =>
                 connection.sendRequest("session.lsp.set", { ...params, sessionId }),
-        },
-        /** @experimental */
-        extensions: {
-            /**
-             * Returns the runtime-derived standalone extension admission policy for the session's actual project and managed-settings context. enforcementVersion 1 means this runtime enforces strictPluginOnlyCustomization for executable extensions. Hosts executing independent extension targets must deny standalone targets unless standalone is allowed; plugin_only requires runtime-verified eligible plugin provenance, not a caller-supplied source label or transport bridge. pending is not confirmed absence. Older runtimes return method-not-found and must not be represented as enforcing this restriction. Re-read on managed-settings changes; a snapshot is not a launch authorization token.
-             *
-             * @returns Runtime support and session-context standalone executable extension policy.
-             */
-            getPolicy: async (): Promise<ExtensionManagedPolicy> =>
-                connection.sendRequest("session.extensions.getPolicy", { sessionId }),
-            /**
-             * Lists extensions discovered for the session and their current status.
-             *
-             * @returns Extensions discovered for the session, with their current status.
-             */
-            list: async (): Promise<ExtensionList> =>
-                connection.sendRequest("session.extensions.list", { sessionId }),
-            /**
-             * Enables an extension for the session and persists the preference when the session has a settings store. Hosts synchronizing effective membership should use extensions.reconcile instead.
-             *
-             * @param params Source-qualified extension identifier to enable for the session.
-             */
-            enable: async (params: ExtensionsEnableRequest): Promise<void> =>
-                connection.sendRequest("session.extensions.enable", { ...params, sessionId }),
-            /**
-             * Disables an extension for the session and persists the preference when the session has a settings store. Hosts synchronizing effective membership should use extensions.reconcile instead.
-             *
-             * @param params Source-qualified extension identifier to disable for the session.
-             */
-            disable: async (params: ExtensionsDisableRequest): Promise<void> =>
-                connection.sendRequest("session.extensions.disable", { ...params, sessionId }),
-            /**
-             * Reloads extension definitions and processes for the session.
-             */
-            reload: async (): Promise<void> =>
-                connection.sendRequest("session.extensions.reload", { sessionId }),
-            /**
-             * Host-only reconciliation of authoritative session-effective extension membership and enablement. Refreshes runtime-owned discovery and preferences without persisting settings, installing plugins, or restarting unchanged activations. Returns ExtensionList only after required starts and process/contribution cleanup settle. Success means every stop, cleanup, contribution refresh and revalidation completed; an enabled extension that fails to start does not fail reconciliation and is reported with status failed, so read statuses rather than assuming every enabled extension is running. Takes no caller inventory or overrides. Missing controllers, unready/incomplete discovery, unavailable workspaces, superseded inputs, and other lifecycle failures (including managed-policy launch denials and failed stops or cleanup) are errors, not empty membership. Independently proven revocations may be applied before an error; retry converges without restarting healthy activations. Error data contains lifecycleChangesApplied and code: extension_reconciliation_host_required, extension_reconciliation_unavailable, extension_reconciliation_not_ready, extension_reconciliation_discovery_failed, extension_reconciliation_workspace_unavailable, extension_reconciliation_superseded, or extension_reconciliation_lifecycle_failed. Mark host reconciliation state applied only on success. On older runtimes, method-not-found must not fall back to global discovery and persistent extension disables.
-             *
-             * @returns Extensions discovered for the session, with their current status.
-             */
-            reconcile: async (): Promise<ExtensionList> =>
-                connection.sendRequest("session.extensions.reconcile", { sessionId }),
-            /**
-             * Push attachments into the next user-message turn from an extension. The host should surface them as composer pills and forward them via the next session.send call. Callable only by extension-owned connections.
-             *
-             * @param params Parameters for session.extensions.sendAttachmentsToMessage.
-             */
-            sendAttachmentsToMessage: async (params: SendAttachmentsToMessageParams): Promise<void> =>
-                connection.sendRequest("session.extensions.sendAttachmentsToMessage", { ...params, sessionId }),
         },
         /** @experimental */
         tools: {
@@ -62593,6 +65377,108 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
 export function createInternalSessionRpc(connection: MessageConnection, sessionId: string) {
     return {
         /** @experimental */
+        persistence: {
+            /**
+             * Flushes durable state through the original session writer, metadata, callback, and tracking owners.
+             *
+             * @param params Flushes durable session state through its original runtime and client owners.
+             */
+            flush: async (params: SessionPersistenceFlushRequest): Promise<void> =>
+                connection.sendRequest("session.persistence.flush", { ...params, sessionId }),
+        },
+        /** @experimental */
+        extensions: {
+            /**
+             * Updates the original host's live extension management-tool gate. Returns false when no service is configured.
+             *
+             * @param params Updates the original host's live management-tool gate without reinstalling its extension service.
+             */
+            setManagementToolsEnabled: async (params: SessionExtensionsSetManagementToolsEnabledRequest): Promise<SessionExtensionsSetManagementToolsEnabledResult> =>
+                connection.sendRequest("session.extensions.setManagementToolsEnabled", { ...params, sessionId }),
+            /**
+             * Configures the original host's extension service with runtime-owned settings, policy, plugin discovery, and lifecycle fences. Only the original session host may supply launch resources.
+             *
+             * @param params Host launch resources and lifecycle options for the original session's extension service.
+             *
+             * @returns Distinguishes an absent extension service from an installed service with an empty inventory.
+             */
+            configureHost: async (params: SessionExtensionsConfigureHostRequest): Promise<SessionExtensionsInspectServiceResult> =>
+                connection.sendRequest("session.extensions.configureHost", { ...params, sessionId }),
+            /**
+             * Inspects whether the selected session has an attached extension service and returns its current inventory without starting or replacing it.
+             *
+             * @returns Distinguishes an absent extension service from an installed service with an empty inventory.
+             */
+            inspectService: async (): Promise<SessionExtensionsInspectServiceResult> =>
+                connection.sendRequest("session.extensions.inspectService", { sessionId }),
+        },
+        /** @experimental */
+        plugins: {
+            /**
+             * Inspects extension contributions for a changed plugin under the selected session's activation policy and installation root.
+             *
+             * @param params Inspects extension directories contributed by a changed plugin under the selected session's activation and profile.
+             *
+             * @returns Whether a changed active plugin contributes extension directories, including empty directories.
+             */
+            inspectExtensionContributions: async (params: SessionPluginInspectExtensionContributionsRequest): Promise<SessionPluginInspectExtensionContributionsResult> =>
+                connection.sendRequest("session.plugins.inspectExtensionContributions", { ...params, sessionId }),
+            /**
+             * Inspects available and inactive plugins with live, external, and trusted bundled provenance under the bound session's configuration and policy.
+             *
+             * @returns Available plugin inventory under the selected session's settings, policy, source roots, and trusted bundle registration.
+             */
+            inspectInventory: async (): Promise<SessionPluginInventoryResult> =>
+                connection.sendRequest("session.plugins.inspectInventory", { sessionId }),
+        },
+        /** @experimental */
+        name: {
+            /**
+             * Generates a friendly session name with the original session's utility-model policy and renewable credentials. Does not change the stored name.
+             *
+             * @param params Input for utility-model session name generation.
+             *
+             * @returns Utility generation outcome under the session's model and credential policy.
+             */
+            generate: async (params: SessionNameGenerateRequest): Promise<SessionNameGenerateResult> =>
+                connection.sendRequest("session.name.generate", { ...params, sessionId }),
+        },
+        /** @experimental */
+        model: {
+            /**
+             * Generates a branch slug with the original session's model policy and renewable credentials, including its established derived-name fallback.
+             *
+             * @param params Conversation and changes for a utility-model branch slug.
+             *
+             * @returns A generated or derived branch slug.
+             */
+            generateBranchSlug: async (params: SessionModelGenerateBranchSlugRequest): Promise<SessionModelGenerateBranchSlugResult> =>
+                connection.sendRequest("session.model.generateBranchSlug", { ...params, sessionId }),
+            /**
+             * Classifies a serialized model-catalog error and returns request identifiers, authorization details, and the bound account's Copilot settings URL. Hosts use these facts to present catalog failures without parsing provider errors or deriving enterprise URLs themselves. Does not resolve credentials or fetch models.
+             *
+             * @param params A serialized provider error from a failed model-catalog request.
+             *
+             * @returns Model-catalog failure facts without host-specific presentation text.
+             */
+            describeLoadError: async (params: SessionModelDescribeLoadErrorRequest): Promise<SessionModelDescribeLoadErrorResult> =>
+                connection.sendRequest("session.model.describeLoadError", { ...params, sessionId }),
+            /**
+             * Resolves and applies organization-managed and repository model overlays.
+             *
+             * @param params Managed, repository, and CLI model overrides to overlay onto the session at startup.
+             *
+             * @returns The model identifier active on the session after the switch.
+             */
+            applyStartupOverlay: async (params: ModelApplyStartupOverlayRequest): Promise<ModelSwitchToResult> =>
+                connection.sendRequest("session.model.applyStartupOverlay", { ...params, sessionId }),
+            /**
+             * Clears an unchanged startup model/provider seed before default-model resolution. Never clears a resumed or user-selected model.
+             */
+            clearStartupSeed: async (params: SessionModelClearStartupSeedRequest): Promise<SessionModelClearStartupSeedResult> =>
+                connection.sendRequest("session.model.clearStartupSeed", { ...params, sessionId }),
+        },
+        /** @experimental */
         mcp: {
             /** @experimental */
             externalClient: {
@@ -62721,6 +65607,15 @@ export function createInternalSessionRpc(connection: MessageConnection, sessionI
                 storeKey: async (params: SessionMcpOauthStoreKeyRequest): Promise<SessionMcpOauthStoreKeyResult> =>
                     connection.sendRequest("session.mcp.oauth.storeKey", { ...params, sessionId }),
             },
+            /**
+             * Inspects source configuration without starting servers or resolving credentials. Workspace trust comes from the bound session and only a matching activation snapshot can attest the requested directory.
+             *
+             * @param params Inspects MCP source configuration without starting servers. The bound session owns workspace trust.
+             *
+             * @returns The composed MCP configuration and all omitted-source diagnostics.
+             */
+            inspectConfiguration: async (params: SessionMcpInspectConfigurationRequest): Promise<McpConfigMergeSourcesResult> =>
+                connection.sendRequest("session.mcp.inspectConfiguration", { ...params, sessionId }),
         },
         /** @experimental */
         eventLog: {
@@ -62953,32 +65848,6 @@ export function createInternalSessionRpc(connection: MessageConnection, sessionI
                 connection.sendRequest("session.workflow.pauseAtCheckpoint", { ...params, sessionId }),
         },
         /** @experimental */
-        model: {
-            /**
-             * Classifies a serialized model-catalog error and returns request identifiers, authorization details, and the bound account's Copilot settings URL. Hosts use these facts to present catalog failures without parsing provider errors or deriving enterprise URLs themselves. Does not resolve credentials or fetch models.
-             *
-             * @param params A serialized provider error from a failed model-catalog request.
-             *
-             * @returns Model-catalog failure facts without host-specific presentation text.
-             */
-            describeLoadError: async (params: SessionModelDescribeLoadErrorRequest): Promise<SessionModelDescribeLoadErrorResult> =>
-                connection.sendRequest("session.model.describeLoadError", { ...params, sessionId }),
-            /**
-             * Resolves and applies organization-managed and repository model overlays.
-             *
-             * @param params Managed, repository, and CLI model overrides to overlay onto the session at startup.
-             *
-             * @returns The model identifier active on the session after the switch.
-             */
-            applyStartupOverlay: async (params: ModelApplyStartupOverlayRequest): Promise<ModelSwitchToResult> =>
-                connection.sendRequest("session.model.applyStartupOverlay", { ...params, sessionId }),
-            /**
-             * Clears an unchanged startup model/provider seed before default-model resolution. Never clears a resumed or user-selected model.
-             */
-            clearStartupSeed: async (params: SessionModelClearStartupSeedRequest): Promise<SessionModelClearStartupSeedResult> =>
-                connection.sendRequest("session.model.clearStartupSeed", { ...params, sessionId }),
-        },
-        /** @experimental */
         autopilot: {
             /**
              * Applies the runtime-owned Autopilot continuation policy at the session-idle decision point and routes any admitted continuation through the normal session send lifecycle. Only the SDK connection that owns the session can invoke this method.
@@ -62987,6 +65856,37 @@ export function createInternalSessionRpc(connection: MessageConnection, sessionI
              */
             evaluateIdleContinuation: async (): Promise<AutopilotEvaluateIdleContinuationResult> =>
                 connection.sendRequest("session.autopilot.evaluateIdleContinuation", { sessionId }),
+        },
+        /** @experimental */
+        skills: {
+            /**
+             * Inspects full local and provider skill records under the selected session's discovery, activation, and managed policy. Preserves effective disabled identities and loader diagnostics without accepting caller paths or settings.
+             *
+             * @returns Full inventory under the selected session's discovery and activation policy.
+             */
+            inspectInventory: async (): Promise<SessionSkillsInspectInventoryResult> =>
+                connection.sendRequest("session.skills.inspectInventory", { sessionId }),
+            /** @experimental */
+            resources: {
+                /**
+                 * Installs a local or HTTPS skill definition or registers a skill directory under the selected session's profile and working directory. Reuses the canonical installer and refreshes the session-owned catalog.
+                 *
+                 * @param params Install a skill with the selected session's profile and working directory.
+                 *
+                 * @returns The persisted result of a skill source installation.
+                 */
+                install: async (params: SessionSkillResourceInstallRequest): Promise<SkillResourceInstallResult> =>
+                    connection.sendRequest("session.skills.resources.install", { ...params, sessionId }),
+                /**
+                 * Removes a personal or project skill or unregisters a directory under the selected session's profile. Uses the full session-owned provider inventory for conservative disabled-identity cleanup.
+                 *
+                 * @param params Remove a skill with the selected session's full inventory and profile.
+                 *
+                 * @returns The completed skill removal, with conservative disabled-state cleanup.
+                 */
+                remove: async (params: SessionSkillResourceRemoveRequest): Promise<SkillResourceRemoveResult> =>
+                    connection.sendRequest("session.skills.resources.remove", { ...params, sessionId }),
+            },
         },
         /** @experimental */
         diagnostics: {
@@ -63072,6 +65972,18 @@ export function createInternalSessionRpc(connection: MessageConnection, sessionI
              */
             handleHumanExitPlanMode: async (params: UIHandlePendingExitPlanModeRequest): Promise<UIHandlePendingResult> =>
                 connection.sendRequest("session.ui.handleHumanExitPlanMode", { ...params, sessionId }),
+        },
+        /** @experimental */
+        permissions: {
+            /**
+             * Reads advisory repository-owned resource disables using the bound session's configuration and matching workspace trust.
+             *
+             * @param params Reads repository resource disables using the bound session's configuration and trust authority.
+             *
+             * @returns The advisory repository disable list. A read failure returns no names and a diagnostic, rather than blocking a listing or mutation.
+             */
+            repositoryDisabledNames: async (params: SessionRepositoryDisabledNamesRequest): Promise<RepositoryDisabledNamesResult> =>
+                connection.sendRequest("session.permissions.repositoryDisabledNames", { ...params, sessionId }),
         },
         /** @experimental */
         settings: {
@@ -63237,6 +66149,28 @@ export function createInternalSessionRpc(connection: MessageConnection, sessionI
              */
             detach: async (): Promise<void> =>
                 connection.sendRequest("session.cafeMetrics.detach", { sessionId }),
+        },
+        /** @experimental */
+        research: {
+            /**
+             * Lists stored Markdown research reports from the bound session's authoritative state path. Preserves missing-directory, file-stat, timestamp, and stable ordering behavior without accepting a caller path or configuration.
+             *
+             * @returns Stored Markdown reports, newest first, from the selected session.
+             */
+            listReports: async (): Promise<ResearchListReportsResult> =>
+                connection.sendRequest("session.research.listReports", { sessionId }),
+        },
+        /** @experimental */
+        github: {
+            /**
+             * Creates a secret GitHub gist with the bound session's renewable credential owner and existing account restrictions. Preserves session and research export errors without returning credentials.
+             *
+             * @param params Creates a secret gist through the bound session's original credential owner.
+             *
+             * @returns The URL returned by GitHub after it creates the secret gist.
+             */
+            createSecretGist: async (params: GitHubCreateSecretGistRequest): Promise<GitHubCreateSecretGistResult> =>
+                connection.sendRequest("session.github.createSecretGist", { ...params, sessionId }),
         },
     };
 }

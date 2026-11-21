@@ -25,6 +25,18 @@ public final class ServerRpc {
 
     private final RpcCaller caller;
 
+    /** API methods for the {@code plugins} namespace. */
+    public final ServerPluginsApi plugins;
+    /** API methods for the {@code skills} namespace. */
+    public final ServerSkillsApi skills;
+    /** API methods for the {@code account} namespace. */
+    public final ServerAccountApi account;
+    /** API methods for the {@code sessions} namespace. */
+    public final ServerSessionsApi sessions;
+    /** API methods for the {@code memories} namespace. */
+    final ServerMemoriesApi memories;
+    /** API methods for the {@code secrets} namespace. */
+    public final ServerSecretsApi secrets;
     /** API methods for the {@code git} namespace. */
     final ServerGitApi git;
     /** API methods for the {@code providers} namespace. */
@@ -69,20 +81,12 @@ public final class ServerRpc {
     public final ServerContentExclusionApi contentExclusion;
     /** API methods for the {@code tools} namespace. */
     public final ServerToolsApi tools;
-    /** API methods for the {@code account} namespace. */
-    public final ServerAccountApi account;
-    /** API methods for the {@code secrets} namespace. */
-    public final ServerSecretsApi secrets;
     /** API methods for the {@code mcp} namespace. */
     public final ServerMcpApi mcp;
     /** API methods for the {@code extensions} namespace. */
     public final ServerExtensionsApi extensions;
     /** API methods for the {@code instructions} namespace. */
     public final ServerInstructionsApi instructions;
-    /** API methods for the {@code skills} namespace. */
-    public final ServerSkillsApi skills;
-    /** API methods for the {@code plugins} namespace. */
-    public final ServerPluginsApi plugins;
     /** API methods for the {@code catalog} namespace. */
     public final ServerCatalogApi catalog;
     /** API methods for the {@code agents} namespace. */
@@ -107,8 +111,6 @@ public final class ServerRpc {
     public final ServerFetchApi fetch;
     /** API methods for the {@code network} namespace. */
     public final ServerNetworkApi network;
-    /** API methods for the {@code sessions} namespace. */
-    public final ServerSessionsApi sessions;
     /** API methods for the {@code shell} namespace. */
     public final ServerShellApi shell;
     /** API methods for the {@code agentRegistry} namespace. */
@@ -135,6 +137,12 @@ public final class ServerRpc {
      */
     public ServerRpc(RpcCaller caller) {
         this.caller = caller;
+        this.plugins = new ServerPluginsApi(caller);
+        this.skills = new ServerSkillsApi(caller);
+        this.account = new ServerAccountApi(caller);
+        this.sessions = new ServerSessionsApi(caller);
+        this.memories = new ServerMemoriesApi(caller);
+        this.secrets = new ServerSecretsApi(caller);
         this.git = new ServerGitApi(caller);
         this.providers = new ServerProvidersApi(caller);
         this.localModels = new ServerLocalModelsApi(caller);
@@ -157,13 +165,9 @@ public final class ServerRpc {
         this.providersSource = new ServerProvidersSourceApi(caller);
         this.contentExclusion = new ServerContentExclusionApi(caller);
         this.tools = new ServerToolsApi(caller);
-        this.account = new ServerAccountApi(caller);
-        this.secrets = new ServerSecretsApi(caller);
         this.mcp = new ServerMcpApi(caller);
         this.extensions = new ServerExtensionsApi(caller);
         this.instructions = new ServerInstructionsApi(caller);
-        this.skills = new ServerSkillsApi(caller);
-        this.plugins = new ServerPluginsApi(caller);
         this.catalog = new ServerCatalogApi(caller);
         this.agents = new ServerAgentsApi(caller);
         this.globalState = new ServerGlobalStateApi(caller);
@@ -176,7 +180,6 @@ public final class ServerRpc {
         this.llmInference = new ServerLlmInferenceApi(caller);
         this.fetch = new ServerFetchApi(caller);
         this.network = new ServerNetworkApi(caller);
-        this.sessions = new ServerSessionsApi(caller);
         this.shell = new ServerShellApi(caller);
         this.agentRegistry = new ServerAgentRegistryApi(caller);
         this.connectors = new ServerConnectorsApi(caller);

@@ -28,6 +28,17 @@ public final class ServerAccountApi {
     }
 
     /**
+     * Runs a connection-owned interactive account login through the original process authentication handle, preserving device and browser flows, policy, persistence, and cancellation.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<AccountLoginProcessResult> loginProcess(AccountLoginProcessParams params) {
+        return caller.invoke("account.loginProcess", params, AccountLoginProcessResult.class);
+    }
+
+    /**
      * Gets Copilot quota usage for the current or opaquely selected authenticated user.
      * <p>
      * Invokes the method with no params, applying the runtime defaults.

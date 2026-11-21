@@ -24,10 +24,14 @@ public final class SessionSkillsApi {
     private final RpcCaller caller;
     private final String sessionId;
 
+    /** API methods for the {@code skills.resources} sub-namespace. */
+    final SessionSkillsResourcesApi resources;
+
     /** @param caller the RPC transport function */
     SessionSkillsApi(RpcCaller caller, String sessionId) {
         this.caller = caller;
         this.sessionId = sessionId;
+        this.resources = new SessionSkillsResourcesApi(caller, sessionId);
     }
 
     /**
@@ -104,6 +108,17 @@ public final class SessionSkillsApi {
     @CopilotExperimental
     public CompletableFuture<Void> ensureLoaded() {
         return caller.invoke("session.skills.ensureLoaded", java.util.Map.of("sessionId", this.sessionId), Void.class);
+    }
+
+    /**
+     * Inspects full local and provider skill records under the selected session's discovery, activation, and managed policy. Preserves effective disabled identities and loader diagnostics without accepting caller paths or settings.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SessionSkillsInspectInventoryResult> inspectInventory() {
+        return caller.invoke("session.skills.inspectInventory", java.util.Map.of("sessionId", this.sessionId), SessionSkillsInspectInventoryResult.class);
     }
 
 }

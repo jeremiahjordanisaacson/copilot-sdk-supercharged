@@ -210,6 +210,252 @@ type AccountGetWebURLResult struct {
 	URL string `json:"url"`
 }
 
+// A pre-session login action. Every action after open retains the same credential and
+// persistence owner.
+// Experimental: AccountLoginProcessRequest is part of an experimental API and may change or
+// be removed.
+type AccountLoginProcessRequest interface {
+	accountLoginProcessRequest()
+	Operation() AccountLoginProcessRequestOperation
+}
+
+type RawAccountLoginProcessRequestData struct {
+	Discriminator AccountLoginProcessRequestOperation
+	Raw           json.RawMessage
+}
+
+func (RawAccountLoginProcessRequestData) accountLoginProcessRequest() {}
+func (r RawAccountLoginProcessRequestData) Operation() AccountLoginProcessRequestOperation {
+	return r.Discriminator
+}
+
+// Cancels pending authorization and releases this owner.
+type AccountLoginProcessRequestClose struct {
+	// The opaque handle returned by open.
+	OwnerID string `json:"ownerId"`
+}
+
+func (AccountLoginProcessRequestClose) accountLoginProcessRequest() {}
+func (AccountLoginProcessRequestClose) Operation() AccountLoginProcessRequestOperation {
+	return AccountLoginProcessRequestOperationClose
+}
+
+// Completes the owner's current authorization flow.
+type AccountLoginProcessRequestComplete struct {
+	// The opaque handle returned by open.
+	OwnerID string `json:"ownerId"`
+}
+
+func (AccountLoginProcessRequestComplete) accountLoginProcessRequest() {}
+func (AccountLoginProcessRequestComplete) Operation() AccountLoginProcessRequestOperation {
+	return AccountLoginProcessRequestOperationComplete
+}
+
+// Continues the same pending persistence operation after plaintext consent.
+type AccountLoginProcessRequestContinue struct {
+	// Whether the user consented to plaintext credential storage.
+	AllowPlaintext bool `json:"allowPlaintext"`
+	// The opaque handle returned by open.
+	OwnerID string `json:"ownerId"`
+}
+
+func (AccountLoginProcessRequestContinue) accountLoginProcessRequest() {}
+func (AccountLoginProcessRequestContinue) Operation() AccountLoginProcessRequestOperation {
+	return AccountLoginProcessRequestOperationContinue
+}
+
+// Removes only the credential that this owner currently resolves.
+type AccountLoginProcessRequestDiscard struct {
+	// The opaque handle returned by open.
+	OwnerID string `json:"ownerId"`
+}
+
+func (AccountLoginProcessRequestDiscard) accountLoginProcessRequest() {}
+func (AccountLoginProcessRequestDiscard) Operation() AccountLoginProcessRequestOperation {
+	return AccountLoginProcessRequestOperationDiscard
+}
+
+// Creates a connection-owned authentication handle without starting a login flow.
+type AccountLoginProcessRequestOpen struct {
+	// The original immutable authentication configuration.
+	// Internal: Context is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Context ProcessLoginContext `json:"context"`
+}
+
+func (AccountLoginProcessRequestOpen) accountLoginProcessRequest() {}
+func (AccountLoginProcessRequestOpen) Operation() AccountLoginProcessRequestOperation {
+	return AccountLoginProcessRequestOperationOpen
+}
+
+// Opens the authorization page for the owner's current flow.
+type AccountLoginProcessRequestOpenBrowser struct {
+	// The opaque handle returned by open.
+	OwnerID string `json:"ownerId"`
+}
+
+func (AccountLoginProcessRequestOpenBrowser) accountLoginProcessRequest() {}
+func (AccountLoginProcessRequestOpenBrowser) Operation() AccountLoginProcessRequestOperation {
+	return AccountLoginProcessRequestOperationOpenBrowser
+}
+
+// Evaluates both organization policy channels against the owner's current credential.
+type AccountLoginProcessRequestPolicy struct {
+	// The original host's current policy inputs.
+	// Internal: Context is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Context ProcessLoginPolicyContext `json:"context"`
+	// The opaque handle returned by open.
+	OwnerID string `json:"ownerId"`
+}
+
+func (AccountLoginProcessRequestPolicy) accountLoginProcessRequest() {}
+func (AccountLoginProcessRequestPolicy) Operation() AccountLoginProcessRequestOperation {
+	return AccountLoginProcessRequestOperationPolicy
+}
+
+// Starts the original device-code flow.
+type AccountLoginProcessRequestStartDevice struct {
+	// The normalized GitHub host.
+	Host string `json:"host"`
+	// The opaque handle returned by open.
+	OwnerID string `json:"ownerId"`
+}
+
+func (AccountLoginProcessRequestStartDevice) accountLoginProcessRequest() {}
+func (AccountLoginProcessRequestStartDevice) Operation() AccountLoginProcessRequestOperation {
+	return AccountLoginProcessRequestOperationStartDevice
+}
+
+// Starts the original loopback browser flow with its existing deadline and PKCE behavior.
+type AccountLoginProcessRequestStartWeb struct {
+	// The normalized GitHub host.
+	Host string `json:"host"`
+	// The opaque handle returned by open.
+	OwnerID string `json:"ownerId"`
+}
+
+func (AccountLoginProcessRequestStartWeb) accountLoginProcessRequest() {}
+func (AccountLoginProcessRequestStartWeb) Operation() AccountLoginProcessRequestOperation {
+	return AccountLoginProcessRequestOperationStartWeb
+}
+
+// Validates and persists a token through the original authentication handle.
+type AccountLoginProcessRequestToken struct {
+	// The normalized GitHub host.
+	Host string `json:"host"`
+	// The opaque handle returned by open.
+	OwnerID string `json:"ownerId"`
+	// The user-supplied token. It is never returned.
+	Token string `json:"token"`
+}
+
+func (AccountLoginProcessRequestToken) accountLoginProcessRequest() {}
+func (AccountLoginProcessRequestToken) Operation() AccountLoginProcessRequestOperation {
+	return AccountLoginProcessRequestOperationToken
+}
+
+// The result of one connection-owned pre-session login action.
+// Experimental: AccountLoginProcessResult is part of an experimental API and may change or
+// be removed.
+type AccountLoginProcessResult interface {
+	accountLoginProcessResult()
+	Kind() AccountLoginProcessResultKind
+}
+
+type RawAccountLoginProcessResultData struct {
+	Discriminator AccountLoginProcessResultKind
+	Raw           json.RawMessage
+}
+
+func (RawAccountLoginProcessResultData) accountLoginProcessResult() {}
+func (r RawAccountLoginProcessResultData) Kind() AccountLoginProcessResultKind {
+	return r.Discriminator
+}
+
+// The device-code instructions to present to the user.
+type AccountLoginProcessResultDeviceCode struct {
+	// The code the user enters.
+	UserCode string `json:"userCode"`
+	// The authorization page.
+	VerificationURI string `json:"verificationUri"`
+}
+
+func (AccountLoginProcessResultDeviceCode) accountLoginProcessResult() {}
+func (AccountLoginProcessResultDeviceCode) Kind() AccountLoginProcessResultKind {
+	return AccountLoginProcessResultKindDeviceCode
+}
+
+// The current credential removal result.
+type AccountLoginProcessResultDiscarded struct {
+	// Whether a credential was removed.
+	Removed bool `json:"removed"`
+}
+
+func (AccountLoginProcessResultDiscarded) accountLoginProcessResult() {}
+func (AccountLoginProcessResultDiscarded) Kind() AccountLoginProcessResultKind {
+	return AccountLoginProcessResultKindDiscarded
+}
+
+// The requested browser or cleanup action completed.
+type AccountLoginProcessResultDone struct {
+}
+
+func (AccountLoginProcessResultDone) accountLoginProcessResult() {}
+func (AccountLoginProcessResultDone) Kind() AccountLoginProcessResultKind {
+	return AccountLoginProcessResultKindDone
+}
+
+// The original authentication owner is ready.
+type AccountLoginProcessResultOpened struct {
+	// The opaque owner identifier, usable only by this connection.
+	OwnerID string `json:"ownerId"`
+}
+
+func (AccountLoginProcessResultOpened) accountLoginProcessResult() {}
+func (AccountLoginProcessResultOpened) Kind() AccountLoginProcessResultKind {
+	return AccountLoginProcessResultKindOpened
+}
+
+// A persistence operation completed or requires user input.
+type AccountLoginProcessResultPersistence struct {
+	// The original persistence result.
+	// Internal: Result is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Result ProcessLoginPersistence `json:"result"`
+}
+
+func (AccountLoginProcessResultPersistence) accountLoginProcessResult() {}
+func (AccountLoginProcessResultPersistence) Kind() AccountLoginProcessResultKind {
+	return AccountLoginProcessResultKindPersistence
+}
+
+// The organization policy verdict.
+type AccountLoginProcessResultPolicy struct {
+	// The verdict from both original policy channels.
+	// Internal: Decision is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Decision ForceLoginOrgsDecision `json:"decision"`
+	// Original policy warnings for the host's configured logger.
+	Warnings []string `json:"warnings"`
+}
+
+func (AccountLoginProcessResultPolicy) accountLoginProcessResult() {}
+func (AccountLoginProcessResultPolicy) Kind() AccountLoginProcessResultKind {
+	return AccountLoginProcessResultKindPolicy
+}
+
+// The authorization page for the original loopback flow.
+type AccountLoginProcessResultWeb struct {
+	// The authorization URL.
+	URL string `json:"url"`
+}
+
+func (AccountLoginProcessResultWeb) accountLoginProcessResult() {}
+func (AccountLoginProcessResultWeb) Kind() AccountLoginProcessResultKind {
+	return AccountLoginProcessResultKindWeb
+}
+
 // Credentials to validate and store. Omit login to resolve the authenticated user from the
 // token.
 // Experimental: AccountLoginRequest is part of an experimental API and may change or be
@@ -1426,8 +1672,9 @@ func (AhpConnectionTransportDirect) Kind() AhpConnectionTransportKind {
 
 // Ask Mission Control to allocate the connection.
 type AhpConnectionTransportMissionControl struct {
-	// Mission Control service URL.
-	BaseURL string `json:"baseUrl"`
+	// Mission Control service URL. Defaults to the original owner's COPILOT_MC_BASE_URL or
+	// GitHub API URL.
+	BaseURL *string `json:"baseUrl,omitempty"`
 	// Target environment identifier.
 	EnvironmentID string `json:"environmentId"`
 }
@@ -9357,6 +9604,30 @@ type GitHubBranchPullRequestLookupResult struct {
 	Status GitHubBranchPullRequestLookupStatus `json:"status"`
 }
 
+// Creates a secret gist through the bound session's original credential owner.
+// Experimental: GitHubCreateSecretGistRequest is part of an experimental API and may change
+// or be removed.
+// Internal: GitHubCreateSecretGistRequest is an internal SDK API and is not part of the
+// public surface.
+type GitHubCreateSecretGistRequest struct {
+	// The description that GitHub stores with the gist.
+	Description string `json:"description"`
+	// File names mapped to their text content.
+	Files map[string]GitHubSecretGistFile `json:"files"`
+	// The purpose that selects account restrictions and error messages.
+	UseCase GitHubSecretGistUseCase `json:"useCase"`
+}
+
+// The URL returned by GitHub after it creates the secret gist.
+// Experimental: GitHubCreateSecretGistResult is part of an experimental API and may change
+// or be removed.
+// Internal: GitHubCreateSecretGistResult is an internal SDK API and is not part of the
+// public surface.
+type GitHubCreateSecretGistResult struct {
+	// The URL of the new secret gist.
+	URL string `json:"url"`
+}
+
 // Safe discovery information. Host-side relay bootstrap credentials are never included.
 // Experimental: GitHubEnvironment is part of an experimental API and may change or be
 // removed.
@@ -10126,6 +10397,16 @@ type GitHubRepositoryOwnerName struct {
 	Name string `json:"name"`
 	// Repository owner login (user or organization).
 	Owner string `json:"owner"`
+}
+
+// The text content of one secret gist file.
+// Experimental: GitHubSecretGistFile is part of an experimental API and may change or be
+// removed.
+// Internal: GitHubSecretGistFile is an internal SDK API and is not part of the public
+// surface.
+type GitHubSecretGistFile struct {
+	// The complete text content of the file.
+	Content string `json:"content"`
 }
 
 // Client environment metadata describing the process that produced a telemetry event.
@@ -12136,6 +12417,9 @@ type InstructionsDiscoverRepoSourcesRequest struct {
 // Experimental: InstructionsDiscoverRequest is part of an experimental API and may change
 // or be removed.
 type InstructionsDiscoverRequest struct {
+	// Optional configuration root for personal instructions and plugins. Omission retains the
+	// connection's root.
+	ConfigDir *string `json:"configDir,omitempty"`
 	// When true, omit the host's instruction sources (user/home-level files and plugin rules),
 	// leaving only repository and working-directory sources. For multitenant deployments.
 	ExcludeHostInstructions *bool `json:"excludeHostInstructions,omitempty"`
@@ -14464,6 +14748,46 @@ type MarketplaceRemoveResult struct {
 	Removed bool `json:"removed"`
 }
 
+// An additional MCP document supplied as JSON text or a host file.
+// Experimental: MCPAdditionalConfigSource is part of an experimental API and may change or
+// be removed.
+type MCPAdditionalConfigSource interface {
+	mcpAdditionalConfigSource()
+	Kind() MCPAdditionalConfigSourceKind
+}
+
+type RawMCPAdditionalConfigSourceData struct {
+	Discriminator MCPAdditionalConfigSourceKind
+	Raw           json.RawMessage
+}
+
+func (RawMCPAdditionalConfigSourceData) mcpAdditionalConfigSource() {}
+func (r RawMCPAdditionalConfigSourceData) Kind() MCPAdditionalConfigSourceKind {
+	return r.Discriminator
+}
+
+// A document read from the host filesystem.
+type MCPAdditionalConfigSourceFile struct {
+	// Absolute path resolved by the caller.
+	Path string `json:"path"`
+}
+
+func (MCPAdditionalConfigSourceFile) mcpAdditionalConfigSource() {}
+func (MCPAdditionalConfigSourceFile) Kind() MCPAdditionalConfigSourceKind {
+	return MCPAdditionalConfigSourceKindFile
+}
+
+// A JSON document to validate and compose.
+type MCPAdditionalConfigSourceJSON struct {
+	// Raw JSON text.
+	Value string `json:"value"`
+}
+
+func (MCPAdditionalConfigSourceJSON) mcpAdditionalConfigSource() {}
+func (MCPAdditionalConfigSourceJSON) Kind() MCPAdditionalConfigSourceKind {
+	return MCPAdditionalConfigSourceKindJSON
+}
+
 // MCP server allowed by policy, with server name and optional PII-free explanatory note.
 // Experimental: MCPAllowedServer is part of an experimental API and may change or be
 // removed.
@@ -14708,12 +15032,41 @@ type MCPCancelSamplingExecutionResult struct {
 	Cancelled bool `json:"cancelled"`
 }
 
+// Apply the host's Computer Use platform overlay without starting a server.
+// Experimental: MCPComputerUseApplyConfigurationRequest is part of an experimental API and
+// may change or be removed.
+// Internal: MCPComputerUseApplyConfigurationRequest is an internal SDK API and is not part
+// of the public surface.
+type MCPComputerUseApplyConfigurationRequest struct {
+	// Disabled servers after invocation precedence.
+	DisabledServers []string `json:"disabledServers"`
+	// Explicitly enabled servers.
+	EnabledServers []string `json:"enabledServers"`
+	// Complete server map, including provenance and fields unknown to older clients.
+	Servers any `json:"servers"`
+}
+
+// Effective configuration after the existing platform overlay.
+// Experimental: MCPComputerUseApplyConfigurationResult is part of an experimental API and
+// may change or be removed.
+// Internal: MCPComputerUseApplyConfigurationResult is an internal SDK API and is not part
+// of the public surface.
+type MCPComputerUseApplyConfigurationResult struct {
+	// Effective disabled server names.
+	DisabledServers []string `json:"disabledServers"`
+	// Server map with only the platform overlay's changes.
+	Servers any `json:"servers"`
+}
+
 // MCP server name and configuration to add to user configuration.
 // Experimental: MCPConfigAddRequest is part of an experimental API and may change or be
 // removed.
 type MCPConfigAddRequest struct {
 	// MCP server configuration (stdio process or remote HTTP/SSE)
 	Config MCPSerializableServerConfig `json:"config"`
+	// Configuration root for the user MCP document. Omission retains the connection's root;
+	// overrides require a trusted host or direct SDK caller.
+	ConfigDir *string `json:"configDir,omitempty"`
 	// Unique name for the MCP server
 	Name string `json:"name"`
 }
@@ -14723,10 +15076,32 @@ type MCPConfigAddRequest struct {
 type MCPConfigAddResult struct {
 }
 
+// Validates and combines additional MCP documents in source order.
+// Experimental: MCPConfigComposeAdditionalRequest is part of an experimental API and may
+// change or be removed.
+// Internal: MCPConfigComposeAdditionalRequest is an internal SDK API and is not part of the
+// public surface.
+type MCPConfigComposeAdditionalRequest struct {
+	// Documents in low-to-high precedence order.
+	Sources []MCPAdditionalConfigSource `json:"sources"`
+}
+
+// Validated additional MCP servers in source precedence order. Runtime-owned filtering
+// remains outside the serialized document.
+// Experimental: MCPConfigComposeAdditionalResult is part of an experimental API and may
+// change or be removed.
+type MCPConfigComposeAdditionalResult struct {
+	// Server names mapped to their validated document configuration.
+	MCPServers map[string]MCPSerializableServerConfig `json:"mcpServers"`
+}
+
 // MCP server names to disable for new sessions.
 // Experimental: MCPConfigDisableRequest is part of an experimental API and may change or be
 // removed.
 type MCPConfigDisableRequest struct {
+	// Optional configuration root for user settings. Omission retains the connection's root;
+	// overrides require a trusted host or direct SDK caller.
+	ConfigDir *string `json:"configDir,omitempty"`
 	// Names of MCP servers to disable. Each server is added to the persisted disabled list so
 	// new sessions skip it. Already-disabled names are ignored. Active sessions keep their
 	// current connections until they end.
@@ -14742,6 +15117,9 @@ type MCPConfigDisableResult struct {
 // Experimental: MCPConfigEnableRequest is part of an experimental API and may change or be
 // removed.
 type MCPConfigEnableRequest struct {
+	// Optional configuration root for user settings. Omission retains the connection's root;
+	// overrides require a trusted host or direct SDK caller.
+	ConfigDir *string `json:"configDir,omitempty"`
 	// Names of MCP servers to enable. Each server is removed from the persisted disabled list
 	// so new sessions spawn it. Unknown or already-enabled names are ignored.
 	Names []string `json:"names"`
@@ -14752,11 +15130,75 @@ type MCPConfigEnableRequest struct {
 type MCPConfigEnableResult struct {
 }
 
+// Selects an explicit user MCP configuration root without changing the connection owner.
+// Experimental: MCPConfigForConfigDirRequest is part of an experimental API and may change
+// or be removed.
+// Internal: MCPConfigForConfigDirRequest is an internal SDK API and is not part of the
+// public surface.
+type MCPConfigForConfigDirRequest struct {
+	// Configuration root containing the user MCP document.
+	ConfigDir string `json:"configDir"`
+}
+
 // User-configured MCP servers, keyed by server name.
 // Experimental: MCPConfigList is part of an experimental API and may change or be removed.
 type MCPConfigList struct {
 	// All MCP servers from user config, keyed by name
 	Servers map[string]MCPSerializableServerConfig `json:"servers"`
+}
+
+// Optional configuration root for user MCP servers. Omission retains the connection's root.
+// Experimental: MCPConfigListRequest is part of an experimental API and may change or be
+// removed.
+type MCPConfigListRequest struct {
+	// Configuration root containing the user MCP document. Only trusted hosts or direct SDK
+	// callers can override it.
+	ConfigDir *string `json:"configDir,omitempty"`
+}
+
+// Read-only MCP configuration composition from explicit source inventories. The result
+// grants no execution authority.
+// Experimental: MCPConfigMergeSourcesRequest is part of an experimental API and may change
+// or be removed.
+// Internal: MCPConfigMergeSourcesRequest is an internal SDK API and is not part of the
+// public surface.
+type MCPConfigMergeSourcesRequest struct {
+	// Additional MCP configuration, merged after the other sources.
+	AdditionalConfig any `json:"additionalConfig,omitempty"`
+	// Host-bundled plugin records, below user and workspace configuration.
+	BuiltinPlugins []any `json:"builtinPlugins,omitzero"`
+	// Configuration root for the user MCP document.
+	ConfigDir string `json:"configDir"`
+	// Include workspace files only where the runtime confirms folder trust.
+	IncludeWorkspaceSources *bool `json:"includeWorkspaceSources,omitempty"`
+	// Resolved installed, live, and explicit plugin records in precedence order.
+	InstalledPlugins []any `json:"installedPlugins,omitzero"`
+	// Repository boundary for upward workspace discovery.
+	RepoRoot *string `json:"repoRoot,omitempty"`
+	// Working directory for workspace discovery and relative source references.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
+// The composed MCP configuration and all omitted-source diagnostics.
+// Experimental: MCPConfigMergeSourcesResult is part of an experimental API and may change
+// or be removed.
+// Internal: MCPConfigMergeSourcesResult is an internal SDK API and is not part of the
+// public surface.
+type MCPConfigMergeSourcesResult struct {
+	// The complete merged configuration, including source provenance.
+	Config any `json:"config"`
+	// Registry servers disabled because their MSIX container is unavailable.
+	OdrMsixDisabledServerNames []string `json:"odrMsixDisabledServerNames"`
+	// Server names discovered through the on-device registry.
+	OdrServerNames []string `json:"odrServerNames"`
+	// Invalid user entries omitted while valid siblings remained.
+	// Internal: UserConfigErrors is part of the SDK's internal API surface and is not intended
+	// for external use.
+	UserConfigErrors []MCPConfigSourceDiagnostic `json:"userConfigErrors"`
+	// Workspace files or entries that did not load.
+	// Internal: WorkspaceErrors is part of the SDK's internal API surface and is not intended
+	// for external use.
+	WorkspaceErrors []MCPConfigSourceDiagnostic `json:"workspaceErrors"`
 }
 
 // Experimental: MCPConfigReloadResult is part of an experimental API and may change or be
@@ -14770,6 +15212,9 @@ type MCPConfigReloadResult struct {
 type MCPConfigRemoveRequest struct {
 	// OAuth Client ID Metadata Document URL whose persisted credentials should also be removed.
 	AuthClientIDMetadataURL *string `json:"authClientIdMetadataUrl,omitempty"`
+	// Configuration root for the user MCP document and credentials. Omission retains the
+	// connection's root; overrides require a trusted host or direct SDK caller.
+	ConfigDir *string `json:"configDir,omitempty"`
 	// Name of the MCP server to remove
 	Name string `json:"name"`
 }
@@ -14777,6 +15222,20 @@ type MCPConfigRemoveRequest struct {
 // Experimental: MCPConfigRemoveResult is part of an experimental API and may change or be
 // removed.
 type MCPConfigRemoveResult struct {
+}
+
+// A source file or server entry that the MCP composition omitted.
+// Experimental: MCPConfigSourceDiagnostic is part of an experimental API and may change or
+// be removed.
+// Internal: MCPConfigSourceDiagnostic is an internal SDK API and is not part of the public
+// surface.
+type MCPConfigSourceDiagnostic struct {
+	// Diagnostic from the existing MCP parser.
+	Message string `json:"message"`
+	// Source file that contains the problem.
+	Path string `json:"path"`
+	// Either malformed, unreadable, or invalid-server.
+	Reason string `json:"reason"`
 }
 
 // MCP server name and replacement configuration to write to user configuration.
@@ -14860,6 +15319,17 @@ type MCPConfigureGitHubRequest struct {
 type MCPConfigureGitHubResult struct {
 	// Whether GitHub MCP configuration changed.
 	Changed bool `json:"changed"`
+}
+
+// Fresh user MCP server names, including invalid entries but excluding installation-owned
+// entries. This read does not change the validated configuration cache.
+// Experimental: MCPConfigUserServerNamesResult is part of an experimental API and may
+// change or be removed.
+// Internal: MCPConfigUserServerNamesResult is an internal SDK API and is not part of the
+// public surface.
+type MCPConfigUserServerNamesResult struct {
+	// User-owned persisted server names, including entries that validation skips.
+	Names []string `json:"names"`
 }
 
 // MCP-specific detail for a source-discriminated diagnostic entry.
@@ -15469,6 +15939,82 @@ type MCPFilteredServer struct {
 	Reason string `json:"reason"`
 	// PII-free filter reason
 	RedactedReason *string `json:"redactedReason,omitempty"`
+}
+
+// One invocation's GitHub MCP tool overrides.
+// Experimental: MCPGitHubInvocationToolOptions is part of an experimental API and may
+// change or be removed.
+// Internal: MCPGitHubInvocationToolOptions is an internal SDK API and is not part of the
+// public surface.
+type MCPGitHubInvocationToolOptions struct {
+	// Additional tools.
+	AdditionalTools []string `json:"additionalTools,omitzero"`
+	// Additional toolsets.
+	AdditionalToolsets []string `json:"additionalToolsets,omitzero"`
+	// Override form deferral when the shared tool resolver supports it.
+	DisableFormDeferral *bool `json:"disableFormDeferral,omitempty"`
+	// Expose all supported tools.
+	EnableAllTools *bool `json:"enableAllTools,omitempty"`
+	// Select the insiders endpoint.
+	EnableInsidersMode *bool `json:"enableInsidersMode,omitempty"`
+}
+
+// A secret-free GitHub descriptor, an ordinary signed-out result, or a bounded degraded
+// result.
+// Experimental: MCPGitHubResolveForInvocationResult is part of an experimental API and may
+// change or be removed.
+// Internal: MCPGitHubResolveForInvocationResult is an internal SDK API and is not part of
+// the public surface.
+type MCPGitHubResolveForInvocationResult struct {
+	// Built-in descriptor without authentication headers; absent when unavailable.
+	Server any `json:"server,omitempty"`
+	// Whether the existing two-second resolution budget expired.
+	TimedOut bool `json:"timedOut"`
+	// Resolution failure detail, distinct from an ordinary signed-out result.
+	Warning *string `json:"warning,omitempty"`
+}
+
+// Resolve the authentication-derived built-in without a session or MCP connection.
+// Experimental: MCPGitHubResolveInvocationRequest is part of an experimental API and may
+// change or be removed.
+// Internal: MCPGitHubResolveInvocationRequest is an internal SDK API and is not part of the
+// public surface.
+type MCPGitHubResolveInvocationRequest struct {
+	// Existing launch populations; account identity comes only from the connection.
+	// Internal: Audience is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Audience MCPInvocationAudience `json:"audience"`
+	// Effective disabled servers, after enable overrides.
+	DisabledServers []string `json:"disabledServers"`
+	// Invocation tool overrides, above settings.
+	// Internal: Flags is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Flags *MCPGitHubInvocationToolOptions `json:"flags,omitempty"`
+	// Client integration identifier for the secret-free descriptor.
+	IntegrationID string `json:"integrationId"`
+	// Tool filters used by the session this invocation describes.
+	// Internal: ToolFilters is part of the SDK's internal API surface and is not intended for
+	// external use.
+	ToolFilters *MCPShouldExcludeGitHubToolsRequest `json:"toolFilters,omitempty"`
+	// Effective user and trusted repository settings.
+	UserSettings any `json:"userSettings"`
+	// Repository context for host detection and shell availability.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
+// A secret-free GitHub descriptor, an ordinary signed-out result, or a bounded degraded
+// result.
+// Experimental: MCPGitHubResolveInvocationResult is part of an experimental API and may
+// change or be removed.
+// Internal: MCPGitHubResolveInvocationResult is an internal SDK API and is not part of the
+// public surface.
+type MCPGitHubResolveInvocationResult struct {
+	// Built-in descriptor without authentication headers; absent when unavailable.
+	Server any `json:"server,omitempty"`
+	// Whether the existing two-second resolution budget expired.
+	TimedOut bool `json:"timedOut"`
+	// Resolution failure detail, distinct from an ordinary signed-out result.
+	Warning *string `json:"warning,omitempty"`
 }
 
 // Repository and server state for GitHub MCP exposure.
@@ -16156,6 +16702,28 @@ type MCPInstallPlan struct {
 	// always has at least one; when none is eligible, planning returns
 	// `CatalogUnavailableTransportError` instead.
 	TransportChoices []MCPPlanTransportChoice `json:"transportChoices"`
+}
+
+// Feature populations for a sessionless capability inspection.
+// Experimental: MCPInvocationAudience is part of an experimental API and may change or be
+// removed.
+// Internal: MCPInvocationAudience is an internal SDK API and is not part of the public
+// surface.
+type MCPInvocationAudience struct {
+	// First launch time in Unix milliseconds.
+	FirstLaunchAtMillis *float64 `json:"firstLaunchAtMillis,omitempty"`
+	// Whether experimental capabilities are enabled.
+	IsExperimental bool `json:"isExperimental"`
+	// Whether this installation belongs to staff.
+	IsStaff bool `json:"isStaff"`
+	// Whether this installation belongs to GitHub staff.
+	IsStaffGitHub *bool `json:"isStaffGithub,omitempty"`
+	// Whether this installation belongs to Microsoft staff.
+	IsStaffMicrosoft *bool `json:"isStaffMicrosoft,omitempty"`
+	// Whether team capabilities are enabled.
+	IsTeam bool `json:"isTeam"`
+	// Whether streamer mode is active.
+	StreamerMode bool `json:"streamerMode"`
 }
 
 // Server name to check running status for.
@@ -18454,6 +19022,42 @@ type MCPUnregisterExternalClientRequest struct {
 	ServerName string `json:"serverName"`
 }
 
+// Memory import input. Authentication remains bound to the calling runtime owner.
+// Experimental: MemoriesImportSemanticRequest is part of an experimental API and may change
+// or be removed.
+type MemoriesImportSemanticRequest struct {
+	// Validate without authentication, network access, or writes.
+	DryRun *bool `json:"dryRun,omitempty"`
+	// Semantic memory JSONL.
+	Jsonl string `json:"jsonl"`
+	// Conflict policy, defaulting to error.
+	OnConflict *SemanticMemoryConflictPolicy `json:"onConflict,omitempty"`
+	// Runtime settings overrides, with the original caller's configuration root.
+	Settings any `json:"settings,omitempty"`
+	// Working directory for temporary, scoped memory sessions.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
+// Semantic memory import outcome.
+// Experimental: MemoriesImportSemanticResult is part of an experimental API and may change
+// or be removed.
+type MemoriesImportSemanticResult struct {
+	// Stable aggregate result code.
+	Code string `json:"code"`
+	// Input validation diagnostics.
+	Diagnostics []SemanticImportDiagnostic `json:"diagnostics"`
+	// Whether the call only validated input.
+	DryRun bool `json:"dryRun"`
+	// Record outcome counts.
+	Imported SemanticMemoryImportCounts `json:"imported"`
+	// Human-readable aggregate result.
+	Message string `json:"message"`
+	// Whether every record succeeded or was skipped.
+	Ok bool `json:"ok"`
+	// Individual record outcomes, in input order.
+	Records []SemanticMemoryImportItemResult `json:"records"`
+}
+
 // Memory configuration for this session.
 // Experimental: MemoryConfiguration is part of an experimental API and may change or be
 // removed.
@@ -19040,6 +19644,32 @@ type ModelClearStartupSeedRequest struct {
 // public surface.
 type ModelClearStartupSeedResult struct {
 	Cleared bool `json:"cleared"`
+}
+
+// Conversation and changes for a utility-model branch slug.
+// Experimental: ModelGenerateBranchSlugRequest is part of an experimental API and may
+// change or be removed.
+// Internal: ModelGenerateBranchSlugRequest is an internal SDK API and is not part of the
+// public surface.
+type ModelGenerateBranchSlugRequest struct {
+	// Summary of the changes the branch will contain.
+	ChangeSummary string `json:"changeSummary"`
+	// Conversation messages in their original order.
+	Conversation []string `json:"conversation"`
+	// Prefix for the established derived-name fallback.
+	FallbackPrefix string `json:"fallbackPrefix"`
+	// Original task, when available.
+	TaskPrompt *string `json:"taskPrompt,omitempty"`
+}
+
+// A generated or derived branch slug.
+// Experimental: ModelGenerateBranchSlugResult is part of an experimental API and may change
+// or be removed.
+// Internal: ModelGenerateBranchSlugResult is an internal SDK API and is not part of the
+// public surface.
+type ModelGenerateBranchSlugResult struct {
+	// Branch slug under the runtime's existing fallback policy.
+	Slug string `json:"slug"`
 }
 
 // Host presentation state the reasoning-summaries policy depends on.
@@ -19921,6 +20551,18 @@ type NamedProviderConfig struct {
 	Type *ProviderConfigType `json:"type,omitempty"`
 	// Wire API used to communicate with the provider.
 	WireAPI *ProviderConfigWireAPI `json:"wireApi,omitempty"`
+}
+
+// Input for utility-model session name generation.
+// Experimental: NameGenerateRequest is part of an experimental API and may change or be
+// removed.
+// Internal: NameGenerateRequest is an internal SDK API and is not part of the public
+// surface.
+type NameGenerateRequest struct {
+	// Whether a user explicitly requested the name. Defaults to false.
+	Manual *bool `json:"manual,omitempty"`
+	// Conversation text from which to derive a name.
+	UserMessage string `json:"userMessage"`
 }
 
 // The session's friendly name, or null when not yet set.
@@ -21769,6 +22411,32 @@ type PermissionURLsSetUnrestrictedModeParams struct {
 	Enabled bool `json:"enabled"`
 }
 
+// A typed request to the original host's retained persistence resources.
+// Experimental: PersistenceBarrierRequest is part of an experimental API and may change or
+// be removed.
+// Internal: PersistenceBarrierRequest is an internal SDK API and is not part of the public
+// surface.
+type PersistenceBarrierRequest struct {
+	// Whether the original writer must persist an otherwise empty session.
+	Force bool `json:"force"`
+	// Native flush failure, combined with retained callback failures at completion.
+	NativeFailure *string `json:"nativeFailure,omitempty"`
+	// Runtime-assigned identity for this flush, independent of concurrent flushes.
+	OperationID string `json:"operationId"`
+	// Resource barrier to await.
+	Phase SessionPersistenceBarrierPhase `json:"phase"`
+	// Target session identifier
+	SessionID string `json:"sessionId"`
+}
+
+// Acknowledges completion of one original-host persistence barrier.
+// Experimental: PersistenceBarrierResult is part of an experimental API and may change or
+// be removed.
+// Internal: PersistenceBarrierResult is an internal SDK API and is not part of the public
+// surface.
+type PersistenceBarrierResult struct {
+}
+
 // A complete JSON snapshot to write under the runtime's per-path file lock.
 // Experimental: PersistenceWriteRawJSONLockedRequest is part of an experimental API and may
 // change or be removed.
@@ -21945,6 +22613,26 @@ type PluginApplyInstallRequest struct {
 	PolicySessionID string `json:"policySessionId"`
 }
 
+// Locates bundled plugin manifests relative to one installed host directory.
+// Experimental: PluginBuiltinDiscoverRequest is part of an experimental API and may change
+// or be removed.
+// Internal: PluginBuiltinDiscoverRequest is an internal SDK API and is not part of the
+// public surface.
+type PluginBuiltinDiscoverRequest struct {
+	// Host module directory used to locate the installed distribution.
+	BaseDirectory string `json:"baseDirectory"`
+}
+
+// Bundled plugin records and diagnostics from the original manifest scanner.
+// Experimental: PluginBuiltinDiscoverResult is part of an experimental API and may change
+// or be removed.
+type PluginBuiltinDiscoverResult struct {
+	// Scanned bundled records in host precedence order.
+	Plugins []any `json:"plugins"`
+	// Manifest and filesystem diagnostics, including a missing required bundle.
+	Warnings []string `json:"warnings"`
+}
+
 // Identifies a plugin and its configured marketplace without accepting configuration or
 // policy overrides.
 // Experimental: PluginCheckUpdateRequest is part of an experimental API and may change or
@@ -21954,6 +22642,28 @@ type PluginCheckUpdateRequest struct {
 	Marketplace string `json:"marketplace"`
 	// Installed plugin name.
 	Name string `json:"name"`
+}
+
+// Inspects persisted and live plugins under an explicit effective configuration without
+// changing the existing user-only plugins.list API.
+// Experimental: PluginInspectInventoryRequest is part of an experimental API and may change
+// or be removed.
+// Internal: PluginInspectInventoryRequest is an internal SDK API and is not part of the
+// public surface.
+type PluginInspectInventoryRequest struct {
+	// Trusted caller-composed read configuration, not persisted by inspection.
+	ConfigOverride any `json:"configOverride"`
+	// Includes pending managed plugins by default. False excludes uninstalled rows before
+	// source merging.
+	IncludeUninstalled *bool `json:"includeUninstalled,omitempty"`
+	// Effective policy for read-only inspection; mutation guards retain their own authority.
+	ManagedSettings any `json:"managedSettings,omitempty"`
+	// Additional plugin directories in host precedence order.
+	PluginDirectories []string `json:"pluginDirectories,omitzero"`
+	// Seeds pre-migration enablement from installed records below explicit overrides.
+	SeedEnabledPluginsFromInstalled bool `json:"seedEnabledPluginsFromInstalled"`
+	// Working directory for repository overlay and live marketplace resolution.
+	WorkingDirectory string `json:"workingDirectory"`
 }
 
 // One reviewed plugin file.
@@ -22303,6 +23013,33 @@ type PluginInstallResult struct {
 	Warnings []string `json:"warnings,omitzero"`
 }
 
+// One plugin in a host invocation's complete merged inventory.
+// Experimental: PluginInvocationInventoryEntry is part of an experimental API and may
+// change or be removed.
+// Internal: PluginInvocationInventoryEntry is an internal SDK API and is not part of the
+// public surface.
+type PluginInvocationInventoryEntry struct {
+	// Whether an explicit host directory supplies this plugin.
+	External bool `json:"external"`
+	// Plugin metadata and effective activation.
+	Plugin InstalledPluginInfo `json:"plugin"`
+}
+
+// Persisted, live, built-in, and host-directory plugins with canonical shadowing and scan
+// diagnostics.
+// Experimental: PluginInvocationInventoryResult is part of an experimental API and may
+// change or be removed.
+// Internal: PluginInvocationInventoryResult is an internal SDK API and is not part of the
+// public surface.
+type PluginInvocationInventoryResult struct {
+	// Merged inventory in canonical precedence order.
+	// Internal: Plugins is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Plugins []PluginInvocationInventoryEntry `json:"plugins"`
+	// Directory scan warnings in source order.
+	Warnings []string `json:"warnings"`
+}
+
 // Plugins installed for the session, with their enabled state and version metadata.
 // Experimental: PluginList is part of an experimental API and may change or be removed.
 type PluginList struct {
@@ -22412,6 +23149,78 @@ type PluginPlanInstallRequest struct {
 	PolicySessionID string `json:"policySessionId"`
 }
 
+// A diagnostic from plugin policy resolution.
+// Experimental: PluginPolicyDiagnostic is part of an experimental API and may change or be
+// removed.
+// Internal: PluginPolicyDiagnostic is an internal SDK API and is not part of the public
+// surface.
+type PluginPolicyDiagnostic struct {
+	// Diagnostic severity: debug, info, warning, or error.
+	Level string `json:"level"`
+	// Diagnostic text for the host's private log.
+	Message string `json:"message"`
+}
+
+// Resolves plugin policy through the requesting connection's original credential owner.
+// Experimental: PluginPolicyResolveInvocationRequest is part of an experimental API and may
+// change or be removed.
+// Internal: PluginPolicyResolveInvocationRequest is an internal SDK API and is not part of
+// the public surface.
+type PluginPolicyResolveInvocationRequest struct {
+	// Optional active account identity; credentials still resolve through the original owner.
+	AuthInfo *AuthIdentity `json:"authInfo,omitempty"`
+	// Reads account and server policy from local caches without network access.
+	CacheOnly bool `json:"cacheOnly"`
+	// Host client identity supplied to the policy helper.
+	ClientName string `json:"clientName"`
+	// Host home directory for policy and cache locations.
+	HomeDirectory string `json:"homeDirectory"`
+	// Host platform in Node platform spelling.
+	Platform string `json:"platform"`
+	// Whether a configured policy helper may run.
+	PolicyHelperEnabled bool `json:"policyHelperEnabled"`
+	// Retains authoritative source layers for subsequent guarded mutations.
+	RetainPolicy *bool `json:"retainPolicy,omitempty"`
+	// Stops on ingestion exceptions instead of reloading the device layer.
+	Strict bool `json:"strict"`
+	// Host user agent supplied to policy retrieval.
+	UserAgent string `json:"userAgent"`
+	// Working directory used by a directory-sensitive policy helper.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
+// Resolved plugin policy and authoritative failure posture. Fresh successful resolutions
+// retain the original policy layers for mutation guards; cache-only inspection never
+// changes retained policy.
+// Experimental: PluginPolicyResolveInvocationResult is part of an experimental API and may
+// change or be removed.
+// Internal: PluginPolicyResolveInvocationResult is an internal SDK API and is not part of
+// the public surface.
+type PluginPolicyResolveInvocationResult struct {
+	// Resolution diagnostics in source order.
+	// Internal: Diagnostics is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Diagnostics []PluginPolicyDiagnostic `json:"diagnostics"`
+	// Whether this host has a configured helper.
+	PolicyHelperConfigured bool `json:"policyHelperConfigured"`
+	// Whether helper failure requires refusal.
+	PolicyHelperFailClosed bool `json:"policyHelperFailClosed"`
+	// Whether the helper failed.
+	PolicyHelperLoadFailed bool `json:"policyHelperLoadFailed"`
+	// Server resolution error, when present.
+	ServerFetchError *string `json:"serverFetchError,omitempty"`
+	// Whether the server policy could not be resolved.
+	ServerFetchFailed bool `json:"serverFetchFailed"`
+	// Whether required fresh confirmation failed and the caller must refuse.
+	ServerForcedRefreshFailure bool `json:"serverForcedRefreshFailure"`
+	// Raw server policy for hosts that inspect the account layer alone.
+	ServerResponse any `json:"serverResponse,omitempty"`
+	// Whether no usable credential was available.
+	ServerTokenUnavailable bool `json:"serverTokenUnavailable"`
+	// Effective device, server, and helper settings when available.
+	Settings any `json:"settings,omitempty"`
+}
+
 // Built-in plugin to activate.
 // Experimental: PluginsActivateRequest is part of an experimental API and may change or be
 // removed.
@@ -22428,6 +23237,36 @@ type PluginsActivateResult struct {
 	Message *string `json:"message,omitempty"`
 	// Whether the plugin's sessionStart hooks ran, or why they did not run.
 	Status PluginActivationStatus `json:"status"`
+}
+
+// Resolve managed Browser activation through the connection's original credential owner.
+// Experimental: PluginsBuiltinResolveActivationRequest is part of an experimental API and
+// may change or be removed.
+// Internal: PluginsBuiltinResolveActivationRequest is an internal SDK API and is not part
+// of the public surface.
+type PluginsBuiltinResolveActivationRequest struct {
+	// Existing launch populations for the policy-helper gate.
+	// Internal: Audience is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Audience MCPInvocationAudience `json:"audience"`
+	// Embedding client identity for the policy helper.
+	ClientName string `json:"clientName"`
+	// Effective user and trusted repository settings.
+	UserSettings any `json:"userSettings"`
+	// Working directory for the policy helper.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
+// Browser activation after the managed-over-user whole-plugin policy.
+// Experimental: PluginsBuiltinResolveActivationResult is part of an experimental API and
+// may change or be removed.
+// Internal: PluginsBuiltinResolveActivationResult is an internal SDK API and is not part of
+// the public surface.
+type PluginsBuiltinResolveActivationResult struct {
+	// Whether the bundled Browser may contribute MCP servers.
+	BrowserEnabled bool `json:"browserEnabled"`
+	// Whether policy resolution exceeded the existing two-second budget.
+	TimedOut bool `json:"timedOut"`
 }
 
 // Trusted built-in plugin directories to use for this runtime process.
@@ -22507,6 +23346,21 @@ type PluginsInstallRequest struct {
 	WorkingDirectory *string `json:"workingDirectory,omitempty"`
 }
 
+// Optional workspace settings for a plugin catalog or bulk update through the original
+// caller's runtime. Omission retains the server's configuration.
+// Experimental: PluginsInvocationRequest is part of an experimental API and may change or
+// be removed.
+type PluginsInvocationRequest struct {
+	// Effective user and repository settings for this invocation. Runtime-owned managed
+	// restrictions still apply.
+	ConfigOverride any `json:"configOverride,omitempty"`
+	// Managed settings supplied by the host for canonical plugin policy evaluation. This value
+	// does not select a credential owner.
+	ManagedSettings any `json:"managedSettings,omitempty"`
+	// Working directory whose repository settings and plugin sources apply to this invocation.
+	WorkingDirectory *string `json:"workingDirectory,omitempty"`
+}
+
 // Optional read-only plugin discovery context. The runtime resolves account, policy, and
 // workspace trust. This query does not change settings.
 // Experimental: PluginsListRequest is part of an experimental API and may change or be
@@ -22559,6 +23413,39 @@ type PluginsMarketplacesRemoveRequest struct {
 	Force *bool `json:"force,omitempty"`
 	// Marketplace name to remove
 	Name string `json:"name"`
+}
+
+// Resolves active plugin sources with runtime-owned folder trust and managed policy.
+// Experimental: PluginSourcesResolveRequest is part of an experimental API and may change
+// or be removed.
+// Internal: PluginSourcesResolveRequest is an internal SDK API and is not part of the
+// public surface.
+type PluginSourcesResolveRequest struct {
+	// Configuration root for user settings and persisted installations.
+	ConfigDir string `json:"configDir"`
+	// Explicit plugin directories in host precedence order.
+	PluginDirectories []string `json:"pluginDirectories,omitzero"`
+	// Working directory for trusted repository overlays and live marketplaces.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
+// Active plugins and the separate persisted inventory, without persisting live directory
+// records.
+// Experimental: PluginSourcesResolveResult is part of an experimental API and may change or
+// be removed.
+// Internal: PluginSourcesResolveResult is an internal SDK API and is not part of the public
+// surface.
+type PluginSourcesResolveResult struct {
+	// Live directory records, including inactive records that still own their names.
+	LivePlugins []any `json:"livePlugins,omitzero"`
+	// Whether this pass confirmed the live tier instead of using persisted fallback.
+	LiveTierKnown *bool `json:"liveTierKnown,omitempty"`
+	// Persisted ambient records, including disabled or shadowed installations.
+	PersistedPlugins []any `json:"persistedPlugins"`
+	// Active records, including trusted live marketplaces and explicit directories.
+	Plugins []any `json:"plugins"`
+	// Scanner and live-marketplace warnings for this exact source pass.
+	Warnings []string `json:"warnings"`
 }
 
 type PluginsReloadRequest struct {
@@ -22751,6 +23638,71 @@ type PolicyHelperHelpLink struct {
 	Label *string `json:"label,omitempty"`
 	// Validated absolute HTTP(S) URL.
 	URL string `json:"url"`
+}
+
+// An account offered by the original login persistence operation.
+// Experimental: ProcessLoginAccount is part of an experimental API and may change or be
+// removed.
+// Internal: ProcessLoginAccount is an internal SDK API and is not part of the public
+// surface.
+type ProcessLoginAccount struct {
+	// The account host.
+	Host string `json:"host"`
+	// The account provider kind.
+	Kind string `json:"kind"`
+	// The account login.
+	Login string `json:"login"`
+	// The opaque account selector.
+	SelectionID string `json:"selectionId"`
+}
+
+// The immutable configuration for one pre-session authentication owner.
+// Experimental: ProcessLoginContext is part of an experimental API and may change or be
+// removed.
+// Internal: ProcessLoginContext is an internal SDK API and is not part of the public
+// surface.
+type ProcessLoginContext struct {
+	// The original configuration directory. Omission preserves the default root.
+	ConfigDir *string `json:"configDir,omitempty"`
+	// The host environment snapshot used throughout credential resolution.
+	Environment map[string]string `json:"environment"`
+}
+
+// The original login persistence result, without credentials.
+// Experimental: ProcessLoginPersistence is part of an experimental API and may change or be
+// removed.
+// Internal: ProcessLoginPersistence is an internal SDK API and is not part of the public
+// surface.
+type ProcessLoginPersistence struct {
+	// The offered accounts, when account selection is required.
+	// Internal: Accounts is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Accounts []ProcessLoginAccount `json:"accounts,omitzero"`
+	// The runtime's original user description, when host and login are available.
+	Description *string `json:"description,omitempty"`
+	// The authenticated host, when available.
+	Host *string `json:"host,omitempty"`
+	// The authenticated login, when available.
+	Login *string `json:"login,omitempty"`
+	// The original completed, needs-plaintext-consent, needs-account-selection, or declined
+	// status.
+	Status string `json:"status"`
+}
+
+// The host facts used for the post-login organization policy evaluation.
+// Experimental: ProcessLoginPolicyContext is part of an experimental API and may change or
+// be removed.
+// Internal: ProcessLoginPolicyContext is an internal SDK API and is not part of the public
+// surface.
+type ProcessLoginPolicyContext struct {
+	// The current host environment, including policy provenance restrictions.
+	Environment map[string]string `json:"environment"`
+	// The original user's home directory.
+	HomeDirectory string `json:"homeDirectory"`
+	// The original host platform, such as win32, darwin, or linux.
+	Platform string `json:"platform"`
+	// The original host's Node.js version for the existing policy user agent.
+	ProcessVersion string `json:"processVersion"`
 }
 
 // Serializable definition of a caller-implemented tool whose execution is handled over the
@@ -24535,6 +25487,53 @@ type RepoSettingsWriteKeyRequest struct {
 type RepoSettingsWriteKeyResult struct {
 }
 
+// Reads only the trusted repository contribution to one resource disable list.
+// Experimental: RepositoryDisabledNamesRequest is part of an experimental API and may
+// change or be removed.
+// Internal: RepositoryDisabledNamesRequest is an internal SDK API and is not part of the
+// public surface.
+type RepositoryDisabledNamesRequest struct {
+	// Host paths and environment that select the user document.
+	Context UserSettingsHostContext `json:"context"`
+	// Resource disable list to inspect.
+	Key RepositoryDisabledKey `json:"key"`
+	// Directory whose repository and persisted trust determine the overlay.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
+// The advisory repository disable list. A read failure returns no names and a diagnostic,
+// rather than blocking a listing or mutation.
+// Experimental: RepositoryDisabledNamesResult is part of an experimental API and may change
+// or be removed.
+type RepositoryDisabledNamesResult struct {
+	// Repository-owned names, excluding the user contribution.
+	Names []string `json:"names"`
+	// Debug diagnostic for a repository that could not be inspected.
+	Warning *string `json:"warning,omitempty"`
+}
+
+// Stored Markdown reports, newest first, from the selected session.
+// Experimental: ResearchListReportsResult is part of an experimental API and may change or
+// be removed.
+type ResearchListReportsResult struct {
+	// Reports sorted by descending modification time with stable ties.
+	Reports []ResearchStoredReport `json:"reports"`
+}
+
+// A stored Markdown research report in the bound session's authoritative state directory.
+// Experimental: ResearchStoredReport is part of an experimental API and may change or be
+// removed.
+type ResearchStoredReport struct {
+	// The full report path on the runtime host.
+	FilePath string `json:"filePath"`
+	// The file name without its final .md extension.
+	ID string `json:"id"`
+	// The file modification time as a UTC ISO timestamp.
+	Timestamp string `json:"timestamp"`
+	// The identifier with hyphens replaced by spaces.
+	Topic string `json:"topic"`
+}
+
 // Experimental: ResponseFormat is part of an experimental API and may change or be removed.
 type ResponseFormat struct {
 	// JSON Schema and provider options for the turn's output.
@@ -25970,6 +26969,14 @@ type SecretsAddFilterValuesResult struct {
 	Ok bool `json:"ok"`
 }
 
+// Content after runtime-owned redaction.
+type SecretsFilterForHostResult struct {
+	// Whether the returned content differs from the submitted text.
+	Changed bool `json:"changed"`
+	// Redacted content. JSON mode preserves the runtime's JSON serialization behavior.
+	Value string `json:"value"`
+}
+
 // Content to redact with the runtime's process filter.
 // Experimental: SecretsFilterRequest is part of an experimental API and may change or be
 // removed.
@@ -26004,6 +27011,66 @@ type SecretsRemoveFilterValuesRequest struct {
 type SecretsRemoveFilterValuesResult struct {
 	// Whether removal completed successfully.
 	Ok bool `json:"ok"`
+}
+
+// One actionable semantic import diagnostic.
+// Experimental: SemanticImportDiagnostic is part of an experimental API and may change or
+// be removed.
+type SemanticImportDiagnostic struct {
+	// Stable diagnostic code.
+	Code string `json:"code"`
+	// External record identifier, when present.
+	ExternalID *string `json:"externalId,omitempty"`
+	// One-based input line.
+	Line int64 `json:"line"`
+	// Explanation of the invalid input or failed operation.
+	Message string `json:"message"`
+}
+
+// Number of submitted memories and their outcomes.
+// Experimental: SemanticMemoryImportCounts is part of an experimental API and may change or
+// be removed.
+type SemanticMemoryImportCounts struct {
+	// Failed records.
+	Failed int64 `json:"failed"`
+	// Successfully stored records.
+	Imported int64 `json:"imported"`
+	// Duplicate or conflicting records skipped by policy.
+	Skipped int64 `json:"skipped"`
+	// Total validated input records.
+	Total int64 `json:"total"`
+}
+
+// One semantic memory record outcome.
+// Experimental: SemanticMemoryImportItemResult is part of an experimental API and may
+// change or be removed.
+type SemanticMemoryImportItemResult struct {
+	// Stable operation code.
+	Code string `json:"code"`
+	// External record identifier, when present.
+	ExternalID *string `json:"externalId,omitempty"`
+	// One-based input line.
+	Line int64 `json:"line"`
+	// Human-readable operation result.
+	Message string `json:"message"`
+	// Outcome: imported, skipped, failed, or validated.
+	Status SemanticMemoryImportItemStatus `json:"status"`
+}
+
+// Conversation records accepted by a semantic session import.
+// Experimental: SemanticSessionImportCounts is part of an experimental API and may change
+// or be removed.
+type SemanticSessionImportCounts struct {
+	// User attachments.
+	Attachments int64 `json:"attachments"`
+	// Message records.
+	Messages int64 `json:"messages"`
+	// Sessions persisted; zero for a dry run.
+	Sessions int64 `json:"sessions"`
+	// Tool call records.
+	ToolCalls int64 `json:"toolCalls"`
+	// Tool result records.
+	ToolResults int64 `json:"toolResults"`
 }
 
 // Internal request-correlated completion of one submitted message.
@@ -26731,6 +27798,41 @@ type SessionEventPublishResult struct {
 	EventID string `json:"eventId"`
 }
 
+// Host launch resources and lifecycle options for the original session's extension service.
+// Experimental: SessionExtensionsConfigureHostRequest is part of an experimental API and
+// may change or be removed.
+// Internal: SessionExtensionsConfigureHostRequest is an internal SDK API and is not part of
+// the public surface.
+type SessionExtensionsConfigureHostRequest struct {
+	// Directory that contains the host's CLI distribution.
+	CLIDistDir string `json:"cliDistDir"`
+	// Explicit disabled IDs. When absent, the runtime reads the selected profile.
+	DisabledIDs []string `json:"disabledIds,omitzero"`
+	// Existing extension host engine. The original session authority must own its session
+	// generation.
+	HostServerID int64 `json:"hostServerId"`
+	// Opaque token for the original host's eligibility check after native discovery.
+	HostValidationToken *string `json:"hostValidationToken,omitempty"`
+	// Explicit source filters. When absent, the runtime uses all allowed sources.
+	IncludeSources []string `json:"includeSources,omitzero"`
+	// Existing initial startup token, when configuration belongs to startup.
+	InitialStartupToken *string `json:"initialStartupToken,omitempty"`
+	// Executable that launches extension processes.
+	LauncherProgram string `json:"launcherProgram"`
+	// Whether this configuration permits extension processes to launch.
+	LaunchProcesses bool `json:"launchProcesses"`
+	// Host gate for extension management tools.
+	ManagementToolsEnabled bool `json:"managementToolsEnabled"`
+	// Host-mounted plugins outside the persisted installation records.
+	MountedPlugins []any `json:"mountedPlugins,omitzero"`
+	// Whether compatible unchanged processes remain active.
+	RetainProcessesIfUnchanged bool `json:"retainProcessesIfUnchanged"`
+	// Path to the host's extension SDK.
+	SDKPath string `json:"sdkPath"`
+	// Working directory captured by the host for this configuration.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
 // Experimental: SessionExtensionsDisableResult is part of an experimental API and may
 // change or be removed.
 type SessionExtensionsDisableResult struct {
@@ -26739,6 +27841,19 @@ type SessionExtensionsDisableResult struct {
 // Experimental: SessionExtensionsEnableResult is part of an experimental API and may change
 // or be removed.
 type SessionExtensionsEnableResult struct {
+}
+
+// Distinguishes an absent extension service from an installed service with an empty
+// inventory.
+// Experimental: SessionExtensionsInspectServiceResult is part of an experimental API and
+// may change or be removed.
+// Internal: SessionExtensionsInspectServiceResult is an internal SDK API and is not part of
+// the public surface.
+type SessionExtensionsInspectServiceResult struct {
+	// Whether the original session has an attached extension service.
+	Configured bool `json:"configured"`
+	// Current discovered extensions and their status.
+	Inventory ExtensionList `json:"inventory"`
 }
 
 // Experimental: SessionExtensionsReloadResult is part of an experimental API and may change
@@ -26750,6 +27865,21 @@ type SessionExtensionsReloadResult struct {
 // API and may change or be removed.
 type SessionExtensionsSendAttachmentsToMessageResult struct {
 }
+
+// Updates the original host's live management-tool gate without reinstalling its extension
+// service.
+// Experimental: SessionExtensionsSetManagementToolsEnabledRequest is part of an
+// experimental API and may change or be removed.
+// Internal: SessionExtensionsSetManagementToolsEnabledRequest is an internal SDK API and is
+// not part of the public surface.
+type SessionExtensionsSetManagementToolsEnabledRequest struct {
+	// Whether the host permits extension management tools.
+	Enabled bool `json:"enabled"`
+}
+
+// Experimental: SessionExtensionsSetManagementToolsEnabledResult is part of an experimental
+// API and may change or be removed.
+type SessionExtensionsSetManagementToolsEnabledResult bool
 
 // Experimental: SessionFeatureFlagConfiguration is part of an experimental API and may
 // change or be removed.
@@ -28019,6 +29149,23 @@ type SessionMCPIdeStateResult struct {
 	Selection *IdeSelection `json:"selection,omitempty"`
 }
 
+// Inspects MCP source configuration without starting servers. The bound session owns
+// workspace trust.
+// Experimental: SessionMCPInspectConfigurationRequest is part of an experimental API and
+// may change or be removed.
+// Internal: SessionMCPInspectConfigurationRequest is an internal SDK API and is not part of
+// the public surface.
+type SessionMCPInspectConfigurationRequest struct {
+	// Additional host configuration, used only when includeSessionSources is true.
+	AdditionalConfig any `json:"additionalConfig,omitempty"`
+	// Explicit host-mounted plugin records, without claiming folder trust or managed policy.
+	ExplicitPlugins []any `json:"explicitPlugins,omitzero"`
+	// Include the matching session activation snapshot and additional configuration.
+	IncludeSessionSources *bool `json:"includeSessionSources,omitempty"`
+	// Directory whose workspace sources to inspect.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
 // Full host-driven authentication for an arbitrary, possibly unsaved, MCP URL.
 // Experimental: SessionMCPOauthAuthenticateRequest is part of an experimental API and may
 // change or be removed.
@@ -28516,6 +29663,32 @@ type SessionModelDescribeLoadErrorResult struct {
 	Status *int64 `json:"status,omitempty"`
 }
 
+// Conversation and changes for a utility-model branch slug.
+// Experimental: SessionModelGenerateBranchSlugRequest is part of an experimental API and
+// may change or be removed.
+// Internal: SessionModelGenerateBranchSlugRequest is an internal SDK API and is not part of
+// the public surface.
+type SessionModelGenerateBranchSlugRequest struct {
+	// Summary of the changes the branch will contain.
+	ChangeSummary string `json:"changeSummary"`
+	// Conversation messages in their original order.
+	Conversation []string `json:"conversation"`
+	// Prefix for the established derived-name fallback.
+	FallbackPrefix string `json:"fallbackPrefix"`
+	// Original task, when available.
+	TaskPrompt *string `json:"taskPrompt,omitempty"`
+}
+
+// A generated or derived branch slug.
+// Experimental: SessionModelGenerateBranchSlugResult is part of an experimental API and may
+// change or be removed.
+// Internal: SessionModelGenerateBranchSlugResult is an internal SDK API and is not part of
+// the public surface.
+type SessionModelGenerateBranchSlugResult struct {
+	// Branch slug under the runtime's existing fallback policy.
+	Slug string `json:"slug"`
+}
+
 // The list of models available to this session.
 // Experimental: SessionModelList is part of an experimental API and may change or be
 // removed.
@@ -28554,6 +29727,34 @@ type SessionModelPriceCategory struct {
 	ID string `json:"id"`
 	// Cost category assigned to the model.
 	PriceCategory ModelPickerPriceCategory `json:"priceCategory"`
+}
+
+// Input for utility-model session name generation.
+// Experimental: SessionNameGenerateRequest is part of an experimental API and may change or
+// be removed.
+// Internal: SessionNameGenerateRequest is an internal SDK API and is not part of the public
+// surface.
+type SessionNameGenerateRequest struct {
+	// Whether a user explicitly requested the name. Defaults to false.
+	Manual *bool `json:"manual,omitempty"`
+	// Conversation text from which to derive a name.
+	UserMessage string `json:"userMessage"`
+}
+
+// Utility generation outcome under the session's model and credential policy.
+// Experimental: SessionNameGenerateResult is part of an experimental API and may change or
+// be removed.
+// Internal: SessionNameGenerateResult is an internal SDK API and is not part of the public
+// surface.
+type SessionNameGenerateResult struct {
+	// Whether generation produced a value.
+	// Internal: Kind is part of the SDK's internal API surface and is not intended for external
+	// use.
+	Kind UtilityPromptResultKind `json:"kind"`
+	// User-facing explanation, when the requested operation needs one.
+	Message *string `json:"message,omitempty"`
+	// Generated value, or absent when the utility model is unavailable.
+	Value *string `json:"value,omitempty"`
 }
 
 // Experimental: SessionNameSetResult is part of an experimental API and may change or be
@@ -29267,6 +30468,47 @@ type SessionPermissionsManagedReviewRequiredRequest struct {
 // API and may change or be removed.
 type SessionPermissionsManagedReviewRequiredResult bool
 
+// A typed request to the original host's retained persistence resources.
+// Experimental: SessionPersistenceBarrierRequest is part of an experimental API and may
+// change or be removed.
+// Internal: SessionPersistenceBarrierRequest is an internal SDK API and is not part of the
+// public surface.
+type SessionPersistenceBarrierRequest struct {
+	// Whether the original writer must persist an otherwise empty session.
+	Force bool `json:"force"`
+	// Native flush failure, combined with retained callback failures at completion.
+	NativeFailure *string `json:"nativeFailure,omitempty"`
+	// Runtime-assigned identity for this flush, independent of concurrent flushes.
+	OperationID string `json:"operationId"`
+	// Resource barrier to await.
+	// Internal: Phase is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Phase SessionPersistenceBarrierPhase `json:"phase"`
+}
+
+// Acknowledges completion of one original-host persistence barrier.
+// Experimental: SessionPersistenceBarrierResult is part of an experimental API and may
+// change or be removed.
+// Internal: SessionPersistenceBarrierResult is an internal SDK API and is not part of the
+// public surface.
+type SessionPersistenceBarrierResult struct {
+}
+
+// Flushes durable session state through its original runtime and client owners.
+// Experimental: SessionPersistenceFlushRequest is part of an experimental API and may
+// change or be removed.
+// Internal: SessionPersistenceFlushRequest is an internal SDK API and is not part of the
+// public surface.
+type SessionPersistenceFlushRequest struct {
+	// Persist an otherwise empty session when true. Defaults to false.
+	Force *bool `json:"force,omitempty"`
+}
+
+// Experimental: SessionPersistenceFlushResult is part of an experimental API and may change
+// or be removed.
+type SessionPersistenceFlushResult struct {
+}
+
 // Experimental: SessionPlanDeleteResult is part of an experimental API and may change or be
 // removed.
 type SessionPlanDeleteResult struct {
@@ -29291,6 +30533,72 @@ type SessionPluginDefaults struct {
 	// Team-only defaults for hosts that retain activation inputs. Managed assignments are read
 	// live by the runtime resolver and must not be retained as Team defaults.
 	TeamDefaultEnabledPlugins map[string]bool `json:"teamDefaultEnabledPlugins"`
+}
+
+// Inspects extension directories contributed by a changed plugin under the selected
+// session's activation and profile.
+// Experimental: SessionPluginInspectExtensionContributionsRequest is part of an
+// experimental API and may change or be removed.
+// Internal: SessionPluginInspectExtensionContributionsRequest is an internal SDK API and is
+// not part of the public surface.
+type SessionPluginInspectExtensionContributionsRequest struct {
+	// Plugin name or marketplace-qualified spec whose in-place change can require extension
+	// restarts.
+	ChangedPluginSpec string `json:"changedPluginSpec"`
+}
+
+// Whether a changed active plugin contributes extension directories, including empty
+// directories.
+// Experimental: SessionPluginInspectExtensionContributionsResult is part of an experimental
+// API and may change or be removed.
+// Internal: SessionPluginInspectExtensionContributionsResult is an internal SDK API and is
+// not part of the public surface.
+type SessionPluginInspectExtensionContributionsResult struct {
+	// True when directories exist or the session has no authoritative activation snapshot.
+	ShipsExtensions bool `json:"shipsExtensions"`
+	// Canonical extension discovery diagnostics, in resolver order.
+	// Internal: Warnings is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Warnings []PluginPolicyDiagnostic `json:"warnings"`
+}
+
+// One available plugin, including inactive live plugins and trusted bundled provenance.
+// Experimental: SessionPluginInventoryEntry is part of an experimental API and may change
+// or be removed.
+type SessionPluginInventoryEntry struct {
+	// Manifest description, with surrounding whitespace removed for installed and bundled
+	// entries.
+	Description *string `json:"description,omitempty"`
+	// Current effective enablement, independent of presence on disk.
+	Enabled bool `json:"enabled"`
+	// Identifies an explicit host mount rather than a persisted installation.
+	External *bool `json:"external,omitempty"`
+	// Marketplace directory for a live plugin that has no persisted copy.
+	InstalledFrom *string `json:"installedFrom,omitempty"`
+	// Marketplace name, or an empty string for a direct or bundled plugin.
+	Marketplace string `json:"marketplace"`
+	// Plugin name from its manifest or installation record.
+	Name string `json:"name"`
+	// Resolved content directory; absent for live plugins whose content is unresolved.
+	// This path does not grant filesystem access.
+	RootPath *string `json:"rootPath,omitempty"`
+	// Trusted runtime provenance; bundled plugins use builtin.
+	Source *string `json:"source,omitempty"`
+	// Version reported by the manifest.
+	Version *string `json:"version,omitempty"`
+}
+
+// Available plugin inventory under the selected session's settings, policy, source roots,
+// and trusted bundle registration.
+// Experimental: SessionPluginInventoryResult is part of an experimental API and may change
+// or be removed.
+// Internal: SessionPluginInventoryResult is an internal SDK API and is not part of the
+// public surface.
+type SessionPluginInventoryResult struct {
+	// Registered bundles before shadowing, for availability and trust checks.
+	BuiltinPlugins []SessionPluginInventoryEntry `json:"builtinPlugins"`
+	// Installed, live, and explicit plugins, including disabled entries.
+	Plugins []SessionPluginInventoryEntry `json:"plugins"`
 }
 
 // Plugin names (or specs) to disable in the session's authoritative working directory.
@@ -29690,6 +30998,19 @@ type SessionRemoteSendWithAdmissionRequest struct {
 	// Serialized canonical SendRequest, including clientTurnId and all supplied message options.
 	// The runtime validates these options and owns their preparation and routing.
 	RequestJSON string `json:"requestJson"`
+}
+
+// Reads repository resource disables using the bound session's configuration and trust
+// authority.
+// Experimental: SessionRepositoryDisabledNamesRequest is part of an experimental API and
+// may change or be removed.
+// Internal: SessionRepositoryDisabledNamesRequest is an internal SDK API and is not part of
+// the public surface.
+type SessionRepositoryDisabledNamesRequest struct {
+	// Resource disable list to inspect.
+	Key RepositoryDisabledKey `json:"key"`
+	// Directory whose repository settings to inspect.
+	WorkingDirectory string `json:"workingDirectory"`
 }
 
 // Experimental: SessionSandboxEnsureEnforcementAvailableResult is part of an experimental
@@ -30378,11 +31699,129 @@ type SessionsHasEventsResult struct {
 type SessionShutdownResult struct {
 }
 
+// Semantic conversation input for local import or validation.
+// Experimental: SessionsImportSemanticRequest is part of an experimental API and may change
+// or be removed.
+type SessionsImportSemanticRequest struct {
+	// Name of the embedding client.
+	ClientName *string `json:"clientName,omitempty"`
+	// Default working directory when the document supplies none.
+	DefaultWorkingDirectory string `json:"defaultWorkingDirectory"`
+	// Validate without authentication, network access, or writes.
+	DryRun *bool `json:"dryRun,omitempty"`
+	// Absolute input path used to resolve attachment references.
+	InputPath string `json:"inputPath"`
+	// Semantic session JSONL, not native session events.
+	Jsonl string `json:"jsonl"`
+	// Explicit session name override.
+	Name *string `json:"name,omitempty"`
+	// Runtime settings overrides, with the original caller's configuration root.
+	Settings any `json:"settings,omitempty"`
+	// Explicit working directory override.
+	WorkingDirectory *string `json:"workingDirectory,omitempty"`
+}
+
+// Semantic session import outcome.
+// Experimental: SessionsImportSemanticResult is part of an experimental API and may change
+// or be removed.
+type SessionsImportSemanticResult struct {
+	// Stable operation code.
+	Code string `json:"code"`
+	// Input or persistence diagnostics.
+	Diagnostics []SemanticImportDiagnostic `json:"diagnostics"`
+	// Whether the call only validated input.
+	DryRun bool `json:"dryRun"`
+	// External session identifier from the document.
+	ExternalID *string `json:"externalId,omitempty"`
+	// Imported or validated record counts.
+	Imported SemanticSessionImportCounts `json:"imported"`
+	// Human-readable operation result.
+	Message string `json:"message"`
+	// Whether validation and persistence succeeded.
+	Ok bool `json:"ok"`
+	// Runtime session identifier after persistence, or incomplete rollback.
+	SessionID *string `json:"sessionId,omitempty"`
+}
+
 // Map of sessionId -> on-disk size in bytes for each session's workspace directory.
 // Experimental: SessionSizes is part of an experimental API and may change or be removed.
 type SessionSizes struct {
 	// Map of sessionId -> on-disk size in bytes for the session's workspace directory
 	Sizes map[string]int64 `json:"sizes"`
+}
+
+// A complete skill row for session-owned inspection and catalog publication.
+// Experimental: SessionSkillInventoryEntry is part of an experimental API and may change or
+// be removed.
+// Internal: SessionSkillInventoryEntry is an internal SDK API and is not part of the public
+// surface.
+type SessionSkillInventoryEntry struct {
+	// Tool names allowed by the skill definition.
+	AllowedTools []string `json:"allowedTools,omitzero"`
+	// Freeform argument hint from the definition.
+	ArgumentHint *string `json:"argumentHint,omitempty"`
+	// Local resource directory, when the skill has one.
+	BaseDir *string `json:"baseDir,omitempty"`
+	// Canonical slash-command identity.
+	CommandName *string `json:"commandName,omitempty"`
+	// Loaded definition body, when available.
+	Content *string `json:"content,omitempty"`
+	// Human-readable skill purpose.
+	Description string `json:"description"`
+	// Whether model invocation is disabled.
+	DisableModelInvocation bool `json:"disableModelInvocation"`
+	// Whether the session enables this skill.
+	Enabled bool `json:"enabled"`
+	// Absolute local definition path, when the skill has one.
+	FilePath *string `json:"filePath,omitempty"`
+	// Invocation identity supplied by the source.
+	InvocationName *string `json:"invocationName,omitempty"`
+	// Whether this row comes from a plugin command definition.
+	IsCommand *bool `json:"isCommand,omitempty"`
+	// MCP server and resource identity without private activation metadata.
+	MCPOrigin *MCPSkillOrigin `json:"mcpOrigin,omitempty"`
+	// Original skill name.
+	Name string `json:"name"`
+	// Provider's original name before qualification.
+	OriginalName *string `json:"originalName,omitempty"`
+	// Owning plugin's opaque identity.
+	PluginID *string `json:"pluginId,omitempty"`
+	// Owning plugin's display name.
+	PluginName *string `json:"pluginName,omitempty"`
+	// Owning plugin's version.
+	PluginVersion *string `json:"pluginVersion,omitempty"`
+	// Provider-relative resource directory.
+	RelativeDir *string `json:"relativeDir,omitempty"`
+	// Provider-relative definition path.
+	RelativePath *string `json:"relativePath,omitempty"`
+	// Repository boundary for local resource reads.
+	RepositoryBoundary *string `json:"repositoryBoundary,omitempty"`
+	// Runtime-owned source classification.
+	Source SkillSource `json:"source"`
+	// Whether the user can invoke this skill.
+	UserInvocable bool `json:"userInvocable"`
+}
+
+// Install a skill with the selected session's profile and working directory.
+// Experimental: SessionSkillResourceInstallRequest is part of an experimental API and may
+// change or be removed.
+// Internal: SessionSkillResourceInstallRequest is an internal SDK API and is not part of
+// the public surface.
+type SessionSkillResourceInstallRequest struct {
+	// Install into the preferred project directory instead of personal storage.
+	Project *bool `json:"project,omitempty"`
+	// Local definition, directory, or HTTPS source.
+	Source string `json:"source"`
+}
+
+// Remove a skill with the selected session's full inventory and profile.
+// Experimental: SessionSkillResourceRemoveRequest is part of an experimental API and may
+// change or be removed.
+// Internal: SessionSkillResourceRemoveRequest is an internal SDK API and is not part of the
+// public surface.
+type SessionSkillResourceRemoveRequest struct {
+	// Skill name or registered directory.
+	Target string `json:"target"`
 }
 
 // Experimental: SessionSkillsDisableResult is part of an experimental API and may change or
@@ -30398,6 +31837,24 @@ type SessionSkillsEnableResult struct {
 // Experimental: SessionSkillsEnsureLoadedResult is part of an experimental API and may
 // change or be removed.
 type SessionSkillsEnsureLoadedResult struct {
+}
+
+// Full inventory under the selected session's discovery and activation policy.
+// Experimental: SessionSkillsInspectInventoryResult is part of an experimental API and may
+// change or be removed.
+// Internal: SessionSkillsInspectInventoryResult is an internal SDK API and is not part of
+// the public surface.
+type SessionSkillsInspectInventoryResult struct {
+	// Effective disabled identities, including host and MCP aliases.
+	DisabledSkills []string `json:"disabledSkills"`
+	// Source failures that make this inventory incomplete.
+	Errors []string `json:"errors"`
+	// Full local and provider rows visible to this session.
+	// Internal: Skills is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Skills []SessionSkillInventoryEntry `json:"skills"`
+	// Nonfatal loader warnings.
+	Warnings []string `json:"warnings"`
 }
 
 // Limit for non-empty local session IDs.
@@ -30694,6 +32151,22 @@ type SessionsUpdateWorkspaceFieldsResult struct {
 // Experimental: SessionSuspendResult is part of an experimental API and may change or be
 // removed.
 type SessionSuspendResult struct {
+}
+
+// A friendly name to validate before a session mutation.
+// Experimental: SessionsValidateNameRequest is part of an experimental API and may change
+// or be removed.
+type SessionsValidateNameRequest struct {
+	// Original name, without whitespace normalization.
+	Name string `json:"name"`
+}
+
+// The shared session-name policy decision.
+// Experimental: SessionsValidateNameResult is part of an experimental API and may change or
+// be removed.
+type SessionsValidateNameResult struct {
+	// Validation error; absent when the name is valid.
+	Error *string `json:"error,omitempty"`
 }
 
 // Telemetry engagement ID for the session, when available.
@@ -32257,6 +33730,120 @@ type SkillRemoveSourceEntry struct {
 	Source string `json:"source"`
 }
 
+// Host-owned paths and environment for standalone skill management.
+// Experimental: SkillResourceContext is part of an experimental API and may change or be
+// removed.
+// Internal: SkillResourceContext is an internal SDK API and is not part of the public
+// surface.
+type SkillResourceContext struct {
+	// Settings paths and hook environment for the original host.
+	Context UserSettingsHostContext `json:"context"`
+	// Workspace directory for repository sources and relative paths.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
+// Loads full local skill records, including disabled records and command metadata.
+// Experimental: SkillResourceDiscoverRequest is part of an experimental API and may change
+// or be removed.
+// Internal: SkillResourceDiscoverRequest is an internal SDK API and is not part of the
+// public surface.
+type SkillResourceDiscoverRequest struct {
+	// Host paths and working directory.
+	// Internal: Host is part of the SDK's internal API surface and is not intended for external
+	// use.
+	Host SkillResourceContext `json:"host"`
+	// Explicit plugin directories, appended after persisted and live plugin sources.
+	PluginDirectories []string `json:"pluginDirectories,omitzero"`
+}
+
+// Full local skill inventory and report-and-ignore source diagnostics.
+// Experimental: SkillResourceDiscoverResult is part of an experimental API and may change
+// or be removed.
+type SkillResourceDiscoverResult struct {
+	// Sources that failed to load; the remaining inventory is incomplete.
+	Errors []string `json:"errors"`
+	// Local skill records with invocation identity, content paths, and command metadata.
+	Skills []any `json:"skills"`
+	// Explicit plugin scan warnings, separate from skill loader diagnostics.
+	SourceWarnings []string `json:"sourceWarnings"`
+	// Nonfatal loader and manifest warnings.
+	Warnings []string `json:"warnings"`
+}
+
+// Registers a skill directory or installs a local or HTTPS skill definition.
+// Experimental: SkillResourceInstallRequest is part of an experimental API and may change
+// or be removed.
+// Internal: SkillResourceInstallRequest is an internal SDK API and is not part of the
+// public surface.
+type SkillResourceInstallRequest struct {
+	// Host paths and working directory.
+	// Internal: Host is part of the SDK's internal API surface and is not intended for external
+	// use.
+	Host SkillResourceContext `json:"host"`
+	// Use the preferred project creation directory instead of personal storage.
+	Project *bool `json:"project,omitempty"`
+	// Local file, directory, or HTTPS source.
+	Source string `json:"source"`
+	// User agent for the existing runtime HTTPS fetcher.
+	UserAgent *string `json:"userAgent,omitempty"`
+}
+
+// The persisted result of a skill source installation.
+// Experimental: SkillResourceInstallResult is part of an experimental API and may change or
+// be removed.
+type SkillResourceInstallResult struct {
+	// Source classification.
+	Kind SkillResourceInstallKind `json:"kind"`
+	// Skill name, absent for a registered directory.
+	Name *string `json:"name,omitempty"`
+	// Installed definition path or registered directory.
+	Path string `json:"path"`
+	// Destination scope, absent for a registered directory.
+	Scope *SkillResourceInstallScope `json:"scope,omitempty"`
+}
+
+// Removes a personal or project skill, or unregisters a custom directory.
+// Experimental: SkillResourceRemoveRequest is part of an experimental API and may change or
+// be removed.
+// Internal: SkillResourceRemoveRequest is an internal SDK API and is not part of the public
+// surface.
+type SkillResourceRemoveRequest struct {
+	// Host paths and working directory.
+	// Internal: Host is part of the SDK's internal API surface and is not intended for external
+	// use.
+	Host SkillResourceContext `json:"host"`
+	// Skill name or registered directory.
+	Target string `json:"target"`
+}
+
+// The completed skill removal, with conservative disabled-state cleanup.
+// Experimental: SkillResourceRemoveResult is part of an experimental API and may change or
+// be removed.
+type SkillResourceRemoveResult struct {
+	// Removed storage tier.
+	Kind SkillResourceRemoveKind `json:"kind"`
+	// Removed skill name, absent for a registered directory.
+	Name *string `json:"name,omitempty"`
+	// Removed definition path or unregistered directory.
+	Path string `json:"path"`
+}
+
+// Atomically changes only one user's disabled skill entry under explicit host paths.
+// Experimental: SkillResourceSetEnabledRequest is part of an experimental API and may
+// change or be removed.
+// Internal: SkillResourceSetEnabledRequest is an internal SDK API and is not part of the
+// public surface.
+type SkillResourceSetEnabledRequest struct {
+	// Desired user-scope enablement.
+	Enabled bool `json:"enabled"`
+	// Host paths and working directory.
+	// Internal: Host is part of the SDK's internal API surface and is not intended for external
+	// use.
+	Host SkillResourceContext `json:"host"`
+	// Invocation name to enable or disable.
+	Name string `json:"name"`
+}
+
 // Skill names to mark as disabled in global configuration, replacing any previous list.
 // Experimental: SkillsConfigSetDisabledSkillsRequest is part of an experimental API and may
 // change or be removed.
@@ -32517,6 +34104,11 @@ type SkillsRemoveSourceResult struct {
 	Path string `json:"path"`
 	// Updated discovery directories for the caller to persist.
 	SkillDirectories []string `json:"skillDirectories"`
+}
+
+// Experimental: SkillsResourcesSetEnabledResult is part of an experimental API and may
+// change or be removed.
+type SkillsResourcesSetEnabledResult struct {
 }
 
 // A computed Skill uninstall plan. Nothing has been removed.
@@ -34747,6 +36339,8 @@ type UserSettingsEditRequest struct {
 	// Configuration directory to edit. Omitted or empty resolves the server's own home, as in
 	// `user.settings.loadForConfigDir`.
 	ConfigDir *string `json:"configDir,omitempty"`
+	// Optional trusted-host paths and hook environment. Cannot be combined with configDir.
+	Context *UserSettingsHostContext `json:"context,omitempty"`
 	// Set a scalar, add or remove a string list item, or remove the setting. The handler
 	// rejects a missing or incompatible value.
 	// Internal: Operation is part of the SDK's internal API surface and is not intended for
@@ -34756,6 +36350,34 @@ type UserSettingsEditRequest struct {
 	// and forbidden for remove. The runtime rejects all other JSON values.
 	Value any `json:"value,omitempty"`
 }
+
+// Selects the settings document and hook environment for an explicit host.
+// Experimental: UserSettingsForContextRequest is part of an experimental API and may change
+// or be removed.
+// Internal: UserSettingsForContextRequest is an internal SDK API and is not part of the
+// public surface.
+type UserSettingsForContextRequest struct {
+	// Host paths and environment used instead of the server process defaults.
+	Context UserSettingsHostContext `json:"context"`
+}
+
+// Reads a contextual user document with trusted repository settings for one working
+// directory.
+// Experimental: UserSettingsForWorkingDirectoryRequest is part of an experimental API and
+// may change or be removed.
+// Internal: UserSettingsForWorkingDirectoryRequest is an internal SDK API and is not part
+// of the public surface.
+type UserSettingsForWorkingDirectoryRequest struct {
+	// Host paths and environment that select the user document.
+	Context UserSettingsHostContext `json:"context"`
+	// Directory whose repository and persisted trust determine the overlay.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
+// The persisted AHP environment compute identity.
+// Experimental: UserSettingsGetOrCreateAhpEnvironmentComputeIDResult is part of an
+// experimental API and may change or be removed.
+type UserSettingsGetOrCreateAhpEnvironmentComputeIDResult string
 
 // Selects which settings file paths to resolve.
 // Experimental: UserSettingsGetPathsRequest is part of an experimental API and may change
@@ -34883,6 +36505,11 @@ type UserSettingsLoadForEditResult struct {
 	Status string `json:"status"`
 }
 
+// The normalized user document with trusted repository settings.
+// Experimental: UserSettingsLoadForWorkingDirectoryResult is part of an experimental API
+// and may change or be removed.
+type UserSettingsLoadForWorkingDirectoryResult map[string]any
+
 // Selects the repository whose checked-in settings to read.
 // Experimental: UserSettingsLoadRepoRequest is part of an experimental API and may change
 // or be removed.
@@ -34905,6 +36532,16 @@ type UserSettingsLoadRepoResult struct {
 	// are still reported, so a consumer should surface this and continue rather than treat it
 	// as a failure.
 	Warning *string `json:"warning,omitempty"`
+}
+
+// Selects an optional trusted-host context for settings and parser diagnostics.
+// Experimental: UserSettingsLoadWithWarningRequest is part of an experimental API and may
+// change or be removed.
+// Internal: UserSettingsLoadWithWarningRequest is an internal SDK API and is not part of
+// the public surface.
+type UserSettingsLoadWithWarningRequest struct {
+	// Optional host paths and hook environment. Omit to keep the server defaults.
+	Context *UserSettingsHostContext `json:"context,omitempty"`
 }
 
 // The user's stored settings, together with any diagnostic raised while reading them.
@@ -35291,6 +36928,8 @@ type UserSettingsUpdateResult struct {
 // Experimental: UserSettingsValidateRequest is part of an experimental API and may change
 // or be removed.
 type UserSettingsValidateRequest struct {
+	// Optional trusted-host context whose environment controls hook validation.
+	Context *UserSettingsHostContext `json:"context,omitempty"`
 	// True to validate a removal of this key. The current settings file is not read.
 	Delete *bool `json:"delete,omitempty"`
 	// Top-level setting name to validate.
@@ -35356,6 +36995,30 @@ type UserSettingsWriteKeyRequest struct {
 // Experimental: UserSettingsWriteKeyResult is part of an experimental API and may change or
 // be removed.
 type UserSettingsWriteKeyResult struct {
+}
+
+// An atomic set of top-level settings updates that preserves unrelated stored values.
+// Experimental: UserSettingsWriteKeysRequest is part of an experimental API and may change
+// or be removed.
+// Internal: UserSettingsWriteKeysRequest is an internal SDK API and is not part of the
+// public surface.
+type UserSettingsWriteKeysRequest struct {
+	// Host paths and environment that select the target document.
+	Context UserSettingsHostContext `json:"context"`
+	// Top-level keys to remove in the same transaction.
+	DeleteKeys []string `json:"deleteKeys"`
+	// Top-level values to write. Stored null remains a value, not deletion.
+	Settings map[string]any `json:"settings"`
+}
+
+// Reports whether the atomic update succeeded or the existing document was invalid.
+// Experimental: UserSettingsWriteKeysResult is part of an experimental API and may change
+// or be removed.
+// Internal: UserSettingsWriteKeysResult is an internal SDK API and is not part of the
+// public surface.
+type UserSettingsWriteKeysResult struct {
+	// Either ok, or invalid when no safe document could be read and nothing changed.
+	Status string `json:"status"`
 }
 
 // The approval to add as a session-scoped rule
@@ -35507,6 +37170,22 @@ type UserToolSessionApprovalWrite struct {
 func (UserToolSessionApprovalWrite) userToolSessionApproval() {}
 func (UserToolSessionApprovalWrite) Kind() UserToolSessionApprovalKind {
 	return UserToolSessionApprovalKindWrite
+}
+
+// Utility generation outcome under the session's model and credential policy.
+// Experimental: UtilityPromptResult is part of an experimental API and may change or be
+// removed.
+// Internal: UtilityPromptResult is an internal SDK API and is not part of the public
+// surface.
+type UtilityPromptResult struct {
+	// Whether generation produced a value.
+	// Internal: Kind is part of the SDK's internal API surface and is not intended for external
+	// use.
+	Kind UtilityPromptResultKind `json:"kind"`
+	// User-facing explanation, when the requested operation needs one.
+	Message *string `json:"message,omitempty"`
+	// Generated value, or absent when the utility model is unavailable.
+	Value *string `json:"value,omitempty"`
 }
 
 // Current sharing status and shareable GitHub URL for a session.
@@ -36768,6 +38447,35 @@ const (
 	// A selectable Microsoft 365 Copilot inference account, backed by a base Entra identity or
 	// an external bearer.
 	AccountKindMicrosoft365Copilot AccountKind = "microsoft365Copilot"
+)
+
+// Operation discriminator for AccountLoginProcessRequest.
+type AccountLoginProcessRequestOperation string
+
+const (
+	AccountLoginProcessRequestOperationClose       AccountLoginProcessRequestOperation = "close"
+	AccountLoginProcessRequestOperationComplete    AccountLoginProcessRequestOperation = "complete"
+	AccountLoginProcessRequestOperationContinue    AccountLoginProcessRequestOperation = "continue"
+	AccountLoginProcessRequestOperationDiscard     AccountLoginProcessRequestOperation = "discard"
+	AccountLoginProcessRequestOperationOpen        AccountLoginProcessRequestOperation = "open"
+	AccountLoginProcessRequestOperationOpenBrowser AccountLoginProcessRequestOperation = "openBrowser"
+	AccountLoginProcessRequestOperationPolicy      AccountLoginProcessRequestOperation = "policy"
+	AccountLoginProcessRequestOperationStartDevice AccountLoginProcessRequestOperation = "startDevice"
+	AccountLoginProcessRequestOperationStartWeb    AccountLoginProcessRequestOperation = "startWeb"
+	AccountLoginProcessRequestOperationToken       AccountLoginProcessRequestOperation = "token"
+)
+
+// Kind discriminator for AccountLoginProcessResult.
+type AccountLoginProcessResultKind string
+
+const (
+	AccountLoginProcessResultKindDeviceCode  AccountLoginProcessResultKind = "deviceCode"
+	AccountLoginProcessResultKindDiscarded   AccountLoginProcessResultKind = "discarded"
+	AccountLoginProcessResultKindDone        AccountLoginProcessResultKind = "done"
+	AccountLoginProcessResultKindOpened      AccountLoginProcessResultKind = "opened"
+	AccountLoginProcessResultKindPersistence AccountLoginProcessResultKind = "persistence"
+	AccountLoginProcessResultKindPolicy      AccountLoginProcessResultKind = "policy"
+	AccountLoginProcessResultKindWeb         AccountLoginProcessResultKind = "web"
 )
 
 // Resolved Anthropic adaptive-thinking capability for a model.
@@ -39409,6 +41117,18 @@ const (
 	GitHubReleaseUpdateChannelStable GitHubReleaseUpdateChannel = "stable"
 )
 
+// The export purpose that selects existing account policy and error messages.
+// Experimental: GitHubSecretGistUseCase is part of an experimental API and may change or be
+// removed.
+type GitHubSecretGistUseCase string
+
+const (
+	// Export a research report under the existing research account policy.
+	GitHubSecretGistUseCaseResearch GitHubSecretGistUseCase = "research"
+	// Export a session transcript under the existing session account policy.
+	GitHubSecretGistUseCaseSession GitHubSecretGistUseCase = "session"
+)
+
 // Why the runtime is requesting a GitHub credential.
 // Experimental: GitHubTokenAcquireReason is part of an experimental API and may change or
 // be removed.
@@ -40187,6 +41907,14 @@ const (
 	MarketplaceMigrationStatusMigrated MarketplaceMigrationStatus = "migrated"
 	// This profile has no retained install that needs migration.
 	MarketplaceMigrationStatusNotApplicable MarketplaceMigrationStatus = "notApplicable"
+)
+
+// Kind discriminator for MCPAdditionalConfigSource.
+type MCPAdditionalConfigSourceKind string
+
+const (
+	MCPAdditionalConfigSourceKindFile MCPAdditionalConfigSourceKind = "file"
+	MCPAdditionalConfigSourceKindJSON MCPAdditionalConfigSourceKind = "json"
 )
 
 // Allowed values for the `McpAppsHostContextDetailsAvailableDisplayMode` enumeration.
@@ -42357,6 +44085,18 @@ const (
 	RepoSettingsEditScopeRepo RepoSettingsEditScope = "repo"
 )
 
+// A resource disable list to which a repository may contribute names.
+// Experimental: RepositoryDisabledKey is part of an experimental API and may change or be
+// removed.
+type RepositoryDisabledKey string
+
+const (
+	// MCP servers disabled by the repository.
+	RepositoryDisabledKeyDisabledMCPServers RepositoryDisabledKey = "disabledMcpServers"
+	// Skills disabled by the repository.
+	RepositoryDisabledKeyDisabledSkills RepositoryDisabledKey = "disabledSkills"
+)
+
 // Output format discriminator. Currently only json_schema is supported.
 type ResponseFormatType string
 
@@ -42498,6 +44238,34 @@ const (
 	SecretFilterFormatJSON SecretFilterFormat = "json"
 	// Redacts plain text.
 	SecretFilterFormatText SecretFilterFormat = "text"
+)
+
+// Conflict handling for a semantic memory import.
+// Experimental: SemanticMemoryConflictPolicy is part of an experimental API and may change
+// or be removed.
+type SemanticMemoryConflictPolicy string
+
+const (
+	// Report duplicate or conflicting memories as failures.
+	SemanticMemoryConflictPolicyError SemanticMemoryConflictPolicy = "error"
+	// Skip duplicate or conflicting memories.
+	SemanticMemoryConflictPolicySkip SemanticMemoryConflictPolicy = "skip"
+)
+
+// Outcome for one validated semantic memory record.
+// Experimental: SemanticMemoryImportItemStatus is part of an experimental API and may
+// change or be removed.
+type SemanticMemoryImportItemStatus string
+
+const (
+	// Validation or submission failed for this record.
+	SemanticMemoryImportItemStatusFailed SemanticMemoryImportItemStatus = "failed"
+	// The memory service accepted the record.
+	SemanticMemoryImportItemStatusImported SemanticMemoryImportItemStatus = "imported"
+	// The selected conflict policy skipped the record.
+	SemanticMemoryImportItemStatusSkipped SemanticMemoryImportItemStatus = "skipped"
+	// The dry run accepted the record without submission.
+	SemanticMemoryImportItemStatusValidated SemanticMemoryImportItemStatus = "validated"
 )
 
 // The UI mode the agent was in when this message was sent. Defaults to the session's
@@ -42843,6 +44611,24 @@ const (
 	SessionOpenParamsKindRemote     SessionOpenParamsKind = "remote"
 	SessionOpenParamsKindResume     SessionOpenParamsKind = "resume"
 	SessionOpenParamsKindResumeLast SessionOpenParamsKind = "resumeLast"
+)
+
+// An original-host persistence barrier stage.
+// Experimental: SessionPersistenceBarrierPhase is part of an experimental API and may
+// change or be removed.
+type SessionPersistenceBarrierPhase string
+
+const (
+	// Release results retained by a canceled flush.
+	SessionPersistenceBarrierPhaseCancel SessionPersistenceBarrierPhase = "cancel"
+	// Release callback results and preserve their original failures.
+	SessionPersistenceBarrierPhaseComplete SessionPersistenceBarrierPhase = "complete"
+	// Wait for the original owner's initial workspace metadata.
+	SessionPersistenceBarrierPhasePrepare SessionPersistenceBarrierPhase = "prepare"
+	// Drain the original owner's live tracker or pending teardown.
+	SessionPersistenceBarrierPhaseTracking SessionPersistenceBarrierPhase = "tracking"
+	// Drain the original owner's retained write callbacks.
+	SessionPersistenceBarrierPhaseWriteCallbacks SessionPersistenceBarrierPhase = "writeCallbacks"
 )
 
 // Copilot plan tier used by the session quota projection.
@@ -43369,6 +45155,46 @@ const (
 	SkillRemoveSourceKindPersonal SkillRemoveSourceKind = "personal"
 	// A project skill file or directory.
 	SkillRemoveSourceKindProject SkillRemoveSourceKind = "project"
+)
+
+// The source of an installed or registered skill.
+// Experimental: SkillResourceInstallKind is part of an experimental API and may change or
+// be removed.
+type SkillResourceInstallKind string
+
+const (
+	// A registered skill directory.
+	SkillResourceInstallKindDirectory SkillResourceInstallKind = "directory"
+	// A local skill definition.
+	SkillResourceInstallKindFile SkillResourceInstallKind = "file"
+	// An HTTPS skill definition.
+	SkillResourceInstallKindURL SkillResourceInstallKind = "url"
+)
+
+// The personal or project destination of an installed skill.
+// Experimental: SkillResourceInstallScope is part of an experimental API and may change or
+// be removed.
+type SkillResourceInstallScope string
+
+const (
+	// The user's personal skill directory.
+	SkillResourceInstallScopePersonal SkillResourceInstallScope = "personal"
+	// The project's skill directory.
+	SkillResourceInstallScopeProject SkillResourceInstallScope = "project"
+)
+
+// The removed skill's storage tier.
+// Experimental: SkillResourceRemoveKind is part of an experimental API and may change or be
+// removed.
+type SkillResourceRemoveKind string
+
+const (
+	// An unregistered skill directory.
+	SkillResourceRemoveKindDirectory SkillResourceRemoveKind = "directory"
+	// A removed personal skill.
+	SkillResourceRemoveKindPersonal SkillResourceRemoveKind = "personal"
+	// A removed project skill.
+	SkillResourceRemoveKindProject SkillResourceRemoveKind = "project"
 )
 
 // Source location type (e.g., project, personal-copilot, plugin, builtin, sdk, mcp)
@@ -43907,6 +45733,18 @@ const (
 	UserToolSessionApprovalKindRead                      UserToolSessionApprovalKind = "read"
 	UserToolSessionApprovalKindWorkflow                  UserToolSessionApprovalKind = "workflow"
 	UserToolSessionApprovalKindWrite                     UserToolSessionApprovalKind = "write"
+)
+
+// Availability of the utility-model result.
+// Experimental: UtilityPromptResultKind is part of an experimental API and may change or be
+// removed.
+type UtilityPromptResultKind string
+
+const (
+	// Generation produced a value.
+	UtilityPromptResultKindSuccess UtilityPromptResultKind = "success"
+	// Generation could not produce a value.
+	UtilityPromptResultKindUnavailable UtilityPromptResultKind = "unavailable"
 )
 
 // Output verbosity level for supported models
@@ -46295,9 +48133,16 @@ func (a *ServerMCPConfigAPI) Enable(ctx context.Context, params *MCPConfigEnable
 //
 // RPC method: mcp.config.list.
 //
+// Parameters: Optional configuration root for user MCP servers. Omission retains the
+// connection's root.
+//
 // Returns: User-configured MCP servers, keyed by server name.
-func (a *ServerMCPConfigAPI) List(ctx context.Context) (*MCPConfigList, error) {
-	raw, err := a.client.Request(ctx, "mcp.config.list", nil)
+// Pass nil for params to use the default request options.
+func (a *ServerMCPConfigAPI) List(ctx context.Context, params *MCPConfigListRequest) (*MCPConfigList, error) {
+	if params == nil {
+		params = &MCPConfigListRequest{}
+	}
+	raw, err := a.client.Request(ctx, "mcp.config.list", params)
 	if err != nil {
 		return nil, err
 	}
@@ -46807,9 +48652,16 @@ func (a *ServerPluginsAPI) Update(ctx context.Context, params *PluginsUpdateRequ
 //
 // RPC method: plugins.updateAll.
 //
+// Parameters: Optional workspace settings for a plugin catalog or bulk update through the
+// original caller's runtime. Omission retains the server's configuration.
+//
 // Returns: Result of updating all installed plugins.
-func (a *ServerPluginsAPI) UpdateAll(ctx context.Context) (*PluginUpdateAllResult, error) {
-	raw, err := a.client.Request(ctx, "plugins.updateAll", nil)
+// Pass nil for params to use the default request options.
+func (a *ServerPluginsAPI) UpdateAll(ctx context.Context, params *PluginsInvocationRequest) (*PluginUpdateAllResult, error) {
+	if params == nil {
+		params = &PluginsInvocationRequest{}
+	}
+	raw, err := a.client.Request(ctx, "plugins.updateAll", params)
 	if err != nil {
 		return nil, err
 	}
@@ -46901,9 +48753,16 @@ func (a *ServerPluginsMarketplacesAPI) Browse(ctx context.Context, params *Plugi
 //
 // RPC method: plugins.marketplaces.list.
 //
+// Parameters: Optional workspace settings for a plugin catalog or bulk update through the
+// original caller's runtime. Omission retains the server's configuration.
+//
 // Returns: All registered marketplaces, including built-in defaults.
-func (a *ServerPluginsMarketplacesAPI) List(ctx context.Context) (*MarketplaceListResult, error) {
-	raw, err := a.client.Request(ctx, "plugins.marketplaces.list", nil)
+// Pass nil for params to use the default request options.
+func (a *ServerPluginsMarketplacesAPI) List(ctx context.Context, params *PluginsInvocationRequest) (*MarketplaceListResult, error) {
+	if params == nil {
+		params = &PluginsInvocationRequest{}
+	}
+	raw, err := a.client.Request(ctx, "plugins.marketplaces.list", params)
 	if err != nil {
 		return nil, err
 	}
@@ -49252,6 +51111,31 @@ func (a *InternalServerAccountAPI) GetWebUrl(ctx context.Context, params *Accoun
 		return nil, err
 	}
 	return &result, nil
+}
+
+// LoginProcess runs a connection-owned interactive account login through the original
+// process authentication handle, preserving device and browser flows, policy, persistence,
+// and cancellation.
+//
+// RPC method: account.loginProcess.
+//
+// Parameters: A pre-session login action. Every action after open retains the same
+// credential and persistence owner.
+//
+// Returns: The result of one connection-owned pre-session login action.
+// Internal: LoginProcess is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerAccountAPI) LoginProcess(ctx context.Context, params AccountLoginProcessRequest) (AccountLoginProcessResult, error) {
+	// Keep nil interface requests as explicit JSON null, matching typed nil pointers.
+	raw, err := a.client.Request(ctx, "account.loginProcess", &params)
+	if err != nil {
+		return nil, err
+	}
+	result, err := unmarshalAccountLoginProcessResult(raw)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // SubscribeCopilotFree enrolls the supplied identity in Copilot Free. A host offers this
@@ -52420,6 +54304,154 @@ func (a *InternalServerMCPAPI) ShouldExcludeGitHubTools(ctx context.Context, par
 	return &result, nil
 }
 
+// Experimental: InternalServerMCPComputerUseAPI contains experimental APIs that may change
+// or be removed.
+type InternalServerMCPComputerUseAPI internalServerAPI
+
+// ApplyConfiguration applies the runtime host's existing Computer Use platform overlay to a
+// complete MCP server map and effective disabled list. Preserves configuration and
+// provenance outside that overlay and starts no server.
+//
+// RPC method: mcp.computerUse.applyConfiguration.
+//
+// Parameters: Apply the host's Computer Use platform overlay without starting a server.
+//
+// Returns: Effective configuration after the existing platform overlay.
+// Internal: ApplyConfiguration is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerMCPComputerUseAPI) ApplyConfiguration(ctx context.Context, params *MCPComputerUseApplyConfigurationRequest) (*MCPComputerUseApplyConfigurationResult, error) {
+	raw, err := a.client.Request(ctx, "mcp.computerUse.applyConfiguration", params)
+	if err != nil {
+		return nil, err
+	}
+	var result MCPComputerUseApplyConfigurationResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: ComputerUse returns experimental APIs that may change or be removed.
+func (s *InternalServerMCPAPI) ComputerUse() *InternalServerMCPComputerUseAPI {
+	return (*InternalServerMCPComputerUseAPI)(s)
+}
+
+// Experimental: InternalServerMCPConfigAPI contains experimental APIs that may change or be
+// removed.
+type InternalServerMCPConfigAPI internalServerAPI
+
+// ComposeAdditional validates and composes additional MCP documents in precedence order
+// without modifying persisted configuration.
+//
+// RPC method: mcp.config.composeAdditional.
+//
+// Parameters: Validates and combines additional MCP documents in source order.
+//
+// Returns: Validated additional MCP servers in source precedence order. Runtime-owned
+// filtering remains outside the serialized document.
+// Internal: ComposeAdditional is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerMCPConfigAPI) ComposeAdditional(ctx context.Context, params *MCPConfigComposeAdditionalRequest) (*MCPConfigComposeAdditionalResult, error) {
+	raw, err := a.client.Request(ctx, "mcp.config.composeAdditional", params)
+	if err != nil {
+		return nil, err
+	}
+	var result MCPConfigComposeAdditionalResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// MergeSources composes explicit MCP source inventories through the shared loader,
+// including trusted workspace and on-device sources. This read-only result grants no
+// execution authority.
+//
+// RPC method: mcp.config.mergeSources.
+//
+// Parameters: Read-only MCP configuration composition from explicit source inventories. The
+// result grants no execution authority.
+//
+// Returns: The composed MCP configuration and all omitted-source diagnostics.
+// Internal: MergeSources is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerMCPConfigAPI) MergeSources(ctx context.Context, params *MCPConfigMergeSourcesRequest) (*MCPConfigMergeSourcesResult, error) {
+	raw, err := a.client.Request(ctx, "mcp.config.mergeSources", params)
+	if err != nil {
+		return nil, err
+	}
+	var result MCPConfigMergeSourcesResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// UserServerNamesForConfigDir reads fresh persisted user MCP server names under an explicit
+// configuration root, including invalid entries but excluding installation-owned entries.
+// Leaves the validated cache unchanged and requires a trusted host or direct SDK caller.
+//
+// RPC method: mcp.config.userServerNamesForConfigDir.
+//
+// Parameters: Selects an explicit user MCP configuration root without changing the
+// connection owner.
+//
+// Returns: Fresh user MCP server names, including invalid entries but excluding
+// installation-owned entries. This read does not change the validated configuration cache.
+// Internal: UserServerNamesForConfigDir is part of the SDK's internal handshake/plumbing;
+// external callers should not use it.
+func (a *InternalServerMCPConfigAPI) UserServerNamesForConfigDir(ctx context.Context, params *MCPConfigForConfigDirRequest) (*MCPConfigUserServerNamesResult, error) {
+	raw, err := a.client.Request(ctx, "mcp.config.userServerNamesForConfigDir", params)
+	if err != nil {
+		return nil, err
+	}
+	var result MCPConfigUserServerNamesResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: Config returns experimental APIs that may change or be removed.
+func (s *InternalServerMCPAPI) Config() *InternalServerMCPConfigAPI {
+	return (*InternalServerMCPConfigAPI)(s)
+}
+
+// Experimental: InternalServerMCPGitHubAPI contains experimental APIs that may change or be
+// removed.
+type InternalServerMCPGitHubAPI internalServerAPI
+
+// ResolveForInvocation resolves a secret-free built-in GitHub MCP descriptor through this
+// connection's original credential owner. Preserves invocation tool overrides, shell
+// filters, Azure DevOps narrowing, and cached GitHub IQ selection within the existing
+// two-second inspection budget. Does not start an MCP connection.
+//
+// RPC method: mcp.github.resolveForInvocation.
+//
+// Parameters: Resolve the authentication-derived built-in without a session or MCP
+// connection.
+//
+// Returns: A secret-free GitHub descriptor, an ordinary signed-out result, or a bounded
+// degraded result.
+// Internal: ResolveForInvocation is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerMCPGitHubAPI) ResolveForInvocation(ctx context.Context, params *MCPGitHubResolveInvocationRequest) (*MCPGitHubResolveForInvocationResult, error) {
+	raw, err := a.client.Request(ctx, "mcp.github.resolveForInvocation", params)
+	if err != nil {
+		return nil, err
+	}
+	var result MCPGitHubResolveForInvocationResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: GitHub returns experimental APIs that may change or be removed.
+func (s *InternalServerMCPAPI) GitHub() *InternalServerMCPGitHubAPI {
+	return (*InternalServerMCPGitHubAPI)(s)
+}
+
 // Experimental: InternalServerMCPOauthAPI contains experimental APIs that may change or be
 // removed.
 type InternalServerMCPOauthAPI internalServerAPI
@@ -52618,6 +54650,34 @@ func (s *InternalServerMCPAPI) Registry() *InternalServerMCPRegistryAPI {
 	return (*InternalServerMCPRegistryAPI)(s)
 }
 
+// Experimental: InternalServerMemoriesAPI contains experimental APIs that may change or be
+// removed.
+type InternalServerMemoriesAPI internalServerAPI
+
+// ImportSemantic validates and imports semantic memory JSONL through original-owner
+// credentials and scoped runtime sessions. Preserves account policy and conflicts. Dry runs
+// perform no authentication, network calls, or writes.
+//
+// RPC method: memories.importSemantic.
+//
+// Parameters: Memory import input. Authentication remains bound to the calling runtime
+// owner.
+//
+// Returns: Semantic memory import outcome.
+// Internal: ImportSemantic is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerMemoriesAPI) ImportSemantic(ctx context.Context, params *MemoriesImportSemanticRequest) (*MemoriesImportSemanticResult, error) {
+	raw, err := a.client.Request(ctx, "memories.importSemantic", params)
+	if err != nil {
+		return nil, err
+	}
+	var result MemoriesImportSemanticResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Experimental: InternalServerPermissionsAPI contains experimental APIs that may change or
 // be removed.
 type InternalServerPermissionsAPI internalServerAPI
@@ -52755,6 +54815,156 @@ func (a *InternalServerPersistenceAPI) WriteRawJsonLocked(ctx context.Context, p
 		return nil, err
 	}
 	return &result, nil
+}
+
+// Experimental: InternalServerPluginsAPI contains experimental APIs that may change or be
+// removed.
+type InternalServerPluginsAPI internalServerAPI
+
+// InspectInventory lists plugin inventory with invocation settings and policy without
+// changing the existing plugin list operation.
+//
+// RPC method: plugins.inspectInventory.
+//
+// Parameters: Inspects persisted and live plugins under an explicit effective configuration
+// without changing the existing user-only plugins.list API.
+//
+// Returns: Persisted, live, built-in, and host-directory plugins with canonical shadowing
+// and scan diagnostics.
+// Internal: InspectInventory is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerPluginsAPI) InspectInventory(ctx context.Context, params *PluginInspectInventoryRequest) (*PluginInvocationInventoryResult, error) {
+	raw, err := a.client.Request(ctx, "plugins.inspectInventory", params)
+	if err != nil {
+		return nil, err
+	}
+	var result PluginInvocationInventoryResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: InternalServerPluginsBuiltinAPI contains experimental APIs that may change
+// or be removed.
+type InternalServerPluginsBuiltinAPI internalServerAPI
+
+// Discovers bundled plugins through the installed distribution resolver and authoritative
+// manifest scanner.
+//
+// RPC method: plugins.builtin.discover.
+//
+// Parameters: Locates bundled plugin manifests relative to one installed host directory.
+//
+// Returns: Bundled plugin records and diagnostics from the original manifest scanner.
+// Internal: Discover is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerPluginsBuiltinAPI) Discover(ctx context.Context, params *PluginBuiltinDiscoverRequest) (*PluginBuiltinDiscoverResult, error) {
+	raw, err := a.client.Request(ctx, "plugins.builtin.discover", params)
+	if err != nil {
+		return nil, err
+	}
+	var result PluginBuiltinDiscoverResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ResolveActivation resolves bundled Browser activation from managed-over-user whole-plugin
+// policy through this connection's original credential owner. Preserves policy-helper and
+// forced-refresh failures and the existing two-second inspection budget.
+//
+// RPC method: plugins.builtin.resolveActivation.
+//
+// Parameters: Resolve managed Browser activation through the connection's original
+// credential owner.
+//
+// Returns: Browser activation after the managed-over-user whole-plugin policy.
+// Internal: ResolveActivation is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerPluginsBuiltinAPI) ResolveActivation(ctx context.Context, params *PluginsBuiltinResolveActivationRequest) (*PluginsBuiltinResolveActivationResult, error) {
+	raw, err := a.client.Request(ctx, "plugins.builtin.resolveActivation", params)
+	if err != nil {
+		return nil, err
+	}
+	var result PluginsBuiltinResolveActivationResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: Builtin returns experimental APIs that may change or be removed.
+func (s *InternalServerPluginsAPI) Builtin() *InternalServerPluginsBuiltinAPI {
+	return (*InternalServerPluginsBuiltinAPI)(s)
+}
+
+// Experimental: InternalServerPluginsPolicyAPI contains experimental APIs that may change
+// or be removed.
+type InternalServerPluginsPolicyAPI internalServerAPI
+
+// ResolveForInvocation resolves plugin policy through the original connection's credential
+// owner and retains the effective managed settings layers.
+//
+// RPC method: plugins.policy.resolveForInvocation.
+//
+// Parameters: Resolves plugin policy through the requesting connection's original
+// credential owner.
+//
+// Returns: Resolved plugin policy and authoritative failure posture. Fresh successful
+// resolutions retain the original policy layers for mutation guards; cache-only inspection
+// never changes retained policy.
+// Internal: ResolveForInvocation is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerPluginsPolicyAPI) ResolveForInvocation(ctx context.Context, params *PluginPolicyResolveInvocationRequest) (*PluginPolicyResolveInvocationResult, error) {
+	raw, err := a.client.Request(ctx, "plugins.policy.resolveForInvocation", params)
+	if err != nil {
+		return nil, err
+	}
+	var result PluginPolicyResolveInvocationResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: Policy returns experimental APIs that may change or be removed.
+func (s *InternalServerPluginsAPI) Policy() *InternalServerPluginsPolicyAPI {
+	return (*InternalServerPluginsPolicyAPI)(s)
+}
+
+// Experimental: InternalServerPluginsSourcesAPI contains experimental APIs that may change
+// or be removed.
+type InternalServerPluginsSourcesAPI internalServerAPI
+
+// Resolves persisted, explicit, and trusted live plugins with runtime-owned managed policy.
+// Live records remain separate from persisted installations.
+//
+// RPC method: plugins.sources.resolve.
+//
+// Parameters: Resolves active plugin sources with runtime-owned folder trust and managed
+// policy.
+//
+// Returns: Active plugins and the separate persisted inventory, without persisting live
+// directory records.
+// Internal: Resolve is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerPluginsSourcesAPI) Resolve(ctx context.Context, params *PluginSourcesResolveRequest) (*PluginSourcesResolveResult, error) {
+	raw, err := a.client.Request(ctx, "plugins.sources.resolve", params)
+	if err != nil {
+		return nil, err
+	}
+	var result PluginSourcesResolveResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: Sources returns experimental APIs that may change or be removed.
+func (s *InternalServerPluginsAPI) Sources() *InternalServerPluginsSourcesAPI {
+	return (*InternalServerPluginsSourcesAPI)(s)
 }
 
 // Experimental: InternalServerProvidersSourceAPI contains experimental APIs that may change
@@ -53612,6 +55822,33 @@ func (s *InternalServerSandboxAPI) Settings() *InternalServerSandboxSettingsAPI 
 	return (*InternalServerSandboxSettingsAPI)(s)
 }
 
+// Experimental: InternalServerSecretsAPI contains experimental APIs that may change or be
+// removed.
+type InternalServerSecretsAPI internalServerAPI
+
+// FilterForHost redacts host output with the runtime's current secret sources, including
+// when SDK-managed secret registration is disabled. Extensions cannot call this method.
+// Does not retain the input.
+//
+// RPC method: secrets.filterForHost.
+//
+// Parameters: Content to redact with the runtime's process filter.
+//
+// Returns: Content after runtime-owned redaction.
+// Internal: FilterForHost is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerSecretsAPI) FilterForHost(ctx context.Context, params *SecretsFilterRequest) (*SecretsFilterResult, error) {
+	raw, err := a.client.Request(ctx, "secrets.filterForHost", params)
+	if err != nil {
+		return nil, err
+	}
+	var result SecretsFilterResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Experimental: InternalServerSessionsAPI contains experimental APIs that may change or be
 // removed.
 type InternalServerSessionsAPI internalServerAPI
@@ -53807,6 +56044,28 @@ func (a *InternalServerSessionsAPI) GetPersistedRemoteSteerable(ctx context.Cont
 	return &result, nil
 }
 
+// ImportSemantic validates semantic session JSONL and imports canonical events into a fresh
+// local session with rollback. Dry runs perform no authentication, network calls, or writes.
+//
+// RPC method: sessions.importSemantic.
+//
+// Parameters: Semantic conversation input for local import or validation.
+//
+// Returns: Semantic session import outcome.
+// Internal: ImportSemantic is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerSessionsAPI) ImportSemantic(ctx context.Context, params *SessionsImportSemanticRequest) (*SessionsImportSemanticResult, error) {
+	raw, err := a.client.Request(ctx, "sessions.importSemantic", params)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionsImportSemanticResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // ListNonEmptySessionIds lists recent local session IDs that contain user-visible history,
 // omitting housekeeping-only sessions.
 //
@@ -53909,6 +56168,28 @@ func (a *InternalServerSessionsAPI) UpdateWorkspaceFields(ctx context.Context, p
 		return nil, err
 	}
 	var result SessionsUpdateWorkspaceFieldsResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ValidateName validates an explicit session name with the canonical session naming rules
+// and returns an optional error.
+//
+// RPC method: sessions.validateName.
+//
+// Parameters: A friendly name to validate before a session mutation.
+//
+// Returns: The shared session-name policy decision.
+// Internal: ValidateName is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerSessionsAPI) ValidateName(ctx context.Context, params *SessionsValidateNameRequest) (*SessionsValidateNameResult, error) {
+	raw, err := a.client.Request(ctx, "sessions.validateName", params)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionsValidateNameResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
@@ -54048,6 +56329,107 @@ func (a *InternalServerSettingsAPI) RemoveRawKey(ctx context.Context, params *Se
 	return &result, nil
 }
 
+// Experimental: InternalServerSkillsAPI contains experimental APIs that may change or be
+// removed.
+type InternalServerSkillsAPI internalServerAPI
+
+// Experimental: InternalServerSkillsResourcesAPI contains experimental APIs that may change
+// or be removed.
+type InternalServerSkillsResourcesAPI internalServerAPI
+
+// Discover loads standalone skill records and diagnostics with explicit host settings,
+// workspace paths, and plugin sources.
+//
+// RPC method: skills.resources.discover.
+//
+// Parameters: Loads full local skill records, including disabled records and command
+// metadata.
+//
+// Returns: Full local skill inventory and report-and-ignore source diagnostics.
+// Internal: Discover is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerSkillsResourcesAPI) Discover(ctx context.Context, params *SkillResourceDiscoverRequest) (*SkillResourceDiscoverResult, error) {
+	raw, err := a.client.Request(ctx, "skills.resources.discover", params)
+	if err != nil {
+		return nil, err
+	}
+	var result SkillResourceDiscoverResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Install registers a skill directory or installs a local or HTTPS definition through the
+// original runtime owner.
+//
+// RPC method: skills.resources.install.
+//
+// Parameters: Registers a skill directory or installs a local or HTTPS skill definition.
+//
+// Returns: The persisted result of a skill source installation.
+// Internal: Install is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerSkillsResourcesAPI) Install(ctx context.Context, params *SkillResourceInstallRequest) (*SkillResourceInstallResult, error) {
+	raw, err := a.client.Request(ctx, "skills.resources.install", params)
+	if err != nil {
+		return nil, err
+	}
+	var result SkillResourceInstallResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Removes a personal or project skill or unregisters a directory with the existing scoped
+// removal rules.
+//
+// RPC method: skills.resources.remove.
+//
+// Parameters: Removes a personal or project skill, or unregisters a custom directory.
+//
+// Returns: The completed skill removal, with conservative disabled-state cleanup.
+// Internal: Remove is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerSkillsResourcesAPI) Remove(ctx context.Context, params *SkillResourceRemoveRequest) (*SkillResourceRemoveResult, error) {
+	raw, err := a.client.Request(ctx, "skills.resources.remove", params)
+	if err != nil {
+		return nil, err
+	}
+	var result SkillResourceRemoveResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// SetEnabled atomically changes one user's skill disable entry under explicit host settings
+// paths.
+//
+// RPC method: skills.resources.setEnabled.
+//
+// Parameters: Atomically changes only one user's disabled skill entry under explicit host
+// paths.
+// Internal: SetEnabled is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerSkillsResourcesAPI) SetEnabled(ctx context.Context, params *SkillResourceSetEnabledRequest) (*SkillsResourcesSetEnabledResult, error) {
+	raw, err := a.client.Request(ctx, "skills.resources.setEnabled", params)
+	if err != nil {
+		return nil, err
+	}
+	var result SkillsResourcesSetEnabledResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: Resources returns experimental APIs that may change or be removed.
+func (s *InternalServerSkillsAPI) Resources() *InternalServerSkillsResourcesAPI {
+	return (*InternalServerSkillsResourcesAPI)(s)
+}
+
 // Experimental: InternalServerToolsAPI contains experimental APIs that may change or be
 // removed.
 type InternalServerToolsAPI internalServerAPI
@@ -54179,7 +56561,9 @@ func (a *InternalServerUserSettingsAPI) DiagnoseProblems(ctx context.Context, pa
 // canonicalizes touched aliases, applies the edit, validates the resulting top-level
 // setting and writes before releasing the lock. An explicit autoUpdatesChannel set
 // completes the staff migration in the same transaction. Only a malformed existing file
-// returns `invalid`; refused keys, invalid values and I/O errors reject the call.
+// returns `invalid`; refused keys, invalid values and I/O errors reject the call. Optional
+// trusted-host context selects paths and hook environment; configDir and context cannot be
+// combined.
 //
 // RPC method: user.settings.edit.
 //
@@ -54194,6 +56578,9 @@ func (a *InternalServerUserSettingsAPI) Edit(ctx context.Context, params *UserSe
 		req["canonicalPath"] = params.CanonicalPath
 		if params.ConfigDir != nil {
 			req["configDir"] = *params.ConfigDir
+		}
+		if params.Context != nil {
+			req["context"] = *params.Context
 		}
 		req["operation"] = params.Operation
 		if params.Value != nil {
@@ -54210,6 +56597,28 @@ func (a *InternalServerUserSettingsAPI) Edit(ctx context.Context, params *UserSe
 		return nil, err
 	}
 	var result SettingsEditResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetOrCreateAhpEnvironmentComputeId atomically returns or creates the AHP environment
+// compute identity under the explicit host settings context.
+//
+// RPC method: user.settings.getOrCreateAhpEnvironmentComputeId.
+//
+// Parameters: Selects the settings document and hook environment for an explicit host.
+//
+// Returns: The persisted AHP environment compute identity.
+// Internal: GetOrCreateAhpEnvironmentComputeId is part of the SDK's internal
+// handshake/plumbing; external callers should not use it.
+func (a *InternalServerUserSettingsAPI) GetOrCreateAhpEnvironmentComputeId(ctx context.Context, params *UserSettingsForContextRequest) (*UserSettingsGetOrCreateAhpEnvironmentComputeIDResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.getOrCreateAhpEnvironmentComputeId", params)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsGetOrCreateAhpEnvironmentComputeIDResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
@@ -54413,6 +56822,29 @@ func (a *InternalServerUserSettingsAPI) LoadForEdit(ctx context.Context, params 
 	return &result, nil
 }
 
+// LoadForWorkingDirectory reads contextual user settings with the trusted repository
+// overlay for one working directory.
+//
+// RPC method: user.settings.loadForWorkingDirectory.
+//
+// Parameters: Reads a contextual user document with trusted repository settings for one
+// working directory.
+//
+// Returns: The normalized user document with trusted repository settings.
+// Internal: LoadForWorkingDirectory is part of the SDK's internal handshake/plumbing;
+// external callers should not use it.
+func (a *InternalServerUserSettingsAPI) LoadForWorkingDirectory(ctx context.Context, params *UserSettingsForWorkingDirectoryRequest) (*UserSettingsLoadForWorkingDirectoryResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.loadForWorkingDirectory", params)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsLoadForWorkingDirectoryResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // LoadRepo reads a repository's checked-in settings document as stored, normalized,
 // together with any diagnostic raised while reading it. This is the repository half of the
 // layering `user.settings.get` reports: `user.settings.loadWithWarning` reads the user's
@@ -54444,22 +56876,25 @@ func (a *InternalServerUserSettingsAPI) LoadRepo(ctx context.Context, params *Us
 	return &result, nil
 }
 
-// LoadWithWarning reads the user's stored settings together with the diagnostic raised
-// while reading them. This is `user.settings.loadForConfigDir` without a `configDir` plus
-// the reason part of the document was ignored: that one answers the document alone, so a
-// caller cannot tell a clean read from a salvaged one. Read this when the caller is about
-// to write the file back, where accepting a partial parse would discard every value the
-// loader could not read. The settings that did load are still reported alongside the
-// warning, so a consumer may surface it and continue instead of failing.
+// LoadWithWarning reads stored settings together with parser diagnostics. Omit context to
+// keep the server's paths and hook environment. An optional trusted-host context selects
+// both instead. The settings that did load remain available alongside the warning, so a
+// consumer can report a partial read without discarding its result.
 //
 // RPC method: user.settings.loadWithWarning.
 //
+// Parameters: Selects an optional trusted-host context for settings and parser diagnostics.
+//
 // Returns: The user's stored settings, together with any diagnostic raised while reading
 // them.
+// Pass nil for params to use the default request options.
 // Internal: LoadWithWarning is part of the SDK's internal handshake/plumbing; external
 // callers should not use it.
-func (a *InternalServerUserSettingsAPI) LoadWithWarning(ctx context.Context) (*UserSettingsLoadWithWarningResult, error) {
-	raw, err := a.client.Request(ctx, "user.settings.loadWithWarning", nil)
+func (a *InternalServerUserSettingsAPI) LoadWithWarning(ctx context.Context, params *UserSettingsLoadWithWarningRequest) (*UserSettingsLoadWithWarningResult, error) {
+	if params == nil {
+		params = &UserSettingsLoadWithWarningRequest{}
+	}
+	raw, err := a.client.Request(ctx, "user.settings.loadWithWarning", params)
 	if err != nil {
 		return nil, err
 	}
@@ -54653,6 +57088,29 @@ func (a *InternalServerUserSettingsAPI) Normalize(ctx context.Context, params *U
 	return &result, nil
 }
 
+// RepositoryDisabledNames reads advisory repository-owned resource disables under explicit
+// host paths and persisted workspace trust.
+//
+// RPC method: user.settings.repositoryDisabledNames.
+//
+// Parameters: Reads only the trusted repository contribution to one resource disable list.
+//
+// Returns: The advisory repository disable list. A read failure returns no names and a
+// diagnostic, rather than blocking a listing or mutation.
+// Internal: RepositoryDisabledNames is part of the SDK's internal handshake/plumbing;
+// external callers should not use it.
+func (a *InternalServerUserSettingsAPI) RepositoryDisabledNames(ctx context.Context, params *RepositoryDisabledNamesRequest) (*RepositoryDisabledNamesResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.repositoryDisabledNames", params)
+	if err != nil {
+		return nil, err
+	}
+	var result RepositoryDisabledNamesResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // ResetStaffModelSelectionOnce runs the one-time reset that clears a staff account's pinned
 // model selection, and reports the timestamp the host should record. Idempotent and
 // self-gating: the reset is gated on a fixed cutoff, so a caller that passes back the
@@ -54736,7 +57194,8 @@ func (a *InternalServerUserSettingsAPI) Update(ctx context.Context, params *User
 // Validates one top-level setting subtree without writing it, reporting each problem with
 // the path it applies to. Scoped to a single top-level key on purpose: validating the whole
 // file would reject an edit whenever an unrelated pre-existing field is malformed, locking
-// the user out of the very tool that could fix it.
+// the user out of the very tool that could fix it. Optional trusted-host context supplies
+// the hook environment; omission keeps the existing process defaults.
 //
 // RPC method: user.settings.validate.
 //
@@ -54807,6 +57266,29 @@ func (a *InternalServerUserSettingsAPI) WriteKey(ctx context.Context, params *Us
 	return &result, nil
 }
 
+// WriteKeys atomically writes and deletes top-level settings keys without replacing
+// unrelated stored values or malformed documents.
+//
+// RPC method: user.settings.writeKeys.
+//
+// Parameters: An atomic set of top-level settings updates that preserves unrelated stored
+// values.
+//
+// Returns: Reports whether the atomic update succeeded or the existing document was invalid.
+// Internal: WriteKeys is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerUserSettingsAPI) WriteKeys(ctx context.Context, params *UserSettingsWriteKeysRequest) (*UserSettingsWriteKeysResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.writeKeys", params)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsWriteKeysResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Experimental: Settings returns experimental APIs that may change or be removed.
 func (s *InternalServerUserAPI) Settings() *InternalServerUserSettingsAPI {
 	return (*InternalServerUserSettingsAPI)(s)
@@ -54836,14 +57318,18 @@ type InternalServerRPC struct {
 	Instructions     *InternalServerInstructionsAPI
 	ManagedSettings  *InternalServerManagedSettingsAPI
 	MCP              *InternalServerMCPAPI
+	Memories         *InternalServerMemoriesAPI
 	Permissions      *InternalServerPermissionsAPI
 	Persistence      *InternalServerPersistenceAPI
+	Plugins          *InternalServerPluginsAPI
 	ProvidersSource  *InternalServerProvidersSourceAPI
 	Repo             *InternalServerRepoAPI
 	Runtime          *InternalServerRuntimeAPI
 	Sandbox          *InternalServerSandboxAPI
+	Secrets          *InternalServerSecretsAPI
 	Sessions         *InternalServerSessionsAPI
 	Settings         *InternalServerSettingsAPI
+	Skills           *InternalServerSkillsAPI
 	Tools            *InternalServerToolsAPI
 	User             *InternalServerUserAPI
 }
@@ -54902,14 +57388,18 @@ func NewInternalServerRPC(client *jsonrpc2.Client) *InternalServerRPC {
 	r.Instructions = (*InternalServerInstructionsAPI)(&r.common)
 	r.ManagedSettings = (*InternalServerManagedSettingsAPI)(&r.common)
 	r.MCP = (*InternalServerMCPAPI)(&r.common)
+	r.Memories = (*InternalServerMemoriesAPI)(&r.common)
 	r.Permissions = (*InternalServerPermissionsAPI)(&r.common)
 	r.Persistence = (*InternalServerPersistenceAPI)(&r.common)
+	r.Plugins = (*InternalServerPluginsAPI)(&r.common)
 	r.ProvidersSource = (*InternalServerProvidersSourceAPI)(&r.common)
 	r.Repo = (*InternalServerRepoAPI)(&r.common)
 	r.Runtime = (*InternalServerRuntimeAPI)(&r.common)
 	r.Sandbox = (*InternalServerSandboxAPI)(&r.common)
+	r.Secrets = (*InternalServerSecretsAPI)(&r.common)
 	r.Sessions = (*InternalServerSessionsAPI)(&r.common)
 	r.Settings = (*InternalServerSettingsAPI)(&r.common)
+	r.Skills = (*InternalServerSkillsAPI)(&r.common)
 	r.Tools = (*InternalServerToolsAPI)(&r.common)
 	r.User = (*InternalServerUserAPI)(&r.common)
 	return r
@@ -64658,6 +67148,140 @@ func (a *InternalEventLogAPI) Publish(ctx context.Context, params *SessionEventL
 	return &result, nil
 }
 
+// Experimental: InternalExtensionsAPI contains experimental APIs that may change or be
+// removed.
+type InternalExtensionsAPI internalSessionAPI
+
+// ConfigureHost configures the original host's extension service with runtime-owned
+// settings, policy, plugin discovery, and lifecycle fences. Only the original session host
+// may supply launch resources.
+//
+// RPC method: session.extensions.configureHost.
+//
+// Parameters: Host launch resources and lifecycle options for the original session's
+// extension service.
+//
+// Returns: Distinguishes an absent extension service from an installed service with an
+// empty inventory.
+// Internal: ConfigureHost is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalExtensionsAPI) ConfigureHost(ctx context.Context, params *SessionExtensionsConfigureHostRequest) (*SessionExtensionsInspectServiceResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		req["cliDistDir"] = params.CLIDistDir
+		if params.DisabledIDs != nil {
+			req["disabledIds"] = params.DisabledIDs
+		}
+		req["hostServerId"] = params.HostServerID
+		if params.HostValidationToken != nil {
+			req["hostValidationToken"] = *params.HostValidationToken
+		}
+		if params.IncludeSources != nil {
+			req["includeSources"] = params.IncludeSources
+		}
+		if params.InitialStartupToken != nil {
+			req["initialStartupToken"] = *params.InitialStartupToken
+		}
+		req["launcherProgram"] = params.LauncherProgram
+		req["launchProcesses"] = params.LaunchProcesses
+		req["managementToolsEnabled"] = params.ManagementToolsEnabled
+		if params.MountedPlugins != nil {
+			req["mountedPlugins"] = params.MountedPlugins
+		}
+		req["retainProcessesIfUnchanged"] = params.RetainProcessesIfUnchanged
+		req["sdkPath"] = params.SDKPath
+		req["workingDirectory"] = params.WorkingDirectory
+	}
+	raw, err := a.client.Request(ctx, "session.extensions.configureHost", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionExtensionsInspectServiceResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// InspectService inspects whether the selected session has an attached extension service
+// and returns its current inventory without starting or replacing it.
+//
+// RPC method: session.extensions.inspectService.
+//
+// Returns: Distinguishes an absent extension service from an installed service with an
+// empty inventory.
+// Internal: InspectService is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalExtensionsAPI) InspectService(ctx context.Context) (*SessionExtensionsInspectServiceResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	raw, err := a.client.Request(ctx, "session.extensions.inspectService", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionExtensionsInspectServiceResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// SetManagementToolsEnabled updates the original host's live extension management-tool
+// gate. Returns false when no service is configured.
+//
+// RPC method: session.extensions.setManagementToolsEnabled.
+//
+// Parameters: Updates the original host's live management-tool gate without reinstalling
+// its extension service.
+// Internal: SetManagementToolsEnabled is part of the SDK's internal handshake/plumbing;
+// external callers should not use it.
+func (a *InternalExtensionsAPI) SetManagementToolsEnabled(ctx context.Context, params *SessionExtensionsSetManagementToolsEnabledRequest) (*SessionExtensionsSetManagementToolsEnabledResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		req["enabled"] = params.Enabled
+	}
+	raw, err := a.client.Request(ctx, "session.extensions.setManagementToolsEnabled", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionExtensionsSetManagementToolsEnabledResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: InternalGitHubAPI contains experimental APIs that may change or be removed.
+type InternalGitHubAPI internalSessionAPI
+
+// CreateSecretGist creates a secret GitHub gist with the bound session's renewable
+// credential owner and existing account restrictions. Preserves session and research export
+// errors without returning credentials.
+//
+// RPC method: session.github.createSecretGist.
+//
+// Parameters: Creates a secret gist through the bound session's original credential owner.
+//
+// Returns: The URL returned by GitHub after it creates the secret gist.
+// Internal: CreateSecretGist is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalGitHubAPI) CreateSecretGist(ctx context.Context, params *GitHubCreateSecretGistRequest) (*GitHubCreateSecretGistResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		req["description"] = params.Description
+		req["files"] = params.Files
+		req["useCase"] = params.UseCase
+	}
+	raw, err := a.client.Request(ctx, "session.github.createSecretGist", req)
+	if err != nil {
+		return nil, err
+	}
+	var result GitHubCreateSecretGistResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Experimental: InternalGitHubAuthAPI contains experimental APIs that may change or be
 // removed.
 type InternalGitHubAuthAPI internalSessionAPI
@@ -64892,6 +67516,43 @@ func (a *InternalMCPAPI) ConfigureGitHub(ctx context.Context, params *MCPConfigu
 		return nil, err
 	}
 	var result MCPConfigureGitHubResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// InspectConfiguration inspects source configuration without starting servers or resolving
+// credentials. Workspace trust comes from the bound session and only a matching activation
+// snapshot can attest the requested directory.
+//
+// RPC method: session.mcp.inspectConfiguration.
+//
+// Parameters: Inspects MCP source configuration without starting servers. The bound session
+// owns workspace trust.
+//
+// Returns: The composed MCP configuration and all omitted-source diagnostics.
+// Internal: InspectConfiguration is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalMCPAPI) InspectConfiguration(ctx context.Context, params *SessionMCPInspectConfigurationRequest) (*MCPConfigMergeSourcesResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		if params.AdditionalConfig != nil {
+			req["additionalConfig"] = params.AdditionalConfig
+		}
+		if params.ExplicitPlugins != nil {
+			req["explicitPlugins"] = params.ExplicitPlugins
+		}
+		if params.IncludeSessionSources != nil {
+			req["includeSessionSources"] = *params.IncludeSessionSources
+		}
+		req["workingDirectory"] = params.WorkingDirectory
+	}
+	raw, err := a.client.Request(ctx, "session.mcp.inspectConfiguration", req)
+	if err != nil {
+		return nil, err
+	}
+	var result MCPConfigMergeSourcesResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
@@ -65516,6 +68177,186 @@ func (a *InternalModelAPI) DescribeLoadError(ctx context.Context, params *Sessio
 	return &result, nil
 }
 
+// GenerateBranchSlug generates a branch slug with the original session's model policy and
+// renewable credentials, including its established derived-name fallback.
+//
+// RPC method: session.model.generateBranchSlug.
+//
+// Parameters: Conversation and changes for a utility-model branch slug.
+//
+// Returns: A generated or derived branch slug.
+// Internal: GenerateBranchSlug is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalModelAPI) GenerateBranchSlug(ctx context.Context, params *SessionModelGenerateBranchSlugRequest) (*SessionModelGenerateBranchSlugResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		req["changeSummary"] = params.ChangeSummary
+		req["conversation"] = params.Conversation
+		req["fallbackPrefix"] = params.FallbackPrefix
+		if params.TaskPrompt != nil {
+			req["taskPrompt"] = *params.TaskPrompt
+		}
+	}
+	raw, err := a.client.Request(ctx, "session.model.generateBranchSlug", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionModelGenerateBranchSlugResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: InternalNameAPI contains experimental APIs that may change or be removed.
+type InternalNameAPI internalSessionAPI
+
+// Generates a friendly session name with the original session's utility-model policy and
+// renewable credentials. Does not change the stored name.
+//
+// RPC method: session.name.generate.
+//
+// Parameters: Input for utility-model session name generation.
+//
+// Returns: Utility generation outcome under the session's model and credential policy.
+// Internal: Generate is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalNameAPI) Generate(ctx context.Context, params *SessionNameGenerateRequest) (*SessionNameGenerateResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		if params.Manual != nil {
+			req["manual"] = *params.Manual
+		}
+		req["userMessage"] = params.UserMessage
+	}
+	raw, err := a.client.Request(ctx, "session.name.generate", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionNameGenerateResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: InternalPermissionsAPI contains experimental APIs that may change or be
+// removed.
+type InternalPermissionsAPI internalSessionAPI
+
+// RepositoryDisabledNames reads advisory repository-owned resource disables using the bound
+// session's configuration and matching workspace trust.
+//
+// RPC method: session.permissions.repositoryDisabledNames.
+//
+// Parameters: Reads repository resource disables using the bound session's configuration
+// and trust authority.
+//
+// Returns: The advisory repository disable list. A read failure returns no names and a
+// diagnostic, rather than blocking a listing or mutation.
+// Internal: RepositoryDisabledNames is part of the SDK's internal handshake/plumbing;
+// external callers should not use it.
+func (a *InternalPermissionsAPI) RepositoryDisabledNames(ctx context.Context, params *SessionRepositoryDisabledNamesRequest) (*RepositoryDisabledNamesResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		req["key"] = params.Key
+		req["workingDirectory"] = params.WorkingDirectory
+	}
+	raw, err := a.client.Request(ctx, "session.permissions.repositoryDisabledNames", req)
+	if err != nil {
+		return nil, err
+	}
+	var result RepositoryDisabledNamesResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: InternalPersistenceAPI contains experimental APIs that may change or be
+// removed.
+type InternalPersistenceAPI internalSessionAPI
+
+// Flushes durable state through the original session writer, metadata, callback, and
+// tracking owners.
+//
+// RPC method: session.persistence.flush.
+//
+// Parameters: Flushes durable session state through its original runtime and client owners.
+// Pass nil for params to use the default request options.
+// Internal: Flush is part of the SDK's internal handshake/plumbing; external callers should
+// not use it.
+func (a *InternalPersistenceAPI) Flush(ctx context.Context, params *SessionPersistenceFlushRequest) (*SessionPersistenceFlushResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		if params.Force != nil {
+			req["force"] = *params.Force
+		}
+	}
+	raw, err := a.client.Request(ctx, "session.persistence.flush", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionPersistenceFlushResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: InternalPluginsAPI contains experimental APIs that may change or be removed.
+type InternalPluginsAPI internalSessionAPI
+
+// InspectExtensionContributions inspects extension contributions for a changed plugin under
+// the selected session's activation policy and installation root.
+//
+// RPC method: session.plugins.inspectExtensionContributions.
+//
+// Parameters: Inspects extension directories contributed by a changed plugin under the
+// selected session's activation and profile.
+//
+// Returns: Whether a changed active plugin contributes extension directories, including
+// empty directories.
+// Internal: InspectExtensionContributions is part of the SDK's internal handshake/plumbing;
+// external callers should not use it.
+func (a *InternalPluginsAPI) InspectExtensionContributions(ctx context.Context, params *SessionPluginInspectExtensionContributionsRequest) (*SessionPluginInspectExtensionContributionsResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		req["changedPluginSpec"] = params.ChangedPluginSpec
+	}
+	raw, err := a.client.Request(ctx, "session.plugins.inspectExtensionContributions", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionPluginInspectExtensionContributionsResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// InspectInventory inspects available and inactive plugins with live, external, and trusted
+// bundled provenance under the bound session's configuration and policy.
+//
+// RPC method: session.plugins.inspectInventory.
+//
+// Returns: Available plugin inventory under the selected session's settings, policy, source
+// roots, and trusted bundle registration.
+// Internal: InspectInventory is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalPluginsAPI) InspectInventory(ctx context.Context) (*SessionPluginInventoryResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	raw, err := a.client.Request(ctx, "session.plugins.inspectInventory", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionPluginInventoryResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Experimental: InternalQueueAPI contains experimental APIs that may change or be removed.
 type InternalQueueAPI internalSessionAPI
 
@@ -65872,6 +68713,32 @@ func (a *InternalRemoteAPI) SendWithAdmission(ctx context.Context, params *Sessi
 	return &result, nil
 }
 
+// Experimental: InternalResearchAPI contains experimental APIs that may change or be
+// removed.
+type InternalResearchAPI internalSessionAPI
+
+// ListReports lists stored Markdown research reports from the bound session's authoritative
+// state path. Preserves missing-directory, file-stat, timestamp, and stable ordering
+// behavior without accepting a caller path or configuration.
+//
+// RPC method: session.research.listReports.
+//
+// Returns: Stored Markdown reports, newest first, from the selected session.
+// Internal: ListReports is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalResearchAPI) ListReports(ctx context.Context) (*ResearchListReportsResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	raw, err := a.client.Request(ctx, "session.research.listReports", req)
+	if err != nil {
+		return nil, err
+	}
+	var result ResearchListReportsResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Experimental: InternalSandboxAPI contains experimental APIs that may change or be removed.
 type InternalSandboxAPI internalSessionAPI
 
@@ -66201,6 +69068,97 @@ func (a *InternalSettingsAPI) Snapshot(ctx context.Context) (*SessionSettingsSna
 	return &result, nil
 }
 
+// Experimental: InternalSkillsAPI contains experimental APIs that may change or be removed.
+type InternalSkillsAPI internalSessionAPI
+
+// InspectInventory inspects full local and provider skill records under the selected
+// session's discovery, activation, and managed policy. Preserves effective disabled
+// identities and loader diagnostics without accepting caller paths or settings.
+//
+// RPC method: session.skills.inspectInventory.
+//
+// Returns: Full inventory under the selected session's discovery and activation policy.
+// Internal: InspectInventory is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalSkillsAPI) InspectInventory(ctx context.Context) (*SessionSkillsInspectInventoryResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	raw, err := a.client.Request(ctx, "session.skills.inspectInventory", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionSkillsInspectInventoryResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: InternalSkillsResourcesAPI contains experimental APIs that may change or be
+// removed.
+type InternalSkillsResourcesAPI internalSessionAPI
+
+// Installs a local or HTTPS skill definition or registers a skill directory under the
+// selected session's profile and working directory. Reuses the canonical installer and
+// refreshes the session-owned catalog.
+//
+// RPC method: session.skills.resources.install.
+//
+// Parameters: Install a skill with the selected session's profile and working directory.
+//
+// Returns: The persisted result of a skill source installation.
+// Internal: Install is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalSkillsResourcesAPI) Install(ctx context.Context, params *SessionSkillResourceInstallRequest) (*SkillResourceInstallResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		if params.Project != nil {
+			req["project"] = *params.Project
+		}
+		req["source"] = params.Source
+	}
+	raw, err := a.client.Request(ctx, "session.skills.resources.install", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SkillResourceInstallResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Removes a personal or project skill or unregisters a directory under the selected
+// session's profile. Uses the full session-owned provider inventory for conservative
+// disabled-identity cleanup.
+//
+// RPC method: session.skills.resources.remove.
+//
+// Parameters: Remove a skill with the selected session's full inventory and profile.
+//
+// Returns: The completed skill removal, with conservative disabled-state cleanup.
+// Internal: Remove is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalSkillsResourcesAPI) Remove(ctx context.Context, params *SessionSkillResourceRemoveRequest) (*SkillResourceRemoveResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		req["target"] = params.Target
+	}
+	raw, err := a.client.Request(ctx, "session.skills.resources.remove", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SkillResourceRemoveResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: Resources returns experimental APIs that may change or be removed.
+func (s *InternalSkillsAPI) Resources() *InternalSkillsResourcesAPI {
+	return (*InternalSkillsResourcesAPI)(s)
+}
+
 // Experimental: InternalUIAPI contains experimental APIs that may change or be removed.
 type InternalUIAPI internalSessionAPI
 
@@ -66437,14 +69395,22 @@ type InternalSessionRPC struct {
 	Connectors   *InternalConnectorsAPI
 	Diagnostics  *InternalDiagnosticsAPI
 	EventLog     *InternalEventLogAPI
+	Extensions   *InternalExtensionsAPI
+	GitHub       *InternalGitHubAPI
 	GitHubAuth   *InternalGitHubAuthAPI
 	MCP          *InternalMCPAPI
 	Model        *InternalModelAPI
+	Name         *InternalNameAPI
+	Permissions  *InternalPermissionsAPI
+	Persistence  *InternalPersistenceAPI
+	Plugins      *InternalPluginsAPI
 	Queue        *InternalQueueAPI
 	Remote       *InternalRemoteAPI
+	Research     *InternalResearchAPI
 	Sandbox      *InternalSandboxAPI
 	Schedule     *InternalScheduleAPI
 	Settings     *InternalSettingsAPI
+	Skills       *InternalSkillsAPI
 	UI           *InternalUIAPI
 	Usage        *InternalUsageAPI
 	Workflow     *InternalWorkflowAPI
@@ -66568,14 +69534,22 @@ func NewInternalSessionRPC(client *jsonrpc2.Client, sessionID string) *InternalS
 	r.Connectors = (*InternalConnectorsAPI)(&r.common)
 	r.Diagnostics = (*InternalDiagnosticsAPI)(&r.common)
 	r.EventLog = (*InternalEventLogAPI)(&r.common)
+	r.Extensions = (*InternalExtensionsAPI)(&r.common)
+	r.GitHub = (*InternalGitHubAPI)(&r.common)
 	r.GitHubAuth = (*InternalGitHubAuthAPI)(&r.common)
 	r.MCP = (*InternalMCPAPI)(&r.common)
 	r.Model = (*InternalModelAPI)(&r.common)
+	r.Name = (*InternalNameAPI)(&r.common)
+	r.Permissions = (*InternalPermissionsAPI)(&r.common)
+	r.Persistence = (*InternalPersistenceAPI)(&r.common)
+	r.Plugins = (*InternalPluginsAPI)(&r.common)
 	r.Queue = (*InternalQueueAPI)(&r.common)
 	r.Remote = (*InternalRemoteAPI)(&r.common)
+	r.Research = (*InternalResearchAPI)(&r.common)
 	r.Sandbox = (*InternalSandboxAPI)(&r.common)
 	r.Schedule = (*InternalScheduleAPI)(&r.common)
 	r.Settings = (*InternalSettingsAPI)(&r.common)
+	r.Skills = (*InternalSkillsAPI)(&r.common)
 	r.UI = (*InternalUIAPI)(&r.common)
 	r.Usage = (*InternalUsageAPI)(&r.common)
 	r.Workflow = (*InternalWorkflowAPI)(&r.common)

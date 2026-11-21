@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use futures_util::FutureExt;
@@ -542,6 +542,31 @@ impl AhpHost {
 
 pub(crate) type ExitCallbacks = Mutex<HashMap<String, AhpHostExitCallback>>;
 
+/// Scoped observation of one host on its original SDK connection.
+///
+/// Dropping the subscription removes only its own observer. A callback already
+/// dispatched by the client can finish after the subscription is dropped.
+pub struct AhpHostExitSubscription {
+    callbacks: Weak<ExitCallbacks>,
+    host_id: String,
+    callback: AhpHostExitCallback,
+}
+
+impl Drop for AhpHostExitSubscription {
+    fn drop(&mut self) {
+        let Some(callbacks) = self.callbacks.upgrade() else {
+            return;
+        };
+        let mut callbacks = callbacks.lock();
+        if callbacks
+            .get(&self.host_id)
+            .is_some_and(|callback| Arc::ptr_eq(callback, &self.callback))
+        {
+            callbacks.remove(&self.host_id);
+        }
+    }
+}
+
 fn invoke_exit_callback(callback: AhpHostExitCallback, exit: AhpHostExit) {
     tokio::task::spawn_blocking(move || {
         if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(exit))).is_err() {
@@ -591,6 +616,48 @@ impl Drop for PendingStart {
 }
 
 impl Client {
+    /// Observe exits for a caller-owned host without changing its start options.
+    ///
+    /// Register before `host.start` on this same client and retain the returned
+    /// subscription through disposal. This does not transfer host ownership.
+    /// An existing observer is preserved and makes this call fail.
+    /// Do not capture the owning client in the callback.
+    ///
+    /// ```no_run
+    /// # use copilot_sdk::{Client, Error};
+    /// # async fn observe(client: &Client, host_id: &str) -> Result<(), Error> {
+    /// let observer = client.observe_ahp_host_exit(
+    ///     host_id,
+    ///     std::sync::Arc::new(|exit| eprintln!("AHP host exited: {}", exit.host_id)),
+    /// )?;
+    /// // Use this same client for host.start and host.dispose.
+    /// # drop(observer);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn observe_ahp_host_exit(
+        &self,
+        host_id: impl Into<String>,
+        callback: AhpHostExitCallback,
+    ) -> Result<AhpHostExitSubscription, Error> {
+        let host_id = host_id.into();
+        let mut callbacks = self.inner.ahp_host_callbacks.lock();
+        if callbacks.contains_key(&host_id) {
+            return Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "An AHP host exit observer is already registered for this host",
+            ));
+        }
+        // A fresh wrapper distinguishes registrations that reuse the same callback.
+        let callback: AhpHostExitCallback = Arc::new(move |exit| callback(exit));
+        callbacks.insert(host_id.clone(), callback.clone());
+        Ok(AhpHostExitSubscription {
+            callbacks: Arc::downgrade(&self.inner.ahp_host_callbacks),
+            host_id,
+            callback,
+        })
+    }
+
     pub(crate) fn host_sessions(&self) -> Result<Arc<HostSessions>, Error> {
         self.ahp_host_sessions
             .clone()

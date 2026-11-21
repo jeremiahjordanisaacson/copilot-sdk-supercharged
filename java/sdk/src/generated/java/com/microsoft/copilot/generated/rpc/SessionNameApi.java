@@ -31,6 +31,22 @@ public final class SessionNameApi {
     }
 
     /**
+     * Generates a friendly session name with the original session's utility-model policy and renewable credentials. Does not change the stored name.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<UtilityPromptResult> generate(SessionNameGenerateParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.name.generate", _p, UtilityPromptResult.class);
+    }
+
+    /**
      * Gets the session's friendly name.
      *
      * @apiNote This method is experimental and may change in a future version.

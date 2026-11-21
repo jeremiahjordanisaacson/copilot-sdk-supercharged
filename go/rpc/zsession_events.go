@@ -556,7 +556,9 @@ type AssistantMessageData struct {
 	ClientRequestID *string `json:"clientRequestId,omitempty"`
 	// The assistant's text response content
 	Content string `json:"content"`
-	// Encrypted reasoning content from OpenAI models. Session-bound and stripped on resume.
+	// No longer emitted. For OpenAI Responses, read encrypted_content from the reasoning items in reasoningBlocks.blocks instead. Older events may still contain this field.
+	//
+	// Deprecated: EncryptedContent is deprecated.
 	EncryptedContent *string `json:"encryptedContent,omitempty"`
 	// Experimental HydraFusion source attribution for this ordinary authoritative assistant message.
 	// Experimental: Fusion is part of an experimental API and may change or be removed.
@@ -869,6 +871,9 @@ type SessionCompactionCompleteData struct {
 	FailureDiagnostics *CompactionCompleteFailureDiagnostics `json:"failureDiagnostics,omitempty"`
 	// Bounded reason for a typed failed outcome. Unknown future values are preserved.
 	FailureReason *string `json:"failureReason,omitempty"`
+	// Experimental HydraFusion attribution for a compaction a HydraFusion turn ran before its first phase.
+	// Experimental: Fusion is part of an experimental API and may change or be removed.
+	Fusion *FusionAttribution `json:"fusion,omitempty"`
 	// Model identifier at admission when routing later changed to the reported compaction model
 	InitialModel *string `json:"initialModel,omitempty"`
 	// Number of messages removed during compaction

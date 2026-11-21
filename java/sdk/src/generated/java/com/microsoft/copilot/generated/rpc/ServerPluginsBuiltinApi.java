@@ -37,4 +37,26 @@ public final class ServerPluginsBuiltinApi {
         return caller.invoke("plugins.builtin.set", params, Void.class);
     }
 
+    /**
+     * Discovers bundled plugins through the installed distribution resolver and authoritative manifest scanner.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<PluginBuiltinDiscoverResult> discover(PluginsBuiltinDiscoverParams params) {
+        return caller.invoke("plugins.builtin.discover", params, PluginBuiltinDiscoverResult.class);
+    }
+
+    /**
+     * Resolves bundled Browser activation from managed-over-user whole-plugin policy through this connection's original credential owner. Preserves policy-helper and forced-refresh failures and the existing two-second inspection budget.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<PluginsBuiltinResolveActivationResult> resolveActivation(PluginsBuiltinResolveActivationParams params) {
+        return caller.invoke("plugins.builtin.resolveActivation", params, PluginsBuiltinResolveActivationResult.class);
+    }
+
 }

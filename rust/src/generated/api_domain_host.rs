@@ -281,6 +281,326 @@ pub(crate) struct AccountGetWebUrlResult {
 }
 crate::record_serde::wire_record!(AccountGetWebUrlResult { url: "url" });
 
+/// The immutable configuration for one pre-session authentication owner.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProcessLoginContext {
+    /// The original configuration directory. Omission preserves the default root.
+    pub config_dir: Option<String>,
+    /// The host environment snapshot used throughout credential resolution.
+    pub environment: HashMap<String, String>,
+}
+crate::record_serde::wire_record!(ProcessLoginContext { config_dir: "configDir" if is_none, environment: "environment" });
+
+/// Creates a connection-owned authentication handle without starting a login flow.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessRequestOpen {
+    /// The original immutable authentication configuration.
+    #[doc(hidden)]
+    pub(crate) context: ProcessLoginContext,
+    pub operation: AccountLoginProcessRequestOpenOperation,
+}
+crate::record_serde::wire_record!(AccountLoginProcessRequestOpen {
+    context: "context",
+    operation: "operation"
+});
+
+/// Validates and persists a token through the original authentication handle.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessRequestToken {
+    /// The normalized GitHub host.
+    pub host: String,
+    pub operation: AccountLoginProcessRequestTokenOperation,
+    /// The opaque handle returned by open.
+    pub owner_id: String,
+    /// The user-supplied token. It is never returned.
+    pub token: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessRequestToken {
+    host: "host",
+    operation: "operation",
+    owner_id: "ownerId",
+    token: "token"
+});
+
+/// Starts the original device-code flow.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessRequestStartDevice {
+    /// The normalized GitHub host.
+    pub host: String,
+    pub operation: AccountLoginProcessRequestStartDeviceOperation,
+    /// The opaque handle returned by open.
+    pub owner_id: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessRequestStartDevice {
+    host: "host",
+    operation: "operation",
+    owner_id: "ownerId"
+});
+
+/// Starts the original loopback browser flow with its existing deadline and PKCE behavior.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessRequestStartWeb {
+    /// The normalized GitHub host.
+    pub host: String,
+    pub operation: AccountLoginProcessRequestStartWebOperation,
+    /// The opaque handle returned by open.
+    pub owner_id: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessRequestStartWeb {
+    host: "host",
+    operation: "operation",
+    owner_id: "ownerId"
+});
+
+/// Completes the owner's current authorization flow.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessRequestComplete {
+    pub operation: AccountLoginProcessRequestCompleteOperation,
+    /// The opaque handle returned by open.
+    pub owner_id: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessRequestComplete {
+    operation: "operation",
+    owner_id: "ownerId"
+});
+
+/// Opens the authorization page for the owner's current flow.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessRequestOpenBrowser {
+    pub operation: AccountLoginProcessRequestOpenBrowserOperation,
+    /// The opaque handle returned by open.
+    pub owner_id: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessRequestOpenBrowser {
+    operation: "operation",
+    owner_id: "ownerId"
+});
+
+/// Continues the same pending persistence operation after plaintext consent.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessRequestContinue {
+    /// Whether the user consented to plaintext credential storage.
+    pub allow_plaintext: bool,
+    pub operation: AccountLoginProcessRequestContinueOperation,
+    /// The opaque handle returned by open.
+    pub owner_id: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessRequestContinue {
+    allow_plaintext: "allowPlaintext",
+    operation: "operation",
+    owner_id: "ownerId"
+});
+
+/// The host facts used for the post-login organization policy evaluation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProcessLoginPolicyContext {
+    /// The current host environment, including policy provenance restrictions.
+    pub environment: HashMap<String, String>,
+    /// The original user's home directory.
+    pub home_directory: String,
+    /// The original host platform, such as win32, darwin, or linux.
+    pub platform: String,
+    /// The original host's Node.js version for the existing policy user agent.
+    pub process_version: String,
+}
+crate::record_serde::wire_record!(ProcessLoginPolicyContext {
+    environment: "environment",
+    home_directory: "homeDirectory",
+    platform: "platform",
+    process_version: "processVersion"
+});
+
+/// Evaluates both organization policy channels against the owner's current credential.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessRequestPolicy {
+    /// The original host's current policy inputs.
+    #[doc(hidden)]
+    pub(crate) context: ProcessLoginPolicyContext,
+    pub operation: AccountLoginProcessRequestPolicyOperation,
+    /// The opaque handle returned by open.
+    pub owner_id: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessRequestPolicy {
+    context: "context",
+    operation: "operation",
+    owner_id: "ownerId"
+});
+
+/// Removes only the credential that this owner currently resolves.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessRequestDiscard {
+    pub operation: AccountLoginProcessRequestDiscardOperation,
+    /// The opaque handle returned by open.
+    pub owner_id: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessRequestDiscard {
+    operation: "operation",
+    owner_id: "ownerId"
+});
+
+/// Cancels pending authorization and releases this owner.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessRequestClose {
+    pub operation: AccountLoginProcessRequestCloseOperation,
+    /// The opaque handle returned by open.
+    pub owner_id: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessRequestClose {
+    operation: "operation",
+    owner_id: "ownerId"
+});
+
+/// The original authentication owner is ready.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessResultOpened {
+    pub kind: AccountLoginProcessResultOpenedKind,
+    /// The opaque owner identifier, usable only by this connection.
+    pub owner_id: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessResultOpened {
+    kind: "kind",
+    owner_id: "ownerId"
+});
+
+/// The device-code instructions to present to the user.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessResultDeviceCode {
+    pub kind: AccountLoginProcessResultDeviceCodeKind,
+    /// The code the user enters.
+    pub user_code: String,
+    /// The authorization page.
+    pub verification_uri: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessResultDeviceCode {
+    kind: "kind",
+    user_code: "userCode",
+    verification_uri: "verificationUri"
+});
+
+/// The authorization page for the original loopback flow.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessResultWeb {
+    pub kind: AccountLoginProcessResultWebKind,
+    /// The authorization URL.
+    pub url: String,
+}
+crate::record_serde::wire_record!(AccountLoginProcessResultWeb {
+    kind: "kind",
+    url: "url"
+});
+
+/// An account offered by the original login persistence operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProcessLoginAccount {
+    /// The account host.
+    pub host: String,
+    /// The account provider kind.
+    pub kind: String,
+    /// The account login.
+    pub login: String,
+    /// The opaque account selector.
+    pub selection_id: String,
+}
+crate::record_serde::wire_record!(ProcessLoginAccount {
+    host: "host",
+    kind: "kind",
+    login: "login",
+    selection_id: "selectionId"
+});
+
+/// The original login persistence result, without credentials.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProcessLoginPersistence {
+    /// The offered accounts, when account selection is required.
+    #[doc(hidden)]
+    pub(crate) accounts: Option<Vec<ProcessLoginAccount>>,
+    /// The runtime's original user description, when host and login are available.
+    pub description: Option<String>,
+    /// The authenticated host, when available.
+    pub host: Option<String>,
+    /// The authenticated login, when available.
+    pub login: Option<String>,
+    /// The original completed, needs-plaintext-consent, needs-account-selection, or declined status.
+    pub status: String,
+}
+crate::record_serde::wire_record!(ProcessLoginPersistence { accounts: "accounts" if is_none, description: "description" if is_none, host: "host" if is_none, login: "login" if is_none, status: "status" });
+
+/// A persistence operation completed or requires user input.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessResultPersistence {
+    pub kind: AccountLoginProcessResultPersistenceKind,
+    /// The original persistence result.
+    #[doc(hidden)]
+    pub(crate) result: ProcessLoginPersistence,
+}
+crate::record_serde::wire_record!(AccountLoginProcessResultPersistence {
+    kind: "kind",
+    result: "result"
+});
+
+/// The organization policy verdict.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessResultPolicy {
+    /// The verdict from both original policy channels.
+    #[doc(hidden)]
+    pub(crate) decision: ForceLoginOrgsDecision,
+    pub kind: AccountLoginProcessResultPolicyKind,
+    /// Original policy warnings for the host's configured logger.
+    pub warnings: Vec<String>,
+}
+crate::record_serde::wire_record!(AccountLoginProcessResultPolicy {
+    decision: "decision",
+    kind: "kind",
+    warnings: "warnings"
+});
+
+/// The current credential removal result.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessResultDiscarded {
+    pub kind: AccountLoginProcessResultDiscardedKind,
+    /// Whether a credential was removed.
+    pub removed: bool,
+}
+crate::record_serde::wire_record!(AccountLoginProcessResultDiscarded {
+    kind: "kind",
+    removed: "removed"
+});
+
+/// The requested browser or cleanup action completed.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountLoginProcessResultDone {
+    pub kind: AccountLoginProcessResultDoneKind,
+}
+crate::record_serde::wire_record!(AccountLoginProcessResultDone { kind: "kind" });
+
 /// Credentials to validate and store. Omit login to resolve the authenticated user from the token.
 ///
 /// <div class="warning">
@@ -1258,6 +1578,61 @@ pub(crate) struct GitHubBranchPullRequestLookupResult {
     pub(crate) status: GitHubBranchPullRequestLookupStatus,
 }
 crate::record_serde::wire_record!(GitHubBranchPullRequestLookupResult { pull_request: "pullRequest" if is_none, status: "status" });
+
+/// The text content of one secret gist file.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct GitHubSecretGistFile {
+    /// The complete text content of the file.
+    pub content: String,
+}
+crate::record_serde::wire_record!(GitHubSecretGistFile { content: "content" });
+
+/// Creates a secret gist through the bound session's original credential owner.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct GitHubCreateSecretGistRequest {
+    /// The description that GitHub stores with the gist.
+    pub description: String,
+    /// File names mapped to their text content.
+    #[doc(hidden)]
+    pub(crate) files: HashMap<String, GitHubSecretGistFile>,
+    /// The purpose that selects account restrictions and error messages.
+    #[doc(hidden)]
+    pub(crate) use_case: GitHubSecretGistUseCase,
+}
+crate::record_serde::wire_record!(GitHubCreateSecretGistRequest {
+    description: "description",
+    files: "files",
+    use_case: "useCase"
+});
+
+/// The URL returned by GitHub after it creates the secret gist.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct GitHubCreateSecretGistResult {
+    /// The URL of the new secret gist.
+    pub url: String,
+}
+crate::record_serde::wire_record!(GitHubCreateSecretGistResult { url: "url" });
 
 /// Whether cancellation reached a registered GitHub request.
 ///
@@ -4103,6 +4478,355 @@ pub type ClientMetadata = HashMap<String, String>;
 /// </div>
 pub type AccountGetAllUsersResult = Vec<AccountAllUsers>;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessRequestOpenOperation {
+    #[serde(rename = "open")]
+    #[default]
+    Open,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessRequestOpenOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessRequestOpenOperation",
+            &["open"],
+            None,
+        )?;
+        Ok(Self::Open)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessRequestTokenOperation {
+    #[serde(rename = "token")]
+    #[default]
+    Token,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessRequestTokenOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessRequestTokenOperation",
+            &["token"],
+            None,
+        )?;
+        Ok(Self::Token)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessRequestStartDeviceOperation {
+    #[serde(rename = "startDevice")]
+    #[default]
+    StartDevice,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessRequestStartDeviceOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessRequestStartDeviceOperation",
+            &["startDevice"],
+            None,
+        )?;
+        Ok(Self::StartDevice)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessRequestStartWebOperation {
+    #[serde(rename = "startWeb")]
+    #[default]
+    StartWeb,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessRequestStartWebOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessRequestStartWebOperation",
+            &["startWeb"],
+            None,
+        )?;
+        Ok(Self::StartWeb)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessRequestCompleteOperation {
+    #[serde(rename = "complete")]
+    #[default]
+    Complete,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessRequestCompleteOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessRequestCompleteOperation",
+            &["complete"],
+            None,
+        )?;
+        Ok(Self::Complete)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessRequestOpenBrowserOperation {
+    #[serde(rename = "openBrowser")]
+    #[default]
+    OpenBrowser,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessRequestOpenBrowserOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessRequestOpenBrowserOperation",
+            &["openBrowser"],
+            None,
+        )?;
+        Ok(Self::OpenBrowser)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessRequestContinueOperation {
+    #[serde(rename = "continue")]
+    #[default]
+    Continue,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessRequestContinueOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessRequestContinueOperation",
+            &["continue"],
+            None,
+        )?;
+        Ok(Self::Continue)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessRequestPolicyOperation {
+    #[serde(rename = "policy")]
+    #[default]
+    Policy,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessRequestPolicyOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessRequestPolicyOperation",
+            &["policy"],
+            None,
+        )?;
+        Ok(Self::Policy)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessRequestDiscardOperation {
+    #[serde(rename = "discard")]
+    #[default]
+    Discard,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessRequestDiscardOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessRequestDiscardOperation",
+            &["discard"],
+            None,
+        )?;
+        Ok(Self::Discard)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessRequestCloseOperation {
+    #[serde(rename = "close")]
+    #[default]
+    Close,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessRequestCloseOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessRequestCloseOperation",
+            &["close"],
+            None,
+        )?;
+        Ok(Self::Close)
+    }
+}
+
+/// A pre-session login action. Every action after open retains the same credential and persistence owner.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum AccountLoginProcessRequest {
+    Open(AccountLoginProcessRequestOpen),
+    Token(AccountLoginProcessRequestToken),
+    StartDevice(AccountLoginProcessRequestStartDevice),
+    StartWeb(AccountLoginProcessRequestStartWeb),
+    Complete(AccountLoginProcessRequestComplete),
+    OpenBrowser(AccountLoginProcessRequestOpenBrowser),
+    Continue(AccountLoginProcessRequestContinue),
+    Policy(AccountLoginProcessRequestPolicy),
+    Discard(AccountLoginProcessRequestDiscard),
+    Close(AccountLoginProcessRequestClose),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessResultOpenedKind {
+    #[serde(rename = "opened")]
+    #[default]
+    Opened,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessResultOpenedKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessResultOpenedKind",
+            &["opened"],
+            None,
+        )?;
+        Ok(Self::Opened)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessResultDeviceCodeKind {
+    #[serde(rename = "deviceCode")]
+    #[default]
+    DeviceCode,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessResultDeviceCodeKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessResultDeviceCodeKind",
+            &["deviceCode"],
+            None,
+        )?;
+        Ok(Self::DeviceCode)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessResultWebKind {
+    #[serde(rename = "web")]
+    #[default]
+    Web,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessResultWebKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessResultWebKind",
+            &["web"],
+            None,
+        )?;
+        Ok(Self::Web)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessResultPersistenceKind {
+    #[serde(rename = "persistence")]
+    #[default]
+    Persistence,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessResultPersistenceKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessResultPersistenceKind",
+            &["persistence"],
+            None,
+        )?;
+        Ok(Self::Persistence)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessResultPolicyKind {
+    #[serde(rename = "policy")]
+    #[default]
+    Policy,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessResultPolicyKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessResultPolicyKind",
+            &["policy"],
+            None,
+        )?;
+        Ok(Self::Policy)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessResultDiscardedKind {
+    #[serde(rename = "discarded")]
+    #[default]
+    Discarded,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessResultDiscardedKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessResultDiscardedKind",
+            &["discarded"],
+            None,
+        )?;
+        Ok(Self::Discarded)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum AccountLoginProcessResultDoneKind {
+    #[serde(rename = "done")]
+    #[default]
+    Done,
+}
+impl<'de> Deserialize<'de> for AccountLoginProcessResultDoneKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AccountLoginProcessResultDoneKind",
+            &["done"],
+            None,
+        )?;
+        Ok(Self::Done)
+    }
+}
+
+/// The result of one connection-owned pre-session login action.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum AccountLoginProcessResult {
+    Opened(AccountLoginProcessResultOpened),
+    DeviceCode(AccountLoginProcessResultDeviceCode),
+    Web(AccountLoginProcessResultWeb),
+    Persistence(AccountLoginProcessResultPersistence),
+    Policy(AccountLoginProcessResultPolicy),
+    Discarded(AccountLoginProcessResultDiscarded),
+    Done(AccountLoginProcessResultDone),
+}
+
 /// How an interactive GitHub login is authorized.
 ///
 /// <div class="warning">
@@ -4530,6 +5254,43 @@ impl<'de> Deserialize<'de> for GitHubBranchPullRequestLookupStatus {
             1 => Self::NoToken,
             2 => Self::NoPr,
             3 => Self::LookupFailed,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// The export purpose that selects existing account policy and error messages.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) enum GitHubSecretGistUseCase {
+    /// Export a session transcript under the existing session account policy.
+    #[serde(rename = "session")]
+    Session,
+    /// Export a research report under the existing research account policy.
+    #[serde(rename = "research")]
+    Research,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for GitHubSecretGistUseCase {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "GitHubSecretGistUseCase",
+            &["session", "research", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::Session,
+            1 => Self::Research,
             _ => Self::Unknown,
         })
     }

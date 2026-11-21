@@ -4452,6 +4452,12 @@ public sealed partial class SessionCompactionCompleteData
     [JsonPropertyName("failureReason")]
     public string? FailureReason { get; set; }
 
+    /// <summary>Experimental HydraFusion attribution for a compaction a HydraFusion turn ran before its first phase.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("fusion")]
+    public FusionAttribution? Fusion { get; set; }
+
     /// <summary>Model identifier at admission when routing later changed to the reported compaction model.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("initialModel")]
@@ -5583,7 +5589,13 @@ public sealed partial class AssistantMessageData
     [JsonPropertyName("content")]
     public required string Content { get; set; }
 
-    /// <summary>Encrypted reasoning content from OpenAI models. Session-bound and stripped on resume.</summary>
+    /// <summary>No longer emitted. For OpenAI Responses, read encrypted_content from the reasoning items in reasoningBlocks.blocks instead. Older events may still contain this field.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+#if NET5_0_OR_GREATER
+    [Obsolete("This member is deprecated and will be removed in a future version.", DiagnosticId = "MCPSDK001")]
+#else
+    [Obsolete("This member is deprecated and will be removed in a future version.")]
+#endif
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("encryptedContent")]
     public string? EncryptedContent { get; set; }
@@ -10329,6 +10341,68 @@ internal sealed partial class CompactionCompleteFailureDiagnostics
     internal string? TransportErrorKind { get; set; }
 }
 
+/// <summary>Experimental attribution linking an ordinary event to the HydraFusion turn, phase, and concrete source that produced it.</summary>
+/// <remarks>Nested data type for <c>FusionAttribution</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed partial class FusionAttribution
+{
+    /// <summary>Idempotency identifier for the authoritative commit, when the event belongs to the selected output.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("commitId")]
+    public string? CommitId { get; set; }
+
+    /// <summary>Conversation scope in which the concrete phase executed.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("conversationScope")]
+    public string? ConversationScope { get; set; }
+
+    /// <summary>Stable identifier for the HydraFusion turn that produced the event.</summary>
+    [JsonPropertyName("fusionId")]
+    public required string FusionId { get; set; }
+
+    /// <summary>Whether this model request consumed a user steering message rather than only internal Fusion work.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("hasUserSteering")]
+    public bool? HasUserSteering { get; set; }
+
+    /// <summary>HydraFusion orchestration pattern selected for the turn.</summary>
+    [JsonPropertyName("pattern")]
+    public required string Pattern { get; set; }
+
+    /// <summary>Identifier of the concrete phase that produced the event.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("phaseId")]
+    public string? PhaseId { get; set; }
+
+    /// <summary>Kind of concrete phase that produced the event.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("phaseKind")]
+    public string? PhaseKind { get; set; }
+
+    /// <summary>HydraFusion routing policy used for the turn.</summary>
+    [JsonPropertyName("policy")]
+    public required string Policy { get; set; }
+
+    /// <summary>Semantic role assigned to the concrete phase.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("role")]
+    public string? Role { get; set; }
+
+    /// <summary>Concrete model that produced the attributed event.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("sourceModel")]
+    public string? SourceModel { get; set; }
+
+    /// <summary>Phase whose output supplied the authoritative content, when different from the executing phase.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("sourcePhaseId")]
+    public string? SourcePhaseId { get; set; }
+
+    /// <summary>Synthetic HydraFusion model selected for the session.</summary>
+    [JsonPropertyName("syntheticModel")]
+    public required string SyntheticModel { get; set; }
+}
+
 /// <summary>How far the compaction's summarizer model calls had progressed when the compaction's outcome was decided. Stream statistics describe the latest model request; durationMs and attemptCount cover every request.</summary>
 /// <remarks>Nested data type for <c>CompactionCompleteSummarizerProgress</c>.</remarks>
 internal sealed partial class CompactionCompleteSummarizerProgress
@@ -11347,68 +11421,6 @@ public sealed partial class FusionPhaseUsage
     /// <summary>Total normalized AI-unit cost reported for the phase, in nano-AIU.</summary>
     [JsonPropertyName("totalNanoAiu")]
     public required double TotalNanoAiu { get; set; }
-}
-
-/// <summary>Experimental attribution linking an ordinary event to the HydraFusion turn, phase, and concrete source that produced it.</summary>
-/// <remarks>Nested data type for <c>FusionAttribution</c>.</remarks>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed partial class FusionAttribution
-{
-    /// <summary>Idempotency identifier for the authoritative commit, when the event belongs to the selected output.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("commitId")]
-    public string? CommitId { get; set; }
-
-    /// <summary>Conversation scope in which the concrete phase executed.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("conversationScope")]
-    public string? ConversationScope { get; set; }
-
-    /// <summary>Stable identifier for the HydraFusion turn that produced the event.</summary>
-    [JsonPropertyName("fusionId")]
-    public required string FusionId { get; set; }
-
-    /// <summary>Whether this model request consumed a user steering message rather than only internal Fusion work.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("hasUserSteering")]
-    public bool? HasUserSteering { get; set; }
-
-    /// <summary>HydraFusion orchestration pattern selected for the turn.</summary>
-    [JsonPropertyName("pattern")]
-    public required string Pattern { get; set; }
-
-    /// <summary>Identifier of the concrete phase that produced the event.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("phaseId")]
-    public string? PhaseId { get; set; }
-
-    /// <summary>Kind of concrete phase that produced the event.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("phaseKind")]
-    public string? PhaseKind { get; set; }
-
-    /// <summary>HydraFusion routing policy used for the turn.</summary>
-    [JsonPropertyName("policy")]
-    public required string Policy { get; set; }
-
-    /// <summary>Semantic role assigned to the concrete phase.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("role")]
-    public string? Role { get; set; }
-
-    /// <summary>Concrete model that produced the attributed event.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("sourceModel")]
-    public string? SourceModel { get; set; }
-
-    /// <summary>Phase whose output supplied the authoritative content, when different from the executing phase.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("sourcePhaseId")]
-    public string? SourcePhaseId { get; set; }
-
-    /// <summary>Synthetic HydraFusion model selected for the session.</summary>
-    [JsonPropertyName("syntheticModel")]
-    public required string SyntheticModel { get; set; }
 }
 
 /// <summary>A source that backs one or more cited spans in the assistant's response.</summary>

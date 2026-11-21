@@ -3586,6 +3586,7 @@ class AssistantMessageData:
     # Experimental: this field is part of an experimental API and may change or be removed.
     citations: Citations | None = None
     client_request_id: str | None = None
+    # Deprecated: this field is deprecated.
     encrypted_content: str | None = None
     # Experimental: this field is part of an experimental API and may change or be removed.
     fusion: FusionAttribution | None = None
@@ -11187,6 +11188,8 @@ class SessionCompactionCompleteData:
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _failure_diagnostics: _CompactionCompleteFailureDiagnostics | None = None
     failure_reason: str | None = None
+    # Experimental: this field is part of an experimental API and may change or be removed.
+    fusion: FusionAttribution | None = None
     initial_model: str | None = None
     messages_removed: int | None = None
     model: str | None = None
@@ -11230,6 +11233,7 @@ class SessionCompactionCompleteData:
         _execution = from_union([from_none, from_str], obj.get("execution"))
         _failure_diagnostics = from_union([from_none, _CompactionCompleteFailureDiagnostics.from_dict], obj.get("failureDiagnostics"))
         failure_reason = from_union([from_none, from_str], obj.get("failureReason"))
+        fusion = from_union([from_none, FusionAttribution.from_dict], obj.get("fusion"))
         initial_model = from_union([from_none, from_str], obj.get("initialModel"))
         messages_removed = from_union([from_none, from_int], obj.get("messagesRemoved"))
         model = from_union([from_none, from_str], obj.get("model"))
@@ -11269,6 +11273,7 @@ class SessionCompactionCompleteData:
             _execution=_execution,
             _failure_diagnostics=_failure_diagnostics,
             failure_reason=failure_reason,
+            fusion=fusion,
             initial_model=initial_model,
             messages_removed=messages_removed,
             model=model,
@@ -11325,6 +11330,8 @@ class SessionCompactionCompleteData:
             result["failureDiagnostics"] = from_union([from_none, lambda x: to_class(_CompactionCompleteFailureDiagnostics, x)], self._failure_diagnostics)
         if self.failure_reason is not None:
             result["failureReason"] = from_union([from_none, from_str], self.failure_reason)
+        if self.fusion is not None:
+            result["fusion"] = from_union([from_none, lambda x: to_class(FusionAttribution, x)], self.fusion)
         if self.initial_model is not None:
             result["initialModel"] = from_union([from_none, from_str], self.initial_model)
         if self.messages_removed is not None:

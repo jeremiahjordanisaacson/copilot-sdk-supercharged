@@ -26,6 +26,211 @@ use crate::types::{RequestId, SessionEvent, SessionId};
 
 /// JSON-RPC method name constants.
 pub mod rpc_methods {
+    /// `plugins.policy.resolveForInvocation`
+    pub(crate) const PLUGINS_POLICY_RESOLVEFORINVOCATION: &str =
+        "plugins.policy.resolveForInvocation";
+    /// `plugins.inspectInventory`
+    pub(crate) const PLUGINS_INSPECTINVENTORY: &str = "plugins.inspectInventory";
+    /// `plugins.planInstall`
+    pub const PLUGINS_PLANINSTALL: &str = "plugins.planInstall";
+    /// `plugins.applyInstall`
+    pub const PLUGINS_APPLYINSTALL: &str = "plugins.applyInstall";
+    /// `plugins.list`
+    pub const PLUGINS_LIST: &str = "plugins.list";
+    /// `plugins.install`
+    pub const PLUGINS_INSTALL: &str = "plugins.install";
+    /// `plugins.uninstall`
+    pub const PLUGINS_UNINSTALL: &str = "plugins.uninstall";
+    /// `plugins.update`
+    pub const PLUGINS_UPDATE: &str = "plugins.update";
+    /// `plugins.updateAll`
+    pub const PLUGINS_UPDATEALL: &str = "plugins.updateAll";
+    /// `plugins.enable`
+    pub const PLUGINS_ENABLE: &str = "plugins.enable";
+    /// `plugins.disable`
+    pub const PLUGINS_DISABLE: &str = "plugins.disable";
+    /// `plugins.builtin.set`
+    pub const PLUGINS_BUILTIN_SET: &str = "plugins.builtin.set";
+    /// `plugins.builtin.discover`
+    pub(crate) const PLUGINS_BUILTIN_DISCOVER: &str = "plugins.builtin.discover";
+    /// `plugins.builtin.resolveActivation`
+    pub(crate) const PLUGINS_BUILTIN_RESOLVEACTIVATION: &str = "plugins.builtin.resolveActivation";
+    /// `plugins.activate`
+    pub const PLUGINS_ACTIVATE: &str = "plugins.activate";
+    /// `plugins.marketplaces.list`
+    pub const PLUGINS_MARKETPLACES_LIST: &str = "plugins.marketplaces.list";
+    /// `plugins.marketplaces.migrateRetiredDefault`
+    pub const PLUGINS_MARKETPLACES_MIGRATERETIREDDEFAULT: &str =
+        "plugins.marketplaces.migrateRetiredDefault";
+    /// `plugins.marketplaces.add`
+    pub const PLUGINS_MARKETPLACES_ADD: &str = "plugins.marketplaces.add";
+    /// `plugins.marketplaces.remove`
+    pub const PLUGINS_MARKETPLACES_REMOVE: &str = "plugins.marketplaces.remove";
+    /// `plugins.marketplaces.browse`
+    pub const PLUGINS_MARKETPLACES_BROWSE: &str = "plugins.marketplaces.browse";
+    /// `plugins.marketplaces.refresh`
+    pub const PLUGINS_MARKETPLACES_REFRESH: &str = "plugins.marketplaces.refresh";
+    /// `plugins.sources.resolve`
+    pub(crate) const PLUGINS_SOURCES_RESOLVE: &str = "plugins.sources.resolve";
+    /// `skills.resources.discover`
+    pub(crate) const SKILLS_RESOURCES_DISCOVER: &str = "skills.resources.discover";
+    /// `skills.resources.install`
+    pub(crate) const SKILLS_RESOURCES_INSTALL: &str = "skills.resources.install";
+    /// `skills.resources.remove`
+    pub(crate) const SKILLS_RESOURCES_REMOVE: &str = "skills.resources.remove";
+    /// `skills.resources.setEnabled`
+    pub(crate) const SKILLS_RESOURCES_SETENABLED: &str = "skills.resources.setEnabled";
+    /// `skills.planInstall`
+    pub const SKILLS_PLANINSTALL: &str = "skills.planInstall";
+    /// `skills.applyInstall`
+    pub const SKILLS_APPLYINSTALL: &str = "skills.applyInstall";
+    /// `skills.installations.list`
+    pub const SKILLS_INSTALLATIONS_LIST: &str = "skills.installations.list";
+    /// `skills.installations.recover`
+    pub const SKILLS_INSTALLATIONS_RECOVER: &str = "skills.installations.recover";
+    /// `skills.installations.status`
+    pub const SKILLS_INSTALLATIONS_STATUS: &str = "skills.installations.status";
+    /// `skills.installations.cancel`
+    pub const SKILLS_INSTALLATIONS_CANCEL: &str = "skills.installations.cancel";
+    /// `skills.installations.setEnabled`
+    pub const SKILLS_INSTALLATIONS_SETENABLED: &str = "skills.installations.setEnabled";
+    /// `skills.planUninstall`
+    pub const SKILLS_PLANUNINSTALL: &str = "skills.planUninstall";
+    /// `skills.applyUninstall`
+    pub const SKILLS_APPLYUNINSTALL: &str = "skills.applyUninstall";
+    /// `skills.config.setDisabledSkills`
+    pub const SKILLS_CONFIG_SETDISABLEDSKILLS: &str = "skills.config.setDisabledSkills";
+    /// `skills.config.setSkillDisabled`
+    pub const SKILLS_CONFIG_SETSKILLDISABLED: &str = "skills.config.setSkillDisabled";
+    /// `skills.discover`
+    pub const SKILLS_DISCOVER: &str = "skills.discover";
+    /// `skills.getDiscoveryPaths`
+    pub const SKILLS_GETDISCOVERYPATHS: &str = "skills.getDiscoveryPaths";
+    /// `skills.installSource`
+    pub const SKILLS_INSTALLSOURCE: &str = "skills.installSource";
+    /// `skills.removeSource`
+    pub const SKILLS_REMOVESOURCE: &str = "skills.removeSource";
+    /// `account.loginProcess`
+    pub(crate) const ACCOUNT_LOGINPROCESS: &str = "account.loginProcess";
+    /// `account.getQuota`
+    pub const ACCOUNT_GETQUOTA: &str = "account.getQuota";
+    /// `account.getCurrentAuth`
+    pub const ACCOUNT_GETCURRENTAUTH: &str = "account.getCurrentAuth";
+    /// `account.getAllUsers`
+    pub const ACCOUNT_GETALLUSERS: &str = "account.getAllUsers";
+    /// `account.login`
+    pub const ACCOUNT_LOGIN: &str = "account.login";
+    /// `account.logout`
+    pub const ACCOUNT_LOGOUT: &str = "account.logout";
+    /// `account.describeAuthInfo`
+    pub(crate) const ACCOUNT_DESCRIBEAUTHINFO: &str = "account.describeAuthInfo";
+    /// `account.getGistSupport`
+    pub(crate) const ACCOUNT_GETGISTSUPPORT: &str = "account.getGistSupport";
+    /// `account.getWebUrl`
+    pub(crate) const ACCOUNT_GETWEBURL: &str = "account.getWebUrl";
+    /// `account.getTokenEnvVar`
+    pub(crate) const ACCOUNT_GETTOKENENVVAR: &str = "account.getTokenEnvVar";
+    /// `account.subscribeCopilotFree`
+    pub(crate) const ACCOUNT_SUBSCRIBECOPILOTFREE: &str = "account.subscribeCopilotFree";
+    /// `account.getHostUrl`
+    pub(crate) const ACCOUNT_GETHOSTURL: &str = "account.getHostUrl";
+    /// `sessions.validateName`
+    pub(crate) const SESSIONS_VALIDATENAME: &str = "sessions.validateName";
+    /// `sessions.importSemantic`
+    pub(crate) const SESSIONS_IMPORTSEMANTIC: &str = "sessions.importSemantic";
+    /// `sessions.open`
+    pub const SESSIONS_OPEN: &str = "sessions.open";
+    /// `sessions.fork`
+    pub const SESSIONS_FORK: &str = "sessions.fork";
+    /// `sessions.connect`
+    pub const SESSIONS_CONNECT: &str = "sessions.connect";
+    /// `sessions.list`
+    pub const SESSIONS_LIST: &str = "sessions.list";
+    /// `sessions.getMetadata`
+    pub(crate) const SESSIONS_GETMETADATA: &str = "sessions.getMetadata";
+    /// `sessions.listRemotePage`
+    pub(crate) const SESSIONS_LISTREMOTEPAGE: &str = "sessions.listRemotePage";
+    /// `sessions.getClientMetadata`
+    pub const SESSIONS_GETCLIENTMETADATA: &str = "sessions.getClientMetadata";
+    /// `sessions.readPersistedEvents`
+    pub const SESSIONS_READPERSISTEDEVENTS: &str = "sessions.readPersistedEvents";
+    /// `sessions.listNonEmptySessionIds`
+    pub(crate) const SESSIONS_LISTNONEMPTYSESSIONIDS: &str = "sessions.listNonEmptySessionIds";
+    /// `sessions.findByTaskId`
+    pub const SESSIONS_FINDBYTASKID: &str = "sessions.findByTaskId";
+    /// `sessions.findByPrefix`
+    pub const SESSIONS_FINDBYPREFIX: &str = "sessions.findByPrefix";
+    /// `sessions.getLastForContext`
+    pub const SESSIONS_GETLASTFORCONTEXT: &str = "sessions.getLastForContext";
+    /// `sessions.hasEvents`
+    pub const SESSIONS_HASEVENTS: &str = "sessions.hasEvents";
+    /// `sessions.getEventFilePath`
+    pub(crate) const SESSIONS_GETEVENTFILEPATH: &str = "sessions.getEventFilePath";
+    /// `sessions.getSizes`
+    pub const SESSIONS_GETSIZES: &str = "sessions.getSizes";
+    /// `sessions.checkInUse`
+    pub const SESSIONS_CHECKINUSE: &str = "sessions.checkInUse";
+    /// `sessions.getPersistedRemoteSteerable`
+    pub(crate) const SESSIONS_GETPERSISTEDREMOTESTEERABLE: &str =
+        "sessions.getPersistedRemoteSteerable";
+    /// `sessions.close`
+    pub const SESSIONS_CLOSE: &str = "sessions.close";
+    /// `sessions.bulkDelete`
+    pub const SESSIONS_BULKDELETE: &str = "sessions.bulkDelete";
+    /// `sessions.delete`
+    pub(crate) const SESSIONS_DELETE: &str = "sessions.delete";
+    /// `sessions.pruneOld`
+    pub const SESSIONS_PRUNEOLD: &str = "sessions.pruneOld";
+    /// `sessions.save`
+    pub const SESSIONS_SAVE: &str = "sessions.save";
+    /// `sessions.releaseLock`
+    pub const SESSIONS_RELEASELOCK: &str = "sessions.releaseLock";
+    /// `sessions.enrichMetadata`
+    pub const SESSIONS_ENRICHMETADATA: &str = "sessions.enrichMetadata";
+    /// `sessions.createWorkspace`
+    pub(crate) const SESSIONS_CREATEWORKSPACE: &str = "sessions.createWorkspace";
+    /// `sessions.loadWorkspace`
+    pub(crate) const SESSIONS_LOADWORKSPACE: &str = "sessions.loadWorkspace";
+    /// `sessions.updateWorkspaceFields`
+    pub(crate) const SESSIONS_UPDATEWORKSPACEFIELDS: &str = "sessions.updateWorkspaceFields";
+    /// `sessions.reloadPluginHooks`
+    pub const SESSIONS_RELOADPLUGINHOOKS: &str = "sessions.reloadPluginHooks";
+    /// `sessions.loadDeferredRepoHooks`
+    pub const SESSIONS_LOADDEFERREDREPOHOOKS: &str = "sessions.loadDeferredRepoHooks";
+    /// `sessions.setAdditionalPlugins`
+    pub const SESSIONS_SETADDITIONALPLUGINS: &str = "sessions.setAdditionalPlugins";
+    /// `sessions.getBoardEntryCount`
+    pub(crate) const SESSIONS_GETBOARDENTRYCOUNT: &str = "sessions.getBoardEntryCount";
+    /// `sessions.startRemoteControl`
+    pub const SESSIONS_STARTREMOTECONTROL: &str = "sessions.startRemoteControl";
+    /// `sessions.transferRemoteControl`
+    pub const SESSIONS_TRANSFERREMOTECONTROL: &str = "sessions.transferRemoteControl";
+    /// `sessions.setRemoteControlSteering`
+    pub const SESSIONS_SETREMOTECONTROLSTEERING: &str = "sessions.setRemoteControlSteering";
+    /// `sessions.stopRemoteControl`
+    pub const SESSIONS_STOPREMOTECONTROL: &str = "sessions.stopRemoteControl";
+    /// `sessions.getRemoteControlStatus`
+    pub const SESSIONS_GETREMOTECONTROLSTATUS: &str = "sessions.getRemoteControlStatus";
+    /// `sessions.configureSessionExtensions`
+    pub(crate) const SESSIONS_CONFIGURESESSIONEXTENSIONS: &str =
+        "sessions.configureSessionExtensions";
+    /// `sessions.forgeProposals.workspaceBefore`
+    pub(crate) const SESSIONS_FORGEPROPOSALS_WORKSPACEBEFORE: &str =
+        "sessions.forgeProposals.workspaceBefore";
+    /// `sessions.forgeProposals.reconcile`
+    pub(crate) const SESSIONS_FORGEPROPOSALS_RECONCILE: &str = "sessions.forgeProposals.reconcile";
+    /// `sessions.forgeProposals.failStale`
+    pub(crate) const SESSIONS_FORGEPROPOSALS_FAILSTALE: &str = "sessions.forgeProposals.failStale";
+    /// `memories.importSemantic`
+    pub(crate) const MEMORIES_IMPORTSEMANTIC: &str = "memories.importSemantic";
+    /// `secrets.filterForHost`
+    pub(crate) const SECRETS_FILTERFORHOST: &str = "secrets.filterForHost";
+    /// `secrets.addFilterValues`
+    pub const SECRETS_ADDFILTERVALUES: &str = "secrets.addFilterValues";
+    /// `secrets.removeFilterValues`
+    pub const SECRETS_REMOVEFILTERVALUES: &str = "secrets.removeFilterValues";
+    /// `secrets.filter`
+    pub const SECRETS_FILTER: &str = "secrets.filter";
     /// `git.branchName`
     pub(crate) const GIT_BRANCHNAME: &str = "git.branchName";
     /// `git.remotes`
@@ -317,6 +522,17 @@ pub mod rpc_methods {
     pub(crate) const USER_SETTINGS_LOADFOREDIT: &str = "user.settings.loadForEdit";
     /// `user.settings.validate`
     pub(crate) const USER_SETTINGS_VALIDATE: &str = "user.settings.validate";
+    /// `user.settings.repositoryDisabledNames`
+    pub(crate) const USER_SETTINGS_REPOSITORYDISABLEDNAMES: &str =
+        "user.settings.repositoryDisabledNames";
+    /// `user.settings.loadForWorkingDirectory`
+    pub(crate) const USER_SETTINGS_LOADFORWORKINGDIRECTORY: &str =
+        "user.settings.loadForWorkingDirectory";
+    /// `user.settings.writeKeys`
+    pub(crate) const USER_SETTINGS_WRITEKEYS: &str = "user.settings.writeKeys";
+    /// `user.settings.getOrCreateAhpEnvironmentComputeId`
+    pub(crate) const USER_SETTINGS_GETORCREATEAHPENVIRONMENTCOMPUTEID: &str =
+        "user.settings.getOrCreateAhpEnvironmentComputeId";
     /// `repo.settings.edit`
     pub(crate) const REPO_SETTINGS_EDIT: &str = "repo.settings.edit";
     /// `repo.settings.readRaw`
@@ -459,34 +675,6 @@ pub mod rpc_methods {
     pub const TOOLS_LIST: &str = "tools.list";
     /// `tools.largeOutput.cleanup`
     pub(crate) const TOOLS_LARGEOUTPUT_CLEANUP: &str = "tools.largeOutput.cleanup";
-    /// `account.getQuota`
-    pub const ACCOUNT_GETQUOTA: &str = "account.getQuota";
-    /// `account.getCurrentAuth`
-    pub const ACCOUNT_GETCURRENTAUTH: &str = "account.getCurrentAuth";
-    /// `account.getAllUsers`
-    pub const ACCOUNT_GETALLUSERS: &str = "account.getAllUsers";
-    /// `account.login`
-    pub const ACCOUNT_LOGIN: &str = "account.login";
-    /// `account.logout`
-    pub const ACCOUNT_LOGOUT: &str = "account.logout";
-    /// `account.describeAuthInfo`
-    pub(crate) const ACCOUNT_DESCRIBEAUTHINFO: &str = "account.describeAuthInfo";
-    /// `account.getGistSupport`
-    pub(crate) const ACCOUNT_GETGISTSUPPORT: &str = "account.getGistSupport";
-    /// `account.getWebUrl`
-    pub(crate) const ACCOUNT_GETWEBURL: &str = "account.getWebUrl";
-    /// `account.getTokenEnvVar`
-    pub(crate) const ACCOUNT_GETTOKENENVVAR: &str = "account.getTokenEnvVar";
-    /// `account.subscribeCopilotFree`
-    pub(crate) const ACCOUNT_SUBSCRIBECOPILOTFREE: &str = "account.subscribeCopilotFree";
-    /// `account.getHostUrl`
-    pub(crate) const ACCOUNT_GETHOSTURL: &str = "account.getHostUrl";
-    /// `secrets.addFilterValues`
-    pub const SECRETS_ADDFILTERVALUES: &str = "secrets.addFilterValues";
-    /// `secrets.removeFilterValues`
-    pub const SECRETS_REMOVEFILTERVALUES: &str = "secrets.removeFilterValues";
-    /// `secrets.filter`
-    pub const SECRETS_FILTER: &str = "secrets.filter";
     /// `mcp.config.list`
     pub const MCP_CONFIG_LIST: &str = "mcp.config.list";
     /// `mcp.config.add`
@@ -501,6 +689,13 @@ pub mod rpc_methods {
     pub const MCP_CONFIG_DISABLE: &str = "mcp.config.disable";
     /// `mcp.config.reload`
     pub const MCP_CONFIG_RELOAD: &str = "mcp.config.reload";
+    /// `mcp.config.composeAdditional`
+    pub(crate) const MCP_CONFIG_COMPOSEADDITIONAL: &str = "mcp.config.composeAdditional";
+    /// `mcp.config.userServerNamesForConfigDir`
+    pub(crate) const MCP_CONFIG_USERSERVERNAMESFORCONFIGDIR: &str =
+        "mcp.config.userServerNamesForConfigDir";
+    /// `mcp.config.mergeSources`
+    pub(crate) const MCP_CONFIG_MERGESOURCES: &str = "mcp.config.mergeSources";
     /// `mcp.registry.allocateRequestId`
     pub(crate) const MCP_REGISTRY_ALLOCATEREQUESTID: &str = "mcp.registry.allocateRequestId";
     /// `mcp.registry.search`
@@ -543,6 +738,11 @@ pub mod rpc_methods {
     pub const MCP_INSTALLATIONS_STATUS: &str = "mcp.installations.status";
     /// `mcp.installations.cancel`
     pub const MCP_INSTALLATIONS_CANCEL: &str = "mcp.installations.cancel";
+    /// `mcp.github.resolveForInvocation`
+    pub(crate) const MCP_GITHUB_RESOLVEFORINVOCATION: &str = "mcp.github.resolveForInvocation";
+    /// `mcp.computerUse.applyConfiguration`
+    pub(crate) const MCP_COMPUTERUSE_APPLYCONFIGURATION: &str =
+        "mcp.computerUse.applyConfiguration";
     /// `extensions.discover`
     pub const EXTENSIONS_DISCOVER: &str = "extensions.discover";
     /// `extensions.enable`
@@ -559,71 +759,6 @@ pub mod rpc_methods {
     pub const INSTRUCTIONS_GETDISCOVERYPATHS: &str = "instructions.getDiscoveryPaths";
     /// `instructions.clearCache`
     pub(crate) const INSTRUCTIONS_CLEARCACHE: &str = "instructions.clearCache";
-    /// `skills.planInstall`
-    pub const SKILLS_PLANINSTALL: &str = "skills.planInstall";
-    /// `skills.applyInstall`
-    pub const SKILLS_APPLYINSTALL: &str = "skills.applyInstall";
-    /// `skills.installations.list`
-    pub const SKILLS_INSTALLATIONS_LIST: &str = "skills.installations.list";
-    /// `skills.installations.recover`
-    pub const SKILLS_INSTALLATIONS_RECOVER: &str = "skills.installations.recover";
-    /// `skills.installations.status`
-    pub const SKILLS_INSTALLATIONS_STATUS: &str = "skills.installations.status";
-    /// `skills.installations.cancel`
-    pub const SKILLS_INSTALLATIONS_CANCEL: &str = "skills.installations.cancel";
-    /// `skills.installations.setEnabled`
-    pub const SKILLS_INSTALLATIONS_SETENABLED: &str = "skills.installations.setEnabled";
-    /// `skills.planUninstall`
-    pub const SKILLS_PLANUNINSTALL: &str = "skills.planUninstall";
-    /// `skills.applyUninstall`
-    pub const SKILLS_APPLYUNINSTALL: &str = "skills.applyUninstall";
-    /// `skills.config.setDisabledSkills`
-    pub const SKILLS_CONFIG_SETDISABLEDSKILLS: &str = "skills.config.setDisabledSkills";
-    /// `skills.config.setSkillDisabled`
-    pub const SKILLS_CONFIG_SETSKILLDISABLED: &str = "skills.config.setSkillDisabled";
-    /// `skills.discover`
-    pub const SKILLS_DISCOVER: &str = "skills.discover";
-    /// `skills.getDiscoveryPaths`
-    pub const SKILLS_GETDISCOVERYPATHS: &str = "skills.getDiscoveryPaths";
-    /// `skills.installSource`
-    pub const SKILLS_INSTALLSOURCE: &str = "skills.installSource";
-    /// `skills.removeSource`
-    pub const SKILLS_REMOVESOURCE: &str = "skills.removeSource";
-    /// `plugins.planInstall`
-    pub const PLUGINS_PLANINSTALL: &str = "plugins.planInstall";
-    /// `plugins.applyInstall`
-    pub const PLUGINS_APPLYINSTALL: &str = "plugins.applyInstall";
-    /// `plugins.list`
-    pub const PLUGINS_LIST: &str = "plugins.list";
-    /// `plugins.install`
-    pub const PLUGINS_INSTALL: &str = "plugins.install";
-    /// `plugins.uninstall`
-    pub const PLUGINS_UNINSTALL: &str = "plugins.uninstall";
-    /// `plugins.update`
-    pub const PLUGINS_UPDATE: &str = "plugins.update";
-    /// `plugins.updateAll`
-    pub const PLUGINS_UPDATEALL: &str = "plugins.updateAll";
-    /// `plugins.enable`
-    pub const PLUGINS_ENABLE: &str = "plugins.enable";
-    /// `plugins.disable`
-    pub const PLUGINS_DISABLE: &str = "plugins.disable";
-    /// `plugins.builtin.set`
-    pub const PLUGINS_BUILTIN_SET: &str = "plugins.builtin.set";
-    /// `plugins.activate`
-    pub const PLUGINS_ACTIVATE: &str = "plugins.activate";
-    /// `plugins.marketplaces.list`
-    pub const PLUGINS_MARKETPLACES_LIST: &str = "plugins.marketplaces.list";
-    /// `plugins.marketplaces.migrateRetiredDefault`
-    pub const PLUGINS_MARKETPLACES_MIGRATERETIREDDEFAULT: &str =
-        "plugins.marketplaces.migrateRetiredDefault";
-    /// `plugins.marketplaces.add`
-    pub const PLUGINS_MARKETPLACES_ADD: &str = "plugins.marketplaces.add";
-    /// `plugins.marketplaces.remove`
-    pub const PLUGINS_MARKETPLACES_REMOVE: &str = "plugins.marketplaces.remove";
-    /// `plugins.marketplaces.browse`
-    pub const PLUGINS_MARKETPLACES_BROWSE: &str = "plugins.marketplaces.browse";
-    /// `plugins.marketplaces.refresh`
-    pub const PLUGINS_MARKETPLACES_REFRESH: &str = "plugins.marketplaces.refresh";
     /// `registerExtensionLaunchProvider`
     pub const REGISTEREXTENSIONLAUNCHPROVIDER: &str = "registerExtensionLaunchProvider";
     /// `catalog.search`
@@ -711,89 +846,6 @@ pub mod rpc_methods {
     pub const FETCH_RESOLVEPROXY: &str = "fetch.resolveProxy";
     /// `network.setProvider`
     pub const NETWORK_SETPROVIDER: &str = "network.setProvider";
-    /// `sessions.open`
-    pub const SESSIONS_OPEN: &str = "sessions.open";
-    /// `sessions.fork`
-    pub const SESSIONS_FORK: &str = "sessions.fork";
-    /// `sessions.connect`
-    pub const SESSIONS_CONNECT: &str = "sessions.connect";
-    /// `sessions.list`
-    pub const SESSIONS_LIST: &str = "sessions.list";
-    /// `sessions.getMetadata`
-    pub(crate) const SESSIONS_GETMETADATA: &str = "sessions.getMetadata";
-    /// `sessions.listRemotePage`
-    pub(crate) const SESSIONS_LISTREMOTEPAGE: &str = "sessions.listRemotePage";
-    /// `sessions.getClientMetadata`
-    pub const SESSIONS_GETCLIENTMETADATA: &str = "sessions.getClientMetadata";
-    /// `sessions.readPersistedEvents`
-    pub const SESSIONS_READPERSISTEDEVENTS: &str = "sessions.readPersistedEvents";
-    /// `sessions.listNonEmptySessionIds`
-    pub(crate) const SESSIONS_LISTNONEMPTYSESSIONIDS: &str = "sessions.listNonEmptySessionIds";
-    /// `sessions.findByTaskId`
-    pub const SESSIONS_FINDBYTASKID: &str = "sessions.findByTaskId";
-    /// `sessions.findByPrefix`
-    pub const SESSIONS_FINDBYPREFIX: &str = "sessions.findByPrefix";
-    /// `sessions.getLastForContext`
-    pub const SESSIONS_GETLASTFORCONTEXT: &str = "sessions.getLastForContext";
-    /// `sessions.hasEvents`
-    pub const SESSIONS_HASEVENTS: &str = "sessions.hasEvents";
-    /// `sessions.getEventFilePath`
-    pub(crate) const SESSIONS_GETEVENTFILEPATH: &str = "sessions.getEventFilePath";
-    /// `sessions.getSizes`
-    pub const SESSIONS_GETSIZES: &str = "sessions.getSizes";
-    /// `sessions.checkInUse`
-    pub const SESSIONS_CHECKINUSE: &str = "sessions.checkInUse";
-    /// `sessions.getPersistedRemoteSteerable`
-    pub(crate) const SESSIONS_GETPERSISTEDREMOTESTEERABLE: &str =
-        "sessions.getPersistedRemoteSteerable";
-    /// `sessions.close`
-    pub const SESSIONS_CLOSE: &str = "sessions.close";
-    /// `sessions.bulkDelete`
-    pub const SESSIONS_BULKDELETE: &str = "sessions.bulkDelete";
-    /// `sessions.delete`
-    pub(crate) const SESSIONS_DELETE: &str = "sessions.delete";
-    /// `sessions.pruneOld`
-    pub const SESSIONS_PRUNEOLD: &str = "sessions.pruneOld";
-    /// `sessions.save`
-    pub const SESSIONS_SAVE: &str = "sessions.save";
-    /// `sessions.releaseLock`
-    pub const SESSIONS_RELEASELOCK: &str = "sessions.releaseLock";
-    /// `sessions.enrichMetadata`
-    pub const SESSIONS_ENRICHMETADATA: &str = "sessions.enrichMetadata";
-    /// `sessions.createWorkspace`
-    pub(crate) const SESSIONS_CREATEWORKSPACE: &str = "sessions.createWorkspace";
-    /// `sessions.loadWorkspace`
-    pub(crate) const SESSIONS_LOADWORKSPACE: &str = "sessions.loadWorkspace";
-    /// `sessions.updateWorkspaceFields`
-    pub(crate) const SESSIONS_UPDATEWORKSPACEFIELDS: &str = "sessions.updateWorkspaceFields";
-    /// `sessions.reloadPluginHooks`
-    pub const SESSIONS_RELOADPLUGINHOOKS: &str = "sessions.reloadPluginHooks";
-    /// `sessions.loadDeferredRepoHooks`
-    pub const SESSIONS_LOADDEFERREDREPOHOOKS: &str = "sessions.loadDeferredRepoHooks";
-    /// `sessions.setAdditionalPlugins`
-    pub const SESSIONS_SETADDITIONALPLUGINS: &str = "sessions.setAdditionalPlugins";
-    /// `sessions.getBoardEntryCount`
-    pub(crate) const SESSIONS_GETBOARDENTRYCOUNT: &str = "sessions.getBoardEntryCount";
-    /// `sessions.startRemoteControl`
-    pub const SESSIONS_STARTREMOTECONTROL: &str = "sessions.startRemoteControl";
-    /// `sessions.transferRemoteControl`
-    pub const SESSIONS_TRANSFERREMOTECONTROL: &str = "sessions.transferRemoteControl";
-    /// `sessions.setRemoteControlSteering`
-    pub const SESSIONS_SETREMOTECONTROLSTEERING: &str = "sessions.setRemoteControlSteering";
-    /// `sessions.stopRemoteControl`
-    pub const SESSIONS_STOPREMOTECONTROL: &str = "sessions.stopRemoteControl";
-    /// `sessions.getRemoteControlStatus`
-    pub const SESSIONS_GETREMOTECONTROLSTATUS: &str = "sessions.getRemoteControlStatus";
-    /// `sessions.configureSessionExtensions`
-    pub(crate) const SESSIONS_CONFIGURESESSIONEXTENSIONS: &str =
-        "sessions.configureSessionExtensions";
-    /// `sessions.forgeProposals.workspaceBefore`
-    pub(crate) const SESSIONS_FORGEPROPOSALS_WORKSPACEBEFORE: &str =
-        "sessions.forgeProposals.workspaceBefore";
-    /// `sessions.forgeProposals.reconcile`
-    pub(crate) const SESSIONS_FORGEPROPOSALS_RECONCILE: &str = "sessions.forgeProposals.reconcile";
-    /// `sessions.forgeProposals.failStale`
-    pub(crate) const SESSIONS_FORGEPROPOSALS_FAILSTALE: &str = "sessions.forgeProposals.failStale";
     /// `shell.buildInteractiveEnvironment`
     pub const SHELL_BUILDINTERACTIVEENVIRONMENT: &str = "shell.buildInteractiveEnvironment";
     /// `agentRegistry.spawn`
@@ -866,6 +918,104 @@ pub mod rpc_methods {
     pub(crate) const CAFEMETRICS_RECORDRESUMERESULT: &str = "cafeMetrics.recordResumeResult";
     /// `cafeMetrics.shutdown`
     pub(crate) const CAFEMETRICS_SHUTDOWN: &str = "cafeMetrics.shutdown";
+    /// `session.persistence.flush`
+    pub(crate) const SESSION_PERSISTENCE_FLUSH: &str = "session.persistence.flush";
+    /// `session.extensions.setManagementToolsEnabled`
+    pub(crate) const SESSION_EXTENSIONS_SETMANAGEMENTTOOLSENABLED: &str =
+        "session.extensions.setManagementToolsEnabled";
+    /// `session.extensions.configureHost`
+    pub(crate) const SESSION_EXTENSIONS_CONFIGUREHOST: &str = "session.extensions.configureHost";
+    /// `session.extensions.inspectService`
+    pub(crate) const SESSION_EXTENSIONS_INSPECTSERVICE: &str = "session.extensions.inspectService";
+    /// `session.extensions.getPolicy`
+    pub const SESSION_EXTENSIONS_GETPOLICY: &str = "session.extensions.getPolicy";
+    /// `session.extensions.list`
+    pub const SESSION_EXTENSIONS_LIST: &str = "session.extensions.list";
+    /// `session.extensions.enable`
+    pub const SESSION_EXTENSIONS_ENABLE: &str = "session.extensions.enable";
+    /// `session.extensions.disable`
+    pub const SESSION_EXTENSIONS_DISABLE: &str = "session.extensions.disable";
+    /// `session.extensions.reload`
+    pub const SESSION_EXTENSIONS_RELOAD: &str = "session.extensions.reload";
+    /// `session.extensions.reconcile`
+    pub const SESSION_EXTENSIONS_RECONCILE: &str = "session.extensions.reconcile";
+    /// `session.extensions.sendAttachmentsToMessage`
+    pub const SESSION_EXTENSIONS_SENDATTACHMENTSTOMESSAGE: &str =
+        "session.extensions.sendAttachmentsToMessage";
+    /// `session.plugins.inspectExtensionContributions`
+    pub(crate) const SESSION_PLUGINS_INSPECTEXTENSIONCONTRIBUTIONS: &str =
+        "session.plugins.inspectExtensionContributions";
+    /// `session.plugins.list`
+    pub const SESSION_PLUGINS_LIST: &str = "session.plugins.list";
+    /// `session.plugins.install`
+    pub const SESSION_PLUGINS_INSTALL: &str = "session.plugins.install";
+    /// `session.plugins.uninstall`
+    pub const SESSION_PLUGINS_UNINSTALL: &str = "session.plugins.uninstall";
+    /// `session.plugins.update`
+    pub const SESSION_PLUGINS_UPDATE: &str = "session.plugins.update";
+    /// `session.plugins.enable`
+    pub const SESSION_PLUGINS_ENABLE: &str = "session.plugins.enable";
+    /// `session.plugins.disable`
+    pub const SESSION_PLUGINS_DISABLE: &str = "session.plugins.disable";
+    /// `session.plugins.marketplaces.list`
+    pub const SESSION_PLUGINS_MARKETPLACES_LIST: &str = "session.plugins.marketplaces.list";
+    /// `session.plugins.marketplaces.add`
+    pub const SESSION_PLUGINS_MARKETPLACES_ADD: &str = "session.plugins.marketplaces.add";
+    /// `session.plugins.marketplaces.remove`
+    pub const SESSION_PLUGINS_MARKETPLACES_REMOVE: &str = "session.plugins.marketplaces.remove";
+    /// `session.plugins.marketplaces.browse`
+    pub const SESSION_PLUGINS_MARKETPLACES_BROWSE: &str = "session.plugins.marketplaces.browse";
+    /// `session.plugins.marketplaces.refresh`
+    pub const SESSION_PLUGINS_MARKETPLACES_REFRESH: &str = "session.plugins.marketplaces.refresh";
+    /// `session.plugins.marketplaces.search`
+    pub const SESSION_PLUGINS_MARKETPLACES_SEARCH: &str = "session.plugins.marketplaces.search";
+    /// `session.plugins.marketplaces.checkUpdate`
+    pub const SESSION_PLUGINS_MARKETPLACES_CHECKUPDATE: &str =
+        "session.plugins.marketplaces.checkUpdate";
+    /// `session.plugins.getDefaults`
+    pub const SESSION_PLUGINS_GETDEFAULTS: &str = "session.plugins.getDefaults";
+    /// `session.plugins.checkUpdate`
+    pub const SESSION_PLUGINS_CHECKUPDATE: &str = "session.plugins.checkUpdate";
+    /// `session.plugins.reload`
+    pub const SESSION_PLUGINS_RELOAD: &str = "session.plugins.reload";
+    /// `session.plugins.retryManaged`
+    pub const SESSION_PLUGINS_RETRYMANAGED: &str = "session.plugins.retryManaged";
+    /// `session.plugins.inspectInventory`
+    pub(crate) const SESSION_PLUGINS_INSPECTINVENTORY: &str = "session.plugins.inspectInventory";
+    /// `session.name.generate`
+    pub(crate) const SESSION_NAME_GENERATE: &str = "session.name.generate";
+    /// `session.name.get`
+    pub const SESSION_NAME_GET: &str = "session.name.get";
+    /// `session.name.set`
+    pub const SESSION_NAME_SET: &str = "session.name.set";
+    /// `session.name.setAuto`
+    pub const SESSION_NAME_SETAUTO: &str = "session.name.setAuto";
+    /// `session.model.generateBranchSlug`
+    pub(crate) const SESSION_MODEL_GENERATEBRANCHSLUG: &str = "session.model.generateBranchSlug";
+    /// `session.model.getCurrent`
+    pub const SESSION_MODEL_GETCURRENT: &str = "session.model.getCurrent";
+    /// `session.model.startupAdmission`
+    pub const SESSION_MODEL_STARTUPADMISSION: &str = "session.model.startupAdmission";
+    /// `session.model.describeLoadError`
+    pub(crate) const SESSION_MODEL_DESCRIBELOADERROR: &str = "session.model.describeLoadError";
+    /// `session.model.switchTo`
+    pub const SESSION_MODEL_SWITCHTO: &str = "session.model.switchTo";
+    /// `session.model.switchAutoTier`
+    pub const SESSION_MODEL_SWITCHAUTOTIER: &str = "session.model.switchAutoTier";
+    /// `session.model.switchFusionTier`
+    pub const SESSION_MODEL_SWITCHFUSIONTIER: &str = "session.model.switchFusionTier";
+    /// `session.model.applyStartupOverlay`
+    pub(crate) const SESSION_MODEL_APPLYSTARTUPOVERLAY: &str = "session.model.applyStartupOverlay";
+    /// `session.model.clearStartupSeed`
+    pub(crate) const SESSION_MODEL_CLEARSTARTUPSEED: &str = "session.model.clearStartupSeed";
+    /// `session.model.setAllowedModels`
+    pub const SESSION_MODEL_SETALLOWEDMODELS: &str = "session.model.setAllowedModels";
+    /// `session.model.setReasoningEffort`
+    pub const SESSION_MODEL_SETREASONINGEFFORT: &str = "session.model.setReasoningEffort";
+    /// `session.model.getReasoningSummaries`
+    pub const SESSION_MODEL_GETREASONINGSUMMARIES: &str = "session.model.getReasoningSummaries";
+    /// `session.model.list`
+    pub const SESSION_MODEL_LIST: &str = "session.model.list";
     /// `session.mcp.externalClient.exchange`
     pub(crate) const SESSION_MCP_EXTERNALCLIENT_EXCHANGE: &str =
         "session.mcp.externalClient.exchange";
@@ -980,6 +1130,8 @@ pub mod rpc_methods {
     pub const SESSION_MCP_PROMPTS_LIST: &str = "session.mcp.prompts.list";
     /// `session.mcp.prompts.get`
     pub const SESSION_MCP_PROMPTS_GET: &str = "session.mcp.prompts.get";
+    /// `session.mcp.inspectConfiguration`
+    pub(crate) const SESSION_MCP_INSPECTCONFIGURATION: &str = "session.mcp.inspectConfiguration";
     /// `session.eventLog.publish`
     pub(crate) const SESSION_EVENTLOG_PUBLISH: &str = "session.eventLog.publish";
     /// `session.eventLog.read`
@@ -1172,30 +1324,6 @@ pub mod rpc_methods {
     pub const SESSION_WORKFLOW_JOURNAL_GET: &str = "session.workflow.journal.get";
     /// `session.workflow.journal.put`
     pub const SESSION_WORKFLOW_JOURNAL_PUT: &str = "session.workflow.journal.put";
-    /// `session.model.getCurrent`
-    pub const SESSION_MODEL_GETCURRENT: &str = "session.model.getCurrent";
-    /// `session.model.startupAdmission`
-    pub const SESSION_MODEL_STARTUPADMISSION: &str = "session.model.startupAdmission";
-    /// `session.model.describeLoadError`
-    pub(crate) const SESSION_MODEL_DESCRIBELOADERROR: &str = "session.model.describeLoadError";
-    /// `session.model.switchTo`
-    pub const SESSION_MODEL_SWITCHTO: &str = "session.model.switchTo";
-    /// `session.model.switchAutoTier`
-    pub const SESSION_MODEL_SWITCHAUTOTIER: &str = "session.model.switchAutoTier";
-    /// `session.model.switchFusionTier`
-    pub const SESSION_MODEL_SWITCHFUSIONTIER: &str = "session.model.switchFusionTier";
-    /// `session.model.applyStartupOverlay`
-    pub(crate) const SESSION_MODEL_APPLYSTARTUPOVERLAY: &str = "session.model.applyStartupOverlay";
-    /// `session.model.clearStartupSeed`
-    pub(crate) const SESSION_MODEL_CLEARSTARTUPSEED: &str = "session.model.clearStartupSeed";
-    /// `session.model.setAllowedModels`
-    pub const SESSION_MODEL_SETALLOWEDMODELS: &str = "session.model.setAllowedModels";
-    /// `session.model.setReasoningEffort`
-    pub const SESSION_MODEL_SETREASONINGEFFORT: &str = "session.model.setReasoningEffort";
-    /// `session.model.getReasoningSummaries`
-    pub const SESSION_MODEL_GETREASONINGSUMMARIES: &str = "session.model.getReasoningSummaries";
-    /// `session.model.list`
-    pub const SESSION_MODEL_LIST: &str = "session.model.list";
     /// `session.featureFlags.configure`
     pub const SESSION_FEATUREFLAGS_CONFIGURE: &str = "session.featureFlags.configure";
     /// `session.featureFlags.read`
@@ -1210,12 +1338,6 @@ pub mod rpc_methods {
     pub const SESSION_MODE_GET: &str = "session.mode.get";
     /// `session.mode.set`
     pub const SESSION_MODE_SET: &str = "session.mode.set";
-    /// `session.name.get`
-    pub const SESSION_NAME_GET: &str = "session.name.get";
-    /// `session.name.set`
-    pub const SESSION_NAME_SET: &str = "session.name.set";
-    /// `session.name.setAuto`
-    pub const SESSION_NAME_SETAUTO: &str = "session.name.setAuto";
     /// `session.plan.read`
     pub const SESSION_PLAN_READ: &str = "session.plan.read";
     /// `session.plan.update`
@@ -1345,6 +1467,12 @@ pub mod rpc_methods {
     pub const SESSION_SKILLS_RELOAD: &str = "session.skills.reload";
     /// `session.skills.ensureLoaded`
     pub const SESSION_SKILLS_ENSURELOADED: &str = "session.skills.ensureLoaded";
+    /// `session.skills.inspectInventory`
+    pub(crate) const SESSION_SKILLS_INSPECTINVENTORY: &str = "session.skills.inspectInventory";
+    /// `session.skills.resources.install`
+    pub(crate) const SESSION_SKILLS_RESOURCES_INSTALL: &str = "session.skills.resources.install";
+    /// `session.skills.resources.remove`
+    pub(crate) const SESSION_SKILLS_RESOURCES_REMOVE: &str = "session.skills.resources.remove";
     /// `session.diagnostics.configure`
     pub const SESSION_DIAGNOSTICS_CONFIGURE: &str = "session.diagnostics.configure";
     /// `session.diagnostics.read`
@@ -1393,41 +1521,6 @@ pub mod rpc_methods {
     /// `session.managedSettings.recheckPolicyHelper`
     pub const SESSION_MANAGEDSETTINGS_RECHECKPOLICYHELPER: &str =
         "session.managedSettings.recheckPolicyHelper";
-    /// `session.plugins.list`
-    pub const SESSION_PLUGINS_LIST: &str = "session.plugins.list";
-    /// `session.plugins.install`
-    pub const SESSION_PLUGINS_INSTALL: &str = "session.plugins.install";
-    /// `session.plugins.uninstall`
-    pub const SESSION_PLUGINS_UNINSTALL: &str = "session.plugins.uninstall";
-    /// `session.plugins.update`
-    pub const SESSION_PLUGINS_UPDATE: &str = "session.plugins.update";
-    /// `session.plugins.enable`
-    pub const SESSION_PLUGINS_ENABLE: &str = "session.plugins.enable";
-    /// `session.plugins.disable`
-    pub const SESSION_PLUGINS_DISABLE: &str = "session.plugins.disable";
-    /// `session.plugins.marketplaces.list`
-    pub const SESSION_PLUGINS_MARKETPLACES_LIST: &str = "session.plugins.marketplaces.list";
-    /// `session.plugins.marketplaces.add`
-    pub const SESSION_PLUGINS_MARKETPLACES_ADD: &str = "session.plugins.marketplaces.add";
-    /// `session.plugins.marketplaces.remove`
-    pub const SESSION_PLUGINS_MARKETPLACES_REMOVE: &str = "session.plugins.marketplaces.remove";
-    /// `session.plugins.marketplaces.browse`
-    pub const SESSION_PLUGINS_MARKETPLACES_BROWSE: &str = "session.plugins.marketplaces.browse";
-    /// `session.plugins.marketplaces.refresh`
-    pub const SESSION_PLUGINS_MARKETPLACES_REFRESH: &str = "session.plugins.marketplaces.refresh";
-    /// `session.plugins.marketplaces.search`
-    pub const SESSION_PLUGINS_MARKETPLACES_SEARCH: &str = "session.plugins.marketplaces.search";
-    /// `session.plugins.marketplaces.checkUpdate`
-    pub const SESSION_PLUGINS_MARKETPLACES_CHECKUPDATE: &str =
-        "session.plugins.marketplaces.checkUpdate";
-    /// `session.plugins.getDefaults`
-    pub const SESSION_PLUGINS_GETDEFAULTS: &str = "session.plugins.getDefaults";
-    /// `session.plugins.checkUpdate`
-    pub const SESSION_PLUGINS_CHECKUPDATE: &str = "session.plugins.checkUpdate";
-    /// `session.plugins.reload`
-    pub const SESSION_PLUGINS_RELOAD: &str = "session.plugins.reload";
-    /// `session.plugins.retryManaged`
-    pub const SESSION_PLUGINS_RETRYMANAGED: &str = "session.plugins.retryManaged";
     /// `session.provider.getEndpoint`
     pub const SESSION_PROVIDER_GETENDPOINT: &str = "session.provider.getEndpoint";
     /// `session.provider.add`
@@ -1456,21 +1549,6 @@ pub mod rpc_methods {
     pub const SESSION_LSP_DIAGNOSE: &str = "session.lsp.diagnose";
     /// `session.lsp.set`
     pub const SESSION_LSP_SET: &str = "session.lsp.set";
-    /// `session.extensions.getPolicy`
-    pub const SESSION_EXTENSIONS_GETPOLICY: &str = "session.extensions.getPolicy";
-    /// `session.extensions.list`
-    pub const SESSION_EXTENSIONS_LIST: &str = "session.extensions.list";
-    /// `session.extensions.enable`
-    pub const SESSION_EXTENSIONS_ENABLE: &str = "session.extensions.enable";
-    /// `session.extensions.disable`
-    pub const SESSION_EXTENSIONS_DISABLE: &str = "session.extensions.disable";
-    /// `session.extensions.reload`
-    pub const SESSION_EXTENSIONS_RELOAD: &str = "session.extensions.reload";
-    /// `session.extensions.reconcile`
-    pub const SESSION_EXTENSIONS_RECONCILE: &str = "session.extensions.reconcile";
-    /// `session.extensions.sendAttachmentsToMessage`
-    pub const SESSION_EXTENSIONS_SENDATTACHMENTSTOMESSAGE: &str =
-        "session.extensions.sendAttachmentsToMessage";
     /// `session.tools.execute`
     pub const SESSION_TOOLS_EXECUTE: &str = "session.tools.execute";
     /// `session.tools.getBuiltinDescriptors`
@@ -1617,6 +1695,9 @@ pub mod rpc_methods {
     /// `session.permissions.urls.setUnrestrictedMode`
     pub const SESSION_PERMISSIONS_URLS_SETUNRESTRICTEDMODE: &str =
         "session.permissions.urls.setUnrestrictedMode";
+    /// `session.permissions.repositoryDisabledNames`
+    pub(crate) const SESSION_PERMISSIONS_REPOSITORYDISABLEDNAMES: &str =
+        "session.permissions.repositoryDisabledNames";
     /// `session.metadata.getWorkingDirectoryContext`
     pub const SESSION_METADATA_GETWORKINGDIRECTORYCONTEXT: &str =
         "session.metadata.getWorkingDirectoryContext";
@@ -1765,6 +1846,12 @@ pub mod rpc_methods {
     pub(crate) const SESSION_CAFEMETRICS_ATTACH: &str = "session.cafeMetrics.attach";
     /// `session.cafeMetrics.detach`
     pub(crate) const SESSION_CAFEMETRICS_DETACH: &str = "session.cafeMetrics.detach";
+    /// `session.research.listReports`
+    pub(crate) const SESSION_RESEARCH_LISTREPORTS: &str = "session.research.listReports";
+    /// `session.github.createSecretGist`
+    pub(crate) const SESSION_GITHUB_CREATESECRETGIST: &str = "session.github.createSecretGist";
+    /// `persistence.barrier`
+    pub(crate) const PERSISTENCE_BARRIER: &str = "persistence.barrier";
     /// `remote.checkSendAdmission`
     pub(crate) const REMOTE_CHECKSENDADMISSION: &str = "remote.checkSendAdmission";
     /// `skillProvider.list`
@@ -1918,21 +2005,22 @@ pub use sdk_api_shared::{
     ProtocolImageGenerationOptions, ProviderConfigAzure, ProviderConfigModelProvider,
     ProviderConfigTransport, ProviderConfigType, ProviderConfigWireApi, ProviderEndpointTransport,
     ProviderEndpointType, ProviderEndpointWireApi, ProviderModelConfig, ProviderSessionToken,
-    QueuePendingItems, QueuePendingItemsKind, QuotaWarningProjection, SandboxConfig,
-    SandboxConfigAuth, SandboxConfigSource, SandboxConfigUserPolicy,
-    SandboxConfigUserPolicyFilesystem, SandboxConfigUserPolicyNetwork,
+    QueuePendingItems, QueuePendingItemsKind, QuotaWarningProjection, RepositoryDisabledKey,
+    ResearchStoredReport, SandboxConfig, SandboxConfigAuth, SandboxConfigSource,
+    SandboxConfigUserPolicy, SandboxConfigUserPolicyFilesystem, SandboxConfigUserPolicyNetwork,
     SandboxConfigUserPolicyNetworkProxy, SandboxConfigUserPolicySeatbelt,
     SandboxCredentialSuggestion, SandboxCredentialsConfig, SandboxMaskedEnvVar,
     SavedProviderConfigurationProvider, SavedProviderConfigurationProviderInput,
-    SavedProviderConfigurationType, SavedProviderCredentialStatus, ScheduleEntry, SendAgentMode,
-    ServerSkill, SessionCompletionItem, SessionVisibilityStatus,
-    SessionWorkingDirectoryContextHostType, ShellCredentials, ShellInitProfile, ShellInitScript,
-    ShellInitScriptShell, ShellOptions, Skill, SkillInstallPlan, SkillInstallationFileReview,
-    SkillInstallationLocation, SkillInstallationOwnershipState, SkillInstallationReview,
-    SkillInstallationReviewInstall, SkillInstallationReviewInstallAction,
+    SavedProviderConfigurationType, SavedProviderCredentialStatus, ScheduleEntry,
+    SemanticImportDiagnostic, SendAgentMode, ServerSkill, SessionCompletionItem,
+    SessionVisibilityStatus, SessionWorkingDirectoryContextHostType, ShellCredentials,
+    ShellInitProfile, ShellInitScript, ShellInitScriptShell, ShellOptions, Skill, SkillInstallPlan,
+    SkillInstallationFileReview, SkillInstallationLocation, SkillInstallationOwnershipState,
+    SkillInstallationReview, SkillInstallationReviewInstall, SkillInstallationReviewInstallAction,
     SkillInstallationReviewUninstall, SkillInstallationReviewUninstallAction,
     SkillInstallationScope, SkillInstallationSessionState, SkillInstallationSource,
-    SkillInstallationSummary, SkillsInvokedSkill, SlashCommandInfo, SlashCommandInput,
+    SkillInstallationSummary, SkillResourceInstallKind, SkillResourceInstallScope,
+    SkillResourceRemoveKind, SkillsInvokedSkill, SlashCommandInfo, SlashCommandInput,
     SlashCommandInputChoice, SlashCommandInputCompletion, SlashCommandKind,
     StandaloneExtensionAdmission, SubagentSettingsConfig, SubagentSettingsEntry,
     SubagentSettingsEntryContextTier, TokenAuthInfo, TokenAuthInfoType, TokenProviderAuthInfo,
@@ -1947,10 +2035,12 @@ pub use sdk_api_shared::{
     WorkspacesCheckpoints, WorkspacesWorkspaceDetailsHostType,
 };
 pub(crate) use sdk_api_shared::{
-    AhpSessionAdmissionPhase, GitHubMcpOptions, McpOauthFlowStaticClientConfig, McpOauthFlowStore,
-    McpOauthTestConnectionTransport, SandboxTransportOwner, SandboxTransportOwnerAhp,
+    AhpSessionAdmissionPhase, ForceLoginOrgsDecision, GitHubMcpOptions, McpConfigSourceDiagnostic,
+    McpOauthFlowStaticClientConfig, McpOauthFlowStore, McpOauthTestConnectionTransport,
+    PluginPolicyDiagnostic, SandboxTransportOwner, SandboxTransportOwnerAhp,
     SandboxTransportOwnerAhpKind, SandboxTransportOwnerLocalRpc, SandboxTransportOwnerLocalRpcKind,
-    SettingsEditOperation, SettingsEditStatus,
+    SessionPersistenceBarrierPhase, SettingsEditOperation, SettingsEditStatus,
+    UtilityPromptResultKind,
 };
 
 #[path = "api_domain_session.rs"]
@@ -1958,9 +2048,10 @@ mod sdk_api_session;
 pub use sdk_api_session::{
     AuthenticatedAuthorityGrant, AuthenticatedAuthorityUpdate, BuiltinToolDescriptor,
     BuiltinToolFormat, BuiltinToolFormatType, BuiltinToolInputSchema, BuiltinToolInputSchemaType,
-    CurrentToolMetadata, FleetStartRequest, FleetStartResult, LocalSessionMetadataValue,
-    ManagedMcpServerConfig, ManagedPluginRetryEntry, ManagedPluginRetryStatus, ManagedSessionInfo,
-    MemoryConfiguration, MemoryMode, MetadataSnapshotCurrentMode, MetadataSnapshotRemoteMetadata,
+    CurrentToolMetadata, ExtensionList, FleetStartRequest, FleetStartResult,
+    LocalSessionMetadataValue, ManagedMcpServerConfig, ManagedPluginRetryEntry,
+    ManagedPluginRetryStatus, ManagedSessionInfo, MemoryConfiguration, MemoryMode,
+    MetadataSnapshotCurrentMode, MetadataSnapshotRemoteMetadata,
     MetadataSnapshotRemoteMetadataRepository, MetadataSnapshotRemoteMetadataTaskType,
     ModelProviderDescriptor, OptionsUpdateAdditionalContentExclusionPolicy,
     OptionsUpdateAdditionalContentExclusionPolicyRule,
@@ -2081,17 +2172,18 @@ pub use sdk_api_session::{
     ProtocolExternalToolDefinition, ProtocolExternalToolNamespace, RemoteControlConfig,
     RemoteControlConfigExistingMcSession, RemoteSessionHostStatus, RemoteSessionMetadataRepository,
     RemoteSessionMetadataTaskType, RemoteSessionMetadataValue, RemoteSessionRepository,
-    SessionAbortResult, SessionAccountsGetActiveParams, SessionAccountsGetActiveResult,
-    SessionAccountsLastErrorsParams, SessionAccountsLastErrorsResult, SessionAccountsListResult,
-    SessionAccountsLoginBeginResult, SessionAccountsLoginListResult, SessionAccountsLogoutResult,
-    SessionActivity, SessionAgentDeselectParams, SessionAgentGetCurrentParams,
-    SessionAgentGetCurrentResult, SessionAgentListResult, SessionAgentReloadParams,
-    SessionAgentReloadResult, SessionAgentSelectResult, SessionAuthInfoResult,
-    SessionAuthLoginRequest, SessionAuthLogoutUserRequest, SessionAuthProvidersListParams,
-    SessionAuthProvidersListResult, SessionAuthStatus, SessionAuthSwitchRequest,
-    SessionAutopilotEvaluateIdleContinuationParams, SessionAutopilotEvaluateIdleContinuationResult,
-    SessionAutopilotObjectiveGetStateParams, SessionAutopilotObjectiveGetStateResult,
-    SessionBulkDeleteResult, SessionCafeMetricsAttachParams, SessionCafeMetricsDetachParams,
+    SemanticSessionImportCounts, SessionAbortResult, SessionAccountsGetActiveParams,
+    SessionAccountsGetActiveResult, SessionAccountsLastErrorsParams,
+    SessionAccountsLastErrorsResult, SessionAccountsListResult, SessionAccountsLoginBeginResult,
+    SessionAccountsLoginListResult, SessionAccountsLogoutResult, SessionActivity,
+    SessionAgentDeselectParams, SessionAgentGetCurrentParams, SessionAgentGetCurrentResult,
+    SessionAgentListResult, SessionAgentReloadParams, SessionAgentReloadResult,
+    SessionAgentSelectResult, SessionAuthInfoResult, SessionAuthLoginRequest,
+    SessionAuthLogoutUserRequest, SessionAuthProvidersListParams, SessionAuthProvidersListResult,
+    SessionAuthStatus, SessionAuthSwitchRequest, SessionAutopilotEvaluateIdleContinuationParams,
+    SessionAutopilotEvaluateIdleContinuationResult, SessionAutopilotObjectiveGetStateParams,
+    SessionAutopilotObjectiveGetStateResult, SessionBulkDeleteResult,
+    SessionCafeMetricsAttachParams, SessionCafeMetricsDetachParams,
     SessionCancelAllBackgroundAgentsParams, SessionCancelAllBackgroundAgentsResult,
     SessionCanvasActionInvokeResult, SessionCanvasListOpenParams, SessionCanvasListOpenResult,
     SessionCanvasListParams, SessionCanvasListResult, SessionCanvasOpenResult, SessionCapability,
@@ -2119,10 +2211,12 @@ pub use sdk_api_session::{
     SessionEventLogRegisterInterestResult, SessionEventLogReleaseInterestResult,
     SessionEventLogTailParams, SessionEventLogTailResult, SessionEventPublishRequest,
     SessionEventPublishResult, SessionExtensionsGetPolicyParams, SessionExtensionsGetPolicyResult,
-    SessionExtensionsListParams, SessionExtensionsListResult, SessionExtensionsReconcileParams,
+    SessionExtensionsInspectServiceParams, SessionExtensionsListParams,
+    SessionExtensionsListResult, SessionExtensionsReconcileParams,
     SessionExtensionsReconcileResult, SessionExtensionsReloadParams,
-    SessionFeatureFlagsConfigureParams, SessionFeatureFlagsConfigureResult,
-    SessionFeatureFlagsReadParams, SessionFeatureFlagsReadResult, SessionFeatureFlagsUpdateParams,
+    SessionExtensionsSetManagementToolsEnabledResult, SessionFeatureFlagsConfigureParams,
+    SessionFeatureFlagsConfigureResult, SessionFeatureFlagsReadParams,
+    SessionFeatureFlagsReadResult, SessionFeatureFlagsUpdateParams,
     SessionFeatureFlagsUpdateResult, SessionFleetStartResult, SessionFsAppendFileRequest,
     SessionFsAppendFileResult, SessionFsError, SessionFsErrorCode, SessionFsExistsRequest,
     SessionFsExistsResult, SessionFsMkdirRequest, SessionFsMkdirResult,
@@ -2247,29 +2341,30 @@ pub use sdk_api_session::{
     SessionPermissionsPathsIsPathWithinAllowedDirectoriesResult,
     SessionPermissionsPathsIsPathWithinWorkspaceResult, SessionPermissionsPathsListResult,
     SessionPermissionsPathsUpdatePrimaryResult, SessionPermissionsPendingRequestsResult,
-    SessionPermissionsResetSessionApprovalsResult, SessionPermissionsSetApproveAllResult,
-    SessionPermissionsSetModeResult, SessionPermissionsSetRequiredResult,
-    SessionPermissionsUrlsSetUnrestrictedModeResult, SessionPlanDeleteParams,
-    SessionPlanReadParams, SessionPlanReadResult, SessionPlanReadSqlTodosParams,
-    SessionPlanReadSqlTodosResult, SessionPlanReadSqlTodosWithDependenciesParams,
-    SessionPlanReadSqlTodosWithDependenciesResult, SessionPluginDefaults,
-    SessionPluginsCheckUpdateResult, SessionPluginsDisableRequest, SessionPluginsEnableRequest,
-    SessionPluginsGetDefaultsParams, SessionPluginsGetDefaultsResult, SessionPluginsInstallRequest,
-    SessionPluginsInstallResult, SessionPluginsListParams, SessionPluginsListResult,
-    SessionPluginsMarketplacesAddResult, SessionPluginsMarketplacesBrowseResult,
-    SessionPluginsMarketplacesCheckUpdateResult, SessionPluginsMarketplacesListParams,
-    SessionPluginsMarketplacesListResult, SessionPluginsMarketplacesRefreshResult,
-    SessionPluginsMarketplacesRemoveResult, SessionPluginsMarketplacesSearchResult,
-    SessionPluginsRetryManagedRequest, SessionPluginsRetryManagedResult,
-    SessionPluginsUpdateResult, SessionProviderAddResult, SessionProviderGetEndpointResult,
-    SessionProviderGetStatusParams, SessionProviderGetStatusResult, SessionProviderSyncResult,
-    SessionProviderUpdateModelParams, SessionProviderUpdateProviderParams,
-    SessionProviderWithdrawResult, SessionProvidersDiscoverResult,
-    SessionProvidersGetCatalogParams, SessionProvidersGetCatalogResult,
-    SessionProvidersGetStatusResult, SessionProvidersModelsDiagnoseParams,
-    SessionProvidersModelsDiagnoseResult, SessionProvidersModelsListResult,
-    SessionProvidersModelsPrepareConfigurationResult, SessionPruneResult,
-    SessionQueueAppendSteeringResult, SessionQueueBeginDeferredIdleDrainResult,
+    SessionPermissionsRepositoryDisabledNamesResult, SessionPermissionsResetSessionApprovalsResult,
+    SessionPermissionsSetApproveAllResult, SessionPermissionsSetModeResult,
+    SessionPermissionsSetRequiredResult, SessionPermissionsUrlsSetUnrestrictedModeResult,
+    SessionPlanDeleteParams, SessionPlanReadParams, SessionPlanReadResult,
+    SessionPlanReadSqlTodosParams, SessionPlanReadSqlTodosResult,
+    SessionPlanReadSqlTodosWithDependenciesParams, SessionPlanReadSqlTodosWithDependenciesResult,
+    SessionPluginDefaults, SessionPluginInventoryEntry, SessionPluginsCheckUpdateResult,
+    SessionPluginsDisableRequest, SessionPluginsEnableRequest, SessionPluginsGetDefaultsParams,
+    SessionPluginsGetDefaultsResult, SessionPluginsInspectInventoryParams,
+    SessionPluginsInstallRequest, SessionPluginsInstallResult, SessionPluginsListParams,
+    SessionPluginsListResult, SessionPluginsMarketplacesAddResult,
+    SessionPluginsMarketplacesBrowseResult, SessionPluginsMarketplacesCheckUpdateResult,
+    SessionPluginsMarketplacesListParams, SessionPluginsMarketplacesListResult,
+    SessionPluginsMarketplacesRefreshResult, SessionPluginsMarketplacesRemoveResult,
+    SessionPluginsMarketplacesSearchResult, SessionPluginsRetryManagedRequest,
+    SessionPluginsRetryManagedResult, SessionPluginsUpdateResult, SessionProviderAddResult,
+    SessionProviderGetEndpointResult, SessionProviderGetStatusParams,
+    SessionProviderGetStatusResult, SessionProviderSyncResult, SessionProviderUpdateModelParams,
+    SessionProviderUpdateProviderParams, SessionProviderWithdrawResult,
+    SessionProvidersDiscoverResult, SessionProvidersGetCatalogParams,
+    SessionProvidersGetCatalogResult, SessionProvidersGetStatusResult,
+    SessionProvidersModelsDiagnoseParams, SessionProvidersModelsDiagnoseResult,
+    SessionProvidersModelsListResult, SessionProvidersModelsPrepareConfigurationResult,
+    SessionPruneResult, SessionQueueAppendSteeringResult, SessionQueueBeginDeferredIdleDrainResult,
     SessionQueueClearParams, SessionQueueConsumeSystemNotificationsResult,
     SessionQueueDuplicateAtResult, SessionQueueEnqueueResumePendingParams,
     SessionQueueEnqueueResumePendingResult, SessionQueueFinishDeferredIdleDrainResult,
@@ -2285,6 +2380,7 @@ pub use sdk_api_session::{
     SessionRemoteNotifySteerableChangedResult, SessionRemotePublishStateParams,
     SessionRemoteReadProjectionParams, SessionRemoteReadProjectionResult,
     SessionRemoteReattachParams, SessionRemoteReattachResult, SessionRemoteSendWithAdmissionResult,
+    SessionResearchListReportsParams, SessionResearchListReportsResult,
     SessionSandboxDisableForSessionResult, SessionSandboxEnsureEnforcementAvailableParams,
     SessionSandboxGetCachedEnforcementStatusParams, SessionSandboxGetCachedEnforcementStatusResult,
     SessionSandboxGetCredentialSuggestionsParams, SessionSandboxGetCredentialSuggestionsResult,
@@ -2307,9 +2403,10 @@ pub use sdk_api_session::{
     SessionSettingsValidationSnapshot, SessionShellCancelUserRequestedResult,
     SessionShellExecResult, SessionShellExecuteUserRequestedResult, SessionShellKillResult,
     SessionSizes, SessionSkillsEnsureLoadedParams, SessionSkillsGetInvokedParams,
-    SessionSkillsGetInvokedResult, SessionSkillsListParams, SessionSkillsListResult,
-    SessionSkillsReloadParams, SessionSkillsReloadResult, SessionSource, SessionSuspendParams,
-    SessionTasksCancelResult, SessionTasksGetCurrentPromotableParams,
+    SessionSkillsGetInvokedResult, SessionSkillsInspectInventoryParams, SessionSkillsListParams,
+    SessionSkillsListResult, SessionSkillsReloadParams, SessionSkillsReloadResult,
+    SessionSkillsResourcesInstallResult, SessionSkillsResourcesRemoveResult, SessionSource,
+    SessionSuspendParams, SessionTasksCancelResult, SessionTasksGetCurrentPromotableParams,
     SessionTasksGetCurrentPromotableResult, SessionTasksGetProgressResult, SessionTasksListParams,
     SessionTasksListResult, SessionTasksPromoteCurrentToBackgroundParams,
     SessionTasksPromoteCurrentToBackgroundResult, SessionTasksPromoteToBackgroundResult,
@@ -2377,12 +2474,12 @@ pub use sdk_api_session::{
     SessionsGetLastForContextResult, SessionsGetMetadataRequest, SessionsGetMetadataResult,
     SessionsGetPersistedRemoteSteerableRequest, SessionsGetPersistedRemoteSteerableResult,
     SessionsGetRemoteControlStatusResult, SessionsGetSizesResult, SessionsHasEventsRequest,
-    SessionsHasEventsResult, SessionsListNonEmptySessionIdsRequest,
-    SessionsListNonEmptySessionIdsResult, SessionsListRequest, SessionsListResult,
-    SessionsLoadDeferredRepoHooksRequest, SessionsLoadDeferredRepoHooksResult,
-    SessionsLoadWorkspaceRequest, SessionsLoadWorkspaceResult, SessionsOpenAttach,
-    SessionsOpenAttachKind, SessionsOpenCloud, SessionsOpenCloudKind, SessionsOpenCreate,
-    SessionsOpenCreateKind, SessionsOpenHandoff, SessionsOpenHandoffKind,
+    SessionsHasEventsResult, SessionsImportSemanticRequest, SessionsImportSemanticResult,
+    SessionsListNonEmptySessionIdsRequest, SessionsListNonEmptySessionIdsResult,
+    SessionsListRequest, SessionsListResult, SessionsLoadDeferredRepoHooksRequest,
+    SessionsLoadDeferredRepoHooksResult, SessionsLoadWorkspaceRequest, SessionsLoadWorkspaceResult,
+    SessionsOpenAttach, SessionsOpenAttachKind, SessionsOpenCloud, SessionsOpenCloudKind,
+    SessionsOpenCreate, SessionsOpenCreateKind, SessionsOpenHandoff, SessionsOpenHandoffKind,
     SessionsOpenHandoffTaskType, SessionsOpenProgress, SessionsOpenProgressStatus,
     SessionsOpenProgressStep, SessionsOpenRemote, SessionsOpenRemoteKind, SessionsOpenResult,
     SessionsOpenResume, SessionsOpenResumeKind, SessionsOpenResumeLast, SessionsOpenResumeLastKind,
@@ -2395,7 +2492,8 @@ pub use sdk_api_session::{
     SessionsStartRemoteControlRequest, SessionsStartRemoteControlResult,
     SessionsStopRemoteControlRequest, SessionsStopRemoteControlResult,
     SessionsTransferRemoteControlRequest, SessionsTransferRemoteControlResult,
-    SessionsUpdateWorkspaceFieldsRequest, SessionsUpdateWorkspaceFieldsResult, SettableAuthInfo,
+    SessionsUpdateWorkspaceFieldsRequest, SessionsUpdateWorkspaceFieldsResult,
+    SessionsValidateNameRequest, SessionsValidateNameResult, SettableAuthInfo,
     SettableTokenAuthInfo, SettableTokenAuthInfoType, TaskAgentInfo, TaskAgentInfoType,
     TaskAgentProgress, TaskAgentProgressType, TaskAnalyticsClassifyTrajectoryRequest,
     TaskAnalyticsClassifyTrajectoryResult, TaskAnalyticsJudge,
@@ -2426,18 +2524,31 @@ pub use sdk_api_session::{
 pub(crate) use sdk_api_session::{
     LifecycleDiagnosticsConfiguration, PermissionsEvaluateManagedPolicyParams,
     PermissionsLocationsCleanupOrphanedResult, RemoteSessionPageEntry, RemoteSessionPageFailure,
-    SessionDiagnosticsLifecycleReadResult, SessionFeatureFlagConfiguration,
+    SessionDiagnosticsLifecycleReadResult, SessionExtensionsConfigureHostRequest,
+    SessionExtensionsConfigureHostResult, SessionExtensionsInspectServiceResult,
+    SessionExtensionsSetManagementToolsEnabledRequest, SessionFeatureFlagConfiguration,
     SessionFeatureFlagsMode, SessionGitHubAuthGetCurrentAuthInfoResult,
     SessionGitHubAuthRefreshCopilotUserResult, SessionGitHubAuthResolveCurrentAuthInfoResult,
-    SessionMcpOauthAuthenticateParams, SessionMcpOauthAuthenticateResult,
-    SessionMcpOauthCancelFlowParams, SessionMcpOauthDisposeStoreParams,
-    SessionMcpOauthHasValidTokensParams, SessionMcpOauthPrepareFlowParams,
-    SessionMcpOauthSaveStaticClientSecretParams, SessionMcpOauthStoreKeyParams,
-    SessionMcpOauthTestConnectionParams, SessionMcpOauthTryRefreshTokensParams,
-    SessionModelClearStartupSeedParams, SessionModelClearStartupSeedResult,
+    SessionGitHubCreateSecretGistResult, SessionMcpInspectConfigurationRequest,
+    SessionMcpInspectConfigurationResult, SessionMcpOauthAuthenticateParams,
+    SessionMcpOauthAuthenticateResult, SessionMcpOauthCancelFlowParams,
+    SessionMcpOauthDisposeStoreParams, SessionMcpOauthHasValidTokensParams,
+    SessionMcpOauthPrepareFlowParams, SessionMcpOauthSaveStaticClientSecretParams,
+    SessionMcpOauthStoreKeyParams, SessionMcpOauthTestConnectionParams,
+    SessionMcpOauthTryRefreshTokensParams, SessionModelClearStartupSeedParams,
+    SessionModelClearStartupSeedResult, SessionModelGenerateBranchSlugParams,
+    SessionModelGenerateBranchSlugResult, SessionNameGenerateParams, SessionNameGenerateResult,
+    SessionPersistenceBarrierRequest, SessionPersistenceBarrierResult,
+    SessionPersistenceFlushParams, SessionPersistenceFlushRequest,
+    SessionPluginInspectExtensionContributionsRequest,
+    SessionPluginInspectExtensionContributionsResult, SessionPluginInventoryResult,
+    SessionPluginsInspectExtensionContributionsResult, SessionPluginsInspectInventoryResult,
     SessionRemoteAttachMissionControlResult, SessionRemoteSendWithAdmissionParams,
-    SessionSandboxInvokeOwnedParams, SessionSandboxInvokeOwnedResult,
-    SessionUsageSetCodeChangesParams, SessionsListRemotePageRequest, SessionsListRemotePageResult,
+    SessionRepositoryDisabledNamesRequest, SessionSandboxInvokeOwnedParams,
+    SessionSandboxInvokeOwnedResult, SessionSkillInventoryEntry,
+    SessionSkillResourceInstallRequest, SessionSkillResourceRemoveRequest,
+    SessionSkillsInspectInventoryResult, SessionUsageSetCodeChangesParams,
+    SessionsListRemotePageRequest, SessionsListRemotePageResult,
 };
 
 #[path = "api_domain_configuration.rs"]
@@ -2445,10 +2556,10 @@ mod sdk_api_configuration;
 pub(crate) use sdk_api_configuration::{
     ConfigureSessionExtensionsParams, FeatureFlagAvailability, FeatureFlagMetadata,
     FeatureFlagsListMetadataResult, FeatureFlagsMetadataResult, FeatureFlagsResolveRequest,
-    FeatureFlagsResolveStartupGatesRequest, ForceLoginOrgsDecision,
-    ManagedSettingsApplyControlsParams, ManagedSettingsApplyControlsResult,
-    ManagedSettingsBypassDisableSource, ManagedSettingsBypassPolicyResolution,
-    ManagedSettingsIngestAndRetainResult, ManagedSettingsIngestParams, ManagedSettingsIngestResult,
+    FeatureFlagsResolveStartupGatesRequest, ManagedSettingsApplyControlsParams,
+    ManagedSettingsApplyControlsResult, ManagedSettingsBypassDisableSource,
+    ManagedSettingsBypassPolicyResolution, ManagedSettingsIngestAndRetainResult,
+    ManagedSettingsIngestParams, ManagedSettingsIngestResult,
     ManagedSettingsLoadRemoteControlParams, ManagedSettingsLoadRemoteControlResult,
     ManagedSettingsLogLevel, ManagedSettingsLogMessage, ManagedSettingsParseClientValueParams,
     ManagedSettingsParseClientValueResult, ManagedSettingsPolicyHelperAuthority,
@@ -2461,9 +2572,11 @@ pub(crate) use sdk_api_configuration::{
     ManagedSettingsResolveStartupPolicyParams, ManagedSettingsResolveStartupPolicyResult,
     ManagedSettingsRetainPolicyParams, ManagedSettingsServerPolicyCacheMode,
     ManagedSettingsServerPolicyResolution, UserSettingsBuildRuntimeRequest,
-    UserSettingsEditRequest, UserSettingsEditResult, UserSettingsGetUnknownKeysWarningResult,
-    UserSettingsLoadAndMergeRepoRequest, UserSettingsLoadAndMergeRepoResult,
-    UserSettingsLoadForConfigDirRequest, UserSettingsMergeManagedAndUserParams,
+    UserSettingsEditOptions, UserSettingsEditRequest, UserSettingsEditResult,
+    UserSettingsForContextRequest, UserSettingsForWorkingDirectoryRequest,
+    UserSettingsGetUnknownKeysWarningResult, UserSettingsLoadAndMergeRepoRequest,
+    UserSettingsLoadAndMergeRepoResult, UserSettingsLoadForConfigDirRequest,
+    UserSettingsLoadWithWarningRequest, UserSettingsMergeManagedAndUserParams,
     UserSettingsMergeRepoValueParams, UserSettingsMigrateObsoleteOnDiskRequest,
     UserSettingsMigrateObsoleteOnDiskResult, UserSettingsMigrateObsoleteOnDiskStatus,
     UserSettingsMigrateStaffLogLevelOnceRequest, UserSettingsMigrateStaffLogLevelOnceResult,
@@ -2472,6 +2585,7 @@ pub(crate) use sdk_api_configuration::{
     UserSettingsResetStaffModelSelectionOnceResult, UserSettingsSetHookDisabledRequest,
     UserSettingsSetHookDisabledResult, UserSettingsUnknownKeysWarningRequest,
     UserSettingsUnknownKeysWarningResult, UserSettingsUpdateRequest, UserSettingsUpdateResult,
+    UserSettingsWriteKeysRequest, UserSettingsWriteKeysResult,
 };
 pub use sdk_api_configuration::{
     FeatureFlagServiceConfigureParams, FeatureFlagServiceReadParams, FeatureFlagServiceReadResult,
@@ -2489,16 +2603,19 @@ pub use sdk_api_configuration::{
     StaffLogLevelMigrationStatus, StaffUpdateChannelMigrationStatus,
     UserRequestedShellCommandResult, UserSettingMetadata, UserSettingsApplyTopKeyRequest,
     UserSettingsApplyTopKeyResult, UserSettingsBuildRuntimeResult,
-    UserSettingsDiagnoseProblemsResult, UserSettingsGetPathResult, UserSettingsGetPathsRequest,
-    UserSettingsGetPathsResult, UserSettingsGetResult, UserSettingsGovernanceKeysResult,
-    UserSettingsListGovernanceKeysResult, UserSettingsLoadForConfigDirResult,
-    UserSettingsLoadForEditResult, UserSettingsLoadRepoRequest, UserSettingsLoadRepoResult,
-    UserSettingsLoadWithWarningResult, UserSettingsMergeManagedAndUserResult,
-    UserSettingsMergeRepoValueResult, UserSettingsNormalizeRequest, UserSettingsNormalizeResult,
-    UserSettingsPathResult, UserSettingsProblem, UserSettingsProblemLocation,
-    UserSettingsProblemSource, UserSettingsProblemsRequest, UserSettingsProblemsResult,
-    UserSettingsSetRequest, UserSettingsValidateRequest, UserSettingsValidateResult,
-    UserSettingsValidationIssue, UserSettingsWriteAllRequest, UserSettingsWriteKeyRequest,
+    UserSettingsDiagnoseProblemsResult, UserSettingsGetOrCreateAhpEnvironmentComputeIdResult,
+    UserSettingsGetPathResult, UserSettingsGetPathsRequest, UserSettingsGetPathsResult,
+    UserSettingsGetResult, UserSettingsGovernanceKeysResult, UserSettingsListGovernanceKeysResult,
+    UserSettingsLoadForConfigDirResult, UserSettingsLoadForEditResult,
+    UserSettingsLoadForWorkingDirectoryResult, UserSettingsLoadRepoRequest,
+    UserSettingsLoadRepoResult, UserSettingsLoadWithWarningResult,
+    UserSettingsMergeManagedAndUserResult, UserSettingsMergeRepoValueResult,
+    UserSettingsNormalizeRequest, UserSettingsNormalizeResult, UserSettingsPathResult,
+    UserSettingsProblem, UserSettingsProblemLocation, UserSettingsProblemSource,
+    UserSettingsProblemsRequest, UserSettingsProblemsResult,
+    UserSettingsRepositoryDisabledNamesResult, UserSettingsSetRequest, UserSettingsValidateOptions,
+    UserSettingsValidateRequest, UserSettingsValidateResult, UserSettingsValidationIssue,
+    UserSettingsWriteAllRequest, UserSettingsWriteKeyRequest,
 };
 
 #[path = "api_domain_integrations.rs"]
@@ -2515,28 +2632,32 @@ pub use sdk_api_integrations::{
     CatalogUnavailableTransportErrorKind, CatalogUnavailableTransportReason, DiscoveredMcpServer,
     DiscoveredMcpServerType, ExtensionContextPushInput, ExtensionContextPushInputType,
     ExtensionLaunchProfile, ExtensionLaunchProviderResolveRequest,
-    ExtensionLaunchProviderResolveResult, ExtensionList, ExtensionManagedPolicy,
-    ExtensionsDisableRequest, ExtensionsDiscoverResult, ExtensionsEnableRequest,
-    InstallationConfirmationRequest, InstallationConfirmationRequestReview,
-    InstallationConfirmationRequestReviewResource, InstallationConfirmationResponse,
-    InstallationDecision, InstallationReview, InstallationReviewMcp, InstallationReviewMcpResource,
-    InstallationReviewPlugin, InstallationReviewPluginResource, InstallationReviewPluginReview,
+    ExtensionLaunchProviderResolveResult, ExtensionManagedPolicy, ExtensionsDisableRequest,
+    ExtensionsDiscoverResult, ExtensionsEnableRequest, InstallationConfirmationRequest,
+    InstallationConfirmationRequestReview, InstallationConfirmationRequestReviewResource,
+    InstallationConfirmationResponse, InstallationDecision, InstallationReview,
+    InstallationReviewMcp, InstallationReviewMcpResource, InstallationReviewPlugin,
+    InstallationReviewPluginResource, InstallationReviewPluginReview,
     InstallationReviewPluginReviewAction, InstallationReviewResource, InstallationReviewSkill,
-    InstallationReviewSkillResource, McpApplyInstallRequest, McpApplyUninstallRequest,
+    InstallationReviewSkillResource, McpAdditionalConfigSource, McpAdditionalConfigSourceFile,
+    McpAdditionalConfigSourceFileKind, McpAdditionalConfigSourceJson,
+    McpAdditionalConfigSourceJsonKind, McpApplyInstallRequest, McpApplyUninstallRequest,
     McpAppsCallToolRequest, McpAppsDiagnoseRequest, McpAppsDiagnoseResult, McpAppsHostContext,
     McpAppsListToolsRequest, McpAppsListToolsResult, McpAppsReadResourceRequest,
     McpAppsReadResourceResult, McpAppsSetHostContextDetails,
     McpAppsSetHostContextDetailsAvailableDisplayMode, McpAppsSetHostContextDetailsDisplayMode,
     McpAppsSetHostContextDetailsPlatform, McpAppsSetHostContextDetailsTheme,
     McpAppsSetHostContextRequest, McpCallToolRequest, McpCallToolResult,
-    McpCancelSamplingExecutionParams, McpCancelSamplingExecutionResult, McpConfigAddRequest,
-    McpConfigDisableRequest, McpConfigEnableRequest, McpConfigList, McpConfigListResult,
-    McpConfigRemoveRequest, McpConfigUpdateRequest, McpConfigureGitHubResult,
-    McpConfiguredServerList, McpDisableRequest, McpDiscoverOptions, McpDiscoverRequest,
-    McpDiscoverResult, McpDiscoveryDiagnostic, McpDiscoveryMemoryConfig,
-    McpDiscoveryMemoryConfigType, McpDiscoveryOptions, McpEnableRequest, McpExecuteSamplingParams,
-    McpExecuteSamplingRequest, McpExternalClientExchangeRequest, McpExternalClientResult,
-    McpExternalClientSnapshot, McpHeadersHandlePendingHeadersRefreshRequest,
+    McpCancelSamplingExecutionParams, McpCancelSamplingExecutionResult, McpConfigAddOptions,
+    McpConfigAddRequest, McpConfigComposeAdditionalResult, McpConfigDisableOptions,
+    McpConfigDisableRequest, McpConfigEnableOptions, McpConfigEnableRequest, McpConfigList,
+    McpConfigListRequest, McpConfigListResult, McpConfigRemoveOptions, McpConfigRemoveRequest,
+    McpConfigUpdateRequest, McpConfigureGitHubResult, McpConfiguredServerList, McpDisableRequest,
+    McpDiscoverOptions, McpDiscoverRequest, McpDiscoverResult, McpDiscoveryDiagnostic,
+    McpDiscoveryMemoryConfig, McpDiscoveryMemoryConfigType, McpDiscoveryOptions, McpEnableRequest,
+    McpExecuteSamplingParams, McpExecuteSamplingRequest, McpExternalClientExchangeRequest,
+    McpExternalClientResult, McpExternalClientSnapshot,
+    McpHeadersHandlePendingHeadersRefreshRequest,
     McpHeadersHandlePendingHeadersRefreshRequestError,
     McpHeadersHandlePendingHeadersRefreshRequestErrorKind,
     McpHeadersHandlePendingHeadersRefreshRequestHeaders,
@@ -2614,8 +2735,8 @@ pub use sdk_api_integrations::{
     McpServerList, McpSetEnvValueModeParams, McpSetEnvValueModeResult, McpSourceFile,
     McpSourcePlugin, McpSourceRef, McpStartServerRequest, McpStartServersResult,
     McpStopServerRequest, McpToolTokenBreakdownResult, McpUninstallPlan, PluginActivationStatus,
-    PluginApplyInstallRequest, PluginCheckUpdateRequest, PluginInstallResult,
-    PluginInstallationFailureReason, PluginInstallationManagementOutcome,
+    PluginApplyInstallRequest, PluginBuiltinDiscoverResult, PluginCheckUpdateRequest,
+    PluginInstallResult, PluginInstallationFailureReason, PluginInstallationManagementOutcome,
     PluginInstallationManagementOutcomeInstallPlanned,
     PluginInstallationManagementOutcomeInstallPlannedKind,
     PluginInstallationManagementOutcomeRefused, PluginInstallationManagementOutcomeRefusedKind,
@@ -2630,18 +2751,18 @@ pub use sdk_api_integrations::{
     PluginList, PluginListResult, PluginMarketplaceCheckUpdateRequest,
     PluginMarketplaceSearchRequest, PluginMarketplaceSearchResult, PluginPlanInstallRequest,
     PluginUpdateAllEntry, PluginUpdateAllResult, PluginUpdateCheckResult, PluginUpdateResult,
-    PluginsActivateRequest, PluginsActivateResult, PluginsBuiltinSetRequest, PluginsDisableRequest,
-    PluginsEnableRequest, PluginsInstallRequest, PluginsInstallResult, PluginsListRequest,
-    PluginsListResult, PluginsMarketplacesAddRequest, PluginsMarketplacesAddResult,
-    PluginsMarketplacesBrowseRequest, PluginsMarketplacesBrowseResult,
-    PluginsMarketplacesListResult, PluginsMarketplacesMigrateRetiredDefaultResult,
-    PluginsMarketplacesRefreshRequest, PluginsMarketplacesRefreshResult,
-    PluginsMarketplacesRemoveRequest, PluginsMarketplacesRemoveResult, PluginsReloadRequest,
-    PluginsUninstallRequest, PluginsUpdateAllResult, PluginsUpdateRequest, PluginsUpdateResult,
-    SkillApplyInstallRequest, SkillApplyUninstallRequest, SkillDiscoveryPath,
-    SkillDiscoveryPathList, SkillDiscoveryScope, SkillInstallSourceKind, SkillInstallSourceScope,
-    SkillInstallationFailureReason, SkillInstallationManagementOutcome,
-    SkillInstallationManagementOutcomeEnabledChanged,
+    PluginsActivateRequest, PluginsActivateResult, PluginsBuiltinDiscoverResult,
+    PluginsBuiltinSetRequest, PluginsDisableRequest, PluginsEnableRequest, PluginsInstallRequest,
+    PluginsInstallResult, PluginsInvocationRequest, PluginsListRequest, PluginsListResult,
+    PluginsMarketplacesAddRequest, PluginsMarketplacesAddResult, PluginsMarketplacesBrowseRequest,
+    PluginsMarketplacesBrowseResult, PluginsMarketplacesListResult,
+    PluginsMarketplacesMigrateRetiredDefaultResult, PluginsMarketplacesRefreshRequest,
+    PluginsMarketplacesRefreshResult, PluginsMarketplacesRemoveRequest,
+    PluginsMarketplacesRemoveResult, PluginsReloadRequest, PluginsUninstallRequest,
+    PluginsUpdateAllResult, PluginsUpdateRequest, PluginsUpdateResult, SkillApplyInstallRequest,
+    SkillApplyUninstallRequest, SkillDiscoveryPath, SkillDiscoveryPathList, SkillDiscoveryScope,
+    SkillInstallSourceKind, SkillInstallSourceScope, SkillInstallationFailureReason,
+    SkillInstallationManagementOutcome, SkillInstallationManagementOutcomeEnabledChanged,
     SkillInstallationManagementOutcomeEnabledChangedKind,
     SkillInstallationManagementOutcomeInstallPlanned,
     SkillInstallationManagementOutcomeInstallPlannedKind, SkillInstallationManagementOutcomeListed,
@@ -2674,7 +2795,8 @@ pub use sdk_api_integrations::{
     SkillInstallationResult, SkillInstallationResultOutcome, SkillInstallationResultOutcomeKind,
     SkillInstallationsRequest, SkillList, SkillPlanInstallRequest, SkillPlanUninstallRequest,
     SkillProviderDescriptor, SkillProviderListParams, SkillRemoveSourceEntry,
-    SkillRemoveSourceKind, SkillSetEnabledRequest, SkillUninstallPlan,
+    SkillRemoveSourceKind, SkillResourceDiscoverResult, SkillResourceInstallResult,
+    SkillResourceRemoveResult, SkillSetEnabledRequest, SkillUninstallPlan,
     SkillsConfigSetDisabledSkillsRequest, SkillsConfigSetSkillDisabledOptions,
     SkillsConfigSetSkillDisabledRequest, SkillsDisableRequest, SkillsDiscoverRequest,
     SkillsDiscoverResult, SkillsEnableRequest, SkillsGetDiscoveryPathsRequest,
@@ -2683,11 +2805,17 @@ pub use sdk_api_integrations::{
     SkillsRemoveSourceOutcome, SkillsRemoveSourceOutcomeNeedsInventory,
     SkillsRemoveSourceOutcomeNeedsInventoryKind, SkillsRemoveSourceOutcomeRemoved,
     SkillsRemoveSourceOutcomeRemovedKind, SkillsRemoveSourceRequest, SkillsRemoveSourceResult,
+    SkillsResourcesDiscoverResult, SkillsResourcesInstallResult, SkillsResourcesRemoveResult,
 };
 pub(crate) use sdk_api_integrations::{
-    McpConfigureGitHubRequest, McpGitHubWorkspace, McpListBuiltinServerNamesResult,
-    McpOauthAuthenticateRequest, McpOauthAuthenticateResult, McpOauthCheckDcrSupportRequest,
-    McpOauthCheckDcrSupportResult, McpOauthDisposeStoreRequest,
+    McpComputerUseApplyConfigurationRequest, McpComputerUseApplyConfigurationResult,
+    McpConfigComposeAdditionalRequest, McpConfigForConfigDirRequest, McpConfigMergeSourcesRequest,
+    McpConfigMergeSourcesResult, McpConfigUserServerNamesForConfigDirResult,
+    McpConfigUserServerNamesResult, McpConfigureGitHubRequest, McpGitHubInvocationToolOptions,
+    McpGitHubResolveForInvocationResult, McpGitHubResolveInvocationRequest,
+    McpGitHubResolveInvocationResult, McpGitHubWorkspace, McpInvocationAudience,
+    McpListBuiltinServerNamesResult, McpOauthAuthenticateRequest, McpOauthAuthenticateResult,
+    McpOauthCheckDcrSupportRequest, McpOauthCheckDcrSupportResult, McpOauthDisposeStoreRequest,
     McpOauthFetchProtectedResourceMetadataRequest, McpOauthFetchProtectedResourceMetadataResult,
     McpOauthFlowIdentityRequest, McpOauthIsMicrosoftAuthorizationServerRequest,
     McpOauthIsMicrosoftAuthorizationServerResult, McpOauthSaveStaticClientSecretRequest,
@@ -2698,8 +2826,15 @@ pub(crate) use sdk_api_integrations::{
     McpRegistryRequestIdResult, McpRegistrySearchRequest, McpRegistrySearchResult, McpReloadConfig,
     McpReloadWithConfigRequest, McpResolveGitHubConfigRequest, McpResolveGitHubConfigResult,
     McpServerConfigMemory, McpServerConfigMemoryType, McpShouldExcludeGitHubToolsRequest,
-    McpShouldExcludeGitHubToolsResult, McpUnregisterExternalClientRequest, SkillProviderListResult,
-    SkillProviderReadRequest, SkillProviderReadResult,
+    McpShouldExcludeGitHubToolsResult, McpUnregisterExternalClientRequest,
+    PluginBuiltinDiscoverRequest, PluginInspectInventoryRequest, PluginInvocationInventoryEntry,
+    PluginInvocationInventoryResult, PluginPolicyResolveInvocationRequest,
+    PluginPolicyResolveInvocationResult, PluginSourcesResolveRequest, PluginSourcesResolveResult,
+    PluginsBuiltinResolveActivationRequest, PluginsBuiltinResolveActivationResult,
+    PluginsInspectInventoryResult, PluginsPolicyResolveForInvocationResult,
+    PluginsSourcesResolveResult, SkillProviderListResult, SkillProviderReadRequest,
+    SkillProviderReadResult, SkillResourceContext, SkillResourceDiscoverRequest,
+    SkillResourceInstallRequest, SkillResourceRemoveRequest, SkillResourceSetEnabledRequest,
 };
 
 #[path = "api_domain_models.rs"]
@@ -2726,7 +2861,10 @@ pub use sdk_api_models::{
     ProvidersConfigRemoveModelResult, ProvidersConfigUpdateModelResult,
     ProvidersConfigUpdateProviderResult, ProvidersSourceAddModelResult, TokenPriceUnit,
 };
-pub(crate) use sdk_api_models::{ModelClearStartupSeedRequest, ModelClearStartupSeedResult};
+pub(crate) use sdk_api_models::{
+    ModelClearStartupSeedRequest, ModelClearStartupSeedResult, ModelGenerateBranchSlugRequest,
+    ModelGenerateBranchSlugResult,
+};
 
 #[path = "api_domain_host.rs"]
 mod sdk_api_host;
@@ -2789,13 +2927,32 @@ pub(crate) use sdk_api_host::{
     AccountDescribeAuthInfoRequest, AccountDescribeAuthInfoResult, AccountGetGistSupportRequest,
     AccountGetGistSupportResult, AccountGetHostUrlRequest, AccountGetHostUrlResult,
     AccountGetTokenEnvVarResult, AccountGetWebUrlRequest, AccountGetWebUrlResult,
+    AccountLoginProcessRequest, AccountLoginProcessRequestClose,
+    AccountLoginProcessRequestCloseOperation, AccountLoginProcessRequestComplete,
+    AccountLoginProcessRequestCompleteOperation, AccountLoginProcessRequestContinue,
+    AccountLoginProcessRequestContinueOperation, AccountLoginProcessRequestDiscard,
+    AccountLoginProcessRequestDiscardOperation, AccountLoginProcessRequestOpen,
+    AccountLoginProcessRequestOpenBrowser, AccountLoginProcessRequestOpenBrowserOperation,
+    AccountLoginProcessRequestOpenOperation, AccountLoginProcessRequestPolicy,
+    AccountLoginProcessRequestPolicyOperation, AccountLoginProcessRequestStartDevice,
+    AccountLoginProcessRequestStartDeviceOperation, AccountLoginProcessRequestStartWeb,
+    AccountLoginProcessRequestStartWebOperation, AccountLoginProcessRequestToken,
+    AccountLoginProcessRequestTokenOperation, AccountLoginProcessResult,
+    AccountLoginProcessResultDeviceCode, AccountLoginProcessResultDeviceCodeKind,
+    AccountLoginProcessResultDiscarded, AccountLoginProcessResultDiscardedKind,
+    AccountLoginProcessResultDone, AccountLoginProcessResultDoneKind,
+    AccountLoginProcessResultOpened, AccountLoginProcessResultOpenedKind,
+    AccountLoginProcessResultPersistence, AccountLoginProcessResultPersistenceKind,
+    AccountLoginProcessResultPolicy, AccountLoginProcessResultPolicyKind,
+    AccountLoginProcessResultWeb, AccountLoginProcessResultWebKind,
     AccountSubscribeCopilotFreeRequest, AccountSubscribeCopilotFreeResult,
     GitCurrentBranchRemoteResult, GitCwdRequest, GitHubBranchPullRequest,
     GitHubBranchPullRequestLookupRequest, GitHubBranchPullRequestLookupResult,
-    GitHubBranchPullRequestLookupStatus, GitHubFetchAllocateRequestIdResult,
-    GitHubFetchCancelResult, GitHubFetchHeader, GitHubFetchHttpError, GitHubFetchOperation,
-    GitHubFetchOperationRequest, GitHubFetchRequest, GitHubFetchRequestId, GitHubFetchResult,
-    GitHubFetchRetryConfig, GitHubOwnerOption, GitHubOwnersCancelRequest, GitHubOwnersCancelResult,
+    GitHubBranchPullRequestLookupStatus, GitHubCreateSecretGistRequest,
+    GitHubCreateSecretGistResult, GitHubFetchAllocateRequestIdResult, GitHubFetchCancelResult,
+    GitHubFetchHeader, GitHubFetchHttpError, GitHubFetchOperation, GitHubFetchOperationRequest,
+    GitHubFetchRequest, GitHubFetchRequestId, GitHubFetchResult, GitHubFetchRetryConfig,
+    GitHubOwnerOption, GitHubOwnersCancelRequest, GitHubOwnersCancelResult,
     GitHubOwnersListRequest, GitHubOwnersListResult, GitHubOwnersNextRequestIdResult,
     GitHubOwnersRequestIdResult, GitHubPullRequestCheck, GitHubPullRequestCheckStatus,
     GitHubReleaseAbandonRequestParams, GitHubReleaseAbandonRequestResult,
@@ -2810,10 +2967,11 @@ pub(crate) use sdk_api_host::{
     GitHubReleaseSnapshotResultSuccessOutcome, GitHubReleaseUpdateChannel,
     GitHubRepositoryAtPathRequest, GitHubRepositoryAtPathResult, GitHubRepositoryByIdRequest,
     GitHubRepositoryByIdResult, GitHubRepositoryGetByIdResult,
-    GitHubRepositoryLookupBranchPullRequestResult, GitHubRepositoryOwnerName, GitRemoteRepository,
-    GitReposFromRemotesRequest, GitReposFromRemotesResult, RemoteAttachMissionControlRequest,
-    RemoteAttachMissionControlResult, RemoteCheckSendAdmissionParams,
-    RemoteCheckSendAdmissionResult,
+    GitHubRepositoryLookupBranchPullRequestResult, GitHubRepositoryOwnerName, GitHubSecretGistFile,
+    GitHubSecretGistUseCase, GitRemoteRepository, GitReposFromRemotesRequest,
+    GitReposFromRemotesResult, ProcessLoginAccount, ProcessLoginContext, ProcessLoginPersistence,
+    ProcessLoginPolicyContext, RemoteAttachMissionControlRequest, RemoteAttachMissionControlResult,
+    RemoteCheckSendAdmissionParams, RemoteCheckSendAdmissionResult,
 };
 
 #[path = "api_domain_sandbox.rs"]
@@ -3112,8 +3270,8 @@ pub use sdk_api_services::{
     LspProbeRequest, LspProbeResult, LspSetEnabledRequest, LspWarmupResult, MarketplaceAddResult,
     MarketplaceBrowseResult, MarketplaceListResult, MarketplaceMigrationResult,
     MarketplaceRefreshResult, MarketplaceRemoveResult, McpElicitationFormMode, McpTaskMetadata,
-    MemoryStoreRequest, MetadataContextAttributionResult,
-    MetadataContextAttributionResultContextAttribution,
+    MemoriesImportSemanticRequest, MemoriesImportSemanticResult, MemoryStoreRequest,
+    MetadataContextAttributionResult, MetadataContextAttributionResultContextAttribution,
     MetadataContextAttributionResultContextAttributionCategories,
     MetadataContextAttributionResultContextAttributionCompactions,
     MetadataContextAttributionResultContextAttributionEntriesItem,
@@ -3162,17 +3320,20 @@ pub use sdk_api_services::{
     QueueWithdrawMessageRequest, QueueWithdrawMessageResult, QueuedCommandHandled,
     QueuedCommandNotHandled, QueuedCommandWaitRequirement, QuotaTakeWarningsResult,
     RegisterEventInterestParams, RegisterEventInterestResult, ReleaseEventInterestParams,
-    ResponseFormat, ResponseFormatType, RuntimeOpenBrowserRequest, SandboxSessionChange,
-    SavedProviderConfigurationAddModelRequest, SavedProviderConfigurationAddModelResult,
-    SavedProviderConfigurationReadResult, SavedProviderConfigurationRemoveModelRequest,
-    SavedProviderConfigurationRemoveModelResult, SavedProviderConfigurationUpdateModelRequest,
-    SavedProviderConfigurationUpdateModelResult, SavedProviderConfigurationUpdateProviderRequest,
+    RepositoryDisabledNamesResult, ResearchListReportsResult, ResponseFormat, ResponseFormatType,
+    RuntimeOpenBrowserRequest, SandboxSessionChange, SavedProviderConfigurationAddModelRequest,
+    SavedProviderConfigurationAddModelResult, SavedProviderConfigurationReadResult,
+    SavedProviderConfigurationRemoveModelRequest, SavedProviderConfigurationRemoveModelResult,
+    SavedProviderConfigurationUpdateModelRequest, SavedProviderConfigurationUpdateModelResult,
+    SavedProviderConfigurationUpdateProviderRequest,
     SavedProviderConfigurationUpdateProviderResult, ScheduleAddAtRequest, ScheduleAddCronRequest,
     ScheduleAddRequest, ScheduleAddResult, ScheduleAddSelfPacedRequest, ScheduleHasSelfPacedResult,
     ScheduleList, ScheduleRearmSelfPacedRequest, ScheduleStopRequest, ScheduleStopResult,
     SecretFilterFormat, SecretsAddFilterValuesRequest, SecretsAddFilterValuesResult,
-    SecretsFilterRequest, SecretsFilterResult, SecretsRemoveFilterValuesRequest,
-    SecretsRemoveFilterValuesResult, SendAndWaitResult, SendAttachmentsToMessageParams,
+    SecretsFilterForHostResult, SecretsFilterRequest, SecretsFilterResult,
+    SecretsRemoveFilterValuesRequest, SecretsRemoveFilterValuesResult,
+    SemanticMemoryConflictPolicy, SemanticMemoryImportCounts, SemanticMemoryImportItemResult,
+    SemanticMemoryImportItemStatus, SendAndWaitResult, SendAttachmentsToMessageParams,
     SendMessageItem, SendMessagesRequest, SendMessagesRequestResponseFormat,
     SendMessagesRequestResponseFormatType, SendMessagesResult, SendMode, SendRequest,
     SendRequestResponseFormat, SendRequestResponseFormatType, SendResult,
@@ -3238,9 +3399,11 @@ pub(crate) use sdk_api_services::{
     GlobalStateWriteKeyRequest, HookInvokeRequest, HookInvokeResponse,
     InstructionsDiscoverRepoSourcesRequest, InstructionsGetInitPromptResult,
     InstructionsInitPromptResult, LifecycleDiagnosticsReadRequest, LifecycleDiagnosticsReadResult,
-    LocationPermissionsCleanupResult, LoggedInUser, RepoSettingsEditRequest,
-    RepoSettingsEditResult, RepoSettingsEditScope, RepoSettingsReadRawRequest,
-    RepoSettingsReadRawResult, RepoSettingsWriteAllRequest, RepoSettingsWriteKeyRequest,
+    LocationPermissionsCleanupResult, LoggedInUser, NameGenerateRequest, PersistenceBarrierParams,
+    PersistenceBarrierResult, RepoSettingsEditRequest, RepoSettingsEditResult,
+    RepoSettingsEditScope, RepoSettingsReadRawRequest, RepoSettingsReadRawResult,
+    RepoSettingsWriteAllRequest, RepoSettingsWriteKeyRequest, RepositoryDisabledNamesRequest,
     SettingsEditResult, SettingsRedactValueForDisplayRequest, SettingsRedactValueForDisplayResult,
     SettingsRemoveRawKeyRequest, SettingsRemoveRawKeyResult, UsageSetCodeChangesRequest,
+    UtilityPromptResult,
 };

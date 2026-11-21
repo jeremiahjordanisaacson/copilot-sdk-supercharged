@@ -54,7 +54,8 @@ public final class AssistantMessageEvent extends SessionEvent {
         @JsonProperty("reasoningText") String reasoningText,
         /** OpenAI-compatible wire field the provider used for reasoning (e.g. reasoning_content/reasoning). Populated only when non-canonical, so the dialect round-trips across turns. */
         @JsonProperty("reasoningWireField") String reasoningWireField,
-        /** Encrypted reasoning content from OpenAI models. Session-bound and stripped on resume. */
+        /** No longer emitted. For OpenAI Responses, read encrypted_content from the reasoning items in reasoningBlocks.blocks instead. Older events may still contain this field. */
+        @Deprecated
         @JsonProperty("encryptedContent") String encryptedContent,
         /** Generation phase for phased-output models (e.g., thinking vs. response phases) */
         @JsonProperty("phase") String phase,

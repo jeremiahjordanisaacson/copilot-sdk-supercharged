@@ -5789,6 +5789,12 @@ export interface CompactionCompleteData {
    */
   failureReason?: string;
   /**
+   * Experimental HydraFusion attribution for a compaction a HydraFusion turn ran before its first phase.
+   *
+   * @experimental
+   */
+  fusion?: FusionAttribution;
+  /**
    * Model identifier at admission when routing later changed to the reported compaction model
    */
   initialModel?: string;
@@ -6158,6 +6164,60 @@ export interface CompactionCompleteFailureDiagnostics {
    * @internal
    */
   transportErrorKind?: string;
+}
+/**
+ * Experimental attribution linking an ordinary event to the HydraFusion turn, phase, and concrete source that produced it.
+ */
+/** @experimental */
+export interface FusionAttribution {
+  /**
+   * Idempotency identifier for the authoritative commit, when the event belongs to the selected output.
+   */
+  commitId?: string;
+  /**
+   * Conversation scope in which the concrete phase executed.
+   */
+  conversationScope?: string;
+  /**
+   * Stable identifier for the HydraFusion turn that produced the event.
+   */
+  fusionId: string;
+  /**
+   * Whether this model request consumed a user steering message rather than only internal Fusion work.
+   */
+  hasUserSteering?: boolean;
+  /**
+   * HydraFusion orchestration pattern selected for the turn.
+   */
+  pattern: string;
+  /**
+   * Identifier of the concrete phase that produced the event.
+   */
+  phaseId?: string;
+  /**
+   * Kind of concrete phase that produced the event.
+   */
+  phaseKind?: string;
+  /**
+   * HydraFusion routing policy used for the turn.
+   */
+  policy: string;
+  /**
+   * Semantic role assigned to the concrete phase.
+   */
+  role?: string;
+  /**
+   * Concrete model that produced the attributed event.
+   */
+  sourceModel?: string;
+  /**
+   * Phase whose output supplied the authoritative content, when different from the executing phase.
+   */
+  sourcePhaseId?: string;
+  /**
+   * Synthetic HydraFusion model selected for the session.
+   */
+  syntheticModel: string;
 }
 /**
  * How far the compaction's summarizer model calls had progressed when the compaction's outcome was decided. Stream statistics describe the latest model request; durationMs and attemptCount cover every request.
@@ -8482,60 +8542,6 @@ export interface AssistantReasoningData {
   turnId?: string;
 }
 /**
- * Experimental attribution linking an ordinary event to the HydraFusion turn, phase, and concrete source that produced it.
- */
-/** @experimental */
-export interface FusionAttribution {
-  /**
-   * Idempotency identifier for the authoritative commit, when the event belongs to the selected output.
-   */
-  commitId?: string;
-  /**
-   * Conversation scope in which the concrete phase executed.
-   */
-  conversationScope?: string;
-  /**
-   * Stable identifier for the HydraFusion turn that produced the event.
-   */
-  fusionId: string;
-  /**
-   * Whether this model request consumed a user steering message rather than only internal Fusion work.
-   */
-  hasUserSteering?: boolean;
-  /**
-   * HydraFusion orchestration pattern selected for the turn.
-   */
-  pattern: string;
-  /**
-   * Identifier of the concrete phase that produced the event.
-   */
-  phaseId?: string;
-  /**
-   * Kind of concrete phase that produced the event.
-   */
-  phaseKind?: string;
-  /**
-   * HydraFusion routing policy used for the turn.
-   */
-  policy: string;
-  /**
-   * Semantic role assigned to the concrete phase.
-   */
-  role?: string;
-  /**
-   * Concrete model that produced the attributed event.
-   */
-  sourceModel?: string;
-  /**
-   * Phase whose output supplied the authoritative content, when different from the executing phase.
-   */
-  sourcePhaseId?: string;
-  /**
-   * Synthetic HydraFusion model selected for the session.
-   */
-  syntheticModel: string;
-}
-/**
  * Session event "assistant.reasoning_delta". Streaming reasoning delta for incremental extended thinking updates
  */
 export interface AssistantReasoningDeltaEvent {
@@ -8769,7 +8775,8 @@ export interface AssistantMessageData {
    */
   content: string;
   /**
-   * Encrypted reasoning content from OpenAI models. Session-bound and stripped on resume.
+   * @deprecated
+   * No longer emitted. For OpenAI Responses, read encrypted_content from the reasoning items in reasoningBlocks.blocks instead. Older events may still contain this field.
    */
   encryptedContent?: string;
   /**

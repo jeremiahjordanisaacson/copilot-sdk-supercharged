@@ -290,18 +290,14 @@ crate::record_serde::wire_record!(AhpConnectionTransportDirect { authenticate_wi
 /// Ask Mission Control to allocate the connection.
 #[derive(Debug, Clone, Default)]
 pub struct AhpConnectionTransportMissionControl {
-    /// Mission Control service URL.
-    pub base_url: String,
+    /// Mission Control service URL. Defaults to the original owner's COPILOT_MC_BASE_URL or GitHub API URL.
+    pub base_url: Option<String>,
     /// Target environment identifier.
     pub environment_id: String,
     /// Outgoing AHP transport discriminator.
     pub kind: AhpConnectionTransportMissionControlKind,
 }
-crate::record_serde::wire_record!(AhpConnectionTransportMissionControl {
-    base_url: "baseUrl",
-    environment_id: "environmentId",
-    kind: "kind"
-});
+crate::record_serde::wire_record!(AhpConnectionTransportMissionControl { base_url: "baseUrl" if is_none, environment_id: "environmentId", kind: "kind" });
 
 /// Creates an inert outgoing connection under the caller's existing runtime auth owner.
 ///

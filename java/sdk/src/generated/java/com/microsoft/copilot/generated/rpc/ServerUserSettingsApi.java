@@ -9,6 +9,7 @@ package com.microsoft.copilot.generated.rpc;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.microsoft.copilot.CopilotExperimental;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import javax.annotation.processing.Generated;
 
@@ -83,14 +84,27 @@ public final class ServerUserSettingsApi {
     }
 
     /**
-     * Reads the user's stored settings together with the diagnostic raised while reading them. This is `user.settings.loadForConfigDir` without a `configDir` plus the reason part of the document was ignored: that one answers the document alone, so a caller cannot tell a clean read from a salvaged one. Read this when the caller is about to write the file back, where accepting a partial parse would discard every value the loader could not read. The settings that did load are still reported alongside the warning, so a consumer may surface it and continue instead of failing.
+     * Reads stored settings together with parser diagnostics. Omit context to keep the server's paths and hook environment. An optional trusted-host context selects both instead. The settings that did load remain available alongside the warning, so a consumer can report a partial read without discarding its result.
+     * <p>
+     * Invokes the method with no params, applying the runtime defaults.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0
      */
     @CopilotExperimental
     CompletableFuture<UserSettingsLoadWithWarningResult> loadWithWarning() {
-        return caller.invoke("user.settings.loadWithWarning", java.util.Map.of(), UserSettingsLoadWithWarningResult.class);
+        return loadWithWarning(null);
+    }
+
+    /**
+     * Reads stored settings together with parser diagnostics. Omit context to keep the server's paths and hook environment. An optional trusted-host context selects both instead. The settings that did load remain available alongside the warning, so a consumer can report a partial read without discarding its result.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<UserSettingsLoadWithWarningResult> loadWithWarning(UserSettingsLoadWithWarningParams params) {
+        return caller.invoke("user.settings.loadWithWarning", params == null ? java.util.Map.of() : params, UserSettingsLoadWithWarningResult.class);
     }
 
     /**
@@ -226,7 +240,7 @@ public final class ServerUserSettingsApi {
     }
 
     /**
-     * Atomically edits one canonical user setting inside its settings-file lock. Reads, canonicalizes touched aliases, applies the edit, validates the resulting top-level setting and writes before releasing the lock. An explicit autoUpdatesChannel set completes the staff migration in the same transaction. Only a malformed existing file returns `invalid`; refused keys, invalid values and I/O errors reject the call.
+     * Atomically edits one canonical user setting inside its settings-file lock. Reads, canonicalizes touched aliases, applies the edit, validates the resulting top-level setting and writes before releasing the lock. An explicit autoUpdatesChannel set completes the staff migration in the same transaction. Only a malformed existing file returns `invalid`; refused keys, invalid values and I/O errors reject the call. Optional trusted-host context selects paths and hook environment; configDir and context cannot be combined.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0
@@ -234,6 +248,19 @@ public final class ServerUserSettingsApi {
     @CopilotExperimental
     CompletableFuture<SettingsEditResult> edit(UserSettingsEditParams params) {
         return caller.invoke("user.settings.edit", params, SettingsEditResult.class);
+    }
+
+    /**
+     * Atomically edits one canonical user setting inside its settings-file lock. Reads, canonicalizes touched aliases, applies the edit, validates the resulting top-level setting and writes before releasing the lock. An explicit autoUpdatesChannel set completes the staff migration in the same transaction. Only a malformed existing file returns `invalid`; refused keys, invalid values and I/O errors reject the call. Optional trusted-host context selects paths and hook environment; configDir and context cannot be combined.
+     * <p>
+     * Accepts the extensible request, including inputs added after the params record.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SettingsEditResult> edit(UserSettingsEditRequest request) {
+        return caller.invoke("user.settings.edit", Objects.requireNonNull(request, "request"), SettingsEditResult.class);
     }
 
     /**
@@ -327,7 +354,7 @@ public final class ServerUserSettingsApi {
     }
 
     /**
-     * Validates one top-level setting subtree without writing it, reporting each problem with the path it applies to. Scoped to a single top-level key on purpose: validating the whole file would reject an edit whenever an unrelated pre-existing field is malformed, locking the user out of the very tool that could fix it.
+     * Validates one top-level setting subtree without writing it, reporting each problem with the path it applies to. Scoped to a single top-level key on purpose: validating the whole file would reject an edit whenever an unrelated pre-existing field is malformed, locking the user out of the very tool that could fix it. Optional trusted-host context supplies the hook environment; omission keeps the existing process defaults.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0
@@ -335,6 +362,63 @@ public final class ServerUserSettingsApi {
     @CopilotExperimental
     CompletableFuture<UserSettingsValidateResult> validate(UserSettingsValidateParams params) {
         return caller.invoke("user.settings.validate", params, UserSettingsValidateResult.class);
+    }
+
+    /**
+     * Validates one top-level setting subtree without writing it, reporting each problem with the path it applies to. Scoped to a single top-level key on purpose: validating the whole file would reject an edit whenever an unrelated pre-existing field is malformed, locking the user out of the very tool that could fix it. Optional trusted-host context supplies the hook environment; omission keeps the existing process defaults.
+     * <p>
+     * Accepts the extensible request, including inputs added after the params record.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<UserSettingsValidateResult> validate(UserSettingsValidateRequest request) {
+        return caller.invoke("user.settings.validate", Objects.requireNonNull(request, "request"), UserSettingsValidateResult.class);
+    }
+
+    /**
+     * Reads advisory repository-owned resource disables under explicit host paths and persisted workspace trust.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<RepositoryDisabledNamesResult> repositoryDisabledNames(UserSettingsRepositoryDisabledNamesParams params) {
+        return caller.invoke("user.settings.repositoryDisabledNames", params, RepositoryDisabledNamesResult.class);
+    }
+
+    /**
+     * Reads contextual user settings with the trusted repository overlay for one working directory.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<JsonNode> loadForWorkingDirectory(UserSettingsLoadForWorkingDirectoryParams params) {
+        return caller.invoke("user.settings.loadForWorkingDirectory", params, JsonNode.class);
+    }
+
+    /**
+     * Atomically writes and deletes top-level settings keys without replacing unrelated stored values or malformed documents.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<UserSettingsWriteKeysResult> writeKeys(UserSettingsWriteKeysParams params) {
+        return caller.invoke("user.settings.writeKeys", params, UserSettingsWriteKeysResult.class);
+    }
+
+    /**
+     * Atomically returns or creates the AHP environment compute identity under the explicit host settings context.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<String> getOrCreateAhpEnvironmentComputeId(UserSettingsGetOrCreateAhpEnvironmentComputeIdParams params) {
+        return caller.invoke("user.settings.getOrCreateAhpEnvironmentComputeId", params, String.class);
     }
 
 }

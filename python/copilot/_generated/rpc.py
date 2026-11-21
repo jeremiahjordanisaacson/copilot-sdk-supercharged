@@ -601,6 +601,172 @@ class _AccountGetWebURLResult:
         result["url"] = from_str(self.url)
         return result
 
+@dataclass
+class AccountLoginProcessRequestContext:
+    """The original immutable authentication configuration."""
+
+    environment: dict[str, str]
+    """The host environment snapshot used throughout credential resolution."""
+
+    config_dir: str | None = None
+    """The original configuration directory. Omission preserves the default root."""
+
+    home_directory: str | None = None
+    """The original user's home directory."""
+
+    platform: str | None = None
+    """The original host platform, such as win32, darwin, or linux."""
+
+    process_version: str | None = None
+    """The original host's Node.js version for the existing policy user agent."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'AccountLoginProcessRequestContext':
+        assert isinstance(obj, dict)
+        environment = from_dict(from_str, obj.get("environment"))
+        config_dir = from_union([from_str, from_none], obj.get("configDir"))
+        home_directory = from_union([from_str, from_none], obj.get("homeDirectory"))
+        platform = from_union([from_str, from_none], obj.get("platform"))
+        process_version = from_union([from_str, from_none], obj.get("processVersion"))
+        return AccountLoginProcessRequestContext(environment, config_dir, home_directory, platform, process_version)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["environment"] = from_dict(from_str, self.environment)
+        if self.config_dir is not None:
+            result["configDir"] = from_union([from_str, from_none], self.config_dir)
+        if self.home_directory is not None:
+            result["homeDirectory"] = from_union([from_str, from_none], self.home_directory)
+        if self.platform is not None:
+            result["platform"] = from_union([from_str, from_none], self.platform)
+        if self.process_version is not None:
+            result["processVersion"] = from_union([from_str, from_none], self.process_version)
+        return result
+
+class _AccountLoginProcessRequestOperation(Enum):
+    CLOSE = "close"
+    COMPLETE = "complete"
+    CONTINUE = "continue"
+    DISCARD = "discard"
+    OPEN = "open"
+    OPEN_BROWSER = "openBrowser"
+    POLICY = "policy"
+    START_DEVICE = "startDevice"
+    START_WEB = "startWeb"
+    TOKEN = "token"
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _ForceLoginOrgsDecision:
+    """The verdict of the `forceLoginOrgs` enterprise sign-in pin for one credential. A managed
+    device may pin Copilot to an approved set of GitHub organizations so a developer cannot
+    sign in with a personal — or another enterprise's — account and escape every control that
+    keys off the signed-in identity. A host must refuse to proceed when `allowed` is false;
+    the remaining fields explain the refusal rather than qualifying it.
+    """
+    allowed: bool
+    """Whether the client may proceed. True whenever no pin is in force, so an unmanaged host is
+    never blocked.
+    """
+    enforced: bool
+    """Whether a pin applies at all. Distinguishes "allowed because unmanaged" from "allowed
+    because the account is approved", which a diagnostics surface needs and which also
+    decides whether a bring-your-own-key provider may serve inference.
+    """
+    policy_diagnostics: list[str]
+    """Error-level detail from managed-policy discovery — which file failed to load, which field
+    failed validation. Carried on the decision rather than left to the log because a refusal
+    can exit the process before a log sink exists, which would discard the only actionable
+    diagnostic a misconfigured managed device produces.
+    """
+    required_orgs: list[str]
+    """The approved organization logins, as configured. Enterprise configuration rather than
+    user data, so it is safe to name in a message or a log line.
+    """
+    denial: str | None = None
+    """A stable kebab-case reason code when refused: `org-not-approved`,
+    `unverifiable-credential`, `policy-undetermined`, `policy-invalid`, `not-signed-in`, or
+    `membership-unknown`. Omitted when allowed. Treat an unrecognized code as a refusal
+    rather than mapping it to an allow: a code this host has not been taught about still
+    denied the credential.
+    """
+    matched_org: str | None = None
+    """The approved organization the account matched, when allowed under a pin."""
+
+    message: str | None = None
+    """A developer-facing explanation of the refusal. Omitted when allowed."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_ForceLoginOrgsDecision':
+        assert isinstance(obj, dict)
+        allowed = from_bool(obj.get("allowed"))
+        enforced = from_bool(obj.get("enforced"))
+        policy_diagnostics = from_list(from_str, obj.get("policyDiagnostics"))
+        required_orgs = from_list(from_str, obj.get("requiredOrgs"))
+        denial = from_union([from_str, from_none], obj.get("denial"))
+        matched_org = from_union([from_str, from_none], obj.get("matchedOrg"))
+        message = from_union([from_str, from_none], obj.get("message"))
+        return _ForceLoginOrgsDecision(allowed, enforced, policy_diagnostics, required_orgs, denial, matched_org, message)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["allowed"] = from_bool(self.allowed)
+        result["enforced"] = from_bool(self.enforced)
+        result["policyDiagnostics"] = from_list(from_str, self.policy_diagnostics)
+        result["requiredOrgs"] = from_list(from_str, self.required_orgs)
+        if self.denial is not None:
+            result["denial"] = from_union([from_str, from_none], self.denial)
+        if self.matched_org is not None:
+            result["matchedOrg"] = from_union([from_str, from_none], self.matched_org)
+        if self.message is not None:
+            result["message"] = from_union([from_str, from_none], self.message)
+        return result
+
+class _AccountLoginProcessResultKind(Enum):
+    DEVICE_CODE = "deviceCode"
+    DISCARDED = "discarded"
+    DONE = "done"
+    OPENED = "opened"
+    PERSISTENCE = "persistence"
+    POLICY = "policy"
+    WEB = "web"
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _ProcessLoginAccount:
+    """An account offered by the original login persistence operation."""
+
+    host: str
+    """The account host."""
+
+    kind: str
+    """The account provider kind."""
+
+    login: str
+    """The account login."""
+
+    selection_id: str
+    """The opaque account selector."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_ProcessLoginAccount':
+        assert isinstance(obj, dict)
+        host = from_str(obj.get("host"))
+        kind = from_str(obj.get("kind"))
+        login = from_str(obj.get("login"))
+        selection_id = from_str(obj.get("selectionId"))
+        return _ProcessLoginAccount(host, kind, login, selection_id)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["host"] = from_str(self.host)
+        result["kind"] = from_str(self.kind)
+        result["login"] = from_str(self.login)
+        result["selectionId"] = from_str(self.selection_id)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class AccountLoginRequest:
@@ -8681,74 +8847,6 @@ class _FolderTrustIsTrustedParams:
             result["configDir"] = from_union([from_str, from_none], self.config_dir)
         return result
 
-# Internal: this type is an internal SDK API and is not part of the public surface.
-# Experimental: this type is part of an experimental API and may change or be removed.
-@dataclass
-class _ForceLoginOrgsDecision:
-    """The verdict of the `forceLoginOrgs` enterprise sign-in pin for one credential. A managed
-    device may pin Copilot to an approved set of GitHub organizations so a developer cannot
-    sign in with a personal — or another enterprise's — account and escape every control that
-    keys off the signed-in identity. A host must refuse to proceed when `allowed` is false;
-    the remaining fields explain the refusal rather than qualifying it.
-    """
-    allowed: bool
-    """Whether the client may proceed. True whenever no pin is in force, so an unmanaged host is
-    never blocked.
-    """
-    enforced: bool
-    """Whether a pin applies at all. Distinguishes "allowed because unmanaged" from "allowed
-    because the account is approved", which a diagnostics surface needs and which also
-    decides whether a bring-your-own-key provider may serve inference.
-    """
-    policy_diagnostics: list[str]
-    """Error-level detail from managed-policy discovery — which file failed to load, which field
-    failed validation. Carried on the decision rather than left to the log because a refusal
-    can exit the process before a log sink exists, which would discard the only actionable
-    diagnostic a misconfigured managed device produces.
-    """
-    required_orgs: list[str]
-    """The approved organization logins, as configured. Enterprise configuration rather than
-    user data, so it is safe to name in a message or a log line.
-    """
-    denial: str | None = None
-    """A stable kebab-case reason code when refused: `org-not-approved`,
-    `unverifiable-credential`, `policy-undetermined`, `policy-invalid`, `not-signed-in`, or
-    `membership-unknown`. Omitted when allowed. Treat an unrecognized code as a refusal
-    rather than mapping it to an allow: a code this host has not been taught about still
-    denied the credential.
-    """
-    matched_org: str | None = None
-    """The approved organization the account matched, when allowed under a pin."""
-
-    message: str | None = None
-    """A developer-facing explanation of the refusal. Omitted when allowed."""
-
-    @staticmethod
-    def from_dict(obj: Any) -> '_ForceLoginOrgsDecision':
-        assert isinstance(obj, dict)
-        allowed = from_bool(obj.get("allowed"))
-        enforced = from_bool(obj.get("enforced"))
-        policy_diagnostics = from_list(from_str, obj.get("policyDiagnostics"))
-        required_orgs = from_list(from_str, obj.get("requiredOrgs"))
-        denial = from_union([from_str, from_none], obj.get("denial"))
-        matched_org = from_union([from_str, from_none], obj.get("matchedOrg"))
-        message = from_union([from_str, from_none], obj.get("message"))
-        return _ForceLoginOrgsDecision(allowed, enforced, policy_diagnostics, required_orgs, denial, matched_org, message)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["allowed"] = from_bool(self.allowed)
-        result["enforced"] = from_bool(self.enforced)
-        result["policyDiagnostics"] = from_list(from_str, self.policy_diagnostics)
-        result["requiredOrgs"] = from_list(from_str, self.required_orgs)
-        if self.denial is not None:
-            result["denial"] = from_union([from_str, from_none], self.denial)
-        if self.matched_org is not None:
-            result["matchedOrg"] = from_union([from_str, from_none], self.matched_org)
-        if self.message is not None:
-            result["message"] = from_union([from_str, from_none], self.message)
-        return result
-
 # Experimental: this type is part of an experimental API and may change or be removed.
 class ForgeProposalChangeType(Enum):
     """Existing persisted file-change classification."""
@@ -9351,6 +9449,56 @@ class _GitHubBranchPullRequestLookupStatus(Enum):
     NO_PR = "no-pr"
     # The credential resolved to no usable token, so the caller must authenticate.
     NO_TOKEN = "no-token"
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _GitHubSecretGistFile:
+    """The text content of one secret gist file."""
+
+    content: str
+    """The complete text content of the file."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_GitHubSecretGistFile':
+        assert isinstance(obj, dict)
+        content = from_str(obj.get("content"))
+        return _GitHubSecretGistFile(content)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["content"] = from_str(self.content)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+# Experimental: this enum is part of an experimental API and may change or be removed.
+class _GitHubSecretGistUseCase(Enum):
+    """The export purpose that selects existing account policy and error messages."""
+    # Export a research report under the existing research account policy.
+    RESEARCH = "research"
+    # Export a session transcript under the existing session account policy.
+    SESSION = "session"
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _GitHubCreateSecretGistResult:
+    """The URL returned by GitHub after it creates the secret gist."""
+
+    url: str
+    """The URL of the new secret gist."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_GitHubCreateSecretGistResult':
+        assert isinstance(obj, dict)
+        url = from_str(obj.get("url"))
+        return _GitHubCreateSecretGistResult(url)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["url"] = from_str(self.url)
+        return result
 
 # Internal: this type is an internal SDK API and is not part of the public surface.
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -12319,6 +12467,10 @@ class _InstructionsDiscoverRepoSourcesRequest:
 class InstructionsDiscoverRequest:
     """Optional project paths to include in instruction discovery."""
 
+    config_dir: str | None = None
+    """Optional configuration root for personal instructions and plugins. Omission retains the
+    connection's root.
+    """
     exclude_host_instructions: bool | None = None
     """When true, omit the host's instruction sources (user/home-level files and plugin rules),
     leaving only repository and working-directory sources. For multitenant deployments.
@@ -12338,13 +12490,16 @@ class InstructionsDiscoverRequest:
     @staticmethod
     def from_dict(obj: Any) -> 'InstructionsDiscoverRequest':
         assert isinstance(obj, dict)
+        config_dir = from_union([from_str, from_none], obj.get("configDir"))
         exclude_host_instructions = from_union([from_bool, from_none], obj.get("excludeHostInstructions"))
         instruction_directories = from_union([lambda x: from_list(from_str, x), from_none], obj.get("instructionDirectories"))
         project_paths = from_union([lambda x: from_list(from_str, x), from_none], obj.get("projectPaths"))
-        return InstructionsDiscoverRequest(exclude_host_instructions, instruction_directories, project_paths)
+        return InstructionsDiscoverRequest(config_dir, exclude_host_instructions, instruction_directories, project_paths)
 
     def to_dict(self) -> dict:
         result: dict = {}
+        if self.config_dir is not None:
+            result["configDir"] = from_union([from_str, from_none], self.config_dir)
         if self.exclude_host_instructions is not None:
             result["excludeHostInstructions"] = from_union([from_bool, from_none], self.exclude_host_instructions)
         if self.instruction_directories is not None:
@@ -14369,6 +14524,11 @@ class MarketplaceRemoveResult:
             result["dependentPlugins"] = from_union([lambda x: from_list(from_str, x), from_none], self.dependent_plugins)
         return result
 
+class MCPAdditionalConfigSourceKind(Enum):
+    """The source format: inline JSON or a host file."""
+    FILE = "file"
+    JSON = "json"
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class MCPAllowedServer:
@@ -14612,6 +14772,61 @@ class MCPCancelSamplingExecutionResult:
         result["cancelled"] = from_bool(self.cancelled)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _MCPComputerUseApplyConfigurationRequest:
+    """Apply the host's Computer Use platform overlay without starting a server."""
+
+    disabled_servers: list[str]
+    """Disabled servers after invocation precedence."""
+
+    enabled_servers: list[str]
+    """Explicitly enabled servers."""
+
+    servers: Any
+    """Complete server map, including provenance and fields unknown to older clients."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPComputerUseApplyConfigurationRequest':
+        assert isinstance(obj, dict)
+        disabled_servers = from_list(from_str, obj.get("disabledServers"))
+        enabled_servers = from_list(from_str, obj.get("enabledServers"))
+        servers = obj.get("servers")
+        return _MCPComputerUseApplyConfigurationRequest(disabled_servers, enabled_servers, servers)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["disabledServers"] = from_list(from_str, self.disabled_servers)
+        result["enabledServers"] = from_list(from_str, self.enabled_servers)
+        result["servers"] = self.servers
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _MCPComputerUseApplyConfigurationResult:
+    """Effective configuration after the existing platform overlay."""
+
+    disabled_servers: list[str]
+    """Effective disabled server names."""
+
+    servers: Any
+    """Server map with only the platform overlay's changes."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPComputerUseApplyConfigurationResult':
+        assert isinstance(obj, dict)
+        disabled_servers = from_list(from_str, obj.get("disabledServers"))
+        servers = obj.get("servers")
+        return _MCPComputerUseApplyConfigurationResult(disabled_servers, servers)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["disabledServers"] = from_list(from_str, self.disabled_servers)
+        result["servers"] = self.servers
+        return result
+
 class MCPSerializableServerConfigType(Enum):
     """Local transport type. Defaults to stdio when omitted."""
     HTTP = "http"
@@ -14629,16 +14844,23 @@ class MCPConfigDisableRequest:
     new sessions skip it. Already-disabled names are ignored. Active sessions keep their
     current connections until they end.
     """
+    config_dir: str | None = None
+    """Optional configuration root for user settings. Omission retains the connection's root;
+    overrides require a trusted host or direct SDK caller.
+    """
 
     @staticmethod
     def from_dict(obj: Any) -> 'MCPConfigDisableRequest':
         assert isinstance(obj, dict)
         names = from_list(from_str, obj.get("names"))
-        return MCPConfigDisableRequest(names)
+        config_dir = from_union([from_none, from_str], obj.get("configDir"))
+        return MCPConfigDisableRequest(names, config_dir)
 
     def to_dict(self) -> dict:
         result: dict = {}
         result["names"] = from_list(from_str, self.names)
+        if self.config_dir is not None:
+            result["configDir"] = from_union([from_none, from_str], self.config_dir)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -14650,16 +14872,65 @@ class MCPConfigEnableRequest:
     """Names of MCP servers to enable. Each server is removed from the persisted disabled list
     so new sessions spawn it. Unknown or already-enabled names are ignored.
     """
+    config_dir: str | None = None
+    """Optional configuration root for user settings. Omission retains the connection's root;
+    overrides require a trusted host or direct SDK caller.
+    """
 
     @staticmethod
     def from_dict(obj: Any) -> 'MCPConfigEnableRequest':
         assert isinstance(obj, dict)
         names = from_list(from_str, obj.get("names"))
-        return MCPConfigEnableRequest(names)
+        config_dir = from_union([from_none, from_str], obj.get("configDir"))
+        return MCPConfigEnableRequest(names, config_dir)
 
     def to_dict(self) -> dict:
         result: dict = {}
         result["names"] = from_list(from_str, self.names)
+        if self.config_dir is not None:
+            result["configDir"] = from_union([from_none, from_str], self.config_dir)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _MCPConfigForConfigDirRequest:
+    """Selects an explicit user MCP configuration root without changing the connection owner."""
+
+    config_dir: str
+    """Configuration root containing the user MCP document."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPConfigForConfigDirRequest':
+        assert isinstance(obj, dict)
+        config_dir = from_str(obj.get("configDir"))
+        return _MCPConfigForConfigDirRequest(config_dir)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["configDir"] = from_str(self.config_dir)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class MCPConfigListRequest:
+    """Optional configuration root for user MCP servers. Omission retains the connection's root."""
+
+    config_dir: str | None = None
+    """Configuration root containing the user MCP document. Only trusted hosts or direct SDK
+    callers can override it.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'MCPConfigListRequest':
+        assert isinstance(obj, dict)
+        config_dir = from_union([from_str, from_none], obj.get("configDir"))
+        return MCPConfigListRequest(config_dir)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        if self.config_dir is not None:
+            result["configDir"] = from_union([from_str, from_none], self.config_dir)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -14673,18 +14944,47 @@ class MCPConfigRemoveRequest:
     auth_client_id_metadata_url: str | None = None
     """OAuth Client ID Metadata Document URL whose persisted credentials should also be removed."""
 
+    config_dir: str | None = None
+    """Configuration root for the user MCP document and credentials. Omission retains the
+    connection's root; overrides require a trusted host or direct SDK caller.
+    """
+
     @staticmethod
     def from_dict(obj: Any) -> 'MCPConfigRemoveRequest':
         assert isinstance(obj, dict)
         name = from_str(obj.get("name"))
         auth_client_id_metadata_url = from_union([from_str, from_none], obj.get("authClientIdMetadataUrl"))
-        return MCPConfigRemoveRequest(name, auth_client_id_metadata_url)
+        config_dir = from_union([from_str, from_none], obj.get("configDir"))
+        return MCPConfigRemoveRequest(name, auth_client_id_metadata_url, config_dir)
 
     def to_dict(self) -> dict:
         result: dict = {}
         result["name"] = from_str(self.name)
         if self.auth_client_id_metadata_url is not None:
             result["authClientIdMetadataUrl"] = from_union([from_str, from_none], self.auth_client_id_metadata_url)
+        if self.config_dir is not None:
+            result["configDir"] = from_union([from_str, from_none], self.config_dir)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _MCPConfigUserServerNamesResult:
+    """Fresh user MCP server names, including invalid entries but excluding installation-owned
+    entries. This read does not change the validated configuration cache.
+    """
+    names: list[str]
+    """User-owned persisted server names, including entries that validation skips."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPConfigUserServerNamesResult':
+        assert isinstance(obj, dict)
+        names = from_list(from_str, obj.get("names"))
+        return _MCPConfigUserServerNamesResult(names)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["names"] = from_list(from_str, self.names)
         return result
 
 # Internal: this type is an internal SDK API and is not part of the public surface.
@@ -15080,6 +15380,147 @@ class MCPFilteredServer:
         result["reason"] = from_str(self.reason)
         if self.redacted_reason is not None:
             result["redactedReason"] = from_union([from_str, from_none], self.redacted_reason)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _MCPGitHubInvocationToolOptions:
+    """One invocation's GitHub MCP tool overrides."""
+
+    additional_tools: list[str] | None = None
+    """Additional tools."""
+
+    additional_toolsets: list[str] | None = None
+    """Additional toolsets."""
+
+    disable_form_deferral: bool | None = None
+    """Override form deferral when the shared tool resolver supports it."""
+
+    enable_all_tools: bool | None = None
+    """Expose all supported tools."""
+
+    enable_insiders_mode: bool | None = None
+    """Select the insiders endpoint."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPGitHubInvocationToolOptions':
+        assert isinstance(obj, dict)
+        additional_tools = from_union([lambda x: from_list(from_str, x), from_none], obj.get("additionalTools"))
+        additional_toolsets = from_union([lambda x: from_list(from_str, x), from_none], obj.get("additionalToolsets"))
+        disable_form_deferral = from_union([from_bool, from_none], obj.get("disableFormDeferral"))
+        enable_all_tools = from_union([from_bool, from_none], obj.get("enableAllTools"))
+        enable_insiders_mode = from_union([from_bool, from_none], obj.get("enableInsidersMode"))
+        return _MCPGitHubInvocationToolOptions(additional_tools, additional_toolsets, disable_form_deferral, enable_all_tools, enable_insiders_mode)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        if self.additional_tools is not None:
+            result["additionalTools"] = from_union([lambda x: from_list(from_str, x), from_none], self.additional_tools)
+        if self.additional_toolsets is not None:
+            result["additionalToolsets"] = from_union([lambda x: from_list(from_str, x), from_none], self.additional_toolsets)
+        if self.disable_form_deferral is not None:
+            result["disableFormDeferral"] = from_union([from_bool, from_none], self.disable_form_deferral)
+        if self.enable_all_tools is not None:
+            result["enableAllTools"] = from_union([from_bool, from_none], self.enable_all_tools)
+        if self.enable_insiders_mode is not None:
+            result["enableInsidersMode"] = from_union([from_bool, from_none], self.enable_insiders_mode)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _MCPInvocationAudience:
+    """Feature populations for a sessionless capability inspection."""
+
+    is_experimental: bool
+    """Whether experimental capabilities are enabled."""
+
+    is_staff: bool
+    """Whether this installation belongs to staff."""
+
+    is_team: bool
+    """Whether team capabilities are enabled."""
+
+    streamer_mode: bool
+    """Whether streamer mode is active."""
+
+    first_launch_at_millis: float | None = None
+    """First launch time in Unix milliseconds."""
+
+    is_staff_github: bool | None = None
+    """Whether this installation belongs to GitHub staff."""
+
+    is_staff_microsoft: bool | None = None
+    """Whether this installation belongs to Microsoft staff."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPInvocationAudience':
+        assert isinstance(obj, dict)
+        is_experimental = from_bool(obj.get("isExperimental"))
+        is_staff = from_bool(obj.get("isStaff"))
+        is_team = from_bool(obj.get("isTeam"))
+        streamer_mode = from_bool(obj.get("streamerMode"))
+        first_launch_at_millis = from_union([from_float, from_none], obj.get("firstLaunchAtMillis"))
+        is_staff_github = from_union([from_bool, from_none], obj.get("isStaffGithub"))
+        is_staff_microsoft = from_union([from_bool, from_none], obj.get("isStaffMicrosoft"))
+        return _MCPInvocationAudience(is_experimental, is_staff, is_team, streamer_mode, first_launch_at_millis, is_staff_github, is_staff_microsoft)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["isExperimental"] = from_bool(self.is_experimental)
+        result["isStaff"] = from_bool(self.is_staff)
+        result["isTeam"] = from_bool(self.is_team)
+        result["streamerMode"] = from_bool(self.streamer_mode)
+        if self.first_launch_at_millis is not None:
+            result["firstLaunchAtMillis"] = from_union([to_float, from_none], self.first_launch_at_millis)
+        if self.is_staff_github is not None:
+            result["isStaffGithub"] = from_union([from_bool, from_none], self.is_staff_github)
+        if self.is_staff_microsoft is not None:
+            result["isStaffMicrosoft"] = from_union([from_bool, from_none], self.is_staff_microsoft)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+class OptionsUpdateToolFilterPrecedence(Enum):
+    """Controls how availableTools (allowlist) and excludedTools (denylist) combine when both
+    are set.
+    """
+    # If availableTools is set, it is the only constraint that applies (excludedTools is ignored). Explicitly opts into allowlist precedence.
+    AVAILABLE = "available"
+    # A tool is enabled if and only if it matches the allowlist (or the allowlist is unset) AND it does not match the denylist. Default for new sessions.
+    EXCLUDED = "excluded"
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _MCPGitHubResolveInvocationResult:
+    """A secret-free GitHub descriptor, an ordinary signed-out result, or a bounded degraded
+    result.
+    """
+    timed_out: bool
+    """Whether the existing two-second resolution budget expired."""
+
+    server: Any = None
+    """Built-in descriptor without authentication headers; absent when unavailable."""
+
+    warning: str | None = None
+    """Resolution failure detail, distinct from an ordinary signed-out result."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPGitHubResolveInvocationResult':
+        assert isinstance(obj, dict)
+        timed_out = from_bool(obj.get("timedOut"))
+        server = obj.get("server")
+        warning = from_union([from_str, from_none], obj.get("warning"))
+        return _MCPGitHubResolveInvocationResult(timed_out, server, warning)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["timedOut"] = from_bool(self.timed_out)
+        if self.server is not None:
+            result["server"] = self.server
+        if self.warning is not None:
+            result["warning"] = from_union([from_str, from_none], self.warning)
         return result
 
 class MCPHeadersHandlePendingHeadersRefreshRequestKind(Enum):
@@ -16387,16 +16828,6 @@ class MCPServerConfigStdioType(Enum):
     # Server communicates over stdio with a local child process.
     STDIO = "stdio"
 
-# Experimental: this type is part of an experimental API and may change or be removed.
-class OptionsUpdateToolFilterPrecedence(Enum):
-    """Controls how availableTools (allowlist) and excludedTools (denylist) combine when both
-    are set.
-    """
-    # If availableTools is set, it is the only constraint that applies (excludedTools is ignored). Explicitly opts into allowlist precedence.
-    AVAILABLE = "available"
-    # A tool is enabled if and only if it matches the allowlist (or the allowlist is unset) AND it does not match the denylist. Default for new sessions.
-    EXCLUDED = "excluded"
-
 # Internal: this type is an internal SDK API and is not part of the public surface.
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
@@ -16468,6 +16899,95 @@ class _MCPUnregisterExternalClientRequest:
         result: dict = {}
         result["serverName"] = from_str(self.server_name)
         return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+class SemanticMemoryConflictPolicy(Enum):
+    """Conflict handling for a semantic memory import."""
+    # Report duplicate or conflicting memories as failures.
+    ERROR = "error"
+    # Skip duplicate or conflicting memories.
+    SKIP = "skip"
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SemanticImportDiagnostic:
+    """One actionable semantic import diagnostic."""
+
+    code: str
+    """Stable diagnostic code."""
+
+    line: int
+    """One-based input line."""
+
+    message: str
+    """Explanation of the invalid input or failed operation."""
+
+    external_id: str | None = None
+    """External record identifier, when present."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SemanticImportDiagnostic':
+        assert isinstance(obj, dict)
+        code = from_str(obj.get("code"))
+        line = from_int(obj.get("line"))
+        message = from_str(obj.get("message"))
+        external_id = from_union([from_str, from_none], obj.get("externalId"))
+        return SemanticImportDiagnostic(code, line, message, external_id)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["code"] = from_str(self.code)
+        result["line"] = from_int(self.line)
+        result["message"] = from_str(self.message)
+        if self.external_id is not None:
+            result["externalId"] = from_union([from_str, from_none], self.external_id)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SemanticMemoryImportCounts:
+    """Number of submitted memories and their outcomes."""
+
+    failed: int
+    """Failed records."""
+
+    imported: int
+    """Successfully stored records."""
+
+    skipped: int
+    """Duplicate or conflicting records skipped by policy."""
+
+    total: int
+    """Total validated input records."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SemanticMemoryImportCounts':
+        assert isinstance(obj, dict)
+        failed = from_int(obj.get("failed"))
+        imported = from_int(obj.get("imported"))
+        skipped = from_int(obj.get("skipped"))
+        total = from_int(obj.get("total"))
+        return SemanticMemoryImportCounts(failed, imported, skipped, total)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["failed"] = from_int(self.failed)
+        result["imported"] = from_int(self.imported)
+        result["skipped"] = from_int(self.skipped)
+        result["total"] = from_int(self.total)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+class SemanticMemoryImportItemStatus(Enum):
+    """Outcome for one validated semantic memory record."""
+    # Validation or submission failed for this record.
+    FAILED = "failed"
+    # The memory service accepted the record.
+    IMPORTED = "imported"
+    # The selected conflict policy skipped the record.
+    SKIPPED = "skipped"
+    # The dry run accepted the record without submission.
+    VALIDATED = "validated"
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 # Experimental: this enum is part of an experimental API and may change or be removed.
@@ -17285,6 +17805,62 @@ class _ModelClearStartupSeedResult:
         result["cleared"] = from_bool(self.cleared)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _ModelGenerateBranchSlugRequest:
+    """Conversation and changes for a utility-model branch slug."""
+
+    change_summary: str
+    """Summary of the changes the branch will contain."""
+
+    conversation: list[str]
+    """Conversation messages in their original order."""
+
+    fallback_prefix: str
+    """Prefix for the established derived-name fallback."""
+
+    task_prompt: str | None = None
+    """Original task, when available."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_ModelGenerateBranchSlugRequest':
+        assert isinstance(obj, dict)
+        change_summary = from_str(obj.get("changeSummary"))
+        conversation = from_list(from_str, obj.get("conversation"))
+        fallback_prefix = from_str(obj.get("fallbackPrefix"))
+        task_prompt = from_union([from_str, from_none], obj.get("taskPrompt"))
+        return _ModelGenerateBranchSlugRequest(change_summary, conversation, fallback_prefix, task_prompt)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["changeSummary"] = from_str(self.change_summary)
+        result["conversation"] = from_list(from_str, self.conversation)
+        result["fallbackPrefix"] = from_str(self.fallback_prefix)
+        if self.task_prompt is not None:
+            result["taskPrompt"] = from_union([from_str, from_none], self.task_prompt)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _ModelGenerateBranchSlugResult:
+    """A generated or derived branch slug."""
+
+    slug: str
+    """Branch slug under the runtime's existing fallback policy."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_ModelGenerateBranchSlugResult':
+        assert isinstance(obj, dict)
+        slug = from_str(obj.get("slug"))
+        return _ModelGenerateBranchSlugResult(slug)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["slug"] = from_str(self.slug)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class ModelGetReasoningSummariesResult:
@@ -17824,6 +18400,32 @@ class MoveMCPLoadingToBackgroundResult:
     def to_dict(self) -> dict:
         result: dict = {}
         result["movedToBackground"] = from_bool(self.moved_to_background)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _NameGenerateRequest:
+    """Input for utility-model session name generation."""
+
+    user_message: str
+    """Conversation text from which to derive a name."""
+
+    manual: bool | None = None
+    """Whether a user explicitly requested the name. Defaults to false."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_NameGenerateRequest':
+        assert isinstance(obj, dict)
+        user_message = from_str(obj.get("userMessage"))
+        manual = from_union([from_bool, from_none], obj.get("manual"))
+        return _NameGenerateRequest(user_message, manual)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["userMessage"] = from_str(self.user_message)
+        if self.manual is not None:
+            result["manual"] = from_union([from_bool, from_none], self.manual)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -19502,6 +20104,30 @@ class PluginActivationStatus(Enum):
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
+class PluginBuiltinDiscoverResult:
+    """Bundled plugin records and diagnostics from the original manifest scanner."""
+
+    plugins: list[Any]
+    """Scanned bundled records in host precedence order."""
+
+    warnings: list[str]
+    """Manifest and filesystem diagnostics, including a missing required bundle."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'PluginBuiltinDiscoverResult':
+        assert isinstance(obj, dict)
+        plugins = from_list(lambda x: x, obj.get("plugins"))
+        warnings = from_list(from_str, obj.get("warnings"))
+        return PluginBuiltinDiscoverResult(plugins, warnings)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["plugins"] = from_list(lambda x: x, self.plugins)
+        result["warnings"] = from_list(from_str, self.warnings)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
 class PluginCheckUpdateRequest:
     """Identifies a plugin and its configured marketplace without accepting configuration or
     policy overrides.
@@ -19523,6 +20149,56 @@ class PluginCheckUpdateRequest:
         result: dict = {}
         result["marketplace"] = from_str(self.marketplace)
         result["name"] = from_str(self.name)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PluginInspectInventoryRequest:
+    """Inspects persisted and live plugins under an explicit effective configuration without
+    changing the existing user-only plugins.list API.
+    """
+    config_override: Any
+    """Trusted caller-composed read configuration, not persisted by inspection."""
+
+    seed_enabled_plugins_from_installed: bool
+    """Seeds pre-migration enablement from installed records below explicit overrides."""
+
+    working_directory: str
+    """Working directory for repository overlay and live marketplace resolution."""
+
+    include_uninstalled: bool | None = None
+    """Includes pending managed plugins by default. False excludes uninstalled rows before
+    source merging.
+    """
+    managed_settings: Any = None
+    """Effective policy for read-only inspection; mutation guards retain their own authority."""
+
+    plugin_directories: list[str] | None = None
+    """Additional plugin directories in host precedence order."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PluginInspectInventoryRequest':
+        assert isinstance(obj, dict)
+        config_override = obj.get("configOverride")
+        seed_enabled_plugins_from_installed = from_bool(obj.get("seedEnabledPluginsFromInstalled"))
+        working_directory = from_str(obj.get("workingDirectory"))
+        include_uninstalled = from_union([from_bool, from_none], obj.get("includeUninstalled"))
+        managed_settings = obj.get("managedSettings")
+        plugin_directories = from_union([lambda x: from_list(from_str, x), from_none], obj.get("pluginDirectories"))
+        return _PluginInspectInventoryRequest(config_override, seed_enabled_plugins_from_installed, working_directory, include_uninstalled, managed_settings, plugin_directories)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["configOverride"] = self.config_override
+        result["seedEnabledPluginsFromInstalled"] = from_bool(self.seed_enabled_plugins_from_installed)
+        result["workingDirectory"] = from_str(self.working_directory)
+        if self.include_uninstalled is not None:
+            result["includeUninstalled"] = from_union([from_bool, from_none], self.include_uninstalled)
+        if self.managed_settings is not None:
+            result["managedSettings"] = self.managed_settings
+        if self.plugin_directories is not None:
+            result["pluginDirectories"] = from_union([lambda x: from_list(from_str, x), from_none], self.plugin_directories)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -19699,6 +20375,105 @@ class PluginMarketplaceSearchRequest:
             result["forceRefresh"] = from_union([from_bool, from_none], self.force_refresh)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PluginPolicyDiagnostic:
+    """A diagnostic from plugin policy resolution."""
+
+    level: str
+    """Diagnostic severity: debug, info, warning, or error."""
+
+    message: str
+    """Diagnostic text for the host's private log."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PluginPolicyDiagnostic':
+        assert isinstance(obj, dict)
+        level = from_str(obj.get("level"))
+        message = from_str(obj.get("message"))
+        return _PluginPolicyDiagnostic(level, message)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["level"] = from_str(self.level)
+        result["message"] = from_str(self.message)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PluginSourcesResolveRequest:
+    """Resolves active plugin sources with runtime-owned folder trust and managed policy."""
+
+    config_dir: str
+    """Configuration root for user settings and persisted installations."""
+
+    working_directory: str
+    """Working directory for trusted repository overlays and live marketplaces."""
+
+    plugin_directories: list[str] | None = None
+    """Explicit plugin directories in host precedence order."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PluginSourcesResolveRequest':
+        assert isinstance(obj, dict)
+        config_dir = from_str(obj.get("configDir"))
+        working_directory = from_str(obj.get("workingDirectory"))
+        plugin_directories = from_union([lambda x: from_list(from_str, x), from_none], obj.get("pluginDirectories"))
+        return _PluginSourcesResolveRequest(config_dir, working_directory, plugin_directories)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["configDir"] = from_str(self.config_dir)
+        result["workingDirectory"] = from_str(self.working_directory)
+        if self.plugin_directories is not None:
+            result["pluginDirectories"] = from_union([lambda x: from_list(from_str, x), from_none], self.plugin_directories)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PluginSourcesResolveResult:
+    """Active plugins and the separate persisted inventory, without persisting live directory
+    records.
+    """
+    persisted_plugins: list[Any]
+    """Persisted ambient records, including disabled or shadowed installations."""
+
+    plugins: list[Any]
+    """Active records, including trusted live marketplaces and explicit directories."""
+
+    warnings: list[str]
+    """Scanner and live-marketplace warnings for this exact source pass."""
+
+    live_plugins: list[Any] | None = None
+    """Live directory records, including inactive records that still own their names."""
+
+    live_tier_known: bool | None = None
+    """Whether this pass confirmed the live tier instead of using persisted fallback."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PluginSourcesResolveResult':
+        assert isinstance(obj, dict)
+        persisted_plugins = from_list(lambda x: x, obj.get("persistedPlugins"))
+        plugins = from_list(lambda x: x, obj.get("plugins"))
+        warnings = from_list(from_str, obj.get("warnings"))
+        live_plugins = from_union([lambda x: from_list(lambda x: x, x), from_none], obj.get("livePlugins"))
+        live_tier_known = from_union([from_bool, from_none], obj.get("liveTierKnown"))
+        return _PluginSourcesResolveResult(persisted_plugins, plugins, warnings, live_plugins, live_tier_known)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["persistedPlugins"] = from_list(lambda x: x, self.persisted_plugins)
+        result["plugins"] = from_list(lambda x: x, self.plugins)
+        result["warnings"] = from_list(from_str, self.warnings)
+        if self.live_plugins is not None:
+            result["livePlugins"] = from_union([lambda x: from_list(lambda x: x, x), from_none], self.live_plugins)
+        if self.live_tier_known is not None:
+            result["liveTierKnown"] = from_union([from_bool, from_none], self.live_tier_known)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class PluginUpdateCheckResult:
@@ -19802,6 +20577,31 @@ class PluginsActivateRequest:
         result["name"] = from_str(self.name)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PluginsBuiltinResolveActivationResult:
+    """Browser activation after the managed-over-user whole-plugin policy."""
+
+    browser_enabled: bool
+    """Whether the bundled Browser may contribute MCP servers."""
+
+    timed_out: bool
+    """Whether policy resolution exceeded the existing two-second budget."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PluginsBuiltinResolveActivationResult':
+        assert isinstance(obj, dict)
+        browser_enabled = from_bool(obj.get("browserEnabled"))
+        timed_out = from_bool(obj.get("timedOut"))
+        return _PluginsBuiltinResolveActivationResult(browser_enabled, timed_out)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["browserEnabled"] = from_bool(self.browser_enabled)
+        result["timedOut"] = from_bool(self.timed_out)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class PluginsBuiltinSetRequest:
@@ -19821,6 +20621,41 @@ class PluginsBuiltinSetRequest:
     def to_dict(self) -> dict:
         result: dict = {}
         result["paths"] = from_list(from_str, self.paths)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class PluginsInvocationRequest:
+    """Optional workspace settings for a plugin catalog or bulk update through the original
+    caller's runtime. Omission retains the server's configuration.
+    """
+    config_override: Any = None
+    """Effective user and repository settings for this invocation. Runtime-owned managed
+    restrictions still apply.
+    """
+    managed_settings: Any = None
+    """Managed settings supplied by the host for canonical plugin policy evaluation. This value
+    does not select a credential owner.
+    """
+    working_directory: str | None = None
+    """Working directory whose repository settings and plugin sources apply to this invocation."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'PluginsInvocationRequest':
+        assert isinstance(obj, dict)
+        config_override = obj.get("configOverride")
+        managed_settings = obj.get("managedSettings")
+        working_directory = from_union([from_str, from_none], obj.get("workingDirectory"))
+        return PluginsInvocationRequest(config_override, managed_settings, working_directory)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        if self.config_override is not None:
+            result["configOverride"] = self.config_override
+        if self.managed_settings is not None:
+            result["managedSettings"] = self.managed_settings
+        if self.working_directory is not None:
+            result["workingDirectory"] = from_union([from_str, from_none], self.working_directory)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -19946,6 +20781,67 @@ class PluginsMarketplacesRemoveRequest:
         result["name"] = from_str(self.name)
         if self.force is not None:
             result["force"] = from_union([from_bool, from_none], self.force)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _ProcessLoginContext:
+    """The immutable configuration for one pre-session authentication owner."""
+
+    environment: dict[str, str]
+    """The host environment snapshot used throughout credential resolution."""
+
+    config_dir: str | None = None
+    """The original configuration directory. Omission preserves the default root."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_ProcessLoginContext':
+        assert isinstance(obj, dict)
+        environment = from_dict(from_str, obj.get("environment"))
+        config_dir = from_union([from_str, from_none], obj.get("configDir"))
+        return _ProcessLoginContext(environment, config_dir)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["environment"] = from_dict(from_str, self.environment)
+        if self.config_dir is not None:
+            result["configDir"] = from_union([from_str, from_none], self.config_dir)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _ProcessLoginPolicyContext:
+    """The host facts used for the post-login organization policy evaluation."""
+
+    environment: dict[str, str]
+    """The current host environment, including policy provenance restrictions."""
+
+    home_directory: str
+    """The original user's home directory."""
+
+    platform: str
+    """The original host platform, such as win32, darwin, or linux."""
+
+    process_version: str
+    """The original host's Node.js version for the existing policy user agent."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_ProcessLoginPolicyContext':
+        assert isinstance(obj, dict)
+        environment = from_dict(from_str, obj.get("environment"))
+        home_directory = from_str(obj.get("homeDirectory"))
+        platform = from_str(obj.get("platform"))
+        process_version = from_str(obj.get("processVersion"))
+        return _ProcessLoginPolicyContext(environment, home_directory, platform, process_version)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["environment"] = from_dict(from_str, self.environment)
+        result["homeDirectory"] = from_str(self.home_directory)
+        result["platform"] = from_str(self.platform)
+        result["processVersion"] = from_str(self.process_version)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -21567,6 +22463,66 @@ class _RepoSettingsWriteKeyRequest:
             result["value"] = self.value
         return result
 
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class RepositoryDisabledNamesResult:
+    """The advisory repository disable list. A read failure returns no names and a diagnostic,
+    rather than blocking a listing or mutation.
+    """
+    names: list[str]
+    """Repository-owned names, excluding the user contribution."""
+
+    warning: str | None = None
+    """Debug diagnostic for a repository that could not be inspected."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'RepositoryDisabledNamesResult':
+        assert isinstance(obj, dict)
+        names = from_list(from_str, obj.get("names"))
+        warning = from_union([from_str, from_none], obj.get("warning"))
+        return RepositoryDisabledNamesResult(names, warning)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["names"] = from_list(from_str, self.names)
+        if self.warning is not None:
+            result["warning"] = from_union([from_str, from_none], self.warning)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class ResearchStoredReport:
+    """A stored Markdown research report in the bound session's authoritative state directory."""
+
+    file_path: str
+    """The full report path on the runtime host."""
+
+    id: str
+    """The file name without its final .md extension."""
+
+    timestamp: str
+    """The file modification time as a UTC ISO timestamp."""
+
+    topic: str
+    """The identifier with hyphens replaced by spaces."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'ResearchStoredReport':
+        assert isinstance(obj, dict)
+        file_path = from_str(obj.get("filePath"))
+        id = from_str(obj.get("id"))
+        timestamp = from_str(obj.get("timestamp"))
+        topic = from_str(obj.get("topic"))
+        return ResearchStoredReport(file_path, id, timestamp, topic)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["filePath"] = from_str(self.file_path)
+        result["id"] = from_str(self.id)
+        result["timestamp"] = from_str(self.timestamp)
+        result["topic"] = from_str(self.topic)
+        return result
+
 class ResponseFormatType(Enum):
     """Output format discriminator. Currently only json_schema is supported."""
     JSON_SCHEMA = "json_schema"
@@ -22721,42 +23677,6 @@ class SandboxSessionState:
         result["incarnation"] = from_int(self.incarnation)
         result["revision"] = from_int(self.revision)
         result["sessionOverride"] = from_union([from_bool, from_none], self.session_override)
-        return result
-
-# Experimental: this type is part of an experimental API and may change or be removed.
-@dataclass
-class UserSettingsHostContext:
-    """The filesystem and environment facts a user-settings file is resolved from. Passed
-    explicitly rather than read from the runtime's own process, so a host whose configuration
-    directory differs from its process environment resolves the file it means.
-    """
-    environment: dict[str, Any]
-    """The host's environment variables. `COPILOT_HOME` is read from here, as are the variables
-    a settings hook may expand.
-    """
-    home_directory: str
-    """The user's home directory, used when neither a configuration directory nor `COPILOT_HOME`
-    is set.
-    """
-    config_dir: str | None = None
-    """The Copilot configuration directory, when the host set one. Takes precedence over
-    `COPILOT_HOME` and the home directory.
-    """
-
-    @staticmethod
-    def from_dict(obj: Any) -> 'UserSettingsHostContext':
-        assert isinstance(obj, dict)
-        environment = from_dict(lambda x: x, obj.get("environment"))
-        home_directory = from_str(obj.get("homeDirectory"))
-        config_dir = from_union([from_str, from_none], obj.get("configDir"))
-        return UserSettingsHostContext(environment, home_directory, config_dir)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["environment"] = from_dict(lambda x: x, self.environment)
-        result["homeDirectory"] = from_str(self.home_directory)
-        if self.config_dir is not None:
-            result["configDir"] = from_union([from_str, from_none], self.config_dir)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -24004,6 +24924,27 @@ class SessionEventPublishResult:
 
 # Internal: this type is an internal SDK API and is not part of the public surface.
 # Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionExtensionsSetManagementToolsEnabledRequest:
+    """Updates the original host's live management-tool gate without reinstalling its extension
+    service.
+    """
+    enabled: bool
+    """Whether the host permits extension management tools."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionExtensionsSetManagementToolsEnabledRequest':
+        assert isinstance(obj, dict)
+        enabled = from_bool(obj.get("enabled"))
+        return _SessionExtensionsSetManagementToolsEnabledRequest(enabled)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["enabled"] = from_bool(self.enabled)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
 class _SessionFeatureFlagsMode(Enum):
     # Retains the CLI assignment source and its refresh lifecycle.
     CLI = "cli"
@@ -25103,6 +26044,45 @@ class SessionMCPIDEStateResult:
 # Internal: this type is an internal SDK API and is not part of the public surface.
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
+class _SessionMCPInspectConfigurationRequest:
+    """Inspects MCP source configuration without starting servers. The bound session owns
+    workspace trust.
+    """
+    working_directory: str
+    """Directory whose workspace sources to inspect."""
+
+    additional_config: Any = None
+    """Additional host configuration, used only when includeSessionSources is true."""
+
+    explicit_plugins: list[Any] | None = None
+    """Explicit host-mounted plugin records, without claiming folder trust or managed policy."""
+
+    include_session_sources: bool | None = None
+    """Include the matching session activation snapshot and additional configuration."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionMCPInspectConfigurationRequest':
+        assert isinstance(obj, dict)
+        working_directory = from_str(obj.get("workingDirectory"))
+        additional_config = obj.get("additionalConfig")
+        explicit_plugins = from_union([lambda x: from_list(lambda x: x, x), from_none], obj.get("explicitPlugins"))
+        include_session_sources = from_union([from_bool, from_none], obj.get("includeSessionSources"))
+        return _SessionMCPInspectConfigurationRequest(working_directory, additional_config, explicit_plugins, include_session_sources)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["workingDirectory"] = from_str(self.working_directory)
+        if self.additional_config is not None:
+            result["additionalConfig"] = self.additional_config
+        if self.explicit_plugins is not None:
+            result["explicitPlugins"] = from_union([lambda x: from_list(lambda x: x, x), from_none], self.explicit_plugins)
+        if self.include_session_sources is not None:
+            result["includeSessionSources"] = from_union([from_bool, from_none], self.include_session_sources)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
 class _SessionMCPOauthAuthenticateResult:
     """Token projection for the existing host-delegated provider."""
 
@@ -25308,6 +26288,62 @@ class SessionModelDescribeLoadErrorRequest:
             result["wireErrorJson"] = from_union([from_str, from_none], self.wire_error_json)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionModelGenerateBranchSlugRequest:
+    """Conversation and changes for a utility-model branch slug."""
+
+    change_summary: str
+    """Summary of the changes the branch will contain."""
+
+    conversation: list[str]
+    """Conversation messages in their original order."""
+
+    fallback_prefix: str
+    """Prefix for the established derived-name fallback."""
+
+    task_prompt: str | None = None
+    """Original task, when available."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionModelGenerateBranchSlugRequest':
+        assert isinstance(obj, dict)
+        change_summary = from_str(obj.get("changeSummary"))
+        conversation = from_list(from_str, obj.get("conversation"))
+        fallback_prefix = from_str(obj.get("fallbackPrefix"))
+        task_prompt = from_union([from_str, from_none], obj.get("taskPrompt"))
+        return _SessionModelGenerateBranchSlugRequest(change_summary, conversation, fallback_prefix, task_prompt)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["changeSummary"] = from_str(self.change_summary)
+        result["conversation"] = from_list(from_str, self.conversation)
+        result["fallbackPrefix"] = from_str(self.fallback_prefix)
+        if self.task_prompt is not None:
+            result["taskPrompt"] = from_union([from_str, from_none], self.task_prompt)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionModelGenerateBranchSlugResult:
+    """A generated or derived branch slug."""
+
+    slug: str
+    """Branch slug under the runtime's existing fallback policy."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionModelGenerateBranchSlugResult':
+        assert isinstance(obj, dict)
+        slug = from_str(obj.get("slug"))
+        return _SessionModelGenerateBranchSlugResult(slug)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["slug"] = from_str(self.slug)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class SessionModelListRequest:
@@ -25325,6 +26361,42 @@ class SessionModelListRequest:
         if self.skip_cache is not None:
             result["skipCache"] = from_union([from_bool, from_none], self.skip_cache)
         return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionNameGenerateRequest:
+    """Input for utility-model session name generation."""
+
+    user_message: str
+    """Conversation text from which to derive a name."""
+
+    manual: bool | None = None
+    """Whether a user explicitly requested the name. Defaults to false."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionNameGenerateRequest':
+        assert isinstance(obj, dict)
+        user_message = from_str(obj.get("userMessage"))
+        manual = from_union([from_bool, from_none], obj.get("manual"))
+        return _SessionNameGenerateRequest(user_message, manual)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["userMessage"] = from_str(self.user_message)
+        if self.manual is not None:
+            result["manual"] = from_union([from_bool, from_none], self.manual)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+# Experimental: this enum is part of an experimental API and may change or be removed.
+class _UtilityPromptResultKind(Enum):
+    """Availability of the utility-model result."""
+    # Generation produced a value.
+    SUCCESS = "success"
+    # Generation could not produce a value.
+    UNAVAILABLE = "unavailable"
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
@@ -25686,6 +26758,42 @@ class SessionPermissionsManagedReviewRequiredRequest:
     def to_dict(self) -> dict:
         result: dict = {}
         result["request"] = self.request
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionPersistenceBarrierResult:
+    """Acknowledges completion of one original-host persistence barrier."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionPersistenceBarrierResult':
+        assert isinstance(obj, dict)
+        return _SessionPersistenceBarrierResult()
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionPersistenceFlushRequest:
+    """Flushes durable session state through its original runtime and client owners."""
+
+    force: bool | None = None
+    """Persist an otherwise empty session when true. Defaults to false."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionPersistenceFlushRequest':
+        assert isinstance(obj, dict)
+        force = from_union([from_bool, from_none], obj.get("force"))
+        return _SessionPersistenceFlushRequest(force)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        if self.force is not None:
+            result["force"] = from_union([from_bool, from_none], self.force)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -26589,6 +27697,32 @@ class SessionSizes:
     def to_dict(self) -> dict:
         result: dict = {}
         result["sizes"] = from_dict(from_int, self.sizes)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionSkillResourceInstallRequest:
+    """Install a skill with the selected session's profile and working directory."""
+
+    source: str
+    """Local definition, directory, or HTTPS source."""
+
+    project: bool | None = None
+    """Install into the preferred project directory instead of personal storage."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionSkillResourceInstallRequest':
+        assert isinstance(obj, dict)
+        source = from_str(obj.get("source"))
+        project = from_union([from_bool, from_none], obj.get("project"))
+        return _SessionSkillResourceInstallRequest(source, project)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["source"] = from_str(self.source)
+        if self.project is not None:
+            result["project"] = from_union([from_bool, from_none], self.project)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -27573,6 +28707,65 @@ class SessionsHasEventsResult:
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
+class SessionsImportSemanticRequest:
+    """Semantic conversation input for local import or validation."""
+
+    default_working_directory: str
+    """Default working directory when the document supplies none."""
+
+    input_path: str
+    """Absolute input path used to resolve attachment references."""
+
+    jsonl: str
+    """Semantic session JSONL, not native session events."""
+
+    client_name: str | None = None
+    """Name of the embedding client."""
+
+    dry_run: bool | None = None
+    """Validate without authentication, network access, or writes."""
+
+    name: str | None = None
+    """Explicit session name override."""
+
+    settings: Any = None
+    """Runtime settings overrides, with the original caller's configuration root."""
+
+    working_directory: str | None = None
+    """Explicit working directory override."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SessionsImportSemanticRequest':
+        assert isinstance(obj, dict)
+        default_working_directory = from_str(obj.get("defaultWorkingDirectory"))
+        input_path = from_str(obj.get("inputPath"))
+        jsonl = from_str(obj.get("jsonl"))
+        client_name = from_union([from_str, from_none], obj.get("clientName"))
+        dry_run = from_union([from_bool, from_none], obj.get("dryRun"))
+        name = from_union([from_str, from_none], obj.get("name"))
+        settings = obj.get("settings")
+        working_directory = from_union([from_str, from_none], obj.get("workingDirectory"))
+        return SessionsImportSemanticRequest(default_working_directory, input_path, jsonl, client_name, dry_run, name, settings, working_directory)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["defaultWorkingDirectory"] = from_str(self.default_working_directory)
+        result["inputPath"] = from_str(self.input_path)
+        result["jsonl"] = from_str(self.jsonl)
+        if self.client_name is not None:
+            result["clientName"] = from_union([from_str, from_none], self.client_name)
+        if self.dry_run is not None:
+            result["dryRun"] = from_union([from_bool, from_none], self.dry_run)
+        if self.name is not None:
+            result["name"] = from_union([from_str, from_none], self.name)
+        if self.settings is not None:
+            result["settings"] = self.settings
+        if self.working_directory is not None:
+            result["workingDirectory"] = from_union([from_str, from_none], self.working_directory)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
 class SessionsListNonEmptySessionIDSRequest:
     """Limit for non-empty local session IDs."""
 
@@ -28002,6 +29195,45 @@ class SessionsUpdateWorkspaceFieldsResult:
 
     def to_dict(self) -> dict:
         result: dict = {}
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SessionsValidateNameRequest:
+    """A friendly name to validate before a session mutation."""
+
+    name: str
+    """Original name, without whitespace normalization."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SessionsValidateNameRequest':
+        assert isinstance(obj, dict)
+        name = from_str(obj.get("name"))
+        return SessionsValidateNameRequest(name)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["name"] = from_str(self.name)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SessionsValidateNameResult:
+    """The shared session-name policy decision."""
+
+    error: str | None = None
+    """Validation error; absent when the name is valid."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SessionsValidateNameResult':
+        assert isinstance(obj, dict)
+        error = from_union([from_str, from_none], obj.get("error"))
+        return SessionsValidateNameResult(error)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        if self.error is not None:
+            result["error"] = from_union([from_str, from_none], self.error)
         return result
 
 class SettableTokenAuthInfoType(Enum):
@@ -28499,6 +29731,68 @@ class SkillRemoveSourceEntry:
         result["name"] = from_str(self.name)
         result["source"] = from_str(self.source)
         return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SkillResourceDiscoverResult:
+    """Full local skill inventory and report-and-ignore source diagnostics."""
+
+    errors: list[str]
+    """Sources that failed to load; the remaining inventory is incomplete."""
+
+    skills: list[Any]
+    """Local skill records with invocation identity, content paths, and command metadata."""
+
+    source_warnings: list[str]
+    """Explicit plugin scan warnings, separate from skill loader diagnostics."""
+
+    warnings: list[str]
+    """Nonfatal loader and manifest warnings."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SkillResourceDiscoverResult':
+        assert isinstance(obj, dict)
+        errors = from_list(from_str, obj.get("errors"))
+        skills = from_list(lambda x: x, obj.get("skills"))
+        source_warnings = from_list(from_str, obj.get("sourceWarnings"))
+        warnings = from_list(from_str, obj.get("warnings"))
+        return SkillResourceDiscoverResult(errors, skills, source_warnings, warnings)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["errors"] = from_list(from_str, self.errors)
+        result["skills"] = from_list(lambda x: x, self.skills)
+        result["sourceWarnings"] = from_list(from_str, self.source_warnings)
+        result["warnings"] = from_list(from_str, self.warnings)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+class SkillResourceInstallKind(Enum):
+    """The source of an installed or registered skill."""
+    # A registered skill directory.
+    DIRECTORY = "directory"
+    # A local skill definition.
+    FILE = "file"
+    # An HTTPS skill definition.
+    URL = "url"
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+class SkillResourceInstallScope(Enum):
+    """The personal or project destination of an installed skill."""
+    # The user's personal skill directory.
+    PERSONAL = "personal"
+    # The project's skill directory.
+    PROJECT = "project"
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+class SkillResourceRemoveKind(Enum):
+    """The removed skill's storage tier."""
+    # An unregistered skill directory.
+    DIRECTORY = "directory"
+    # A removed personal skill.
+    PERSONAL = "personal"
+    # A removed project skill.
+    PROJECT = "project"
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
@@ -31281,37 +32575,6 @@ class _UserSettingsUpdateResult:
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
-class UserSettingsValidateRequest:
-    """A single top-level setting subtree to validate."""
-
-    top_key: str
-    """Top-level setting name to validate."""
-
-    delete: bool | None = None
-    """True to validate a removal of this key. The current settings file is not read."""
-
-    value: Any = None
-    """Value to validate. Omitted when `delete` is true."""
-
-    @staticmethod
-    def from_dict(obj: Any) -> 'UserSettingsValidateRequest':
-        assert isinstance(obj, dict)
-        top_key = from_str(obj.get("topKey"))
-        delete = from_union([from_bool, from_none], obj.get("delete"))
-        value = obj.get("value")
-        return UserSettingsValidateRequest(top_key, delete, value)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["topKey"] = from_str(self.top_key)
-        if self.delete is not None:
-            result["delete"] = from_union([from_bool, from_none], self.delete)
-        if self.value is not None:
-            result["value"] = self.value
-        return result
-
-# Experimental: this type is part of an experimental API and may change or be removed.
-@dataclass
 class UserSettingsWriteAllRequest:
     """The whole content to store in the user settings file."""
 
@@ -31329,6 +32592,26 @@ class UserSettingsWriteAllRequest:
     def to_dict(self) -> dict:
         result: dict = {}
         result["settings"] = self.settings
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _UserSettingsWriteKeysResult:
+    """Reports whether the atomic update succeeded or the existing document was invalid."""
+
+    status: str
+    """Either ok, or invalid when no safe document could be read and nothing changed."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_UserSettingsWriteKeysResult':
+        assert isinstance(obj, dict)
+        status = from_str(obj.get("status"))
+        return _UserSettingsWriteKeysResult(status)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["status"] = from_str(self.status)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -32740,6 +34023,100 @@ class AccountGetQuotaResult:
         result["quotaSnapshots"] = from_dict(lambda x: to_class(AccountQuotaSnapshot, x), self.quota_snapshots)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _AccountLoginProcessRequest:
+    """A pre-session login action. Every action after open retains the same credential and
+    persistence owner.
+    """
+    operation: _AccountLoginProcessRequestOperation
+    context: AccountLoginProcessRequestContext | None = None
+    """The original immutable authentication configuration."""
+
+    host: str | None = None
+    """The normalized GitHub host."""
+
+    owner_id: str | None = None
+    """The opaque handle returned by open."""
+
+    token: str | None = None
+    """The user-supplied token. It is never returned."""
+
+    allow_plaintext: bool | None = None
+    """Whether the user consented to plaintext credential storage."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_AccountLoginProcessRequest':
+        assert isinstance(obj, dict)
+        operation = _AccountLoginProcessRequestOperation(obj.get("operation"))
+        context = from_union([AccountLoginProcessRequestContext.from_dict, from_none], obj.get("context"))
+        host = from_union([from_str, from_none], obj.get("host"))
+        owner_id = from_union([from_str, from_none], obj.get("ownerId"))
+        token = from_union([from_str, from_none], obj.get("token"))
+        allow_plaintext = from_union([from_bool, from_none], obj.get("allowPlaintext"))
+        return _AccountLoginProcessRequest(operation, context, host, owner_id, token, allow_plaintext)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["operation"] = to_enum(_AccountLoginProcessRequestOperation, self.operation)
+        if self.context is not None:
+            result["context"] = from_union([lambda x: to_class(AccountLoginProcessRequestContext, x), from_none], self.context)
+        if self.host is not None:
+            result["host"] = from_union([from_str, from_none], self.host)
+        if self.owner_id is not None:
+            result["ownerId"] = from_union([from_str, from_none], self.owner_id)
+        if self.token is not None:
+            result["token"] = from_union([from_str, from_none], self.token)
+        if self.allow_plaintext is not None:
+            result["allowPlaintext"] = from_union([from_bool, from_none], self.allow_plaintext)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _ProcessLoginPersistence:
+    """The original login persistence result, without credentials."""
+
+    status: str
+    """The original completed, needs-plaintext-consent, needs-account-selection, or declined
+    status.
+    """
+    accounts: list[_ProcessLoginAccount] | None = None
+    """The offered accounts, when account selection is required."""
+
+    description: str | None = None
+    """The runtime's original user description, when host and login are available."""
+
+    host: str | None = None
+    """The authenticated host, when available."""
+
+    login: str | None = None
+    """The authenticated login, when available."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_ProcessLoginPersistence':
+        assert isinstance(obj, dict)
+        status = from_str(obj.get("status"))
+        accounts = from_union([lambda x: from_list(_ProcessLoginAccount.from_dict, x), from_none], obj.get("accounts"))
+        description = from_union([from_str, from_none], obj.get("description"))
+        host = from_union([from_str, from_none], obj.get("host"))
+        login = from_union([from_str, from_none], obj.get("login"))
+        return _ProcessLoginPersistence(status, accounts, description, host, login)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["status"] = from_str(self.status)
+        if self.accounts is not None:
+            result["accounts"] = from_union([lambda x: from_list(lambda x: to_class(_ProcessLoginAccount, x), x), from_none], self.accounts)
+        if self.description is not None:
+            result["description"] = from_union([from_str, from_none], self.description)
+        if self.host is not None:
+            result["host"] = from_union([from_str, from_none], self.host)
+        if self.login is not None:
+            result["login"] = from_union([from_str, from_none], self.login)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class ModelCapabilitiesOverrideSupports:
@@ -33133,8 +34510,9 @@ class AhpConnectionTransport:
     """WebSocket URL of the AHP endpoint."""
 
     base_url: str | None = None
-    """Mission Control service URL."""
-
+    """Mission Control service URL. Defaults to the original owner's COPILOT_MC_BASE_URL or
+    GitHub API URL.
+    """
     environment_id: str | None = None
     """Target environment identifier."""
 
@@ -33144,7 +34522,7 @@ class AhpConnectionTransport:
         kind = AhpConnectionTransportKind(obj.get("kind"))
         authenticate_with_git_hub = from_union([from_bool, from_none], obj.get("authenticateWithGitHub"))
         url = from_union([from_str, from_none], obj.get("url"))
-        base_url = from_union([from_str, from_none], obj.get("baseUrl"))
+        base_url = from_union([from_none, from_str], obj.get("baseUrl"))
         environment_id = from_union([from_str, from_none], obj.get("environmentId"))
         return AhpConnectionTransport(kind, authenticate_with_git_hub, url, base_url, environment_id)
 
@@ -33156,7 +34534,7 @@ class AhpConnectionTransport:
         if self.url is not None:
             result["url"] = from_union([from_str, from_none], self.url)
         if self.base_url is not None:
-            result["baseUrl"] = from_union([from_str, from_none], self.base_url)
+            result["baseUrl"] = from_union([from_none, from_str], self.base_url)
         if self.environment_id is not None:
             result["environmentId"] = from_union([from_str, from_none], self.environment_id)
         return result
@@ -36807,6 +38185,62 @@ class LocalModelsEventType(Enum):
     # Refresh the host's available model list.
     REFRESH = "refresh"
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _MCPConfigMergeSourcesRequest:
+    """Read-only MCP configuration composition from explicit source inventories. The result
+    grants no execution authority.
+    """
+    config_dir: str
+    """Configuration root for the user MCP document."""
+
+    working_directory: str
+    """Working directory for workspace discovery and relative source references."""
+
+    additional_config: Any = None
+    """Additional MCP configuration, merged after the other sources."""
+
+    builtin_plugins: list[Any] | None = None
+    """Host-bundled plugin records, below user and workspace configuration."""
+
+    include_workspace_sources: bool | None = None
+    """Include workspace files only where the runtime confirms folder trust."""
+
+    installed_plugins: list[Any] | None = None
+    """Resolved installed, live, and explicit plugin records in precedence order."""
+
+    repo_root: str | None = None
+    """Repository boundary for upward workspace discovery."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPConfigMergeSourcesRequest':
+        assert isinstance(obj, dict)
+        config_dir = from_str(obj.get("configDir"))
+        working_directory = from_str(obj.get("workingDirectory"))
+        additional_config = obj.get("additionalConfig")
+        builtin_plugins = from_union([lambda x: from_list(lambda x: x, x), from_none], obj.get("builtinPlugins"))
+        include_workspace_sources = from_union([from_bool, from_none], obj.get("includeWorkspaceSources"))
+        installed_plugins = from_union([lambda x: from_list(lambda x: x, x), from_none], obj.get("installedPlugins"))
+        repo_root = from_union([from_str, from_none], obj.get("repoRoot"))
+        return _MCPConfigMergeSourcesRequest(config_dir, working_directory, additional_config, builtin_plugins, include_workspace_sources, installed_plugins, repo_root)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["configDir"] = from_str(self.config_dir)
+        result["workingDirectory"] = from_str(self.working_directory)
+        if self.additional_config is not None:
+            result["additionalConfig"] = self.additional_config
+        if self.builtin_plugins is not None:
+            result["builtinPlugins"] = from_union([lambda x: from_list(lambda x: x, x), from_none], self.builtin_plugins)
+        if self.include_workspace_sources is not None:
+            result["includeWorkspaceSources"] = from_union([from_bool, from_none], self.include_workspace_sources)
+        if self.installed_plugins is not None:
+            result["installedPlugins"] = from_union([lambda x: from_list(lambda x: x, x), from_none], self.installed_plugins)
+        if self.repo_root is not None:
+            result["repoRoot"] = from_union([from_str, from_none], self.repo_root)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class MCPOauthCompleteRequest:
@@ -36924,6 +38358,26 @@ class ModelSetAllowedModelsRequest:
             result["allowedModels"] = from_union([lambda x: from_list(from_str, x), from_none], self.allowed_models)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PluginBuiltinDiscoverRequest:
+    """Locates bundled plugin manifests relative to one installed host directory."""
+
+    base_directory: str
+    """Host module directory used to locate the installed distribution."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PluginBuiltinDiscoverRequest':
+        assert isinstance(obj, dict)
+        base_directory = from_str(obj.get("baseDirectory"))
+        return _PluginBuiltinDiscoverRequest(base_directory)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["baseDirectory"] = from_str(self.base_directory)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class ProviderWithdrawRequest:
@@ -36944,6 +38398,128 @@ class ProviderWithdrawRequest:
     def to_dict(self) -> dict:
         result: dict = {}
         result["models"] = from_list(from_str, self.models)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class UserSettingsHostContext:
+    """The filesystem and environment facts a user-settings file is resolved from. Passed
+    explicitly rather than read from the runtime's own process, so a host whose configuration
+    directory differs from its process environment resolves the file it means.
+    """
+    environment: dict[str, Any]
+    """The host's environment variables. `COPILOT_HOME` is read from here, as are the variables
+    a settings hook may expand.
+    """
+    home_directory: str
+    """The user's home directory, used when neither a configuration directory nor `COPILOT_HOME`
+    is set.
+    """
+    config_dir: str | None = None
+    """The Copilot configuration directory, when the host set one. Takes precedence over
+    `COPILOT_HOME` and the home directory.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'UserSettingsHostContext':
+        assert isinstance(obj, dict)
+        environment = from_dict(lambda x: x, obj.get("environment"))
+        home_directory = from_str(obj.get("homeDirectory"))
+        config_dir = from_union([from_str, from_none], obj.get("configDir"))
+        return UserSettingsHostContext(environment, home_directory, config_dir)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["environment"] = from_dict(lambda x: x, self.environment)
+        result["homeDirectory"] = from_str(self.home_directory)
+        if self.config_dir is not None:
+            result["configDir"] = from_union([from_str, from_none], self.config_dir)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionExtensionsConfigureHostRequest:
+    """Host launch resources and lifecycle options for the original session's extension service."""
+
+    cli_dist_dir: str
+    """Directory that contains the host's CLI distribution."""
+
+    host_server_id: int
+    """Existing extension host engine. The original session authority must own its session
+    generation.
+    """
+    launcher_program: str
+    """Executable that launches extension processes."""
+
+    launch_processes: bool
+    """Whether this configuration permits extension processes to launch."""
+
+    management_tools_enabled: bool
+    """Host gate for extension management tools."""
+
+    retain_processes_if_unchanged: bool
+    """Whether compatible unchanged processes remain active."""
+
+    sdk_path: str
+    """Path to the host's extension SDK."""
+
+    working_directory: str
+    """Working directory captured by the host for this configuration."""
+
+    disabled_ids: list[str] | None = None
+    """Explicit disabled IDs. When absent, the runtime reads the selected profile."""
+
+    host_validation_token: str | None = None
+    """Opaque token for the original host's eligibility check after native discovery."""
+
+    include_sources: list[str] | None = None
+    """Explicit source filters. When absent, the runtime uses all allowed sources."""
+
+    initial_startup_token: str | None = None
+    """Existing initial startup token, when configuration belongs to startup."""
+
+    mounted_plugins: list[Any] | None = None
+    """Host-mounted plugins outside the persisted installation records."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionExtensionsConfigureHostRequest':
+        assert isinstance(obj, dict)
+        cli_dist_dir = from_str(obj.get("cliDistDir"))
+        host_server_id = from_int(obj.get("hostServerId"))
+        launcher_program = from_str(obj.get("launcherProgram"))
+        launch_processes = from_bool(obj.get("launchProcesses"))
+        management_tools_enabled = from_bool(obj.get("managementToolsEnabled"))
+        retain_processes_if_unchanged = from_bool(obj.get("retainProcessesIfUnchanged"))
+        sdk_path = from_str(obj.get("sdkPath"))
+        working_directory = from_str(obj.get("workingDirectory"))
+        disabled_ids = from_union([lambda x: from_list(from_str, x), from_none], obj.get("disabledIds"))
+        host_validation_token = from_union([from_str, from_none], obj.get("hostValidationToken"))
+        include_sources = from_union([lambda x: from_list(from_str, x), from_none], obj.get("includeSources"))
+        initial_startup_token = from_union([from_str, from_none], obj.get("initialStartupToken"))
+        mounted_plugins = from_union([lambda x: from_list(lambda x: x, x), from_none], obj.get("mountedPlugins"))
+        return _SessionExtensionsConfigureHostRequest(cli_dist_dir, host_server_id, launcher_program, launch_processes, management_tools_enabled, retain_processes_if_unchanged, sdk_path, working_directory, disabled_ids, host_validation_token, include_sources, initial_startup_token, mounted_plugins)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["cliDistDir"] = from_str(self.cli_dist_dir)
+        result["hostServerId"] = from_int(self.host_server_id)
+        result["launcherProgram"] = from_str(self.launcher_program)
+        result["launchProcesses"] = from_bool(self.launch_processes)
+        result["managementToolsEnabled"] = from_bool(self.management_tools_enabled)
+        result["retainProcessesIfUnchanged"] = from_bool(self.retain_processes_if_unchanged)
+        result["sdkPath"] = from_str(self.sdk_path)
+        result["workingDirectory"] = from_str(self.working_directory)
+        if self.disabled_ids is not None:
+            result["disabledIds"] = from_union([lambda x: from_list(from_str, x), from_none], self.disabled_ids)
+        if self.host_validation_token is not None:
+            result["hostValidationToken"] = from_union([from_str, from_none], self.host_validation_token)
+        if self.include_sources is not None:
+            result["includeSources"] = from_union([lambda x: from_list(from_str, x), from_none], self.include_sources)
+        if self.initial_startup_token is not None:
+            result["initialStartupToken"] = from_union([from_str, from_none], self.initial_startup_token)
+        if self.mounted_plugins is not None:
+            result["mountedPlugins"] = from_union([lambda x: from_list(lambda x: x, x), from_none], self.mounted_plugins)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -39982,6 +41558,36 @@ class _GitHubPullRequestCheck:
 # Internal: this type is an internal SDK API and is not part of the public surface.
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
+class _GitHubCreateSecretGistRequest:
+    """Creates a secret gist through the bound session's original credential owner."""
+
+    description: str
+    """The description that GitHub stores with the gist."""
+
+    files: dict[str, _GitHubSecretGistFile]
+    """File names mapped to their text content."""
+
+    use_case: _GitHubSecretGistUseCase
+    """The purpose that selects account restrictions and error messages."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_GitHubCreateSecretGistRequest':
+        assert isinstance(obj, dict)
+        description = from_str(obj.get("description"))
+        files = from_dict(_GitHubSecretGistFile.from_dict, obj.get("files"))
+        use_case = _GitHubSecretGistUseCase(obj.get("useCase"))
+        return _GitHubCreateSecretGistRequest(description, files, use_case)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["description"] = from_str(self.description)
+        result["files"] = from_dict(lambda x: to_class(_GitHubSecretGistFile, x), self.files)
+        result["useCase"] = to_enum(_GitHubSecretGistUseCase, self.use_case)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
 class _GitHubFetchOperationRequest:
     """Arguments for a named authenticated operation."""
 
@@ -41596,6 +43202,30 @@ class MCPResourcesReadRequest:
         result["serverName"] = from_str(self.server_name)
         result["uri"] = from_str(self.uri)
         return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+# Experimental: this enum is part of an experimental API and may change or be removed.
+class _SessionPersistenceBarrierPhase(Enum):
+    """An original-host persistence barrier stage."""
+    # Release results retained by a canceled flush.
+    CANCEL = "cancel"
+    # Release callback results and preserve their original failures.
+    COMPLETE = "complete"
+    # Wait for the original owner's initial workspace metadata.
+    PREPARE = "prepare"
+    # Drain the original owner's live tracker or pending teardown.
+    TRACKING = "tracking"
+    # Drain the original owner's retained write callbacks.
+    WRITE_CALLBACKS = "writeCallbacks"
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+class RepositoryDisabledKey(Enum):
+    """A resource disable list to which a repository may contribute names."""
+    # MCP servers disabled by the repository.
+    DISABLED_MCP_SERVERS = "disabledMcpServers"
+    # Skills disabled by the repository.
+    DISABLED_SKILLS = "disabledSkills"
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 class SkillRemoveSourceKind(Enum):
@@ -43566,6 +45196,37 @@ class MarketplaceRefreshResult:
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
+class MCPAdditionalConfigSource:
+    """An additional MCP document supplied as JSON text or a host file."""
+
+    kind: MCPAdditionalConfigSourceKind
+    """The source format: inline JSON or a host file."""
+
+    value: str | None = None
+    """Raw JSON text."""
+
+    path: str | None = None
+    """Absolute path resolved by the caller."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'MCPAdditionalConfigSource':
+        assert isinstance(obj, dict)
+        kind = MCPAdditionalConfigSourceKind(obj.get("kind"))
+        value = from_union([from_str, from_none], obj.get("value"))
+        path = from_union([from_str, from_none], obj.get("path"))
+        return MCPAdditionalConfigSource(kind, value, path)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["kind"] = to_enum(MCPAdditionalConfigSourceKind, self.kind)
+        if self.value is not None:
+            result["value"] = from_union([from_str, from_none], self.value)
+        if self.path is not None:
+            result["path"] = from_union([from_str, from_none], self.path)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
 class MCPAppsDiagnoseResult:
     """Diagnostic snapshot of MCP Apps wiring for the named server."""
 
@@ -43883,6 +45544,41 @@ class MCPStartServersResult:
             result["allowedServers"] = from_union([lambda x: from_list(lambda x: to_class(MCPAllowedServer, x), x), from_none], self.allowed_servers)
         if self.failed_servers is not None:
             result["failedServers"] = from_union([lambda x: from_list(lambda x: to_class(MCPFailedServer, x), x), from_none], self.failed_servers)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PluginsBuiltinResolveActivationRequest:
+    """Resolve managed Browser activation through the connection's original credential owner."""
+
+    audience: _MCPInvocationAudience
+    """Existing launch populations for the policy-helper gate."""
+
+    client_name: str
+    """Embedding client identity for the policy helper."""
+
+    user_settings: Any
+    """Effective user and trusted repository settings."""
+
+    working_directory: str
+    """Working directory for the policy helper."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PluginsBuiltinResolveActivationRequest':
+        assert isinstance(obj, dict)
+        audience = _MCPInvocationAudience.from_dict(obj.get("audience"))
+        client_name = from_str(obj.get("clientName"))
+        user_settings = obj.get("userSettings")
+        working_directory = from_str(obj.get("workingDirectory"))
+        return _PluginsBuiltinResolveActivationRequest(audience, client_name, user_settings, working_directory)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["audience"] = to_class(_MCPInvocationAudience, self.audience)
+        result["clientName"] = from_str(self.client_name)
+        result["userSettings"] = self.user_settings
+        result["workingDirectory"] = from_str(self.working_directory)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -44785,42 +46481,86 @@ class PermissionsLocationsAddToolApprovalDetailsMemory:
         result["kind"] = self.kind
         return result
 
-# Internal: this type is an internal SDK API and is not part of the public surface.
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
-class _MCPShouldExcludeGitHubToolsRequest:
-    """The session tool filters that decide whether the session still has a shell to run `gh`
-    with.
-    """
-    available_tools: list[str] | None = None
-    """The session's tool allowlist, when it set one. Omitted means the session constrains
-    nothing this way.
-    """
-    excluded_tools: list[str] | None = None
-    """The session's tool denylist, when it set one. Omitted means the session constrains
-    nothing this way.
-    """
-    tool_filter_precedence: OptionsUpdateToolFilterPrecedence | None = None
-    """How the allowlist and denylist combine when both are set. Omitted uses the default
-    excluded precedence; supply the session's explicit Update selection when present.
-    """
+class MemoriesImportSemanticRequest:
+    """Memory import input. Authentication remains bound to the calling runtime owner."""
+
+    jsonl: str
+    """Semantic memory JSONL."""
+
+    working_directory: str
+    """Working directory for temporary, scoped memory sessions."""
+
+    dry_run: bool | None = None
+    """Validate without authentication, network access, or writes."""
+
+    on_conflict: SemanticMemoryConflictPolicy | None = None
+    """Conflict policy, defaulting to error."""
+
+    settings: Any = None
+    """Runtime settings overrides, with the original caller's configuration root."""
 
     @staticmethod
-    def from_dict(obj: Any) -> '_MCPShouldExcludeGitHubToolsRequest':
+    def from_dict(obj: Any) -> 'MemoriesImportSemanticRequest':
         assert isinstance(obj, dict)
-        available_tools = from_union([lambda x: from_list(from_str, x), from_none], obj.get("availableTools"))
-        excluded_tools = from_union([lambda x: from_list(from_str, x), from_none], obj.get("excludedTools"))
-        tool_filter_precedence = from_union([OptionsUpdateToolFilterPrecedence, from_none], obj.get("toolFilterPrecedence"))
-        return _MCPShouldExcludeGitHubToolsRequest(available_tools, excluded_tools, tool_filter_precedence)
+        jsonl = from_str(obj.get("jsonl"))
+        working_directory = from_str(obj.get("workingDirectory"))
+        dry_run = from_union([from_bool, from_none], obj.get("dryRun"))
+        on_conflict = from_union([SemanticMemoryConflictPolicy, from_none], obj.get("onConflict"))
+        settings = obj.get("settings")
+        return MemoriesImportSemanticRequest(jsonl, working_directory, dry_run, on_conflict, settings)
 
     def to_dict(self) -> dict:
         result: dict = {}
-        if self.available_tools is not None:
-            result["availableTools"] = from_union([lambda x: from_list(from_str, x), from_none], self.available_tools)
-        if self.excluded_tools is not None:
-            result["excludedTools"] = from_union([lambda x: from_list(from_str, x), from_none], self.excluded_tools)
-        if self.tool_filter_precedence is not None:
-            result["toolFilterPrecedence"] = from_union([lambda x: to_enum(OptionsUpdateToolFilterPrecedence, x), from_none], self.tool_filter_precedence)
+        result["jsonl"] = from_str(self.jsonl)
+        result["workingDirectory"] = from_str(self.working_directory)
+        if self.dry_run is not None:
+            result["dryRun"] = from_union([from_bool, from_none], self.dry_run)
+        if self.on_conflict is not None:
+            result["onConflict"] = from_union([lambda x: to_enum(SemanticMemoryConflictPolicy, x), from_none], self.on_conflict)
+        if self.settings is not None:
+            result["settings"] = self.settings
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SemanticMemoryImportItemResult:
+    """One semantic memory record outcome."""
+
+    code: str
+    """Stable operation code."""
+
+    line: int
+    """One-based input line."""
+
+    message: str
+    """Human-readable operation result."""
+
+    status: SemanticMemoryImportItemStatus
+    """Outcome: imported, skipped, failed, or validated."""
+
+    external_id: str | None = None
+    """External record identifier, when present."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SemanticMemoryImportItemResult':
+        assert isinstance(obj, dict)
+        code = from_str(obj.get("code"))
+        line = from_int(obj.get("line"))
+        message = from_str(obj.get("message"))
+        status = SemanticMemoryImportItemStatus(obj.get("status"))
+        external_id = from_union([from_str, from_none], obj.get("externalId"))
+        return SemanticMemoryImportItemResult(code, line, message, status, external_id)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["code"] = from_str(self.code)
+        result["line"] = from_int(self.line)
+        result["message"] = from_str(self.message)
+        result["status"] = to_enum(SemanticMemoryImportItemStatus, self.status)
+        if self.external_id is not None:
+            result["externalId"] = from_union([from_str, from_none], self.external_id)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -46857,6 +48597,102 @@ class PluginsActivateResult:
             result["message"] = from_union([from_str, from_none], self.message)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PluginPolicyResolveInvocationResult:
+    """Resolved plugin policy and authoritative failure posture. Fresh successful resolutions
+    retain the original policy layers for mutation guards; cache-only inspection never
+    changes retained policy.
+    """
+    diagnostics: list[_PluginPolicyDiagnostic]
+    """Resolution diagnostics in source order."""
+
+    policy_helper_configured: bool
+    """Whether this host has a configured helper."""
+
+    policy_helper_fail_closed: bool
+    """Whether helper failure requires refusal."""
+
+    policy_helper_load_failed: bool
+    """Whether the helper failed."""
+
+    server_fetch_failed: bool
+    """Whether the server policy could not be resolved."""
+
+    server_forced_refresh_failure: bool
+    """Whether required fresh confirmation failed and the caller must refuse."""
+
+    server_token_unavailable: bool
+    """Whether no usable credential was available."""
+
+    server_fetch_error: str | None = None
+    """Server resolution error, when present."""
+
+    server_response: Any = None
+    """Raw server policy for hosts that inspect the account layer alone."""
+
+    settings: Any = None
+    """Effective device, server, and helper settings when available."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PluginPolicyResolveInvocationResult':
+        assert isinstance(obj, dict)
+        diagnostics = from_list(_PluginPolicyDiagnostic.from_dict, obj.get("diagnostics"))
+        policy_helper_configured = from_bool(obj.get("policyHelperConfigured"))
+        policy_helper_fail_closed = from_bool(obj.get("policyHelperFailClosed"))
+        policy_helper_load_failed = from_bool(obj.get("policyHelperLoadFailed"))
+        server_fetch_failed = from_bool(obj.get("serverFetchFailed"))
+        server_forced_refresh_failure = from_bool(obj.get("serverForcedRefreshFailure"))
+        server_token_unavailable = from_bool(obj.get("serverTokenUnavailable"))
+        server_fetch_error = from_union([from_str, from_none], obj.get("serverFetchError"))
+        server_response = obj.get("serverResponse")
+        settings = obj.get("settings")
+        return _PluginPolicyResolveInvocationResult(diagnostics, policy_helper_configured, policy_helper_fail_closed, policy_helper_load_failed, server_fetch_failed, server_forced_refresh_failure, server_token_unavailable, server_fetch_error, server_response, settings)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["diagnostics"] = from_list(lambda x: to_class(_PluginPolicyDiagnostic, x), self.diagnostics)
+        result["policyHelperConfigured"] = from_bool(self.policy_helper_configured)
+        result["policyHelperFailClosed"] = from_bool(self.policy_helper_fail_closed)
+        result["policyHelperLoadFailed"] = from_bool(self.policy_helper_load_failed)
+        result["serverFetchFailed"] = from_bool(self.server_fetch_failed)
+        result["serverForcedRefreshFailure"] = from_bool(self.server_forced_refresh_failure)
+        result["serverTokenUnavailable"] = from_bool(self.server_token_unavailable)
+        if self.server_fetch_error is not None:
+            result["serverFetchError"] = from_union([from_str, from_none], self.server_fetch_error)
+        if self.server_response is not None:
+            result["serverResponse"] = self.server_response
+        if self.settings is not None:
+            result["settings"] = self.settings
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionPluginInspectExtensionContributionsResult:
+    """Whether a changed active plugin contributes extension directories, including empty
+    directories.
+    """
+    ships_extensions: bool
+    """True when directories exist or the session has no authoritative activation snapshot."""
+
+    warnings: list[_PluginPolicyDiagnostic]
+    """Canonical extension discovery diagnostics, in resolver order."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionPluginInspectExtensionContributionsResult':
+        assert isinstance(obj, dict)
+        ships_extensions = from_bool(obj.get("shipsExtensions"))
+        warnings = from_list(_PluginPolicyDiagnostic.from_dict, obj.get("warnings"))
+        return _SessionPluginInspectExtensionContributionsResult(ships_extensions, warnings)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["shipsExtensions"] = from_bool(self.ships_extensions)
+        result["warnings"] = from_list(lambda x: to_class(_PluginPolicyDiagnostic, x), self.warnings)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class ProtocolSystemMessageAppendConfig:
@@ -47807,47 +49643,6 @@ class RemoteEnableRequest:
 # Internal: this type is an internal SDK API and is not part of the public surface.
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
-class _UserSettingsEditRequest:
-    """One atomic edit of a canonical setting in settings.json."""
-
-    canonical_path: list[str]
-    """Nonempty canonical path segments of the setting to edit, starting with its top-level key."""
-
-    operation: _SettingsEditOperation
-    """Set a scalar, add or remove a string list item, or remove the setting. The handler
-    rejects a missing or incompatible value.
-    """
-    config_dir: str | None = None
-    """Configuration directory to edit. Omitted or empty resolves the server's own home, as in
-    `user.settings.loadForConfigDir`.
-    """
-    value: Any = UNSET_SENTINEL
-    """Required boolean, string or number for set, required string for add-item and remove-item,
-    and forbidden for remove. The runtime rejects all other JSON values.
-    """
-
-    @staticmethod
-    def from_dict(obj: Any) -> '_UserSettingsEditRequest':
-        assert isinstance(obj, dict)
-        canonical_path = from_list(from_str, obj.get("canonicalPath"))
-        operation = _SettingsEditOperation(obj.get("operation"))
-        config_dir = from_union([from_str, from_none], obj.get("configDir"))
-        value = obj["value"] if "value" in obj else UNSET_SENTINEL
-        return _UserSettingsEditRequest(canonical_path, operation, config_dir, value)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["canonicalPath"] = from_list(from_str, self.canonical_path)
-        result["operation"] = to_enum(_SettingsEditOperation, self.operation)
-        if self.config_dir is not None:
-            result["configDir"] = from_union([from_str, from_none], self.config_dir)
-        if self.value is not UNSET_SENTINEL:
-            result["value"] = self.value
-        return result
-
-# Internal: this type is an internal SDK API and is not part of the public surface.
-# Experimental: this type is part of an experimental API and may change or be removed.
-@dataclass
 class _RepoSettingsEditRequest:
     """One atomic edit of an allowed top-level repository setting."""
 
@@ -47887,6 +49682,25 @@ class _RepoSettingsEditRequest:
         result["scope"] = to_enum(_RepoSettingsEditScope, self.scope)
         if self.value is not None:
             result["value"] = self.value
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class ResearchListReportsResult:
+    """Stored Markdown reports, newest first, from the selected session."""
+
+    reports: list[ResearchStoredReport]
+    """Reports sorted by descending modification time with stable ties."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'ResearchListReportsResult':
+        assert isinstance(obj, dict)
+        reports = from_list(ResearchStoredReport.from_dict, obj.get("reports"))
+        return ResearchListReportsResult(reports)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["reports"] = from_list(lambda x: to_class(ResearchStoredReport, x), self.reports)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -48232,233 +50046,6 @@ class SlashCommandTextResult:
             result["runtimeSettingsChanged"] = from_union([from_bool, from_none], self.runtime_settings_changed)
         if self.sandbox_session_change is not None:
             result["sandboxSessionChange"] = from_union([lambda x: to_enum(SandboxSessionChange, x), from_none], self.sandbox_session_change)
-        return result
-
-# Experimental: this type is part of an experimental API and may change or be removed.
-@dataclass
-class SandboxSettingsLoadRequest:
-    """The host context to read sandbox settings from."""
-
-    context: UserSettingsHostContext
-    """The configuration directory, home directory, and environment used to resolve
-    settings.json.
-    """
-    reject_warnings: bool | None = None
-    """Reject a settings warning instead of returning recovered settings, for a caller about to
-    edit the document.
-    """
-
-    @staticmethod
-    def from_dict(obj: Any) -> 'SandboxSettingsLoadRequest':
-        assert isinstance(obj, dict)
-        context = UserSettingsHostContext.from_dict(obj.get("context"))
-        reject_warnings = from_union([from_bool, from_none], obj.get("rejectWarnings"))
-        return SandboxSettingsLoadRequest(context, reject_warnings)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["context"] = to_class(UserSettingsHostContext, self.context)
-        if self.reject_warnings is not None:
-            result["rejectWarnings"] = from_union([from_bool, from_none], self.reject_warnings)
-        return result
-
-# Experimental: this type is part of an experimental API and may change or be removed.
-@dataclass
-class SandboxSettingsPersistPathGrantRequest:
-    """A literal sandbox path grant to save in the user's settings."""
-
-    context: UserSettingsHostContext
-    """The configuration directory, home directory, and environment used to resolve
-    settings.json.
-    """
-    grant: PermissionSandboxPathGrant
-    """The path grant to persist, including read-only entries to remove by their exact stored
-    spelling.
-    """
-
-    @staticmethod
-    def from_dict(obj: Any) -> 'SandboxSettingsPersistPathGrantRequest':
-        assert isinstance(obj, dict)
-        context = UserSettingsHostContext.from_dict(obj.get("context"))
-        grant = PermissionSandboxPathGrant.from_dict(obj.get("grant"))
-        return SandboxSettingsPersistPathGrantRequest(context, grant)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["context"] = to_class(UserSettingsHostContext, self.context)
-        result["grant"] = to_class(PermissionSandboxPathGrant, self.grant)
-        return result
-
-# Experimental: this type is part of an experimental API and may change or be removed.
-@dataclass
-class SandboxSettingsUpdateRequest:
-    """A sandbox settings patch and the host context that selects its settings file."""
-
-    context: UserSettingsHostContext
-    """The configuration directory, home directory, and environment used to resolve
-    settings.json.
-    """
-    patch: Any
-    """Sandbox settings changes. Filesystem, network, and seatbelt fields merge into userPolicy;
-    other supported fields merge at the sandbox root.
-    """
-
-    @staticmethod
-    def from_dict(obj: Any) -> 'SandboxSettingsUpdateRequest':
-        assert isinstance(obj, dict)
-        context = UserSettingsHostContext.from_dict(obj.get("context"))
-        patch = obj.get("patch")
-        return SandboxSettingsUpdateRequest(context, patch)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["context"] = to_class(UserSettingsHostContext, self.context)
-        result["patch"] = self.patch
-        return result
-
-# Internal: this type is an internal SDK API and is not part of the public surface.
-# Experimental: this type is part of an experimental API and may change or be removed.
-@dataclass
-class _UserSettingsMigrateStaffLogLevelOnceRequest:
-    """Selects the configuration directory to run the one-time staff log-level migration
-    against, and supplies the caller's record of whether it has already run.
-    """
-    context: UserSettingsHostContext
-    """The configuration directory, home directory and environment to resolve the settings and
-    global-state documents from. A host that scopes a session to its own Copilot home must
-    pass that directory here, or the migration is evaluated against the server's own home
-    instead.
-    """
-    cached_completed_at: str | None = None
-    """When the caller last recorded this migration, as an ISO-8601 timestamp. Supplying it lets
-    the runtime answer `current` without re-running the evaluation.
-    """
-
-    @staticmethod
-    def from_dict(obj: Any) -> '_UserSettingsMigrateStaffLogLevelOnceRequest':
-        assert isinstance(obj, dict)
-        context = UserSettingsHostContext.from_dict(obj.get("context"))
-        cached_completed_at = from_union([from_str, from_none], obj.get("cachedCompletedAt"))
-        return _UserSettingsMigrateStaffLogLevelOnceRequest(context, cached_completed_at)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["context"] = to_class(UserSettingsHostContext, self.context)
-        if self.cached_completed_at is not None:
-            result["cachedCompletedAt"] = from_union([from_str, from_none], self.cached_completed_at)
-        return result
-
-# Internal: this type is an internal SDK API and is not part of the public surface.
-# Experimental: this type is part of an experimental API and may change or be removed.
-@dataclass
-class _UserSettingsResetStaffModelSelectionOnceRequest:
-    """Selects the configuration directory to run the one-time staff model-selection reset
-    against, and supplies the caller's record of whether it has already run.
-    """
-    context: UserSettingsHostContext
-    """The configuration directory, home directory and environment to resolve the settings and
-    global-state documents from. A host that scopes a session to its own Copilot home must
-    pass that directory here, or the reset is evaluated against the server's own home instead.
-    """
-    staff: bool | None = None
-    """Whether the signed-in account is a staff account. The reset applies only to staff, so
-    anything other than `true` returns `didReset: false` without touching the settings
-    document.
-    """
-    staff_model_reset_at: str | None = None
-    """When the caller last recorded this reset, as an ISO-8601 timestamp. A timestamp at or
-    after the cutoff means the reset already ran and is returned unchanged.
-    """
-
-    @staticmethod
-    def from_dict(obj: Any) -> '_UserSettingsResetStaffModelSelectionOnceRequest':
-        assert isinstance(obj, dict)
-        context = UserSettingsHostContext.from_dict(obj.get("context"))
-        staff = from_union([from_bool, from_none], obj.get("staff"))
-        staff_model_reset_at = from_union([from_str, from_none], obj.get("staffModelResetAt"))
-        return _UserSettingsResetStaffModelSelectionOnceRequest(context, staff, staff_model_reset_at)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["context"] = to_class(UserSettingsHostContext, self.context)
-        if self.staff is not None:
-            result["staff"] = from_union([from_bool, from_none], self.staff)
-        if self.staff_model_reset_at is not None:
-            result["staffModelResetAt"] = from_union([from_str, from_none], self.staff_model_reset_at)
-        return result
-
-# Internal: this type is an internal SDK API and is not part of the public surface.
-# Experimental: this type is part of an experimental API and may change or be removed.
-@dataclass
-class _UserSettingsUnknownKeysWarningRequest:
-    """Selects the configuration directory whose user settings document should be inspected for
-    unrecognized top-level keys.
-    """
-    context: UserSettingsHostContext
-    """The configuration directory, home directory and environment to resolve the settings
-    document from. A host that scopes a session to its own Copilot home must pass that
-    directory here, or the server's own home is inspected instead.
-    """
-
-    @staticmethod
-    def from_dict(obj: Any) -> '_UserSettingsUnknownKeysWarningRequest':
-        assert isinstance(obj, dict)
-        context = UserSettingsHostContext.from_dict(obj.get("context"))
-        return _UserSettingsUnknownKeysWarningRequest(context)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["context"] = to_class(UserSettingsHostContext, self.context)
-        return result
-
-# Experimental: this type is part of an experimental API and may change or be removed.
-@dataclass
-class UserSettingsWriteKeyRequest:
-    """A raw top-level setting edit with explicit read-failure behavior."""
-
-    key: str
-    """The top-level setting to write without canonicalizing legacy siblings."""
-
-    value: Any
-    """The value to store. Explicit null is retained. Pass null when deleting."""
-
-    context: UserSettingsHostContext | None = None
-    """Optional host paths and environment. Omit to use the server's settings home."""
-
-    delete: bool | None = None
-    """Remove the key instead of writing it. Defaults to false."""
-
-    refuse_on_read_failure: bool | None = None
-    """Refuse to replace an unreadable or invalid file. Defaults to false."""
-
-    refuse_on_unrecoverable_read_failure: bool | None = None
-    """Refuse content no JSONC recovery pass reads as an object. Defaults to false.
-    Recoverable content can still be repaired when refuseOnReadFailure is false.
-    """
-
-    @staticmethod
-    def from_dict(obj: Any) -> 'UserSettingsWriteKeyRequest':
-        assert isinstance(obj, dict)
-        key = from_str(obj.get("key"))
-        value = obj.get("value")
-        context = from_union([UserSettingsHostContext.from_dict, from_none], obj.get("context"))
-        delete = from_union([from_bool, from_none], obj.get("delete"))
-        refuse_on_read_failure = from_union([from_bool, from_none], obj.get("refuseOnReadFailure"))
-        refuse_on_unrecoverable_read_failure = from_union([from_bool, from_none], obj.get("refuseOnUnrecoverableReadFailure"))
-        return UserSettingsWriteKeyRequest(key, value, context, delete, refuse_on_read_failure, refuse_on_unrecoverable_read_failure)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["key"] = from_str(self.key)
-        result["value"] = self.value
-        if self.context is not None:
-            result["context"] = from_union([lambda x: to_class(UserSettingsHostContext, x), from_none], self.context)
-        if self.delete is not None:
-            result["delete"] = from_union([from_bool, from_none], self.delete)
-        if self.refuse_on_read_failure is not None:
-            result["refuseOnReadFailure"] = from_union([from_bool, from_none], self.refuse_on_read_failure)
-        if self.refuse_on_unrecoverable_read_failure is not None:
-            result["refuseOnUnrecoverableReadFailure"] = from_union([from_bool, from_none], self.refuse_on_unrecoverable_read_failure)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -49039,6 +50626,70 @@ class SessionManagementConfigureRequest:
             result["scope"] = from_union([lambda x: to_enum(SessionManagementScope, x), from_none], self.scope)
         if self.tools is not None:
             result["tools"] = from_union([lambda x: to_class(SessionManagementToolOverrides, x), from_none], self.tools)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionNameGenerateResult:
+    """Utility generation outcome under the session's model and credential policy."""
+
+    kind: _UtilityPromptResultKind
+    """Whether generation produced a value."""
+
+    message: str | None = None
+    """User-facing explanation, when the requested operation needs one."""
+
+    value: str | None = None
+    """Generated value, or absent when the utility model is unavailable."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionNameGenerateResult':
+        assert isinstance(obj, dict)
+        kind = _UtilityPromptResultKind(obj.get("kind"))
+        message = from_union([from_str, from_none], obj.get("message"))
+        value = from_union([from_str, from_none], obj.get("value"))
+        return _SessionNameGenerateResult(kind, message, value)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["kind"] = to_enum(_UtilityPromptResultKind, self.kind)
+        if self.message is not None:
+            result["message"] = from_union([from_str, from_none], self.message)
+        if self.value is not None:
+            result["value"] = from_union([from_str, from_none], self.value)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _UtilityPromptResult:
+    """Utility generation outcome under the session's model and credential policy."""
+
+    kind: _UtilityPromptResultKind
+    """Whether generation produced a value."""
+
+    message: str | None = None
+    """User-facing explanation, when the requested operation needs one."""
+
+    value: str | None = None
+    """Generated value, or absent when the utility model is unavailable."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_UtilityPromptResult':
+        assert isinstance(obj, dict)
+        kind = _UtilityPromptResultKind(obj.get("kind"))
+        message = from_union([from_str, from_none], obj.get("message"))
+        value = from_union([from_str, from_none], obj.get("value"))
+        return _UtilityPromptResult(kind, message, value)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["kind"] = to_enum(_UtilityPromptResultKind, self.kind)
+        if self.message is not None:
+            result["message"] = from_union([from_str, from_none], self.message)
+        if self.value is not None:
+            result["value"] = from_union([from_str, from_none], self.value)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -50061,6 +51712,26 @@ class SessionOpenSkillOptions:
             result["includedBuiltinSkills"] = from_union([lambda x: from_list(from_str, x), from_none], self.included_builtin_skills)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionSkillResourceRemoveRequest:
+    """Remove a skill with the selected session's full inventory and profile."""
+
+    target: str
+    """Skill name or registered directory."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionSkillResourceRemoveRequest':
+        assert isinstance(obj, dict)
+        target = from_str(obj.get("target"))
+        return _SessionSkillResourceRemoveRequest(target)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["target"] = from_str(self.target)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class SessionUpdateSkillOptions:
@@ -50489,6 +52160,72 @@ class SkillsRemoveSourceInventory:
         result["personalSkillsDirs"] = from_list(from_str, self.personal_skills_dirs)
         result["projectSkillsDir"] = from_str(self.project_skills_dir)
         result["skills"] = from_list(lambda x: to_class(SkillRemoveSourceEntry, x), self.skills)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SkillResourceInstallResult:
+    """The persisted result of a skill source installation."""
+
+    kind: SkillResourceInstallKind
+    """Source classification."""
+
+    path: str
+    """Installed definition path or registered directory."""
+
+    name: str | None = None
+    """Skill name, absent for a registered directory."""
+
+    scope: SkillResourceInstallScope | None = None
+    """Destination scope, absent for a registered directory."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SkillResourceInstallResult':
+        assert isinstance(obj, dict)
+        kind = SkillResourceInstallKind(obj.get("kind"))
+        path = from_str(obj.get("path"))
+        name = from_union([from_str, from_none], obj.get("name"))
+        scope = from_union([SkillResourceInstallScope, from_none], obj.get("scope"))
+        return SkillResourceInstallResult(kind, path, name, scope)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["kind"] = to_enum(SkillResourceInstallKind, self.kind)
+        result["path"] = from_str(self.path)
+        if self.name is not None:
+            result["name"] = from_union([from_str, from_none], self.name)
+        if self.scope is not None:
+            result["scope"] = from_union([lambda x: to_enum(SkillResourceInstallScope, x), from_none], self.scope)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SkillResourceRemoveResult:
+    """The completed skill removal, with conservative disabled-state cleanup."""
+
+    kind: SkillResourceRemoveKind
+    """Removed storage tier."""
+
+    path: str
+    """Removed definition path or unregistered directory."""
+
+    name: str | None = None
+    """Removed skill name, absent for a registered directory."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SkillResourceRemoveResult':
+        assert isinstance(obj, dict)
+        kind = SkillResourceRemoveKind(obj.get("kind"))
+        path = from_str(obj.get("path"))
+        name = from_union([from_str, from_none], obj.get("name"))
+        return SkillResourceRemoveResult(kind, path, name)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["kind"] = to_enum(SkillResourceRemoveKind, self.kind)
+        result["path"] = from_str(self.path)
+        if self.name is not None:
+            result["name"] = from_union([from_str, from_none], self.name)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -52552,6 +54289,72 @@ class ConnectorSessionAccount:
         result["authInfo"] = to_class(AuthIdentityMetadata, self.auth_info)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _AccountLoginProcessResult:
+    """The result of one connection-owned pre-session login action."""
+
+    kind: _AccountLoginProcessResultKind
+    owner_id: str | None = None
+    """The opaque owner identifier, usable only by this connection."""
+
+    user_code: str | None = None
+    """The code the user enters."""
+
+    verification_uri: str | None = None
+    """The authorization page."""
+
+    url: str | None = None
+    """The authorization URL."""
+
+    result: _ProcessLoginPersistence | None = None
+    """The original persistence result."""
+
+    decision: _ForceLoginOrgsDecision | None = None
+    """The verdict from both original policy channels."""
+
+    warnings: list[str] | None = None
+    """Original policy warnings for the host's configured logger."""
+
+    removed: bool | None = None
+    """Whether a credential was removed."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_AccountLoginProcessResult':
+        assert isinstance(obj, dict)
+        kind = _AccountLoginProcessResultKind(obj.get("kind"))
+        owner_id = from_union([from_str, from_none], obj.get("ownerId"))
+        user_code = from_union([from_str, from_none], obj.get("userCode"))
+        verification_uri = from_union([from_str, from_none], obj.get("verificationUri"))
+        url = from_union([from_str, from_none], obj.get("url"))
+        result = from_union([_ProcessLoginPersistence.from_dict, from_none], obj.get("result"))
+        decision = from_union([_ForceLoginOrgsDecision.from_dict, from_none], obj.get("decision"))
+        warnings = from_union([lambda x: from_list(from_str, x), from_none], obj.get("warnings"))
+        removed = from_union([from_bool, from_none], obj.get("removed"))
+        return _AccountLoginProcessResult(kind, owner_id, user_code, verification_uri, url, result, decision, warnings, removed)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["kind"] = to_enum(_AccountLoginProcessResultKind, self.kind)
+        if self.owner_id is not None:
+            result["ownerId"] = from_union([from_str, from_none], self.owner_id)
+        if self.user_code is not None:
+            result["userCode"] = from_union([from_str, from_none], self.user_code)
+        if self.verification_uri is not None:
+            result["verificationUri"] = from_union([from_str, from_none], self.verification_uri)
+        if self.url is not None:
+            result["url"] = from_union([from_str, from_none], self.url)
+        if self.result is not None:
+            result["result"] = from_union([lambda x: to_class(_ProcessLoginPersistence, x), from_none], self.result)
+        if self.decision is not None:
+            result["decision"] = from_union([lambda x: to_class(_ForceLoginOrgsDecision, x), from_none], self.decision)
+        if self.warnings is not None:
+            result["warnings"] = from_union([lambda x: from_list(from_str, x), from_none], self.warnings)
+        if self.removed is not None:
+            result["removed"] = from_union([from_bool, from_none], self.removed)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class AgentDiscoveryPathList:
@@ -53063,6 +54866,44 @@ class MCPAppsCallToolRequest:
             result["arguments"] = from_union([lambda x: from_dict(lambda x: x, x), from_none], self.arguments)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _MCPShouldExcludeGitHubToolsRequest:
+    """The session tool filters that decide whether the session still has a shell to run `gh`
+    with.
+    """
+    available_tools: list[str] | None = None
+    """The session's tool allowlist, when it set one. Omitted means the session constrains
+    nothing this way.
+    """
+    excluded_tools: list[str] | None = None
+    """The session's tool denylist, when it set one. Omitted means the session constrains
+    nothing this way.
+    """
+    tool_filter_precedence: OptionsUpdateToolFilterPrecedence | None = None
+    """How the allowlist and denylist combine when both are set. Omitted uses the default
+    excluded precedence; supply the session's explicit Update selection when present.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPShouldExcludeGitHubToolsRequest':
+        assert isinstance(obj, dict)
+        available_tools = from_union([lambda x: from_list(from_str, x), from_none], obj.get("availableTools"))
+        excluded_tools = from_union([lambda x: from_list(from_str, x), from_none], obj.get("excludedTools"))
+        tool_filter_precedence = from_union([OptionsUpdateToolFilterPrecedence, from_none], obj.get("toolFilterPrecedence"))
+        return _MCPShouldExcludeGitHubToolsRequest(available_tools, excluded_tools, tool_filter_precedence)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        if self.available_tools is not None:
+            result["availableTools"] = from_union([lambda x: from_list(from_str, x), from_none], self.available_tools)
+        if self.excluded_tools is not None:
+            result["excludedTools"] = from_union([lambda x: from_list(from_str, x), from_none], self.excluded_tools)
+        if self.tool_filter_precedence is not None:
+            result["toolFilterPrecedence"] = from_union([lambda x: to_enum(OptionsUpdateToolFilterPrecedence, x), from_none], self.tool_filter_precedence)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 class MCPToolUIVisibility(Enum):
     """Consumer allowed to call an MCP tool."""
@@ -53186,6 +55027,45 @@ class PermissionLocationAddToolApprovalParams:
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
+class SemanticSessionImportCounts:
+    """Conversation records accepted by a semantic session import."""
+
+    attachments: int
+    """User attachments."""
+
+    messages: int
+    """Message records."""
+
+    sessions: int
+    """Sessions persisted; zero for a dry run."""
+
+    tool_calls: int
+    """Tool call records."""
+
+    tool_results: int
+    """Tool result records."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SemanticSessionImportCounts':
+        assert isinstance(obj, dict)
+        attachments = from_int(obj.get("attachments"))
+        messages = from_int(obj.get("messages"))
+        sessions = from_int(obj.get("sessions"))
+        tool_calls = from_int(obj.get("toolCalls"))
+        tool_results = from_int(obj.get("toolResults"))
+        return SemanticSessionImportCounts(attachments, messages, sessions, tool_calls, tool_results)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["attachments"] = from_int(self.attachments)
+        result["messages"] = from_int(self.messages)
+        result["sessions"] = from_int(self.sessions)
+        result["toolCalls"] = from_int(self.tool_calls)
+        result["toolResults"] = from_int(self.tool_results)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
 class SessionSettingsEvaluatePredicateRequest:
     """Named Rust-owned settings predicate to evaluate for this session."""
 
@@ -53207,6 +55087,147 @@ class SessionSettingsEvaluatePredicateRequest:
         result["name"] = to_enum(SessionSettingsPredicateName, self.name)
         if self.tool_name is not None:
             result["toolName"] = from_union([from_str, from_none], self.tool_name)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionSkillInventoryEntry:
+    """A complete skill row for session-owned inspection and catalog publication."""
+
+    description: str
+    """Human-readable skill purpose."""
+
+    disable_model_invocation: bool
+    """Whether model invocation is disabled."""
+
+    enabled: bool
+    """Whether the session enables this skill."""
+
+    name: str
+    """Original skill name."""
+
+    source: SkillSource
+    """Runtime-owned source classification."""
+
+    user_invocable: bool
+    """Whether the user can invoke this skill."""
+
+    allowed_tools: list[str] | None = None
+    """Tool names allowed by the skill definition."""
+
+    argument_hint: str | None = None
+    """Freeform argument hint from the definition."""
+
+    base_dir: str | None = None
+    """Local resource directory, when the skill has one."""
+
+    command_name: str | None = None
+    """Canonical slash-command identity."""
+
+    content: str | None = None
+    """Loaded definition body, when available."""
+
+    file_path: str | None = None
+    """Absolute local definition path, when the skill has one."""
+
+    invocation_name: str | None = None
+    """Invocation identity supplied by the source."""
+
+    is_command: bool | None = None
+    """Whether this row comes from a plugin command definition."""
+
+    mcp_origin: McpSkillOrigin | None = None
+    """MCP server and resource identity without private activation metadata."""
+
+    original_name: str | None = None
+    """Provider's original name before qualification."""
+
+    plugin_id: str | None = None
+    """Owning plugin's opaque identity."""
+
+    plugin_name: str | None = None
+    """Owning plugin's display name."""
+
+    plugin_version: str | None = None
+    """Owning plugin's version."""
+
+    relative_dir: str | None = None
+    """Provider-relative resource directory."""
+
+    relative_path: str | None = None
+    """Provider-relative definition path."""
+
+    repository_boundary: str | None = None
+    """Repository boundary for local resource reads."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionSkillInventoryEntry':
+        assert isinstance(obj, dict)
+        description = from_str(obj.get("description"))
+        disable_model_invocation = from_bool(obj.get("disableModelInvocation"))
+        enabled = from_bool(obj.get("enabled"))
+        name = from_str(obj.get("name"))
+        source = SkillSource(obj.get("source"))
+        user_invocable = from_bool(obj.get("userInvocable"))
+        allowed_tools = from_union([lambda x: from_list(from_str, x), from_none], obj.get("allowedTools"))
+        argument_hint = from_union([from_str, from_none], obj.get("argumentHint"))
+        base_dir = from_union([from_str, from_none], obj.get("baseDir"))
+        command_name = from_union([from_str, from_none], obj.get("commandName"))
+        content = from_union([from_str, from_none], obj.get("content"))
+        file_path = from_union([from_str, from_none], obj.get("filePath"))
+        invocation_name = from_union([from_str, from_none], obj.get("invocationName"))
+        is_command = from_union([from_bool, from_none], obj.get("isCommand"))
+        mcp_origin = from_union([McpSkillOrigin.from_dict, from_none], obj.get("mcpOrigin"))
+        original_name = from_union([from_str, from_none], obj.get("originalName"))
+        plugin_id = from_union([from_str, from_none], obj.get("pluginId"))
+        plugin_name = from_union([from_str, from_none], obj.get("pluginName"))
+        plugin_version = from_union([from_str, from_none], obj.get("pluginVersion"))
+        relative_dir = from_union([from_str, from_none], obj.get("relativeDir"))
+        relative_path = from_union([from_str, from_none], obj.get("relativePath"))
+        repository_boundary = from_union([from_str, from_none], obj.get("repositoryBoundary"))
+        return _SessionSkillInventoryEntry(description, disable_model_invocation, enabled, name, source, user_invocable, allowed_tools, argument_hint, base_dir, command_name, content, file_path, invocation_name, is_command, mcp_origin, original_name, plugin_id, plugin_name, plugin_version, relative_dir, relative_path, repository_boundary)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["description"] = from_str(self.description)
+        result["disableModelInvocation"] = from_bool(self.disable_model_invocation)
+        result["enabled"] = from_bool(self.enabled)
+        result["name"] = from_str(self.name)
+        result["source"] = to_enum(SkillSource, self.source)
+        result["userInvocable"] = from_bool(self.user_invocable)
+        if self.allowed_tools is not None:
+            result["allowedTools"] = from_union([lambda x: from_list(from_str, x), from_none], self.allowed_tools)
+        if self.argument_hint is not None:
+            result["argumentHint"] = from_union([from_str, from_none], self.argument_hint)
+        if self.base_dir is not None:
+            result["baseDir"] = from_union([from_str, from_none], self.base_dir)
+        if self.command_name is not None:
+            result["commandName"] = from_union([from_str, from_none], self.command_name)
+        if self.content is not None:
+            result["content"] = from_union([from_str, from_none], self.content)
+        if self.file_path is not None:
+            result["filePath"] = from_union([from_str, from_none], self.file_path)
+        if self.invocation_name is not None:
+            result["invocationName"] = from_union([from_str, from_none], self.invocation_name)
+        if self.is_command is not None:
+            result["isCommand"] = from_union([from_bool, from_none], self.is_command)
+        if self.mcp_origin is not None:
+            result["mcpOrigin"] = from_union([lambda x: to_class(McpSkillOrigin, x), from_none], self.mcp_origin)
+        if self.original_name is not None:
+            result["originalName"] = from_union([from_str, from_none], self.original_name)
+        if self.plugin_id is not None:
+            result["pluginId"] = from_union([from_str, from_none], self.plugin_id)
+        if self.plugin_name is not None:
+            result["pluginName"] = from_union([from_str, from_none], self.plugin_name)
+        if self.plugin_version is not None:
+            result["pluginVersion"] = from_union([from_str, from_none], self.plugin_version)
+        if self.relative_dir is not None:
+            result["relativeDir"] = from_union([from_str, from_none], self.relative_dir)
+        if self.relative_path is not None:
+            result["relativePath"] = from_union([from_str, from_none], self.relative_path)
+        if self.repository_boundary is not None:
+            result["repositoryBoundary"] = from_union([from_str, from_none], self.repository_boundary)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -54816,6 +56837,414 @@ class SendAgentMode(Enum):
 
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
+class SandboxSettingsLoadRequest:
+    """The host context to read sandbox settings from."""
+
+    context: UserSettingsHostContext
+    """The configuration directory, home directory, and environment used to resolve
+    settings.json.
+    """
+    reject_warnings: bool | None = None
+    """Reject a settings warning instead of returning recovered settings, for a caller about to
+    edit the document.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SandboxSettingsLoadRequest':
+        assert isinstance(obj, dict)
+        context = UserSettingsHostContext.from_dict(obj.get("context"))
+        reject_warnings = from_union([from_bool, from_none], obj.get("rejectWarnings"))
+        return SandboxSettingsLoadRequest(context, reject_warnings)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["context"] = to_class(UserSettingsHostContext, self.context)
+        if self.reject_warnings is not None:
+            result["rejectWarnings"] = from_union([from_bool, from_none], self.reject_warnings)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SandboxSettingsPersistPathGrantRequest:
+    """A literal sandbox path grant to save in the user's settings."""
+
+    context: UserSettingsHostContext
+    """The configuration directory, home directory, and environment used to resolve
+    settings.json.
+    """
+    grant: PermissionSandboxPathGrant
+    """The path grant to persist, including read-only entries to remove by their exact stored
+    spelling.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SandboxSettingsPersistPathGrantRequest':
+        assert isinstance(obj, dict)
+        context = UserSettingsHostContext.from_dict(obj.get("context"))
+        grant = PermissionSandboxPathGrant.from_dict(obj.get("grant"))
+        return SandboxSettingsPersistPathGrantRequest(context, grant)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["context"] = to_class(UserSettingsHostContext, self.context)
+        result["grant"] = to_class(PermissionSandboxPathGrant, self.grant)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SandboxSettingsUpdateRequest:
+    """A sandbox settings patch and the host context that selects its settings file."""
+
+    context: UserSettingsHostContext
+    """The configuration directory, home directory, and environment used to resolve
+    settings.json.
+    """
+    patch: Any
+    """Sandbox settings changes. Filesystem, network, and seatbelt fields merge into userPolicy;
+    other supported fields merge at the sandbox root.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SandboxSettingsUpdateRequest':
+        assert isinstance(obj, dict)
+        context = UserSettingsHostContext.from_dict(obj.get("context"))
+        patch = obj.get("patch")
+        return SandboxSettingsUpdateRequest(context, patch)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["context"] = to_class(UserSettingsHostContext, self.context)
+        result["patch"] = self.patch
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _UserSettingsEditRequest:
+    """One atomic edit of a canonical setting in settings.json."""
+
+    canonical_path: list[str]
+    """Nonempty canonical path segments of the setting to edit, starting with its top-level key."""
+
+    operation: _SettingsEditOperation
+    """Set a scalar, add or remove a string list item, or remove the setting. The handler
+    rejects a missing or incompatible value.
+    """
+    config_dir: str | None = None
+    """Configuration directory to edit. Omitted or empty resolves the server's own home, as in
+    `user.settings.loadForConfigDir`.
+    """
+    context: UserSettingsHostContext | None = None
+    """Optional trusted-host paths and hook environment. Cannot be combined with configDir."""
+
+    value: Any = UNSET_SENTINEL
+    """Required boolean, string or number for set, required string for add-item and remove-item,
+    and forbidden for remove. The runtime rejects all other JSON values.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_UserSettingsEditRequest':
+        assert isinstance(obj, dict)
+        canonical_path = from_list(from_str, obj.get("canonicalPath"))
+        operation = _SettingsEditOperation(obj.get("operation"))
+        config_dir = from_union([from_str, from_none], obj.get("configDir"))
+        context = from_union([UserSettingsHostContext.from_dict, from_none], obj.get("context"))
+        value = obj["value"] if "value" in obj else UNSET_SENTINEL
+        return _UserSettingsEditRequest(canonical_path, operation, config_dir, context, value)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["canonicalPath"] = from_list(from_str, self.canonical_path)
+        result["operation"] = to_enum(_SettingsEditOperation, self.operation)
+        if self.config_dir is not None:
+            result["configDir"] = from_union([from_str, from_none], self.config_dir)
+        if self.context is not None:
+            result["context"] = from_union([lambda x: to_class(UserSettingsHostContext, x), from_none], self.context)
+        if self.value is not UNSET_SENTINEL:
+            result["value"] = self.value
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _UserSettingsForContextRequest:
+    """Selects the settings document and hook environment for an explicit host."""
+
+    context: UserSettingsHostContext
+    """Host paths and environment used instead of the server process defaults."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_UserSettingsForContextRequest':
+        assert isinstance(obj, dict)
+        context = UserSettingsHostContext.from_dict(obj.get("context"))
+        return _UserSettingsForContextRequest(context)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["context"] = to_class(UserSettingsHostContext, self.context)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _UserSettingsForWorkingDirectoryRequest:
+    """Reads a contextual user document with trusted repository settings for one working
+    directory.
+    """
+    context: UserSettingsHostContext
+    """Host paths and environment that select the user document."""
+
+    working_directory: str
+    """Directory whose repository and persisted trust determine the overlay."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_UserSettingsForWorkingDirectoryRequest':
+        assert isinstance(obj, dict)
+        context = UserSettingsHostContext.from_dict(obj.get("context"))
+        working_directory = from_str(obj.get("workingDirectory"))
+        return _UserSettingsForWorkingDirectoryRequest(context, working_directory)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["context"] = to_class(UserSettingsHostContext, self.context)
+        result["workingDirectory"] = from_str(self.working_directory)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _UserSettingsLoadWithWarningRequest:
+    """Selects an optional trusted-host context for settings and parser diagnostics."""
+
+    context: UserSettingsHostContext | None = None
+    """Optional host paths and hook environment. Omit to keep the server defaults."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_UserSettingsLoadWithWarningRequest':
+        assert isinstance(obj, dict)
+        context = from_union([UserSettingsHostContext.from_dict, from_none], obj.get("context"))
+        return _UserSettingsLoadWithWarningRequest(context)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        if self.context is not None:
+            result["context"] = from_union([lambda x: to_class(UserSettingsHostContext, x), from_none], self.context)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _UserSettingsMigrateStaffLogLevelOnceRequest:
+    """Selects the configuration directory to run the one-time staff log-level migration
+    against, and supplies the caller's record of whether it has already run.
+    """
+    context: UserSettingsHostContext
+    """The configuration directory, home directory and environment to resolve the settings and
+    global-state documents from. A host that scopes a session to its own Copilot home must
+    pass that directory here, or the migration is evaluated against the server's own home
+    instead.
+    """
+    cached_completed_at: str | None = None
+    """When the caller last recorded this migration, as an ISO-8601 timestamp. Supplying it lets
+    the runtime answer `current` without re-running the evaluation.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_UserSettingsMigrateStaffLogLevelOnceRequest':
+        assert isinstance(obj, dict)
+        context = UserSettingsHostContext.from_dict(obj.get("context"))
+        cached_completed_at = from_union([from_str, from_none], obj.get("cachedCompletedAt"))
+        return _UserSettingsMigrateStaffLogLevelOnceRequest(context, cached_completed_at)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["context"] = to_class(UserSettingsHostContext, self.context)
+        if self.cached_completed_at is not None:
+            result["cachedCompletedAt"] = from_union([from_str, from_none], self.cached_completed_at)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _UserSettingsResetStaffModelSelectionOnceRequest:
+    """Selects the configuration directory to run the one-time staff model-selection reset
+    against, and supplies the caller's record of whether it has already run.
+    """
+    context: UserSettingsHostContext
+    """The configuration directory, home directory and environment to resolve the settings and
+    global-state documents from. A host that scopes a session to its own Copilot home must
+    pass that directory here, or the reset is evaluated against the server's own home instead.
+    """
+    staff: bool | None = None
+    """Whether the signed-in account is a staff account. The reset applies only to staff, so
+    anything other than `true` returns `didReset: false` without touching the settings
+    document.
+    """
+    staff_model_reset_at: str | None = None
+    """When the caller last recorded this reset, as an ISO-8601 timestamp. A timestamp at or
+    after the cutoff means the reset already ran and is returned unchanged.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_UserSettingsResetStaffModelSelectionOnceRequest':
+        assert isinstance(obj, dict)
+        context = UserSettingsHostContext.from_dict(obj.get("context"))
+        staff = from_union([from_bool, from_none], obj.get("staff"))
+        staff_model_reset_at = from_union([from_str, from_none], obj.get("staffModelResetAt"))
+        return _UserSettingsResetStaffModelSelectionOnceRequest(context, staff, staff_model_reset_at)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["context"] = to_class(UserSettingsHostContext, self.context)
+        if self.staff is not None:
+            result["staff"] = from_union([from_bool, from_none], self.staff)
+        if self.staff_model_reset_at is not None:
+            result["staffModelResetAt"] = from_union([from_str, from_none], self.staff_model_reset_at)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _UserSettingsUnknownKeysWarningRequest:
+    """Selects the configuration directory whose user settings document should be inspected for
+    unrecognized top-level keys.
+    """
+    context: UserSettingsHostContext
+    """The configuration directory, home directory and environment to resolve the settings
+    document from. A host that scopes a session to its own Copilot home must pass that
+    directory here, or the server's own home is inspected instead.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_UserSettingsUnknownKeysWarningRequest':
+        assert isinstance(obj, dict)
+        context = UserSettingsHostContext.from_dict(obj.get("context"))
+        return _UserSettingsUnknownKeysWarningRequest(context)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["context"] = to_class(UserSettingsHostContext, self.context)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class UserSettingsValidateRequest:
+    """A single top-level setting subtree to validate."""
+
+    top_key: str
+    """Top-level setting name to validate."""
+
+    context: UserSettingsHostContext | None = None
+    """Optional trusted-host context whose environment controls hook validation."""
+
+    delete: bool | None = None
+    """True to validate a removal of this key. The current settings file is not read."""
+
+    value: Any = None
+    """Value to validate. Omitted when `delete` is true."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'UserSettingsValidateRequest':
+        assert isinstance(obj, dict)
+        top_key = from_str(obj.get("topKey"))
+        context = from_union([UserSettingsHostContext.from_dict, from_none], obj.get("context"))
+        delete = from_union([from_bool, from_none], obj.get("delete"))
+        value = obj.get("value")
+        return UserSettingsValidateRequest(top_key, context, delete, value)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["topKey"] = from_str(self.top_key)
+        if self.context is not None:
+            result["context"] = from_union([lambda x: to_class(UserSettingsHostContext, x), from_none], self.context)
+        if self.delete is not None:
+            result["delete"] = from_union([from_bool, from_none], self.delete)
+        if self.value is not None:
+            result["value"] = self.value
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class UserSettingsWriteKeyRequest:
+    """A raw top-level setting edit with explicit read-failure behavior."""
+
+    key: str
+    """The top-level setting to write without canonicalizing legacy siblings."""
+
+    value: Any
+    """The value to store. Explicit null is retained. Pass null when deleting."""
+
+    context: UserSettingsHostContext | None = None
+    """Optional host paths and environment. Omit to use the server's settings home."""
+
+    delete: bool | None = None
+    """Remove the key instead of writing it. Defaults to false."""
+
+    refuse_on_read_failure: bool | None = None
+    """Refuse to replace an unreadable or invalid file. Defaults to false."""
+
+    refuse_on_unrecoverable_read_failure: bool | None = None
+    """Refuse content no JSONC recovery pass reads as an object. Defaults to false.
+    Recoverable content can still be repaired when refuseOnReadFailure is false.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'UserSettingsWriteKeyRequest':
+        assert isinstance(obj, dict)
+        key = from_str(obj.get("key"))
+        value = obj.get("value")
+        context = from_union([UserSettingsHostContext.from_dict, from_none], obj.get("context"))
+        delete = from_union([from_bool, from_none], obj.get("delete"))
+        refuse_on_read_failure = from_union([from_bool, from_none], obj.get("refuseOnReadFailure"))
+        refuse_on_unrecoverable_read_failure = from_union([from_bool, from_none], obj.get("refuseOnUnrecoverableReadFailure"))
+        return UserSettingsWriteKeyRequest(key, value, context, delete, refuse_on_read_failure, refuse_on_unrecoverable_read_failure)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["key"] = from_str(self.key)
+        result["value"] = self.value
+        if self.context is not None:
+            result["context"] = from_union([lambda x: to_class(UserSettingsHostContext, x), from_none], self.context)
+        if self.delete is not None:
+            result["delete"] = from_union([from_bool, from_none], self.delete)
+        if self.refuse_on_read_failure is not None:
+            result["refuseOnReadFailure"] = from_union([from_bool, from_none], self.refuse_on_read_failure)
+        if self.refuse_on_unrecoverable_read_failure is not None:
+            result["refuseOnUnrecoverableReadFailure"] = from_union([from_bool, from_none], self.refuse_on_unrecoverable_read_failure)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _UserSettingsWriteKeysRequest:
+    """An atomic set of top-level settings updates that preserves unrelated stored values."""
+
+    context: UserSettingsHostContext
+    """Host paths and environment that select the target document."""
+
+    delete_keys: list[str]
+    """Top-level keys to remove in the same transaction."""
+
+    settings: dict[str, Any]
+    """Top-level values to write. Stored null remains a value, not deletion."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_UserSettingsWriteKeysRequest':
+        assert isinstance(obj, dict)
+        context = UserSettingsHostContext.from_dict(obj.get("context"))
+        delete_keys = from_list(from_str, obj.get("deleteKeys"))
+        settings = from_dict(lambda x: x, obj.get("settings"))
+        return _UserSettingsWriteKeysRequest(context, delete_keys, settings)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["context"] = to_class(UserSettingsHostContext, self.context)
+        result["deleteKeys"] = from_list(from_str, self.delete_keys)
+        result["settings"] = from_dict(lambda x: x, self.settings)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
 class CustomizationsReloadResult:
     """Results of reloading discovered session customizations. Inspect outcomes for reloaded,
     skipped, or failed subsystems; a rejection may follow partial mutation. Changes to the
@@ -56399,6 +58828,36 @@ class MetadataRecordContextChangeRequest:
 # Internal: this type is an internal SDK API and is not part of the public surface.
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
+class _MCPConfigSourceDiagnostic:
+    """A source file or server entry that the MCP composition omitted."""
+
+    message: str
+    """Diagnostic from the existing MCP parser."""
+
+    path: str
+    """Source file that contains the problem."""
+
+    reason: str
+    """Either malformed, unreadable, or invalid-server."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPConfigSourceDiagnostic':
+        assert isinstance(obj, dict)
+        message = from_str(obj.get("message"))
+        path = from_str(obj.get("path"))
+        reason = from_str(obj.get("reason"))
+        return _MCPConfigSourceDiagnostic(message, path, reason)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["message"] = from_str(self.message)
+        result["path"] = from_str(self.path)
+        result["reason"] = from_str(self.reason)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
 class _MCPGitHubWorkspace:
     """Repository and server state for GitHub MCP exposure."""
 
@@ -56620,6 +59079,31 @@ class SessionsUpdateWorkspaceFieldsRequest:
         result["fieldsJson"] = from_str(self.fields_json)
         result["sessionId"] = from_str(self.session_id)
         result["sessionsHome"] = from_str(self.sessions_home)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SkillResourceContext:
+    """Host-owned paths and environment for standalone skill management."""
+
+    context: UserSettingsHostContext
+    """Settings paths and hook environment for the original host."""
+
+    working_directory: str
+    """Workspace directory for repository sources and relative paths."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SkillResourceContext':
+        assert isinstance(obj, dict)
+        context = UserSettingsHostContext.from_dict(obj.get("context"))
+        working_directory = from_str(obj.get("workingDirectory"))
+        return _SkillResourceContext(context, working_directory)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["context"] = to_class(UserSettingsHostContext, self.context)
+        result["workingDirectory"] = from_str(self.working_directory)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -56868,6 +59352,139 @@ class MCPResourcesReadResult:
     def to_dict(self) -> dict:
         result: dict = {}
         result["contents"] = from_list(lambda x: to_class(MCPResourceContent, x), self.contents)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PersistenceBarrierRequest:
+    """A typed request to the original host's retained persistence resources."""
+
+    force: bool
+    """Whether the original writer must persist an otherwise empty session."""
+
+    operation_id: str
+    """Runtime-assigned identity for this flush, independent of concurrent flushes."""
+
+    phase: _SessionPersistenceBarrierPhase
+    """Resource barrier to await."""
+
+    session_id: str
+    """Target session identifier"""
+
+    native_failure: str | None = None
+    """Native flush failure, combined with retained callback failures at completion."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PersistenceBarrierRequest':
+        assert isinstance(obj, dict)
+        force = from_bool(obj.get("force"))
+        operation_id = from_str(obj.get("operationId"))
+        phase = _SessionPersistenceBarrierPhase(obj.get("phase"))
+        session_id = from_str(obj.get("sessionId"))
+        native_failure = from_union([from_str, from_none], obj.get("nativeFailure"))
+        return _PersistenceBarrierRequest(force, operation_id, phase, session_id, native_failure)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["force"] = from_bool(self.force)
+        result["operationId"] = from_str(self.operation_id)
+        result["phase"] = to_enum(_SessionPersistenceBarrierPhase, self.phase)
+        result["sessionId"] = from_str(self.session_id)
+        if self.native_failure is not None:
+            result["nativeFailure"] = from_union([from_str, from_none], self.native_failure)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionPersistenceBarrierRequest:
+    """A typed request to the original host's retained persistence resources."""
+
+    force: bool
+    """Whether the original writer must persist an otherwise empty session."""
+
+    operation_id: str
+    """Runtime-assigned identity for this flush, independent of concurrent flushes."""
+
+    phase: _SessionPersistenceBarrierPhase
+    """Resource barrier to await."""
+
+    native_failure: str | None = None
+    """Native flush failure, combined with retained callback failures at completion."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionPersistenceBarrierRequest':
+        assert isinstance(obj, dict)
+        force = from_bool(obj.get("force"))
+        operation_id = from_str(obj.get("operationId"))
+        phase = _SessionPersistenceBarrierPhase(obj.get("phase"))
+        native_failure = from_union([from_str, from_none], obj.get("nativeFailure"))
+        return _SessionPersistenceBarrierRequest(force, operation_id, phase, native_failure)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["force"] = from_bool(self.force)
+        result["operationId"] = from_str(self.operation_id)
+        result["phase"] = to_enum(_SessionPersistenceBarrierPhase, self.phase)
+        if self.native_failure is not None:
+            result["nativeFailure"] = from_union([from_str, from_none], self.native_failure)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _RepositoryDisabledNamesRequest:
+    """Reads only the trusted repository contribution to one resource disable list."""
+
+    context: UserSettingsHostContext
+    """Host paths and environment that select the user document."""
+
+    key: RepositoryDisabledKey
+    """Resource disable list to inspect."""
+
+    working_directory: str
+    """Directory whose repository and persisted trust determine the overlay."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_RepositoryDisabledNamesRequest':
+        assert isinstance(obj, dict)
+        context = UserSettingsHostContext.from_dict(obj.get("context"))
+        key = RepositoryDisabledKey(obj.get("key"))
+        working_directory = from_str(obj.get("workingDirectory"))
+        return _RepositoryDisabledNamesRequest(context, key, working_directory)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["context"] = to_class(UserSettingsHostContext, self.context)
+        result["key"] = to_enum(RepositoryDisabledKey, self.key)
+        result["workingDirectory"] = from_str(self.working_directory)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionRepositoryDisabledNamesRequest:
+    """Reads repository resource disables using the bound session's configuration and trust
+    authority.
+    """
+    key: RepositoryDisabledKey
+    """Resource disable list to inspect."""
+
+    working_directory: str
+    """Directory whose repository settings to inspect."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionRepositoryDisabledNamesRequest':
+        assert isinstance(obj, dict)
+        key = RepositoryDisabledKey(obj.get("key"))
+        working_directory = from_str(obj.get("workingDirectory"))
+        return _SessionRepositoryDisabledNamesRequest(key, working_directory)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["key"] = to_enum(RepositoryDisabledKey, self.key)
+        result["workingDirectory"] = from_str(self.working_directory)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -58143,6 +60760,96 @@ class SessionInstalledPlugin:
             result["version"] = from_union([from_str, from_none], self.version)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionPluginInspectExtensionContributionsRequest:
+    """Inspects extension directories contributed by a changed plugin under the selected
+    session's activation and profile.
+    """
+    changed_plugin_spec: str
+    """Plugin name or marketplace-qualified spec whose in-place change can require extension
+    restarts.
+    """
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionPluginInspectExtensionContributionsRequest':
+        assert isinstance(obj, dict)
+        changed_plugin_spec = from_str(obj.get("changedPluginSpec"))
+        return _SessionPluginInspectExtensionContributionsRequest(changed_plugin_spec)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["changedPluginSpec"] = from_str(self.changed_plugin_spec)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SessionPluginInventoryEntry:
+    """One available plugin, including inactive live plugins and trusted bundled provenance."""
+
+    enabled: bool
+    """Current effective enablement, independent of presence on disk."""
+
+    marketplace: str
+    """Marketplace name, or an empty string for a direct or bundled plugin."""
+
+    name: str
+    """Plugin name from its manifest or installation record."""
+
+    description: str | None = None
+    """Manifest description, with surrounding whitespace removed for installed and bundled
+    entries.
+    """
+    external: bool | None = None
+    """Identifies an explicit host mount rather than a persisted installation."""
+
+    installed_from: str | None = None
+    """Marketplace directory for a live plugin that has no persisted copy."""
+
+    root_path: str | None = None
+    """Resolved content directory; absent for live plugins whose content is unresolved.
+    This path does not grant filesystem access.
+    """
+    source: str | None = None
+    """Trusted runtime provenance; bundled plugins use builtin."""
+
+    version: str | None = None
+    """Version reported by the manifest."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SessionPluginInventoryEntry':
+        assert isinstance(obj, dict)
+        enabled = from_bool(obj.get("enabled"))
+        marketplace = from_str(obj.get("marketplace"))
+        name = from_str(obj.get("name"))
+        description = from_union([from_str, from_none], obj.get("description"))
+        external = from_union([from_bool, from_none], obj.get("external"))
+        installed_from = from_union([from_str, from_none], obj.get("installedFrom"))
+        root_path = from_union([from_str, from_none], obj.get("rootPath"))
+        source = from_union([from_str, from_none], obj.get("source"))
+        version = from_union([from_str, from_none], obj.get("version"))
+        return SessionPluginInventoryEntry(enabled, marketplace, name, description, external, installed_from, root_path, source, version)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["enabled"] = from_bool(self.enabled)
+        result["marketplace"] = from_str(self.marketplace)
+        result["name"] = from_str(self.name)
+        if self.description is not None:
+            result["description"] = from_union([from_str, from_none], self.description)
+        if self.external is not None:
+            result["external"] = from_union([from_bool, from_none], self.external)
+        if self.installed_from is not None:
+            result["installedFrom"] = from_union([from_str, from_none], self.installed_from)
+        if self.root_path is not None:
+            result["rootPath"] = from_union([from_str, from_none], self.root_path)
+        if self.source is not None:
+            result["source"] = from_union([from_str, from_none], self.source)
+        if self.version is not None:
+            result["version"] = from_union([from_str, from_none], self.version)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class SessionPluginsDisableRequest:
@@ -58681,6 +61388,26 @@ class _ManagedSettingsIngestResult:
             result["serverSandboxFloor"] = self.server_sandbox_floor
         if self.settings is not None:
             result["settings"] = self.settings
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _MCPConfigComposeAdditionalRequest:
+    """Validates and combines additional MCP documents in source order."""
+
+    sources: list[MCPAdditionalConfigSource]
+    """Documents in low-to-high precedence order."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPConfigComposeAdditionalRequest':
+        assert isinstance(obj, dict)
+        sources = from_list(MCPAdditionalConfigSource.from_dict, obj.get("sources"))
+        return _MCPConfigComposeAdditionalRequest(sources)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["sources"] = from_list(lambda x: to_class(MCPAdditionalConfigSource, x), self.sources)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -59457,6 +62184,55 @@ class MCPPromptsGetResult:
             result["additionalProperties"] = from_union([lambda x: from_dict(lambda x: x, x), from_none], self.additional_properties)
         if self.description is not None:
             result["description"] = from_union([from_str, from_none], self.description)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class MemoriesImportSemanticResult:
+    """Semantic memory import outcome."""
+
+    code: str
+    """Stable aggregate result code."""
+
+    diagnostics: list[SemanticImportDiagnostic]
+    """Input validation diagnostics."""
+
+    dry_run: bool
+    """Whether the call only validated input."""
+
+    imported: SemanticMemoryImportCounts
+    """Record outcome counts."""
+
+    message: str
+    """Human-readable aggregate result."""
+
+    ok: bool
+    """Whether every record succeeded or was skipped."""
+
+    records: list[SemanticMemoryImportItemResult]
+    """Individual record outcomes, in input order."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'MemoriesImportSemanticResult':
+        assert isinstance(obj, dict)
+        code = from_str(obj.get("code"))
+        diagnostics = from_list(SemanticImportDiagnostic.from_dict, obj.get("diagnostics"))
+        dry_run = from_bool(obj.get("dryRun"))
+        imported = SemanticMemoryImportCounts.from_dict(obj.get("imported"))
+        message = from_str(obj.get("message"))
+        ok = from_bool(obj.get("ok"))
+        records = from_list(SemanticMemoryImportItemResult.from_dict, obj.get("records"))
+        return MemoriesImportSemanticResult(code, diagnostics, dry_run, imported, message, ok, records)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["code"] = from_str(self.code)
+        result["diagnostics"] = from_list(lambda x: to_class(SemanticImportDiagnostic, x), self.diagnostics)
+        result["dryRun"] = from_bool(self.dry_run)
+        result["imported"] = to_class(SemanticMemoryImportCounts, self.imported)
+        result["message"] = from_str(self.message)
+        result["ok"] = from_bool(self.ok)
+        result["records"] = from_list(lambda x: to_class(SemanticMemoryImportItemResult, x), self.records)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -63674,6 +66450,58 @@ class MCPStartServerConfig:
             result["socketPath"] = from_union([from_str, from_none], self.socket_path)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _MCPGitHubResolveInvocationRequest:
+    """Resolve the authentication-derived built-in without a session or MCP connection."""
+
+    audience: _MCPInvocationAudience
+    """Existing launch populations; account identity comes only from the connection."""
+
+    disabled_servers: list[str]
+    """Effective disabled servers, after enable overrides."""
+
+    integration_id: str
+    """Client integration identifier for the secret-free descriptor."""
+
+    user_settings: Any
+    """Effective user and trusted repository settings."""
+
+    working_directory: str
+    """Repository context for host detection and shell availability."""
+
+    flags: _MCPGitHubInvocationToolOptions | None = None
+    """Invocation tool overrides, above settings."""
+
+    tool_filters: _MCPShouldExcludeGitHubToolsRequest | None = None
+    """Tool filters used by the session this invocation describes."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPGitHubResolveInvocationRequest':
+        assert isinstance(obj, dict)
+        audience = _MCPInvocationAudience.from_dict(obj.get("audience"))
+        disabled_servers = from_list(from_str, obj.get("disabledServers"))
+        integration_id = from_str(obj.get("integrationId"))
+        user_settings = obj.get("userSettings")
+        working_directory = from_str(obj.get("workingDirectory"))
+        flags = from_union([_MCPGitHubInvocationToolOptions.from_dict, from_none], obj.get("flags"))
+        tool_filters = from_union([_MCPShouldExcludeGitHubToolsRequest.from_dict, from_none], obj.get("toolFilters"))
+        return _MCPGitHubResolveInvocationRequest(audience, disabled_servers, integration_id, user_settings, working_directory, flags, tool_filters)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["audience"] = to_class(_MCPInvocationAudience, self.audience)
+        result["disabledServers"] = from_list(from_str, self.disabled_servers)
+        result["integrationId"] = from_str(self.integration_id)
+        result["userSettings"] = self.user_settings
+        result["workingDirectory"] = from_str(self.working_directory)
+        if self.flags is not None:
+            result["flags"] = from_union([lambda x: to_class(_MCPGitHubInvocationToolOptions, x), from_none], self.flags)
+        if self.tool_filters is not None:
+            result["toolFilters"] = from_union([lambda x: to_class(_MCPShouldExcludeGitHubToolsRequest, x), from_none], self.tool_filters)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class MCPToolUI:
@@ -63754,6 +66582,97 @@ class PendingExternalToolRequestList:
     def to_dict(self) -> dict:
         result: dict = {}
         result["items"] = from_list(lambda x: to_class(PendingExternalToolRequest, x), self.items)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class SessionsImportSemanticResult:
+    """Semantic session import outcome."""
+
+    code: str
+    """Stable operation code."""
+
+    diagnostics: list[SemanticImportDiagnostic]
+    """Input or persistence diagnostics."""
+
+    dry_run: bool
+    """Whether the call only validated input."""
+
+    imported: SemanticSessionImportCounts
+    """Imported or validated record counts."""
+
+    message: str
+    """Human-readable operation result."""
+
+    ok: bool
+    """Whether validation and persistence succeeded."""
+
+    external_id: str | None = None
+    """External session identifier from the document."""
+
+    session_id: str | None = None
+    """Runtime session identifier after persistence, or incomplete rollback."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'SessionsImportSemanticResult':
+        assert isinstance(obj, dict)
+        code = from_str(obj.get("code"))
+        diagnostics = from_list(SemanticImportDiagnostic.from_dict, obj.get("diagnostics"))
+        dry_run = from_bool(obj.get("dryRun"))
+        imported = SemanticSessionImportCounts.from_dict(obj.get("imported"))
+        message = from_str(obj.get("message"))
+        ok = from_bool(obj.get("ok"))
+        external_id = from_union([from_str, from_none], obj.get("externalId"))
+        session_id = from_union([from_str, from_none], obj.get("sessionId"))
+        return SessionsImportSemanticResult(code, diagnostics, dry_run, imported, message, ok, external_id, session_id)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["code"] = from_str(self.code)
+        result["diagnostics"] = from_list(lambda x: to_class(SemanticImportDiagnostic, x), self.diagnostics)
+        result["dryRun"] = from_bool(self.dry_run)
+        result["imported"] = to_class(SemanticSessionImportCounts, self.imported)
+        result["message"] = from_str(self.message)
+        result["ok"] = from_bool(self.ok)
+        if self.external_id is not None:
+            result["externalId"] = from_union([from_str, from_none], self.external_id)
+        if self.session_id is not None:
+            result["sessionId"] = from_union([from_str, from_none], self.session_id)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionSkillsInspectInventoryResult:
+    """Full inventory under the selected session's discovery and activation policy."""
+
+    disabled_skills: list[str]
+    """Effective disabled identities, including host and MCP aliases."""
+
+    errors: list[str]
+    """Source failures that make this inventory incomplete."""
+
+    skills: list[_SessionSkillInventoryEntry]
+    """Full local and provider rows visible to this session."""
+
+    warnings: list[str]
+    """Nonfatal loader warnings."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionSkillsInspectInventoryResult':
+        assert isinstance(obj, dict)
+        disabled_skills = from_list(from_str, obj.get("disabledSkills"))
+        errors = from_list(from_str, obj.get("errors"))
+        skills = from_list(_SessionSkillInventoryEntry.from_dict, obj.get("skills"))
+        warnings = from_list(from_str, obj.get("warnings"))
+        return _SessionSkillsInspectInventoryResult(disabled_skills, errors, skills, warnings)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["disabledSkills"] = from_list(from_str, self.disabled_skills)
+        result["errors"] = from_list(from_str, self.errors)
+        result["skills"] = from_list(lambda x: to_class(_SessionSkillInventoryEntry, x), self.skills)
+        result["warnings"] = from_list(from_str, self.warnings)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -65275,6 +68194,32 @@ class ModelProviderStatus:
             result["version"] = from_union([from_str, from_none], self.version)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionExtensionsInspectServiceResult:
+    """Distinguishes an absent extension service from an installed service with an empty
+    inventory.
+    """
+    configured: bool
+    """Whether the original session has an attached extension service."""
+
+    inventory: ExtensionList
+    """Current discovered extensions and their status."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionExtensionsInspectServiceResult':
+        assert isinstance(obj, dict)
+        configured = from_bool(obj.get("configured"))
+        inventory = ExtensionList.from_dict(obj.get("inventory"))
+        return _SessionExtensionsInspectServiceResult(configured, inventory)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["configured"] = from_bool(self.configured)
+        result["inventory"] = to_class(ExtensionList, self.inventory)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class HandlePendingToolCallRequest:
@@ -65590,6 +68535,46 @@ class SessionOpenResult:
 # Internal: this type is an internal SDK API and is not part of the public surface.
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
+class _MCPConfigMergeSourcesResult:
+    """The composed MCP configuration and all omitted-source diagnostics."""
+
+    config: Any
+    """The complete merged configuration, including source provenance."""
+
+    odr_msix_disabled_server_names: list[str]
+    """Registry servers disabled because their MSIX container is unavailable."""
+
+    odr_server_names: list[str]
+    """Server names discovered through the on-device registry."""
+
+    user_config_errors: list[_MCPConfigSourceDiagnostic]
+    """Invalid user entries omitted while valid siblings remained."""
+
+    workspace_errors: list[_MCPConfigSourceDiagnostic]
+    """Workspace files or entries that did not load."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_MCPConfigMergeSourcesResult':
+        assert isinstance(obj, dict)
+        config = obj.get("config")
+        odr_msix_disabled_server_names = from_list(from_str, obj.get("odrMsixDisabledServerNames"))
+        odr_server_names = from_list(from_str, obj.get("odrServerNames"))
+        user_config_errors = from_list(_MCPConfigSourceDiagnostic.from_dict, obj.get("userConfigErrors"))
+        workspace_errors = from_list(_MCPConfigSourceDiagnostic.from_dict, obj.get("workspaceErrors"))
+        return _MCPConfigMergeSourcesResult(config, odr_msix_disabled_server_names, odr_server_names, user_config_errors, workspace_errors)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["config"] = self.config
+        result["odrMsixDisabledServerNames"] = from_list(from_str, self.odr_msix_disabled_server_names)
+        result["odrServerNames"] = from_list(from_str, self.odr_server_names)
+        result["userConfigErrors"] = from_list(lambda x: to_class(_MCPConfigSourceDiagnostic, x), self.user_config_errors)
+        result["workspaceErrors"] = from_list(lambda x: to_class(_MCPConfigSourceDiagnostic, x), self.workspace_errors)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
 class _MCPResolveGitHubConfigRequest:
     """Resolve GitHub MCP exposure and optionally build a secretless server descriptor."""
 
@@ -65780,6 +68765,124 @@ class SessionMetadataSnapshot:
         if self.workspace is not None:
             result["workspace"] = from_union([lambda x: to_class(WorkspaceSummary, x), from_none], self.workspace)
         result["workspacePath"] = from_union([from_none, from_str], self.workspace_path)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SkillResourceDiscoverRequest:
+    """Loads full local skill records, including disabled records and command metadata."""
+
+    host: _SkillResourceContext
+    """Host paths and working directory."""
+
+    plugin_directories: list[str] | None = None
+    """Explicit plugin directories, appended after persisted and live plugin sources."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SkillResourceDiscoverRequest':
+        assert isinstance(obj, dict)
+        host = _SkillResourceContext.from_dict(obj.get("host"))
+        plugin_directories = from_union([lambda x: from_list(from_str, x), from_none], obj.get("pluginDirectories"))
+        return _SkillResourceDiscoverRequest(host, plugin_directories)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["host"] = to_class(_SkillResourceContext, self.host)
+        if self.plugin_directories is not None:
+            result["pluginDirectories"] = from_union([lambda x: from_list(from_str, x), from_none], self.plugin_directories)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SkillResourceInstallRequest:
+    """Registers a skill directory or installs a local or HTTPS skill definition."""
+
+    host: _SkillResourceContext
+    """Host paths and working directory."""
+
+    source: str
+    """Local file, directory, or HTTPS source."""
+
+    project: bool | None = None
+    """Use the preferred project creation directory instead of personal storage."""
+
+    user_agent: str | None = None
+    """User agent for the existing runtime HTTPS fetcher."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SkillResourceInstallRequest':
+        assert isinstance(obj, dict)
+        host = _SkillResourceContext.from_dict(obj.get("host"))
+        source = from_str(obj.get("source"))
+        project = from_union([from_bool, from_none], obj.get("project"))
+        user_agent = from_union([from_str, from_none], obj.get("userAgent"))
+        return _SkillResourceInstallRequest(host, source, project, user_agent)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["host"] = to_class(_SkillResourceContext, self.host)
+        result["source"] = from_str(self.source)
+        if self.project is not None:
+            result["project"] = from_union([from_bool, from_none], self.project)
+        if self.user_agent is not None:
+            result["userAgent"] = from_union([from_str, from_none], self.user_agent)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SkillResourceRemoveRequest:
+    """Removes a personal or project skill, or unregisters a custom directory."""
+
+    host: _SkillResourceContext
+    """Host paths and working directory."""
+
+    target: str
+    """Skill name or registered directory."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SkillResourceRemoveRequest':
+        assert isinstance(obj, dict)
+        host = _SkillResourceContext.from_dict(obj.get("host"))
+        target = from_str(obj.get("target"))
+        return _SkillResourceRemoveRequest(host, target)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["host"] = to_class(_SkillResourceContext, self.host)
+        result["target"] = from_str(self.target)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SkillResourceSetEnabledRequest:
+    """Atomically changes only one user's disabled skill entry under explicit host paths."""
+
+    enabled: bool
+    """Desired user-scope enablement."""
+
+    host: _SkillResourceContext
+    """Host paths and working directory."""
+
+    name: str
+    """Invocation name to enable or disable."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SkillResourceSetEnabledRequest':
+        assert isinstance(obj, dict)
+        enabled = from_bool(obj.get("enabled"))
+        host = _SkillResourceContext.from_dict(obj.get("host"))
+        name = from_str(obj.get("name"))
+        return _SkillResourceSetEnabledRequest(enabled, host, name)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["enabled"] = from_bool(self.enabled)
+        result["host"] = to_class(_SkillResourceContext, self.host)
+        result["name"] = from_str(self.name)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -66525,6 +69628,31 @@ class PluginInstallResult:
             result["warnings"] = from_union([lambda x: from_list(from_str, x), from_none], self.warnings)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PluginInvocationInventoryEntry:
+    """One plugin in a host invocation's complete merged inventory."""
+
+    external: bool
+    """Whether an explicit host directory supplies this plugin."""
+
+    plugin: InstalledPluginInfo
+    """Plugin metadata and effective activation."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PluginInvocationInventoryEntry':
+        assert isinstance(obj, dict)
+        external = from_bool(obj.get("external"))
+        plugin = InstalledPluginInfo.from_dict(obj.get("plugin"))
+        return _PluginInvocationInventoryEntry(external, plugin)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["external"] = from_bool(self.external)
+        result["plugin"] = to_class(InstalledPluginInfo, self.plugin)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class PluginListResult:
@@ -66989,6 +70117,32 @@ class SessionUpdatePluginOptions:
         result: dict = {}
         if self.installed is not None:
             result["installed"] = from_union([lambda x: from_list(lambda x: to_class(SessionInstalledPlugin, x), x), from_none], self.installed)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _SessionPluginInventoryResult:
+    """Available plugin inventory under the selected session's settings, policy, source roots,
+    and trusted bundle registration.
+    """
+    builtin_plugins: list[SessionPluginInventoryEntry]
+    """Registered bundles before shadowing, for availability and trust checks."""
+
+    plugins: list[SessionPluginInventoryEntry]
+    """Installed, live, and explicit plugins, including disabled entries."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_SessionPluginInventoryResult':
+        assert isinstance(obj, dict)
+        builtin_plugins = from_list(SessionPluginInventoryEntry.from_dict, obj.get("builtinPlugins"))
+        plugins = from_list(SessionPluginInventoryEntry.from_dict, obj.get("plugins"))
+        return _SessionPluginInventoryResult(builtin_plugins, plugins)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["builtinPlugins"] = from_list(lambda x: to_class(SessionPluginInventoryEntry, x), self.builtin_plugins)
+        result["plugins"] = from_list(lambda x: to_class(SessionPluginInventoryEntry, x), self.plugins)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -68527,17 +71681,45 @@ class MCPConfigAddRequest:
     name: str
     """Unique name for the MCP server"""
 
+    config_dir: str | None = None
+    """Configuration root for the user MCP document. Omission retains the connection's root;
+    overrides require a trusted host or direct SDK caller.
+    """
+
     @staticmethod
     def from_dict(obj: Any) -> 'MCPConfigAddRequest':
         assert isinstance(obj, dict)
         config = MCPSerializableServerConfig.from_dict(obj.get("config"))
         name = from_str(obj.get("name"))
-        return MCPConfigAddRequest(config, name)
+        config_dir = from_union([from_str, from_none], obj.get("configDir"))
+        return MCPConfigAddRequest(config, name, config_dir)
 
     def to_dict(self) -> dict:
         result: dict = {}
         result["config"] = to_class(MCPSerializableServerConfig, self.config)
         result["name"] = from_str(self.name)
+        if self.config_dir is not None:
+            result["configDir"] = from_union([from_str, from_none], self.config_dir)
+        return result
+
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class MCPConfigComposeAdditionalResult:
+    """Validated additional MCP servers in source precedence order. Runtime-owned filtering
+    remains outside the serialized document.
+    """
+    mcp_servers: dict[str, MCPSerializableServerConfig]
+    """Server names mapped to their validated document configuration."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> 'MCPConfigComposeAdditionalResult':
+        assert isinstance(obj, dict)
+        mcp_servers = from_dict(MCPSerializableServerConfig.from_dict, obj.get("mcpServers"))
+        return MCPConfigComposeAdditionalResult(mcp_servers)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["mcpServers"] = from_dict(lambda x: to_class(MCPSerializableServerConfig, x), self.mcp_servers)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -69656,6 +72838,32 @@ class DiscoveredMCPServer:
             result["sourcePluginVersion"] = from_union([from_str, from_none], self.source_plugin_version)
         if self.type is not None:
             result["type"] = from_union([lambda x: to_enum(DiscoveredMCPServerType, x), from_none], self.type)
+        return result
+
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PluginInvocationInventoryResult:
+    """Persisted, live, built-in, and host-directory plugins with canonical shadowing and scan
+    diagnostics.
+    """
+    plugins: list[_PluginInvocationInventoryEntry]
+    """Merged inventory in canonical precedence order."""
+
+    warnings: list[str]
+    """Directory scan warnings in source order."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PluginInvocationInventoryResult':
+        assert isinstance(obj, dict)
+        plugins = from_list(_PluginInvocationInventoryEntry.from_dict, obj.get("plugins"))
+        warnings = from_list(from_str, obj.get("warnings"))
+        return _PluginInvocationInventoryResult(plugins, warnings)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["plugins"] = from_list(lambda x: to_class(_PluginInvocationInventoryEntry, x), self.plugins)
+        result["warnings"] = from_list(from_str, self.warnings)
         return result
 
 # Experimental: this type is part of an experimental API and may change or be removed.
@@ -75407,6 +78615,73 @@ class PermissionsSetModeRequest:
             result["source"] = from_union([lambda x: to_enum(PermissionModeSource, x), from_none], self.source)
         return result
 
+# Internal: this type is an internal SDK API and is not part of the public surface.
+# Experimental: this type is part of an experimental API and may change or be removed.
+@dataclass
+class _PluginPolicyResolveInvocationRequest:
+    """Resolves plugin policy through the requesting connection's original credential owner."""
+
+    cache_only: bool
+    """Reads account and server policy from local caches without network access."""
+
+    client_name: str
+    """Host client identity supplied to the policy helper."""
+
+    home_directory: str
+    """Host home directory for policy and cache locations."""
+
+    platform: str
+    """Host platform in Node platform spelling."""
+
+    policy_helper_enabled: bool
+    """Whether a configured policy helper may run."""
+
+    strict: bool
+    """Stops on ingestion exceptions instead of reloading the device layer."""
+
+    user_agent: str
+    """Host user agent supplied to policy retrieval."""
+
+    working_directory: str
+    """Working directory used by a directory-sensitive policy helper."""
+
+    auth_info: AuthIdentity | None = None
+    """Optional active account identity; credentials still resolve through the original owner."""
+
+    retain_policy: bool | None = None
+    """Retains authoritative source layers for subsequent guarded mutations."""
+
+    @staticmethod
+    def from_dict(obj: Any) -> '_PluginPolicyResolveInvocationRequest':
+        assert isinstance(obj, dict)
+        cache_only = from_bool(obj.get("cacheOnly"))
+        client_name = from_str(obj.get("clientName"))
+        home_directory = from_str(obj.get("homeDirectory"))
+        platform = from_str(obj.get("platform"))
+        policy_helper_enabled = from_bool(obj.get("policyHelperEnabled"))
+        strict = from_bool(obj.get("strict"))
+        user_agent = from_str(obj.get("userAgent"))
+        working_directory = from_str(obj.get("workingDirectory"))
+        auth_info = from_union([AuthIdentity.from_dict, from_none], obj.get("authInfo"))
+        retain_policy = from_union([from_bool, from_none], obj.get("retainPolicy"))
+        return _PluginPolicyResolveInvocationRequest(cache_only, client_name, home_directory, platform, policy_helper_enabled, strict, user_agent, working_directory, auth_info, retain_policy)
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["cacheOnly"] = from_bool(self.cache_only)
+        result["clientName"] = from_str(self.client_name)
+        result["homeDirectory"] = from_str(self.home_directory)
+        result["platform"] = from_str(self.platform)
+        result["policyHelperEnabled"] = from_bool(self.policy_helper_enabled)
+        result["strict"] = from_bool(self.strict)
+        result["userAgent"] = from_str(self.user_agent)
+        result["workingDirectory"] = from_str(self.working_directory)
+        if self.auth_info is not None:
+            result["authInfo"] = from_union([lambda x: to_class(AuthIdentity, x), from_none], self.auth_info)
+        if self.retain_policy is not None:
+            result["retainPolicy"] = from_union([from_bool, from_none], self.retain_policy)
+        return result
+
 # Experimental: this type is part of an experimental API and may change or be removed.
 @dataclass
 class ProtocolExternalToolDefinition:
@@ -77588,6 +80863,8 @@ class RPC:
     account_get_web_url_result: _AccountGetWebURLResult
     account_health: AccountHealth
     account_kind: AccountKind
+    account_login_process_request: _AccountLoginProcessRequest
+    account_login_process_result: _AccountLoginProcessResult
     account_login_request: AccountLoginRequest
     account_login_result: AccountLoginResult
     account_logout_request: AccountLogoutRequest
@@ -78213,6 +81490,8 @@ class RPC:
     git_hub_branch_pull_request_lookup_request: _GitHubBranchPullRequestLookupRequest
     git_hub_branch_pull_request_lookup_result: _GitHubBranchPullRequestLookupResult
     git_hub_branch_pull_request_lookup_status: _GitHubBranchPullRequestLookupStatus
+    git_hub_create_secret_gist_request: _GitHubCreateSecretGistRequest
+    git_hub_create_secret_gist_result: _GitHubCreateSecretGistResult
     git_hub_environment: GitHubEnvironment
     git_hub_fetch_cancel_result: _GitHubFetchCancelResult
     git_hub_fetch_header: _GitHubFetchHeader
@@ -78260,6 +81539,8 @@ class RPC:
     git_hub_repository_by_id_result: _GitHubRepositoryByIDResult
     git_hub_repository_identity: GitHubRepositoryIdentity
     git_hub_repository_owner_name: _GitHubRepositoryOwnerName
+    git_hub_secret_gist_file: _GitHubSecretGistFile
+    git_hub_secret_gist_use_case: _GitHubSecretGistUseCase
     git_hub_telemetry_client_info: GitHubTelemetryClientInfo
     git_hub_telemetry_event: GitHubTelemetryEvent
     git_hub_telemetry_notification: GitHubTelemetryNotification
@@ -78517,6 +81798,7 @@ class RPC:
     marketplace_refresh_entry: MarketplaceRefreshEntry
     marketplace_refresh_result: MarketplaceRefreshResult
     marketplace_remove_result: MarketplaceRemoveResult
+    mcp_additional_config_source: MCPAdditionalConfigSource
     mcp_allowed_server: MCPAllowedServer
     mcp_apply_install_request: MCPApplyInstallRequest
     mcp_apply_uninstall_request: MCPApplyUninstallRequest
@@ -78545,17 +81827,27 @@ class RPC:
     mcp_call_tool_request: MCPCallToolRequest
     mcp_cancel_sampling_execution_params: MCPCancelSamplingExecutionParams
     mcp_cancel_sampling_execution_result: MCPCancelSamplingExecutionResult
+    mcp_computer_use_apply_configuration_request: _MCPComputerUseApplyConfigurationRequest
+    mcp_computer_use_apply_configuration_result: _MCPComputerUseApplyConfigurationResult
     mcp_config_add_request: MCPConfigAddRequest
+    mcp_config_compose_additional_request: _MCPConfigComposeAdditionalRequest
+    mcp_config_compose_additional_result: MCPConfigComposeAdditionalResult
     mcp_config_disable_request: MCPConfigDisableRequest
     mcp_config_enable_request: MCPConfigEnableRequest
+    mcp_config_for_config_dir_request: _MCPConfigForConfigDirRequest
     mcp_config_list: MCPConfigList
+    mcp_config_list_request: MCPConfigListRequest
+    mcp_config_merge_sources_request: _MCPConfigMergeSourcesRequest
+    mcp_config_merge_sources_result: _MCPConfigMergeSourcesResult
     mcp_config_remove_request: MCPConfigRemoveRequest
+    mcp_config_source_diagnostic: _MCPConfigSourceDiagnostic
     mcp_config_update_request: MCPConfigUpdateRequest
     mcp_configured_server: MCPConfiguredServer
     mcp_configured_server_list: MCPConfiguredServerList
     mcp_configured_server_state: MCPConfiguredServerState
     mcp_configure_git_hub_request: _MCPConfigureGitHubRequest
     mcp_configure_git_hub_result: MCPConfigureGitHubResult
+    mcp_config_user_server_names_result: _MCPConfigUserServerNamesResult
     mcp_diagnostic_details: MCPDiagnosticDetails
     mcp_diagnostic_direction: MCPDiagnosticDirection
     mcp_diagnostic_kind: MCPDiagnosticKind
@@ -78578,6 +81870,9 @@ class RPC:
     mcp_external_client_snapshot: MCPExternalClientSnapshot
     mcp_failed_server: MCPFailedServer
     mcp_filtered_server: MCPFilteredServer
+    mcp_git_hub_invocation_tool_options: _MCPGitHubInvocationToolOptions
+    mcp_git_hub_resolve_invocation_request: _MCPGitHubResolveInvocationRequest
+    mcp_git_hub_resolve_invocation_result: _MCPGitHubResolveInvocationResult
     mcp_git_hub_workspace: _MCPGitHubWorkspace
     mcp_headers_handle_pending_headers_refresh_request: MCPHeadersHandlePendingHeadersRefreshRequest
     mcp_headers_handle_pending_headers_refresh_request_request: MCPHeadersHandlePendingHeadersRefreshRequestRequest
@@ -78600,6 +81895,7 @@ class RPC:
     mcp_installation_state: MCPInstallationState
     mcp_installation_summary: MCPInstallationSummary
     mcp_install_plan: MCPInstallPlan
+    mcp_invocation_audience: _MCPInvocationAudience
     mcp_is_server_running_request: MCPIsServerRunningRequest
     mcp_is_server_running_result: MCPIsServerRunningResult
     mcp_list_builtin_server_names_result: _MCPListBuiltinServerNamesResult
@@ -78764,6 +82060,8 @@ class RPC:
     mcp_tool_ui_visibility: MCPToolUIVisibility
     mcp_uninstall_plan: MCPUninstallPlan
     mcp_unregister_external_client_request: _MCPUnregisterExternalClientRequest
+    memories_import_semantic_request: MemoriesImportSemanticRequest
+    memories_import_semantic_result: MemoriesImportSemanticResult
     memory_configuration: MemoryConfiguration
     memory_mode: MemoryMode
     memory_store_request: MemoryStoreRequest
@@ -78803,6 +82101,8 @@ class RPC:
     model_capabilities_supports: ModelCapabilitiesSupports
     model_clear_startup_seed_request: _ModelClearStartupSeedRequest
     model_clear_startup_seed_result: _ModelClearStartupSeedResult
+    model_generate_branch_slug_request: _ModelGenerateBranchSlugRequest
+    model_generate_branch_slug_result: _ModelGenerateBranchSlugResult
     model_get_reasoning_summaries_request: ModelGetReasoningSummariesRequest
     model_get_reasoning_summaries_result: ModelGetReasoningSummariesResult
     model_list: ModelList
@@ -78865,6 +82165,7 @@ class RPC:
     mode_set_result: ModeSetResult
     move_mcp_loading_to_background_result: MoveMCPLoadingToBackgroundResult
     named_provider_config: NamedProviderConfig
+    name_generate_request: _NameGenerateRequest
     name_get_result: NameGetResult
     name_set_auto_request: NameSetAutoRequest
     name_set_auto_result: NameSetAutoResult
@@ -79009,6 +82310,7 @@ class RPC:
     permissions_urls_set_unrestricted_mode_result: PermissionsUrlsSetUnrestrictedModeResult
     permission_urls_config: PermissionUrlsConfig
     permission_urls_set_unrestricted_mode_params: PermissionUrlsSetUnrestrictedModeParams
+    persistence_barrier_request: _PersistenceBarrierRequest
     persistence_write_raw_json_locked_request: PersistenceWriteRawJSONLockedRequest
     persistence_write_raw_json_locked_result: PersistenceWriteRawJSONLockedResult
     ping_request: PingRequest
@@ -79022,7 +82324,10 @@ class RPC:
     plugin: Plugin
     plugin_activation_status: PluginActivationStatus
     plugin_apply_install_request: PluginApplyInstallRequest
+    plugin_builtin_discover_request: _PluginBuiltinDiscoverRequest
+    plugin_builtin_discover_result: PluginBuiltinDiscoverResult
     plugin_check_update_request: PluginCheckUpdateRequest
+    plugin_inspect_inventory_request: _PluginInspectInventoryRequest
     plugin_installation_failure_reason: PluginInstallationFailureReason
     plugin_installation_file_review: PluginInstallationFileReview
     plugin_installation_location: PluginInstallationLocation
@@ -79038,6 +82343,8 @@ class RPC:
     plugin_install_plan: PluginInstallPlan
     plugin_install_result: PluginInstallResult
     plugin_install_staging_mode: PluginInstallStagingMode
+    plugin_invocation_inventory_entry: _PluginInvocationInventoryEntry
+    plugin_invocation_inventory_result: _PluginInvocationInventoryResult
     plugin_list: PluginList
     plugin_list_result: PluginListResult
     plugin_marketplace_check_update_request: PluginMarketplaceCheckUpdateRequest
@@ -79047,17 +82354,25 @@ class RPC:
     plugin_marketplace_search_request: PluginMarketplaceSearchRequest
     plugin_marketplace_search_result: PluginMarketplaceSearchResult
     plugin_plan_install_request: PluginPlanInstallRequest
+    plugin_policy_diagnostic: _PluginPolicyDiagnostic
+    plugin_policy_resolve_invocation_request: _PluginPolicyResolveInvocationRequest
+    plugin_policy_resolve_invocation_result: _PluginPolicyResolveInvocationResult
     plugins_activate_request: PluginsActivateRequest
     plugins_activate_result: PluginsActivateResult
+    plugins_builtin_resolve_activation_request: _PluginsBuiltinResolveActivationRequest
+    plugins_builtin_resolve_activation_result: _PluginsBuiltinResolveActivationResult
     plugins_builtin_set_request: PluginsBuiltinSetRequest
     plugins_disable_request: PluginsDisableRequest
     plugins_enable_request: PluginsEnableRequest
     plugins_install_request: PluginsInstallRequest
+    plugins_invocation_request: PluginsInvocationRequest
     plugins_list_request: PluginsListRequest
     plugins_marketplaces_add_request: PluginsMarketplacesAddRequest
     plugins_marketplaces_browse_request: PluginsMarketplacesBrowseRequest
     plugins_marketplaces_refresh_request: PluginsMarketplacesRefreshRequest
     plugins_marketplaces_remove_request: PluginsMarketplacesRemoveRequest
+    plugin_sources_resolve_request: _PluginSourcesResolveRequest
+    plugin_sources_resolve_result: _PluginSourcesResolveResult
     plugins_reload_request: Any
     plugins_uninstall_request: PluginsUninstallRequest
     plugins_update_request: PluginsUpdateRequest
@@ -79065,6 +82380,10 @@ class RPC:
     plugin_update_all_result: PluginUpdateAllResult
     plugin_update_check_result: PluginUpdateCheckResult
     plugin_update_result: PluginUpdateResult
+    process_login_account: _ProcessLoginAccount
+    process_login_context: _ProcessLoginContext
+    process_login_persistence: _ProcessLoginPersistence
+    process_login_policy_context: _ProcessLoginPolicyContext
     protocol_append_mode: ProtocolAppendMode
     protocol_customize_mode: ProtocolCustomizeMode
     protocol_external_tool_defer: MCPServerConfigDeferTools
@@ -79198,6 +82517,11 @@ class RPC:
     repo_settings_read_raw_result: _RepoSettingsReadRawResult
     repo_settings_write_all_request: _RepoSettingsWriteAllRequest
     repo_settings_write_key_request: _RepoSettingsWriteKeyRequest
+    repository_disabled_key: RepositoryDisabledKey
+    repository_disabled_names_request: _RepositoryDisabledNamesRequest
+    repository_disabled_names_result: RepositoryDisabledNamesResult
+    research_list_reports_result: ResearchListReportsResult
+    research_stored_report: ResearchStoredReport
     response_format: ResponseFormat
     runtime_open_browser_request: RuntimeOpenBrowserRequest
     sandbox_apply_defaults_request: SandboxApplyDefaultsRequest
@@ -79312,6 +82636,12 @@ class RPC:
     secrets_filter_result: SecretsFilterResult
     secrets_remove_filter_values_request: SecretsRemoveFilterValuesRequest
     secrets_remove_filter_values_result: SecretsRemoveFilterValuesResult
+    semantic_import_diagnostic: SemanticImportDiagnostic
+    semantic_memory_conflict_policy: SemanticMemoryConflictPolicy
+    semantic_memory_import_counts: SemanticMemoryImportCounts
+    semantic_memory_import_item_result: SemanticMemoryImportItemResult
+    semantic_memory_import_item_status: SemanticMemoryImportItemStatus
+    semantic_session_import_counts: SemanticSessionImportCounts
     send_agent_mode: SendAgentMode
     send_and_wait_result: SendAndWaitResult
     send_attachments_to_message_params: SendAttachmentsToMessageParams
@@ -79349,6 +82679,10 @@ class RPC:
     session_event_log_publish_result: _SessionEventLogPublishResult
     session_event_publish_request: SessionEventPublishRequest
     session_event_publish_result: SessionEventPublishResult
+    session_extensions_configure_host_request: _SessionExtensionsConfigureHostRequest
+    session_extensions_inspect_service_result: _SessionExtensionsInspectServiceResult
+    session_extensions_set_management_tools_enabled_request: _SessionExtensionsSetManagementToolsEnabledRequest
+    session_extensions_set_management_tools_enabled_result: bool
     session_feature_flag_configuration: _SessionFeatureFlagConfiguration
     session_feature_flags_configure_request: SessionFeatureFlagsConfigureRequest
     session_feature_flags_configure_result: SessionFeatureFlagsConfigureResult
@@ -79444,6 +82778,7 @@ class RPC:
     session_mcp_external_client_exchange_request: SessionMCPExternalClientExchangeRequest
     session_mcp_external_client_exchange_result: _SessionMCPExternalClientExchangeResult
     session_mcp_ide_state_result: SessionMCPIDEStateResult
+    session_mcp_inspect_configuration_request: _SessionMCPInspectConfigurationRequest
     session_mcp_oauth_authenticate_request: _SessionMCPOauthAuthenticateRequest
     session_mcp_oauth_authenticate_result: _SessionMCPOauthAuthenticateResult
     session_mcp_oauth_cancel_flow_request: _SessionMCPOauthCancelFlowRequest
@@ -79471,9 +82806,13 @@ class RPC:
     session_model_clear_startup_seed_result: _SessionModelClearStartupSeedResult
     session_model_describe_load_error_request: SessionModelDescribeLoadErrorRequest
     session_model_describe_load_error_result: _SessionModelDescribeLoadErrorResult
+    session_model_generate_branch_slug_request: _SessionModelGenerateBranchSlugRequest
+    session_model_generate_branch_slug_result: _SessionModelGenerateBranchSlugResult
     session_model_list: SessionModelList
     session_model_list_request: SessionModelListRequest
     session_model_price_category: SessionModelPriceCategory
+    session_name_generate_request: _SessionNameGenerateRequest
+    session_name_generate_result: _SessionNameGenerateResult
     session_open_agent_options: SessionOpenAgentOptions
     session_open_event_options: SessionOpenEventOptions
     session_open_execution_options: SessionOpenExecutionOptions
@@ -79505,7 +82844,15 @@ class RPC:
     session_permissions_get_required_result: bool
     session_permissions_managed_review_required_request: SessionPermissionsManagedReviewRequiredRequest
     session_permissions_managed_review_required_result: bool
+    session_persistence_barrier_phase: _SessionPersistenceBarrierPhase
+    session_persistence_barrier_request: _SessionPersistenceBarrierRequest
+    session_persistence_barrier_result: _SessionPersistenceBarrierResult
+    session_persistence_flush_request: _SessionPersistenceFlushRequest
     session_plugin_defaults: SessionPluginDefaults
+    session_plugin_inspect_extension_contributions_request: _SessionPluginInspectExtensionContributionsRequest
+    session_plugin_inspect_extension_contributions_result: _SessionPluginInspectExtensionContributionsResult
+    session_plugin_inventory_entry: SessionPluginInventoryEntry
+    session_plugin_inventory_result: _SessionPluginInventoryResult
     session_plugins_disable_request: SessionPluginsDisableRequest
     session_plugins_enable_request: SessionPluginsEnableRequest
     session_plugins_install_request: SessionPluginsInstallRequest
@@ -79532,6 +82879,7 @@ class RPC:
     session_remote_reattach_request: SessionRemoteReattachRequest
     session_remote_reattach_result: _SessionRemoteReattachResult
     session_remote_send_with_admission_request: _SessionRemoteSendWithAdmissionRequest
+    session_repository_disabled_names_request: _SessionRepositoryDisabledNamesRequest
     session_sandbox_get_remote_mcp_egress_request: SessionSandboxGetRemoteMCPEgressRequest
     session_sandbox_get_remote_mcp_egress_result: SessionSandboxGetRemoteMCPEgressResult
     session_sandbox_get_state_result: SessionSandboxGetStateResult
@@ -79582,7 +82930,13 @@ class RPC:
     sessions_get_persisted_remote_steerable_result: SessionsGetPersistedRemoteSteerableResult
     sessions_has_events_request: SessionsHasEventsRequest
     sessions_has_events_result: SessionsHasEventsResult
+    sessions_import_semantic_request: SessionsImportSemanticRequest
+    sessions_import_semantic_result: SessionsImportSemanticResult
     session_sizes: SessionSizes
+    session_skill_inventory_entry: _SessionSkillInventoryEntry
+    session_skill_resource_install_request: _SessionSkillResourceInstallRequest
+    session_skill_resource_remove_request: _SessionSkillResourceRemoveRequest
+    session_skills_inspect_inventory_result: _SessionSkillsInspectInventoryResult
     sessions_list_non_empty_session_ids_request: SessionsListNonEmptySessionIDSRequest
     sessions_list_non_empty_session_ids_result: SessionsListNonEmptySessionIDSResult
     sessions_list_remote_page_request: _SessionsListRemotePageRequest
@@ -79620,6 +82974,8 @@ class RPC:
     sessions_transfer_remote_control_request: SessionsTransferRemoteControlRequest
     sessions_update_workspace_fields_request: SessionsUpdateWorkspaceFieldsRequest
     sessions_update_workspace_fields_result: SessionsUpdateWorkspaceFieldsResult
+    sessions_validate_name_request: SessionsValidateNameRequest
+    sessions_validate_name_result: SessionsValidateNameResult
     session_telemetry_engagement: SessionTelemetryEngagement
     session_ui_register_direct_auto_mode_switch_handler_request: SessionUIRegisterDirectAutoModeSwitchHandlerRequest
     session_update_agent_options: SessionUpdateAgentOptions
@@ -79706,6 +83062,17 @@ class RPC:
     skill_provider_read_result: _SkillProviderReadResult
     skill_remove_source_entry: SkillRemoveSourceEntry
     skill_remove_source_kind: SkillRemoveSourceKind
+    skill_resource_context: _SkillResourceContext
+    skill_resource_discover_request: _SkillResourceDiscoverRequest
+    skill_resource_discover_result: SkillResourceDiscoverResult
+    skill_resource_install_kind: SkillResourceInstallKind
+    skill_resource_install_request: _SkillResourceInstallRequest
+    skill_resource_install_result: SkillResourceInstallResult
+    skill_resource_install_scope: SkillResourceInstallScope
+    skill_resource_remove_kind: SkillResourceRemoveKind
+    skill_resource_remove_request: _SkillResourceRemoveRequest
+    skill_resource_remove_result: SkillResourceRemoveResult
+    skill_resource_set_enabled_request: _SkillResourceSetEnabledRequest
     skills_config_set_disabled_skills_request: SkillsConfigSetDisabledSkillsRequest
     skills_config_set_skill_disabled_request: SkillsConfigSetSkillDisabledRequest
     skills_disable_request: SkillsDisableRequest
@@ -79877,6 +83244,9 @@ class RPC:
     user_settings_build_runtime_request: _UserSettingsBuildRuntimeRequest
     user_settings_build_runtime_result: dict[str, Any]
     user_settings_edit_request: _UserSettingsEditRequest
+    user_settings_for_context_request: _UserSettingsForContextRequest
+    user_settings_for_working_directory_request: _UserSettingsForWorkingDirectoryRequest
+    user_settings_get_or_create_ahp_environment_compute_id_result: str
     user_settings_get_paths_request: UserSettingsGetPathsRequest
     user_settings_get_paths_result: UserSettingsGetPathsResult
     user_settings_get_result: UserSettingsGetResult
@@ -79887,8 +83257,10 @@ class RPC:
     user_settings_load_for_config_dir_request: _UserSettingsLoadForConfigDirRequest
     user_settings_load_for_config_dir_result: dict[str, Any]
     user_settings_load_for_edit_result: UserSettingsLoadForEditResult
+    user_settings_load_for_working_directory_result: dict[str, Any]
     user_settings_load_repo_request: UserSettingsLoadRepoRequest
     user_settings_load_repo_result: UserSettingsLoadRepoResult
+    user_settings_load_with_warning_request: _UserSettingsLoadWithWarningRequest
     user_settings_load_with_warning_result: UserSettingsLoadWithWarningResult
     user_settings_merge_managed_and_user_params: _UserSettingsMergeManagedAndUserParams
     user_settings_merge_managed_and_user_result: UserSettingsMergeManagedAndUserResult
@@ -79922,6 +83294,10 @@ class RPC:
     user_settings_validation_issue: UserSettingsValidationIssue
     user_settings_write_all_request: UserSettingsWriteAllRequest
     user_settings_write_key_request: UserSettingsWriteKeyRequest
+    user_settings_write_keys_request: _UserSettingsWriteKeysRequest
+    user_settings_write_keys_result: _UserSettingsWriteKeysResult
+    utility_prompt_result: _UtilityPromptResult
+    utility_prompt_result_kind: _UtilityPromptResultKind
     visibility_get_result: VisibilityGetResult
     visibility_set_request: VisibilitySetRequest
     visibility_set_result: VisibilitySetResult
@@ -80047,6 +83423,8 @@ class RPC:
         account_get_web_url_result = _AccountGetWebURLResult.from_dict(obj.get("AccountGetWebUrlResult"))
         account_health = AccountHealth(obj.get("AccountHealth"))
         account_kind = AccountKind(obj.get("AccountKind"))
+        account_login_process_request = _AccountLoginProcessRequest.from_dict(obj.get("AccountLoginProcessRequest"))
+        account_login_process_result = _AccountLoginProcessResult.from_dict(obj.get("AccountLoginProcessResult"))
         account_login_request = AccountLoginRequest.from_dict(obj.get("AccountLoginRequest"))
         account_login_result = AccountLoginResult.from_dict(obj.get("AccountLoginResult"))
         account_logout_request = AccountLogoutRequest.from_dict(obj.get("AccountLogoutRequest"))
@@ -80673,6 +84051,8 @@ class RPC:
         git_hub_branch_pull_request_lookup_request = _GitHubBranchPullRequestLookupRequest.from_dict(obj.get("GitHubBranchPullRequestLookupRequest"))
         git_hub_branch_pull_request_lookup_result = _GitHubBranchPullRequestLookupResult.from_dict(obj.get("GitHubBranchPullRequestLookupResult"))
         git_hub_branch_pull_request_lookup_status = _GitHubBranchPullRequestLookupStatus(obj.get("GitHubBranchPullRequestLookupStatus"))
+        git_hub_create_secret_gist_request = _GitHubCreateSecretGistRequest.from_dict(obj.get("GitHubCreateSecretGistRequest"))
+        git_hub_create_secret_gist_result = _GitHubCreateSecretGistResult.from_dict(obj.get("GitHubCreateSecretGistResult"))
         git_hub_environment = GitHubEnvironment.from_dict(obj.get("GitHubEnvironment"))
         git_hub_fetch_cancel_result = _GitHubFetchCancelResult.from_dict(obj.get("GitHubFetchCancelResult"))
         git_hub_fetch_header = _GitHubFetchHeader.from_dict(obj.get("GitHubFetchHeader"))
@@ -80720,6 +84100,8 @@ class RPC:
         git_hub_repository_by_id_result = _GitHubRepositoryByIDResult.from_dict(obj.get("GitHubRepositoryByIdResult"))
         git_hub_repository_identity = GitHubRepositoryIdentity.from_dict(obj.get("GitHubRepositoryIdentity"))
         git_hub_repository_owner_name = _GitHubRepositoryOwnerName.from_dict(obj.get("GitHubRepositoryOwnerName"))
+        git_hub_secret_gist_file = _GitHubSecretGistFile.from_dict(obj.get("GitHubSecretGistFile"))
+        git_hub_secret_gist_use_case = _GitHubSecretGistUseCase(obj.get("GitHubSecretGistUseCase"))
         git_hub_telemetry_client_info = GitHubTelemetryClientInfo.from_dict(obj.get("GitHubTelemetryClientInfo"))
         git_hub_telemetry_event = GitHubTelemetryEvent.from_dict(obj.get("GitHubTelemetryEvent"))
         git_hub_telemetry_notification = GitHubTelemetryNotification.from_dict(obj.get("GitHubTelemetryNotification"))
@@ -80977,6 +84359,7 @@ class RPC:
         marketplace_refresh_entry = MarketplaceRefreshEntry.from_dict(obj.get("MarketplaceRefreshEntry"))
         marketplace_refresh_result = MarketplaceRefreshResult.from_dict(obj.get("MarketplaceRefreshResult"))
         marketplace_remove_result = MarketplaceRemoveResult.from_dict(obj.get("MarketplaceRemoveResult"))
+        mcp_additional_config_source = MCPAdditionalConfigSource.from_dict(obj.get("McpAdditionalConfigSource"))
         mcp_allowed_server = MCPAllowedServer.from_dict(obj.get("McpAllowedServer"))
         mcp_apply_install_request = MCPApplyInstallRequest.from_dict(obj.get("McpApplyInstallRequest"))
         mcp_apply_uninstall_request = MCPApplyUninstallRequest.from_dict(obj.get("McpApplyUninstallRequest"))
@@ -81006,17 +84389,27 @@ class RPC:
         mcp_call_tool_result = from_union([lambda x: from_dict(lambda x: x, x), from_none], obj.get("McpCallToolResult"))
         mcp_cancel_sampling_execution_params = MCPCancelSamplingExecutionParams.from_dict(obj.get("McpCancelSamplingExecutionParams"))
         mcp_cancel_sampling_execution_result = MCPCancelSamplingExecutionResult.from_dict(obj.get("McpCancelSamplingExecutionResult"))
+        mcp_computer_use_apply_configuration_request = _MCPComputerUseApplyConfigurationRequest.from_dict(obj.get("McpComputerUseApplyConfigurationRequest"))
+        mcp_computer_use_apply_configuration_result = _MCPComputerUseApplyConfigurationResult.from_dict(obj.get("McpComputerUseApplyConfigurationResult"))
         mcp_config_add_request = MCPConfigAddRequest.from_dict(obj.get("McpConfigAddRequest"))
+        mcp_config_compose_additional_request = _MCPConfigComposeAdditionalRequest.from_dict(obj.get("McpConfigComposeAdditionalRequest"))
+        mcp_config_compose_additional_result = MCPConfigComposeAdditionalResult.from_dict(obj.get("McpConfigComposeAdditionalResult"))
         mcp_config_disable_request = MCPConfigDisableRequest.from_dict(obj.get("McpConfigDisableRequest"))
         mcp_config_enable_request = MCPConfigEnableRequest.from_dict(obj.get("McpConfigEnableRequest"))
+        mcp_config_for_config_dir_request = _MCPConfigForConfigDirRequest.from_dict(obj.get("McpConfigForConfigDirRequest"))
         mcp_config_list = MCPConfigList.from_dict(obj.get("McpConfigList"))
+        mcp_config_list_request = MCPConfigListRequest.from_dict(obj.get("McpConfigListRequest"))
+        mcp_config_merge_sources_request = _MCPConfigMergeSourcesRequest.from_dict(obj.get("McpConfigMergeSourcesRequest"))
+        mcp_config_merge_sources_result = _MCPConfigMergeSourcesResult.from_dict(obj.get("McpConfigMergeSourcesResult"))
         mcp_config_remove_request = MCPConfigRemoveRequest.from_dict(obj.get("McpConfigRemoveRequest"))
+        mcp_config_source_diagnostic = _MCPConfigSourceDiagnostic.from_dict(obj.get("McpConfigSourceDiagnostic"))
         mcp_config_update_request = MCPConfigUpdateRequest.from_dict(obj.get("McpConfigUpdateRequest"))
         mcp_configured_server = MCPConfiguredServer.from_dict(obj.get("McpConfiguredServer"))
         mcp_configured_server_list = MCPConfiguredServerList.from_dict(obj.get("McpConfiguredServerList"))
         mcp_configured_server_state = MCPConfiguredServerState.from_dict(obj.get("McpConfiguredServerState"))
         mcp_configure_git_hub_request = _MCPConfigureGitHubRequest.from_dict(obj.get("McpConfigureGitHubRequest"))
         mcp_configure_git_hub_result = MCPConfigureGitHubResult.from_dict(obj.get("McpConfigureGitHubResult"))
+        mcp_config_user_server_names_result = _MCPConfigUserServerNamesResult.from_dict(obj.get("McpConfigUserServerNamesResult"))
         mcp_diagnostic_details = MCPDiagnosticDetails.from_dict(obj.get("McpDiagnosticDetails"))
         mcp_diagnostic_direction = MCPDiagnosticDirection(obj.get("McpDiagnosticDirection"))
         mcp_diagnostic_kind = MCPDiagnosticKind(obj.get("McpDiagnosticKind"))
@@ -81039,6 +84432,9 @@ class RPC:
         mcp_external_client_snapshot = MCPExternalClientSnapshot.from_dict(obj.get("McpExternalClientSnapshot"))
         mcp_failed_server = MCPFailedServer.from_dict(obj.get("McpFailedServer"))
         mcp_filtered_server = MCPFilteredServer.from_dict(obj.get("McpFilteredServer"))
+        mcp_git_hub_invocation_tool_options = _MCPGitHubInvocationToolOptions.from_dict(obj.get("McpGitHubInvocationToolOptions"))
+        mcp_git_hub_resolve_invocation_request = _MCPGitHubResolveInvocationRequest.from_dict(obj.get("McpGitHubResolveInvocationRequest"))
+        mcp_git_hub_resolve_invocation_result = _MCPGitHubResolveInvocationResult.from_dict(obj.get("McpGitHubResolveInvocationResult"))
         mcp_git_hub_workspace = _MCPGitHubWorkspace.from_dict(obj.get("McpGitHubWorkspace"))
         mcp_headers_handle_pending_headers_refresh_request = MCPHeadersHandlePendingHeadersRefreshRequest.from_dict(obj.get("McpHeadersHandlePendingHeadersRefreshRequest"))
         mcp_headers_handle_pending_headers_refresh_request_request = MCPHeadersHandlePendingHeadersRefreshRequestRequest.from_dict(obj.get("McpHeadersHandlePendingHeadersRefreshRequestRequest"))
@@ -81061,6 +84457,7 @@ class RPC:
         mcp_installation_state = MCPInstallationState(obj.get("McpInstallationState"))
         mcp_installation_summary = MCPInstallationSummary.from_dict(obj.get("McpInstallationSummary"))
         mcp_install_plan = MCPInstallPlan.from_dict(obj.get("McpInstallPlan"))
+        mcp_invocation_audience = _MCPInvocationAudience.from_dict(obj.get("McpInvocationAudience"))
         mcp_is_server_running_request = MCPIsServerRunningRequest.from_dict(obj.get("McpIsServerRunningRequest"))
         mcp_is_server_running_result = MCPIsServerRunningResult.from_dict(obj.get("McpIsServerRunningResult"))
         mcp_list_builtin_server_names_result = _MCPListBuiltinServerNamesResult.from_dict(obj.get("McpListBuiltinServerNamesResult"))
@@ -81225,6 +84622,8 @@ class RPC:
         mcp_tool_ui_visibility = MCPToolUIVisibility(obj.get("McpToolUiVisibility"))
         mcp_uninstall_plan = MCPUninstallPlan.from_dict(obj.get("McpUninstallPlan"))
         mcp_unregister_external_client_request = _MCPUnregisterExternalClientRequest.from_dict(obj.get("McpUnregisterExternalClientRequest"))
+        memories_import_semantic_request = MemoriesImportSemanticRequest.from_dict(obj.get("MemoriesImportSemanticRequest"))
+        memories_import_semantic_result = MemoriesImportSemanticResult.from_dict(obj.get("MemoriesImportSemanticResult"))
         memory_configuration = MemoryConfiguration.from_dict(obj.get("MemoryConfiguration"))
         memory_mode = MemoryMode(obj.get("MemoryMode"))
         memory_store_request = MemoryStoreRequest.from_dict(obj.get("MemoryStoreRequest"))
@@ -81264,6 +84663,8 @@ class RPC:
         model_capabilities_supports = ModelCapabilitiesSupports.from_dict(obj.get("ModelCapabilitiesSupports"))
         model_clear_startup_seed_request = _ModelClearStartupSeedRequest.from_dict(obj.get("ModelClearStartupSeedRequest"))
         model_clear_startup_seed_result = _ModelClearStartupSeedResult.from_dict(obj.get("ModelClearStartupSeedResult"))
+        model_generate_branch_slug_request = _ModelGenerateBranchSlugRequest.from_dict(obj.get("ModelGenerateBranchSlugRequest"))
+        model_generate_branch_slug_result = _ModelGenerateBranchSlugResult.from_dict(obj.get("ModelGenerateBranchSlugResult"))
         model_get_reasoning_summaries_request = ModelGetReasoningSummariesRequest.from_dict(obj.get("ModelGetReasoningSummariesRequest"))
         model_get_reasoning_summaries_result = ModelGetReasoningSummariesResult.from_dict(obj.get("ModelGetReasoningSummariesResult"))
         model_list = ModelList.from_dict(obj.get("ModelList"))
@@ -81326,6 +84727,7 @@ class RPC:
         mode_set_result = ModeSetResult.from_dict(obj.get("ModeSetResult"))
         move_mcp_loading_to_background_result = MoveMCPLoadingToBackgroundResult.from_dict(obj.get("MoveMcpLoadingToBackgroundResult"))
         named_provider_config = NamedProviderConfig.from_dict(obj.get("NamedProviderConfig"))
+        name_generate_request = _NameGenerateRequest.from_dict(obj.get("NameGenerateRequest"))
         name_get_result = NameGetResult.from_dict(obj.get("NameGetResult"))
         name_set_auto_request = NameSetAutoRequest.from_dict(obj.get("NameSetAutoRequest"))
         name_set_auto_result = NameSetAutoResult.from_dict(obj.get("NameSetAutoResult"))
@@ -81470,6 +84872,7 @@ class RPC:
         permissions_urls_set_unrestricted_mode_result = PermissionsUrlsSetUnrestrictedModeResult.from_dict(obj.get("PermissionsUrlsSetUnrestrictedModeResult"))
         permission_urls_config = PermissionUrlsConfig.from_dict(obj.get("PermissionUrlsConfig"))
         permission_urls_set_unrestricted_mode_params = PermissionUrlsSetUnrestrictedModeParams.from_dict(obj.get("PermissionUrlsSetUnrestrictedModeParams"))
+        persistence_barrier_request = _PersistenceBarrierRequest.from_dict(obj.get("PersistenceBarrierRequest"))
         persistence_write_raw_json_locked_request = PersistenceWriteRawJSONLockedRequest.from_dict(obj.get("PersistenceWriteRawJsonLockedRequest"))
         persistence_write_raw_json_locked_result = PersistenceWriteRawJSONLockedResult.from_dict(obj.get("PersistenceWriteRawJsonLockedResult"))
         ping_request = PingRequest.from_dict(obj.get("PingRequest"))
@@ -81483,7 +84886,10 @@ class RPC:
         plugin = Plugin.from_dict(obj.get("Plugin"))
         plugin_activation_status = PluginActivationStatus(obj.get("PluginActivationStatus"))
         plugin_apply_install_request = PluginApplyInstallRequest.from_dict(obj.get("PluginApplyInstallRequest"))
+        plugin_builtin_discover_request = _PluginBuiltinDiscoverRequest.from_dict(obj.get("PluginBuiltinDiscoverRequest"))
+        plugin_builtin_discover_result = PluginBuiltinDiscoverResult.from_dict(obj.get("PluginBuiltinDiscoverResult"))
         plugin_check_update_request = PluginCheckUpdateRequest.from_dict(obj.get("PluginCheckUpdateRequest"))
+        plugin_inspect_inventory_request = _PluginInspectInventoryRequest.from_dict(obj.get("PluginInspectInventoryRequest"))
         plugin_installation_failure_reason = PluginInstallationFailureReason(obj.get("PluginInstallationFailureReason"))
         plugin_installation_file_review = PluginInstallationFileReview.from_dict(obj.get("PluginInstallationFileReview"))
         plugin_installation_location = PluginInstallationLocation.from_dict(obj.get("PluginInstallationLocation"))
@@ -81499,6 +84905,8 @@ class RPC:
         plugin_install_plan = PluginInstallPlan.from_dict(obj.get("PluginInstallPlan"))
         plugin_install_result = PluginInstallResult.from_dict(obj.get("PluginInstallResult"))
         plugin_install_staging_mode = PluginInstallStagingMode(obj.get("PluginInstallStagingMode"))
+        plugin_invocation_inventory_entry = _PluginInvocationInventoryEntry.from_dict(obj.get("PluginInvocationInventoryEntry"))
+        plugin_invocation_inventory_result = _PluginInvocationInventoryResult.from_dict(obj.get("PluginInvocationInventoryResult"))
         plugin_list = PluginList.from_dict(obj.get("PluginList"))
         plugin_list_result = PluginListResult.from_dict(obj.get("PluginListResult"))
         plugin_marketplace_check_update_request = PluginMarketplaceCheckUpdateRequest.from_dict(obj.get("PluginMarketplaceCheckUpdateRequest"))
@@ -81508,17 +84916,25 @@ class RPC:
         plugin_marketplace_search_request = PluginMarketplaceSearchRequest.from_dict(obj.get("PluginMarketplaceSearchRequest"))
         plugin_marketplace_search_result = PluginMarketplaceSearchResult.from_dict(obj.get("PluginMarketplaceSearchResult"))
         plugin_plan_install_request = PluginPlanInstallRequest.from_dict(obj.get("PluginPlanInstallRequest"))
+        plugin_policy_diagnostic = _PluginPolicyDiagnostic.from_dict(obj.get("PluginPolicyDiagnostic"))
+        plugin_policy_resolve_invocation_request = _PluginPolicyResolveInvocationRequest.from_dict(obj.get("PluginPolicyResolveInvocationRequest"))
+        plugin_policy_resolve_invocation_result = _PluginPolicyResolveInvocationResult.from_dict(obj.get("PluginPolicyResolveInvocationResult"))
         plugins_activate_request = PluginsActivateRequest.from_dict(obj.get("PluginsActivateRequest"))
         plugins_activate_result = PluginsActivateResult.from_dict(obj.get("PluginsActivateResult"))
+        plugins_builtin_resolve_activation_request = _PluginsBuiltinResolveActivationRequest.from_dict(obj.get("PluginsBuiltinResolveActivationRequest"))
+        plugins_builtin_resolve_activation_result = _PluginsBuiltinResolveActivationResult.from_dict(obj.get("PluginsBuiltinResolveActivationResult"))
         plugins_builtin_set_request = PluginsBuiltinSetRequest.from_dict(obj.get("PluginsBuiltinSetRequest"))
         plugins_disable_request = PluginsDisableRequest.from_dict(obj.get("PluginsDisableRequest"))
         plugins_enable_request = PluginsEnableRequest.from_dict(obj.get("PluginsEnableRequest"))
         plugins_install_request = PluginsInstallRequest.from_dict(obj.get("PluginsInstallRequest"))
+        plugins_invocation_request = PluginsInvocationRequest.from_dict(obj.get("PluginsInvocationRequest"))
         plugins_list_request = PluginsListRequest.from_dict(obj.get("PluginsListRequest"))
         plugins_marketplaces_add_request = PluginsMarketplacesAddRequest.from_dict(obj.get("PluginsMarketplacesAddRequest"))
         plugins_marketplaces_browse_request = PluginsMarketplacesBrowseRequest.from_dict(obj.get("PluginsMarketplacesBrowseRequest"))
         plugins_marketplaces_refresh_request = PluginsMarketplacesRefreshRequest.from_dict(obj.get("PluginsMarketplacesRefreshRequest"))
         plugins_marketplaces_remove_request = PluginsMarketplacesRemoveRequest.from_dict(obj.get("PluginsMarketplacesRemoveRequest"))
+        plugin_sources_resolve_request = _PluginSourcesResolveRequest.from_dict(obj.get("PluginSourcesResolveRequest"))
+        plugin_sources_resolve_result = _PluginSourcesResolveResult.from_dict(obj.get("PluginSourcesResolveResult"))
         plugins_reload_request = obj.get("PluginsReloadRequest")
         plugins_uninstall_request = PluginsUninstallRequest.from_dict(obj.get("PluginsUninstallRequest"))
         plugins_update_request = PluginsUpdateRequest.from_dict(obj.get("PluginsUpdateRequest"))
@@ -81526,6 +84942,10 @@ class RPC:
         plugin_update_all_result = PluginUpdateAllResult.from_dict(obj.get("PluginUpdateAllResult"))
         plugin_update_check_result = PluginUpdateCheckResult.from_dict(obj.get("PluginUpdateCheckResult"))
         plugin_update_result = PluginUpdateResult.from_dict(obj.get("PluginUpdateResult"))
+        process_login_account = _ProcessLoginAccount.from_dict(obj.get("ProcessLoginAccount"))
+        process_login_context = _ProcessLoginContext.from_dict(obj.get("ProcessLoginContext"))
+        process_login_persistence = _ProcessLoginPersistence.from_dict(obj.get("ProcessLoginPersistence"))
+        process_login_policy_context = _ProcessLoginPolicyContext.from_dict(obj.get("ProcessLoginPolicyContext"))
         protocol_append_mode = ProtocolAppendMode(obj.get("ProtocolAppendMode"))
         protocol_customize_mode = ProtocolCustomizeMode(obj.get("ProtocolCustomizeMode"))
         protocol_external_tool_defer = MCPServerConfigDeferTools(obj.get("ProtocolExternalToolDefer"))
@@ -81659,6 +85079,11 @@ class RPC:
         repo_settings_read_raw_result = _RepoSettingsReadRawResult.from_dict(obj.get("RepoSettingsReadRawResult"))
         repo_settings_write_all_request = _RepoSettingsWriteAllRequest.from_dict(obj.get("RepoSettingsWriteAllRequest"))
         repo_settings_write_key_request = _RepoSettingsWriteKeyRequest.from_dict(obj.get("RepoSettingsWriteKeyRequest"))
+        repository_disabled_key = RepositoryDisabledKey(obj.get("RepositoryDisabledKey"))
+        repository_disabled_names_request = _RepositoryDisabledNamesRequest.from_dict(obj.get("RepositoryDisabledNamesRequest"))
+        repository_disabled_names_result = RepositoryDisabledNamesResult.from_dict(obj.get("RepositoryDisabledNamesResult"))
+        research_list_reports_result = ResearchListReportsResult.from_dict(obj.get("ResearchListReportsResult"))
+        research_stored_report = ResearchStoredReport.from_dict(obj.get("ResearchStoredReport"))
         response_format = ResponseFormat.from_dict(obj.get("ResponseFormat"))
         runtime_open_browser_request = RuntimeOpenBrowserRequest.from_dict(obj.get("RuntimeOpenBrowserRequest"))
         sandbox_apply_defaults_request = SandboxApplyDefaultsRequest.from_dict(obj.get("SandboxApplyDefaultsRequest"))
@@ -81773,6 +85198,12 @@ class RPC:
         secrets_filter_result = SecretsFilterResult.from_dict(obj.get("SecretsFilterResult"))
         secrets_remove_filter_values_request = SecretsRemoveFilterValuesRequest.from_dict(obj.get("SecretsRemoveFilterValuesRequest"))
         secrets_remove_filter_values_result = SecretsRemoveFilterValuesResult.from_dict(obj.get("SecretsRemoveFilterValuesResult"))
+        semantic_import_diagnostic = SemanticImportDiagnostic.from_dict(obj.get("SemanticImportDiagnostic"))
+        semantic_memory_conflict_policy = SemanticMemoryConflictPolicy(obj.get("SemanticMemoryConflictPolicy"))
+        semantic_memory_import_counts = SemanticMemoryImportCounts.from_dict(obj.get("SemanticMemoryImportCounts"))
+        semantic_memory_import_item_result = SemanticMemoryImportItemResult.from_dict(obj.get("SemanticMemoryImportItemResult"))
+        semantic_memory_import_item_status = SemanticMemoryImportItemStatus(obj.get("SemanticMemoryImportItemStatus"))
+        semantic_session_import_counts = SemanticSessionImportCounts.from_dict(obj.get("SemanticSessionImportCounts"))
         send_agent_mode = SendAgentMode(obj.get("SendAgentMode"))
         send_and_wait_result = SendAndWaitResult.from_dict(obj.get("SendAndWaitResult"))
         send_attachments_to_message_params = SendAttachmentsToMessageParams.from_dict(obj.get("SendAttachmentsToMessageParams"))
@@ -81810,6 +85241,10 @@ class RPC:
         session_event_log_publish_result = _SessionEventLogPublishResult.from_dict(obj.get("SessionEventLogPublishResult"))
         session_event_publish_request = SessionEventPublishRequest.from_dict(obj.get("SessionEventPublishRequest"))
         session_event_publish_result = SessionEventPublishResult.from_dict(obj.get("SessionEventPublishResult"))
+        session_extensions_configure_host_request = _SessionExtensionsConfigureHostRequest.from_dict(obj.get("SessionExtensionsConfigureHostRequest"))
+        session_extensions_inspect_service_result = _SessionExtensionsInspectServiceResult.from_dict(obj.get("SessionExtensionsInspectServiceResult"))
+        session_extensions_set_management_tools_enabled_request = _SessionExtensionsSetManagementToolsEnabledRequest.from_dict(obj.get("SessionExtensionsSetManagementToolsEnabledRequest"))
+        session_extensions_set_management_tools_enabled_result = from_bool(obj.get("SessionExtensionsSetManagementToolsEnabledResult"))
         session_feature_flag_configuration = _SessionFeatureFlagConfiguration.from_dict(obj.get("SessionFeatureFlagConfiguration"))
         session_feature_flags_configure_request = SessionFeatureFlagsConfigureRequest.from_dict(obj.get("SessionFeatureFlagsConfigureRequest"))
         session_feature_flags_configure_result = SessionFeatureFlagsConfigureResult.from_dict(obj.get("SessionFeatureFlagsConfigureResult"))
@@ -81905,6 +85340,7 @@ class RPC:
         session_mcp_external_client_exchange_request = SessionMCPExternalClientExchangeRequest.from_dict(obj.get("SessionMcpExternalClientExchangeRequest"))
         session_mcp_external_client_exchange_result = _SessionMCPExternalClientExchangeResult.from_dict(obj.get("SessionMcpExternalClientExchangeResult"))
         session_mcp_ide_state_result = SessionMCPIDEStateResult.from_dict(obj.get("SessionMcpIdeStateResult"))
+        session_mcp_inspect_configuration_request = _SessionMCPInspectConfigurationRequest.from_dict(obj.get("SessionMcpInspectConfigurationRequest"))
         session_mcp_oauth_authenticate_request = _SessionMCPOauthAuthenticateRequest.from_dict(obj.get("SessionMcpOauthAuthenticateRequest"))
         session_mcp_oauth_authenticate_result = _SessionMCPOauthAuthenticateResult.from_dict(obj.get("SessionMcpOauthAuthenticateResult"))
         session_mcp_oauth_cancel_flow_request = _SessionMCPOauthCancelFlowRequest.from_dict(obj.get("SessionMcpOauthCancelFlowRequest"))
@@ -81932,9 +85368,13 @@ class RPC:
         session_model_clear_startup_seed_result = _SessionModelClearStartupSeedResult.from_dict(obj.get("SessionModelClearStartupSeedResult"))
         session_model_describe_load_error_request = SessionModelDescribeLoadErrorRequest.from_dict(obj.get("SessionModelDescribeLoadErrorRequest"))
         session_model_describe_load_error_result = _SessionModelDescribeLoadErrorResult.from_dict(obj.get("SessionModelDescribeLoadErrorResult"))
+        session_model_generate_branch_slug_request = _SessionModelGenerateBranchSlugRequest.from_dict(obj.get("SessionModelGenerateBranchSlugRequest"))
+        session_model_generate_branch_slug_result = _SessionModelGenerateBranchSlugResult.from_dict(obj.get("SessionModelGenerateBranchSlugResult"))
         session_model_list = SessionModelList.from_dict(obj.get("SessionModelList"))
         session_model_list_request = SessionModelListRequest.from_dict(obj.get("SessionModelListRequest"))
         session_model_price_category = SessionModelPriceCategory.from_dict(obj.get("SessionModelPriceCategory"))
+        session_name_generate_request = _SessionNameGenerateRequest.from_dict(obj.get("SessionNameGenerateRequest"))
+        session_name_generate_result = _SessionNameGenerateResult.from_dict(obj.get("SessionNameGenerateResult"))
         session_open_agent_options = SessionOpenAgentOptions.from_dict(obj.get("SessionOpenAgentOptions"))
         session_open_event_options = SessionOpenEventOptions.from_dict(obj.get("SessionOpenEventOptions"))
         session_open_execution_options = SessionOpenExecutionOptions.from_dict(obj.get("SessionOpenExecutionOptions"))
@@ -81966,7 +85406,15 @@ class RPC:
         session_permissions_get_required_result = from_bool(obj.get("SessionPermissionsGetRequiredResult"))
         session_permissions_managed_review_required_request = SessionPermissionsManagedReviewRequiredRequest.from_dict(obj.get("SessionPermissionsManagedReviewRequiredRequest"))
         session_permissions_managed_review_required_result = from_bool(obj.get("SessionPermissionsManagedReviewRequiredResult"))
+        session_persistence_barrier_phase = _SessionPersistenceBarrierPhase(obj.get("SessionPersistenceBarrierPhase"))
+        session_persistence_barrier_request = _SessionPersistenceBarrierRequest.from_dict(obj.get("SessionPersistenceBarrierRequest"))
+        session_persistence_barrier_result = _SessionPersistenceBarrierResult.from_dict(obj.get("SessionPersistenceBarrierResult"))
+        session_persistence_flush_request = _SessionPersistenceFlushRequest.from_dict(obj.get("SessionPersistenceFlushRequest"))
         session_plugin_defaults = SessionPluginDefaults.from_dict(obj.get("SessionPluginDefaults"))
+        session_plugin_inspect_extension_contributions_request = _SessionPluginInspectExtensionContributionsRequest.from_dict(obj.get("SessionPluginInspectExtensionContributionsRequest"))
+        session_plugin_inspect_extension_contributions_result = _SessionPluginInspectExtensionContributionsResult.from_dict(obj.get("SessionPluginInspectExtensionContributionsResult"))
+        session_plugin_inventory_entry = SessionPluginInventoryEntry.from_dict(obj.get("SessionPluginInventoryEntry"))
+        session_plugin_inventory_result = _SessionPluginInventoryResult.from_dict(obj.get("SessionPluginInventoryResult"))
         session_plugins_disable_request = SessionPluginsDisableRequest.from_dict(obj.get("SessionPluginsDisableRequest"))
         session_plugins_enable_request = SessionPluginsEnableRequest.from_dict(obj.get("SessionPluginsEnableRequest"))
         session_plugins_install_request = SessionPluginsInstallRequest.from_dict(obj.get("SessionPluginsInstallRequest"))
@@ -81993,6 +85441,7 @@ class RPC:
         session_remote_reattach_request = SessionRemoteReattachRequest.from_dict(obj.get("SessionRemoteReattachRequest"))
         session_remote_reattach_result = _SessionRemoteReattachResult.from_dict(obj.get("SessionRemoteReattachResult"))
         session_remote_send_with_admission_request = _SessionRemoteSendWithAdmissionRequest.from_dict(obj.get("SessionRemoteSendWithAdmissionRequest"))
+        session_repository_disabled_names_request = _SessionRepositoryDisabledNamesRequest.from_dict(obj.get("SessionRepositoryDisabledNamesRequest"))
         session_sandbox_get_remote_mcp_egress_request = SessionSandboxGetRemoteMCPEgressRequest.from_dict(obj.get("SessionSandboxGetRemoteMcpEgressRequest"))
         session_sandbox_get_remote_mcp_egress_result = SessionSandboxGetRemoteMCPEgressResult.from_dict(obj.get("SessionSandboxGetRemoteMcpEgressResult"))
         session_sandbox_get_state_result = SessionSandboxGetStateResult.from_dict(obj.get("SessionSandboxGetStateResult"))
@@ -82043,7 +85492,13 @@ class RPC:
         sessions_get_persisted_remote_steerable_result = SessionsGetPersistedRemoteSteerableResult.from_dict(obj.get("SessionsGetPersistedRemoteSteerableResult"))
         sessions_has_events_request = SessionsHasEventsRequest.from_dict(obj.get("SessionsHasEventsRequest"))
         sessions_has_events_result = SessionsHasEventsResult.from_dict(obj.get("SessionsHasEventsResult"))
+        sessions_import_semantic_request = SessionsImportSemanticRequest.from_dict(obj.get("SessionsImportSemanticRequest"))
+        sessions_import_semantic_result = SessionsImportSemanticResult.from_dict(obj.get("SessionsImportSemanticResult"))
         session_sizes = SessionSizes.from_dict(obj.get("SessionSizes"))
+        session_skill_inventory_entry = _SessionSkillInventoryEntry.from_dict(obj.get("SessionSkillInventoryEntry"))
+        session_skill_resource_install_request = _SessionSkillResourceInstallRequest.from_dict(obj.get("SessionSkillResourceInstallRequest"))
+        session_skill_resource_remove_request = _SessionSkillResourceRemoveRequest.from_dict(obj.get("SessionSkillResourceRemoveRequest"))
+        session_skills_inspect_inventory_result = _SessionSkillsInspectInventoryResult.from_dict(obj.get("SessionSkillsInspectInventoryResult"))
         sessions_list_non_empty_session_ids_request = SessionsListNonEmptySessionIDSRequest.from_dict(obj.get("SessionsListNonEmptySessionIdsRequest"))
         sessions_list_non_empty_session_ids_result = SessionsListNonEmptySessionIDSResult.from_dict(obj.get("SessionsListNonEmptySessionIdsResult"))
         sessions_list_remote_page_request = _SessionsListRemotePageRequest.from_dict(obj.get("SessionsListRemotePageRequest"))
@@ -82081,6 +85536,8 @@ class RPC:
         sessions_transfer_remote_control_request = SessionsTransferRemoteControlRequest.from_dict(obj.get("SessionsTransferRemoteControlRequest"))
         sessions_update_workspace_fields_request = SessionsUpdateWorkspaceFieldsRequest.from_dict(obj.get("SessionsUpdateWorkspaceFieldsRequest"))
         sessions_update_workspace_fields_result = SessionsUpdateWorkspaceFieldsResult.from_dict(obj.get("SessionsUpdateWorkspaceFieldsResult"))
+        sessions_validate_name_request = SessionsValidateNameRequest.from_dict(obj.get("SessionsValidateNameRequest"))
+        sessions_validate_name_result = SessionsValidateNameResult.from_dict(obj.get("SessionsValidateNameResult"))
         session_telemetry_engagement = SessionTelemetryEngagement.from_dict(obj.get("SessionTelemetryEngagement"))
         session_ui_register_direct_auto_mode_switch_handler_request = SessionUIRegisterDirectAutoModeSwitchHandlerRequest.from_dict(obj.get("SessionUiRegisterDirectAutoModeSwitchHandlerRequest"))
         session_update_agent_options = SessionUpdateAgentOptions.from_dict(obj.get("SessionUpdateAgentOptions"))
@@ -82167,6 +85624,17 @@ class RPC:
         skill_provider_read_result = _SkillProviderReadResult.from_dict(obj.get("SkillProviderReadResult"))
         skill_remove_source_entry = SkillRemoveSourceEntry.from_dict(obj.get("SkillRemoveSourceEntry"))
         skill_remove_source_kind = SkillRemoveSourceKind(obj.get("SkillRemoveSourceKind"))
+        skill_resource_context = _SkillResourceContext.from_dict(obj.get("SkillResourceContext"))
+        skill_resource_discover_request = _SkillResourceDiscoverRequest.from_dict(obj.get("SkillResourceDiscoverRequest"))
+        skill_resource_discover_result = SkillResourceDiscoverResult.from_dict(obj.get("SkillResourceDiscoverResult"))
+        skill_resource_install_kind = SkillResourceInstallKind(obj.get("SkillResourceInstallKind"))
+        skill_resource_install_request = _SkillResourceInstallRequest.from_dict(obj.get("SkillResourceInstallRequest"))
+        skill_resource_install_result = SkillResourceInstallResult.from_dict(obj.get("SkillResourceInstallResult"))
+        skill_resource_install_scope = SkillResourceInstallScope(obj.get("SkillResourceInstallScope"))
+        skill_resource_remove_kind = SkillResourceRemoveKind(obj.get("SkillResourceRemoveKind"))
+        skill_resource_remove_request = _SkillResourceRemoveRequest.from_dict(obj.get("SkillResourceRemoveRequest"))
+        skill_resource_remove_result = SkillResourceRemoveResult.from_dict(obj.get("SkillResourceRemoveResult"))
+        skill_resource_set_enabled_request = _SkillResourceSetEnabledRequest.from_dict(obj.get("SkillResourceSetEnabledRequest"))
         skills_config_set_disabled_skills_request = SkillsConfigSetDisabledSkillsRequest.from_dict(obj.get("SkillsConfigSetDisabledSkillsRequest"))
         skills_config_set_skill_disabled_request = SkillsConfigSetSkillDisabledRequest.from_dict(obj.get("SkillsConfigSetSkillDisabledRequest"))
         skills_disable_request = SkillsDisableRequest.from_dict(obj.get("SkillsDisableRequest"))
@@ -82339,6 +85807,9 @@ class RPC:
         user_settings_build_runtime_request = _UserSettingsBuildRuntimeRequest.from_dict(obj.get("UserSettingsBuildRuntimeRequest"))
         user_settings_build_runtime_result = from_dict(lambda x: x, obj.get("UserSettingsBuildRuntimeResult"))
         user_settings_edit_request = _UserSettingsEditRequest.from_dict(obj.get("UserSettingsEditRequest"))
+        user_settings_for_context_request = _UserSettingsForContextRequest.from_dict(obj.get("UserSettingsForContextRequest"))
+        user_settings_for_working_directory_request = _UserSettingsForWorkingDirectoryRequest.from_dict(obj.get("UserSettingsForWorkingDirectoryRequest"))
+        user_settings_get_or_create_ahp_environment_compute_id_result = from_str(obj.get("UserSettingsGetOrCreateAhpEnvironmentComputeIdResult"))
         user_settings_get_paths_request = UserSettingsGetPathsRequest.from_dict(obj.get("UserSettingsGetPathsRequest"))
         user_settings_get_paths_result = UserSettingsGetPathsResult.from_dict(obj.get("UserSettingsGetPathsResult"))
         user_settings_get_result = UserSettingsGetResult.from_dict(obj.get("UserSettingsGetResult"))
@@ -82349,8 +85820,10 @@ class RPC:
         user_settings_load_for_config_dir_request = _UserSettingsLoadForConfigDirRequest.from_dict(obj.get("UserSettingsLoadForConfigDirRequest"))
         user_settings_load_for_config_dir_result = from_dict(lambda x: x, obj.get("UserSettingsLoadForConfigDirResult"))
         user_settings_load_for_edit_result = UserSettingsLoadForEditResult.from_dict(obj.get("UserSettingsLoadForEditResult"))
+        user_settings_load_for_working_directory_result = from_dict(lambda x: x, obj.get("UserSettingsLoadForWorkingDirectoryResult"))
         user_settings_load_repo_request = UserSettingsLoadRepoRequest.from_dict(obj.get("UserSettingsLoadRepoRequest"))
         user_settings_load_repo_result = UserSettingsLoadRepoResult.from_dict(obj.get("UserSettingsLoadRepoResult"))
+        user_settings_load_with_warning_request = _UserSettingsLoadWithWarningRequest.from_dict(obj.get("UserSettingsLoadWithWarningRequest"))
         user_settings_load_with_warning_result = UserSettingsLoadWithWarningResult.from_dict(obj.get("UserSettingsLoadWithWarningResult"))
         user_settings_merge_managed_and_user_params = _UserSettingsMergeManagedAndUserParams.from_dict(obj.get("UserSettingsMergeManagedAndUserParams"))
         user_settings_merge_managed_and_user_result = UserSettingsMergeManagedAndUserResult.from_dict(obj.get("UserSettingsMergeManagedAndUserResult"))
@@ -82384,6 +85857,10 @@ class RPC:
         user_settings_validation_issue = UserSettingsValidationIssue.from_dict(obj.get("UserSettingsValidationIssue"))
         user_settings_write_all_request = UserSettingsWriteAllRequest.from_dict(obj.get("UserSettingsWriteAllRequest"))
         user_settings_write_key_request = UserSettingsWriteKeyRequest.from_dict(obj.get("UserSettingsWriteKeyRequest"))
+        user_settings_write_keys_request = _UserSettingsWriteKeysRequest.from_dict(obj.get("UserSettingsWriteKeysRequest"))
+        user_settings_write_keys_result = _UserSettingsWriteKeysResult.from_dict(obj.get("UserSettingsWriteKeysResult"))
+        utility_prompt_result = _UtilityPromptResult.from_dict(obj.get("UtilityPromptResult"))
+        utility_prompt_result_kind = _UtilityPromptResultKind(obj.get("UtilityPromptResultKind"))
         visibility_get_result = VisibilityGetResult.from_dict(obj.get("VisibilityGetResult"))
         visibility_set_request = VisibilitySetRequest.from_dict(obj.get("VisibilitySetRequest"))
         visibility_set_result = VisibilitySetResult.from_dict(obj.get("VisibilitySetResult"))
@@ -82481,7 +85958,7 @@ class RPC:
         subagent_settings = from_union([SubagentSettingsConfig.from_dict, from_none], obj.get("SubagentSettings"))
         task_progress = from_union([from_none, TaskProgress.from_dict], obj.get("TaskProgress"))
         workspace_summary = from_union([WorkspaceSummary.from_dict, from_none], obj.get("WorkspaceSummary"))
-        return RPC(abort_request, abort_result, accepted_enqueue_command_result, account, account_all_users, account_auth_info, account_describe_auth_info_request, account_describe_auth_info_result, account_get_all_users_result, account_get_current_auth_result, account_get_gist_support_request, account_get_gist_support_result, account_get_host_url_request, account_get_host_url_result, account_get_quota_request, account_get_quota_result, account_get_token_env_var_result, account_get_web_url_request, account_get_web_url_result, account_health, account_kind, account_login_request, account_login_result, account_logout_request, account_logout_result, account_quota_snapshot, accounts_get_active_result, accounts_list, accounts_list_request, accounts_logout_request, accounts_set_credentials_request, accounts_switch_active_request, account_subscribe_copilot_free_request, account_subscribe_copilot_free_result, adaptive_thinking_support, agent_discovery_path, agent_discovery_path_list, agent_discovery_path_scope, agent_file_location, agent_get_current_result, agent_info, agent_info_source, agent_list, agent_list_request, agent_registry_ensure_dir_result, agent_registry_error, agent_registry_list_entries_request, agent_registry_list_entries_result, agent_registry_live_target_entry, agent_registry_live_target_entry_attention_kind, agent_registry_live_target_entry_kind, agent_registry_live_target_entry_last_terminal_event, agent_registry_live_target_entry_status, agent_registry_location_request, agent_registry_log_capture, agent_registry_log_capture_open_error_reason, agent_registry_pid_request, agent_registry_remove_entry_result, agent_registry_spawn_error, agent_registry_spawn_permission_mode, agent_registry_spawn_registry_timeout, agent_registry_spawn_request, agent_registry_spawn_result, agent_registry_spawn_spawned, agent_registry_spawn_validation_error, agent_registry_spawn_validation_error_field, agent_registry_spawn_validation_error_reason, agent_reload_result, agents_create_file_request, agents_create_file_result, agents_custom_agent_initial_model_decision_params, agents_custom_agent_initial_model_decision_result, agents_discover_request, agent_select_request, agent_select_result, agent_set_prompt_request, agents_generate_file_content_request, agents_generate_file_content_result, agents_get_available_builtins_request, agents_get_available_builtins_result, agents_get_builtin_definition_request, agents_get_builtin_definition_result, agents_get_builtin_listing_definition_request, agents_get_builtin_listing_definition_result, agents_get_builtins_result, agents_get_discovery_paths_request, agents_list_tool_categories_result, agents_validate_name_request, agents_validate_name_result, agent_tool_category, agent_tool_category_id, ahp_connection_authenticate_request, ahp_connection_create_request, ahp_connection_create_session_request, ahp_connection_create_session_result, ahp_connection_dispose_session_request, ahp_connection_event, ahp_connection_log_open_request, ahp_connection_log_request, ahp_connection_log_write_request, ahp_connection_model_selection, ahp_connection_project_options, ahp_connection_read_events_result, ahp_connection_request, ahp_connection_resource_auth_result, ahp_connections_authenticate_result, ahp_connection_select_session_request, ahp_connection_select_session_result, ahp_connection_session_options, ahp_connection_state_result, ahp_connection_transport, ahp_session_admission_callback_request, ahp_session_admission_callback_result, ahp_session_admission_phase, ahp_session_attach_request, ahp_session_attach_result, ahp_session_detach_request, ahp_session_lease_phase, ahp_session_lease_request, ahp_session_lease_result, ahp_session_metadata, ahp_session_projection_request, ahp_session_projection_result, ahp_session_publish_request, ahp_session_send_admission_request, api_key_auth_info, attached_provider_configuration_add_model_request, authenticated_authority_grant, authenticated_authority_update, auth_identity, auth_identity_metadata, auth_info, auth_info_type, auth_login_account, auth_login_advance_request, auth_login_begin_request, auth_login_begun, auth_login_cancel_request, auth_login_identity, auth_login_identity_list, auth_login_list_request, auth_login_method, auth_login_mode, auth_login_result_dto, auth_login_result_status, auth_login_step, auth_provider_descriptor, auth_providers_list, auth_validation_error, auth_validation_errors, autopilot_evaluate_idle_continuation_outcome, autopilot_evaluate_idle_continuation_result, autopilot_objective_credit_limit, autopilot_objective_get_state_result, autopilot_objective_set_stay_in_autopilot_request, autopilot_objective_state, autopilot_objective_status, autopilot_options, auto_tier_billing, auto_tier_billing_promo, auto_tier_descriptor, auto_tier_metadata, auto_tier_status, azure_ml_cancel_result, azure_ml_catalog_request, azure_ml_catalog_result, azure_ml_catalog_retry_mode, azure_ml_catalog_warning, azure_ml_discard_request, azure_ml_download_id_request, azure_ml_download_request, azure_ml_download_result, azure_ml_download_status, azure_ml_family_lease_result, azure_ml_family_release_request, azure_ml_family_request, azure_ml_gpu_memory, azure_ml_hardware_result, azure_ml_latest_request, azure_ml_license, azure_ml_model, azure_ml_profile, azure_ml_registration_kind, azure_ml_registration_operation, azure_ml_registration_request, azure_ml_registration_result, azure_ml_registry, azure_ml_resolve_request, azure_ml_resolve_result, builtin_agent_summary, built_in_model_catalog, built_in_model_catalog_entry, builtin_tool_descriptor, builtin_tool_format, builtin_tool_format_type, builtin_tool_input_schema, builtin_tool_input_schema_type, builtin_tool_safe_for_telemetry, builtin_tool_safe_telemetry_fields, cafe_metrics_embedded_package_identity, cafe_metrics_launch_scenario, cafe_metrics_record_cli_ready_request, cafe_metrics_record_resume_result_request, cafe_metrics_release, cafe_metrics_resolve_admission_request, cafe_metrics_resolve_admission_result, cafe_metrics_resume_outcome, cafe_metrics_resume_reason, cafe_metrics_resume_stage, cafe_metrics_shutdown_request, cafe_metrics_start_refusal, cafe_metrics_start_request, cafe_metrics_start_result, cancel_user_requested_shell_command_result, canvas_action, canvas_action_invoke_request, canvas_action_invoke_result, canvas_close_request, canvas_host_context, canvas_host_context_capabilities, canvas_json_schema, canvas_list, canvas_list_open_result, canvas_open_request, canvas_provider_close_request, canvas_provider_invoke_action_request, canvas_provider_open_request, canvas_provider_open_result, canvas_provider_register_request, canvas_provider_unregister_request, canvas_session_context, canvas_source_close_request, capi_session_options, card_digest, card_digest_algorithm, card_digest_value, catalog_agent_plugin_candidate, catalog_agent_plugin_candidate_kind, catalog_agent_plugin_candidate_provenance, catalog_agent_plugin_compatibility_tag, catalog_agent_plugin_component, catalog_agent_plugin_installability, catalog_agent_plugin_install_plan, catalog_agent_plugin_install_source, catalog_agent_plugin_marketplace_source, catalog_agent_plugin_marketplace_source_kind, catalog_agent_plugin_materialization_source, catalog_agent_plugin_materialization_source_kind, catalog_agent_plugin_media_type, catalog_agent_plugin_repository_source, catalog_agent_plugin_repository_source_kind, catalog_ai_skill_candidate, catalog_ai_skill_candidate_kind, catalog_ai_skill_candidate_provenance, catalog_ai_skill_installability, catalog_ai_skill_media_type, catalog_authentication_required_error, catalog_authentication_required_reason, catalog_candidate, catalog_candidate_kind, catalog_candidate_source, catalog_candidate_source_embedded, catalog_candidate_source_url, catalog_capability, catalog_capability_id, catalog_client_contract, catalog_contract_violation_error, catalog_contract_violation_reason, catalog_feed_available_entry, catalog_feed_available_status, catalog_feed_entry, catalog_feed_filtered_entry, catalog_feed_filtered_status, catalog_feed_unavailable_entry, catalog_feed_unavailable_reason, catalog_feed_unavailable_status, catalog_generated_feed_description, catalog_get_generated_feed_request, catalog_get_generated_feed_succeeded, catalog_get_saved_feed_request, catalog_get_saved_feed_succeeded, catalog_handle_rejected_error, catalog_handle_rejection_reason, catalog_handle_type, catalog_invalid_request_error, catalog_invalid_request_field, catalog_malformed_card_error, catalog_malformed_card_reason, catalog_materialization_reference, catalog_mcp_server_candidate, catalog_mcp_server_candidate_kind, catalog_mcp_server_candidate_provenance, catalog_mcp_server_installability, catalog_media_type, catalog_negotiated_contract, catalog_negotiation_refused_error, catalog_negotiation_refused_reason, catalog_network_failure_error, catalog_network_failure_reason, catalog_not_installable_error, catalog_not_installable_reason, catalog_plan_install_from_reference_request, catalog_plugin_repository_source, catalog_policy_rejected_error, catalog_recommend_request, catalog_reference_installation_failure_reason, catalog_reference_installation_outcome, catalog_reference_installation_result, catalog_resource_generated_feed_result, catalog_resource_identity, catalog_resource_saved_feed_result, catalog_resource_version, catalog_saved_feed_description, catalog_search_page, catalog_search_pagination, catalog_search_request, catalog_search_result, catalog_search_succeeded, catalog_search_total_count_relation, catalog_selection_cancelled, catalog_selection_decision, catalog_selection_declined, catalog_selection_foreign, catalog_selection_invalid, catalog_selection_replayed, catalog_selection_request, catalog_selection_result, catalog_selection_selected, catalog_selection_stale, catalog_selection_timed_out, catalog_selection_wrong_kind, catalog_trust_eligibility, catalog_trust_provenance, catalog_trust_snapshot, catalog_trust_snapshot_absent, catalog_trust_snapshot_absent_status, catalog_trust_snapshot_current, catalog_trust_snapshot_current_status, catalog_trust_snapshot_downgraded, catalog_trust_snapshot_downgraded_status, catalog_trust_snapshot_malformed, catalog_trust_snapshot_malformed_status, catalog_trust_snapshot_revoked, catalog_trust_snapshot_revoked_status, catalog_trust_snapshot_schema_version, catalog_trust_snapshot_stale, catalog_trust_snapshot_stale_status, catalog_trust_snapshot_unsupported, catalog_trust_snapshot_unsupported_status, catalog_trust_source, catalog_trust_tier, catalog_unavailable_error, catalog_unavailable_reason, catalog_unavailable_transport_error, catalog_unavailable_transport_reason, catalog_unsafe_retrieval_error, catalog_unsafe_retrieval_reason, catalog_unsupported_kind_error, client_metadata, client_task_cancel_reason, client_task_cancel_request, client_task_cancel_result, cloud_tasks_create_params, cloud_tasks_create_result, cloud_tasks_delete_params, cloud_tasks_delete_result, cloud_tasks_get_params, cloud_tasks_get_result, cloud_tasks_get_session_logs_params, cloud_tasks_get_session_logs_result, cloud_tasks_get_session_params, cloud_tasks_get_session_replay_params, cloud_tasks_get_session_replay_result, cloud_tasks_get_sharing_status_params, cloud_tasks_resolve_task_id_params, cloud_tasks_resolve_task_id_result, cloud_tasks_set_sharing_status_params, cloud_tasks_sharing_status_result, command_list, commands_finalize_invocation_effect_request, commands_finalize_invocation_effect_result, commands_handle_pending_command_request, commands_handle_pending_command_result, commands_invocation_effect_outcome, commands_invocation_origin, commands_invoke_request, commands_list_request, commands_report_queued_command_wait_request, commands_report_queued_command_wait_result, commands_respond_to_queued_command_request, commands_respond_to_queued_command_result, completions_get_trigger_characters_result, completions_request_request, completions_request_result, configure_session_extensions_params, connect_client_info, connected_remote_session_metadata, connected_remote_session_metadata_kind, connected_remote_session_metadata_repository, connector_account_request, connector_authorization_requirement, connector_authorization_scope, connector_availability, connector_capabilities, connector_catalog_entry, connector_catalog_result, connector_catalog_status, connector_connect_request, connector_connect_result, connector_continue_request, connector_disconnect_result, connector_discovery_account, connector_discovery_account_list, connector_discovery_account_request, connector_discovery_auth_info, connector_discovery_availability, connector_discovery_capabilities, connector_discovery_catalog_entry, connector_discovery_catalog_result, connector_mcp_status, connector_reconcile_request, connector_runtime_status, connector_session_account, connector_status, connect_remote_session_params, connect_request, connect_result, content_exclusion_check_paths_request, content_exclusion_check_paths_result, content_exclusion_path_check, content_exclusion_validate_policies_request, content_exclusion_validate_policies_result, content_filter_mode, context_heaviest_message, copilot_api_token_auth_info, copilot_user_response, copilot_user_response_endpoints, copilot_user_response_quota_snapshots, copilot_user_response_quota_snapshots_chat, copilot_user_response_quota_snapshots_completions, copilot_user_response_quota_snapshots_premium_interactions, credential_context_error_code, credential_context_error_data, current_model, current_tool_metadata, customization_reload_outcome, customization_reload_status, customization_reload_subsystem, customizations_reload_result, debug_collect_logs_collected_entry, debug_collect_logs_destination, debug_collect_logs_entry, debug_collect_logs_entry_kind, debug_collect_logs_include, debug_collect_logs_redaction, debug_collect_logs_request, debug_collect_logs_result, debug_collect_logs_result_kind, debug_collect_logs_skipped_entry, debug_collect_logs_source, decision_answer, decision_context, decision_error_data, decision_error_kind, decision_level, decision_level_probability, decision_model_info, decision_model_limits, decision_option, decision_option_probability, decision_question, decisions_ask_request, decisions_ask_result, decision_usage, decision_violation, diagnostic_cursor_status, diagnostic_entry, diagnostic_log_level, diagnostics_configuration, diagnostics_configure_request, diagnostic_severity, diagnostic_source, diagnostic_sources_configuration, diagnostics_read_request, diagnostics_read_result, discovered_canvas, discovered_extension, discovered_extension_mode, discovered_extension_plugin, discovered_extensions, discovered_extensions_disable_request, discovered_extensions_enable_request, discovered_extension_source, discovered_hook, discovered_mcp_server, discovered_mcp_server_type, discovered_model, discovered_model_list, eligible_plugin_extension_entry, enqueue_command_params, enqueue_command_result, entra_auth_config, entra_token_acquire_reason, entra_token_acquire_request, entra_token_acquire_result, entra_token_get_token_request, env_auth_info, environment_capabilities, environment_kind, environments_delete_request, environments_delete_result, environments_get_request, environments_get_result, environments_list_request, environments_list_result, event_log_read_request, event_log_release_interest_result, event_log_tail_result, event_log_types, events_agent_scope, events_cursor_status, events_read_direction, events_read_result, events_read_view, execute_command_params, execute_command_result, extension, extension_context_push_input, extension_launch_profile, extension_launch_provider_resolve_request, extension_launch_provider_resolve_result, extension_list, extension_managed_policy, extensions_disable_request, extensions_enable_request, extension_source, extension_status, external_tool_result, external_tool_text_result_for_llm, external_tool_text_result_for_llm_binary_results_for_llm, external_tool_text_result_for_llm_binary_results_for_llm_type, external_tool_text_result_for_llm_content, external_tool_text_result_for_llm_content_audio, external_tool_text_result_for_llm_content_image, external_tool_text_result_for_llm_content_resource, external_tool_text_result_for_llm_content_resource_details, external_tool_text_result_for_llm_content_resource_link, external_tool_text_result_for_llm_content_resource_link_icon, external_tool_text_result_for_llm_content_resource_link_icon_theme, external_tool_text_result_for_llm_content_shell_exit, external_tool_text_result_for_llm_content_terminal, external_tool_text_result_for_llm_content_text, feature_flag_assignments_update, feature_flag_availability, feature_flag_config_patch, feature_flag_enabled_override, feature_flag_exp_override_query, feature_flag_metadata, feature_flag_reasoning_summaries_arm, feature_flag_service_configure_params, feature_flag_service_read_params, feature_flag_service_read_result, feature_flag_service_snapshot, feature_flag_service_update_params, feature_flags_metadata_result, feature_flags_resolve_request, feature_flags_resolve_result, feature_flags_resolve_startup_gates_request, feature_flags_resolve_startup_gates_result, feature_flag_value, feedback_upload_cancel_result, feedback_upload_operation_request, feedback_upload_outcome, feedback_upload_phase, feedback_upload_progress, feedback_upload_read_request, feedback_upload_snapshot, feedback_upload_start_request, feedback_upload_status, fetch_cancel_result, fetch_create_result, fetch_file_error_data, fetch_file_error_kind, fetch_file_operation, fetch_header, fetch_proxy_env, fetch_proxy_route, fetch_read_result, fetch_redirect, fetch_request_id, fetch_resolve_proxy_request, fetch_resolve_proxy_result, fetch_response_mode, fetch_send_params, fetch_send_result, fetch_transport_error_data, fetch_transport_error_kind, file_log_level, file_log_open_request, file_log_operation, file_log_resource, file_log_write_request, filter_mapping, fleet_start_request, fleet_start_result, folder_trust_add_params, folder_trust_check_params, folder_trust_check_result, folder_trust_is_trusted_params, force_login_orgs_decision, forge_proposal_change_type, forge_proposal_fail_stale_request, forge_proposal_fail_stale_result, forge_proposal_manifest_entry, forge_proposal_reconcile_request, forge_proposal_reconcile_result, forge_proposal_record, forge_proposal_scope, forge_proposal_status, forge_proposal_summary, forge_proposal_trigger_mode, forge_proposal_workspace_before_request, forge_proposal_workspace_before_result, fusion_tier, gh_cli_auth_info, git_boolean_result, git_branch_request, git_change_counts_result, git_commit_all_request, git_commit_all_result, git_context_request, git_create_and_push_branch_request, git_created_worktree, git_current_branch_remote_result, git_cwd_request, git_default_branch_request, git_detect_remote_hosts_request, git_diff_changes_request, git_diff_changes_result, git_diff_change_type, git_diff_file_change, git_diff_request, git_find_root_request, git_hub_branch_pull_request, git_hub_branch_pull_request_lookup_request, git_hub_branch_pull_request_lookup_result, git_hub_branch_pull_request_lookup_status, git_hub_environment, git_hub_fetch_cancel_result, git_hub_fetch_header, git_hub_fetch_http_error, git_hub_fetch_operation, git_hub_fetch_operation_request, git_hub_fetch_pinned_address, git_hub_fetch_proxy_environment, git_hub_fetch_request, git_hub_fetch_request_id, git_hub_fetch_result, git_hub_fetch_retry_config, git_hub_mcp_options, git_hub_owner_option, git_hub_owners_cancel_request, git_hub_owners_cancel_result, git_hub_owners_list_request, git_hub_owners_list_result, git_hub_owners_request_id_result, git_hub_pull_request_check, git_hub_pull_request_check_status, git_hub_release_abandon_request_params, git_hub_release_abandon_request_result, git_hub_release_cancel_request, git_hub_release_cancel_result, git_hub_release_download_asset_request, git_hub_release_download_asset_result, git_hub_release_download_kind, git_hub_release_download_progress_request, git_hub_release_download_progress_result, git_hub_release_lookup_kind, git_hub_release_lookup_request, git_hub_release_lookup_result, git_hub_release_package_identity, git_hub_release_query, git_hub_release_request_id_result, git_hub_release_snapshot_asset, git_hub_release_snapshot_entry, git_hub_release_snapshot_request, git_hub_release_snapshot_result, git_hub_release_update_channel, git_hub_repository_at_path_request, git_hub_repository_at_path_result, git_hub_repository_by_id_request, git_hub_repository_by_id_result, git_hub_repository_identity, git_hub_repository_owner_name, git_hub_telemetry_client_info, git_hub_telemetry_event, git_hub_telemetry_notification, git_hub_token_acquire_reason, git_hub_token_acquire_request, git_hub_token_acquire_result, git_inherit_trust_request, git_moved_worktree, git_move_worktree_request, git_move_worktree_result, git_named_worktree_request, git_optional_string_result, git_prepared_worktree, git_read_head_file_request, git_remote_host_detection, git_remote_repository, git_remotes_result, git_repo_identifier_info, git_repo_identifier_result, git_repos_from_remotes_request, git_repos_from_remotes_result, git_resource_worktree_request, git_root_result, git_string_result, git_working_tree_status, git_working_tree_status_request, git_worktree_request, git_worktree_summary_request, global_state_load_for_config_dir_request, global_state_load_result, global_state_write_key_request, handle_pending_tool_call_request, handle_pending_tool_call_result, history_abort_manual_compaction_result, history_cancel_background_compaction_result, history_clear_context_request, history_clear_context_result, history_compact_context_window, history_compact_request, history_compact_result, history_file_restore_skip_reason, history_list_rewind_points_result, history_preview_rewind_request, history_preview_rewind_result, history_rewind_change_type, history_rewind_file_preview, history_rewind_mode, history_rewind_outcome, history_rewind_point, history_rewind_request, history_rewind_result, history_rewind_unavailable_reason, history_set_compaction_config_request, history_skipped_file_restore, history_summarize_for_handoff_result, history_truncate_request, history_truncate_result, hmac_auth_info, hook_invoke_request, hook_invoke_response, hook_origin, hooks_discover_request, hooks_discover_result, hook_type, host_authenticate_request, host_authentication, host_authentication_cancelled_notification, host_authentication_result, host_cancel_authentication_request, host_configuration, host_credential_lifecycle_action, host_credential_lifecycle_request, host_credential_lifecycle_result, host_diagnostics, host_dispose_request, host_empty_result, host_environment_credentials, host_error_reporting_status, host_exited_notification, host_exit_reason, host_git_hub_environment_options, host_list_sessions_request, host_list_sessions_result, host_local_server_configuration, host_local_server_options, host_publish_session_request, host_publish_session_result, host_ready_request, host_register_session_request, host_session_authentication, host_session_create_callback, host_session_create_request, host_session_create_result, host_session_released_notification, host_session_release_request, host_session_summary, host_set_session_creation_policy_request, host_start_request, host_start_result, host_unpublish_session_request, host_unpublish_session_result, host_unregister_session_request, host_validate_authentication_request, ide_connection_state, image_tool_model, image_tool_model_availability, image_tool_model_operation, image_tool_model_pricing, installation_catalogue_identity, installation_confirmation_request, installation_confirmation_response, installation_decision, installation_review, installed_plugin, installed_plugin_info, installed_plugin_source, installed_plugin_source_git_hub, installed_plugin_source_local, installed_plugin_source_url, installed_plugin_verified_source, instruction_discovery_path, instruction_discovery_path_kind, instruction_discovery_path_list, instruction_discovery_path_location, instructions_discover_repo_sources_request, instructions_discover_request, instructions_get_discovery_paths_request, instructions_get_sources_result, instructions_init_prompt_result, instruction_source, instruction_source_location, instruction_source_type, interrupt_main_turn_request, interrupt_main_turn_result, json_schema_response_format, lifecycle_diagnostics_configuration, lifecycle_diagnostics_read_request, lifecycle_diagnostics_read_result, llm_inference_headers, llm_inference_http_request_chunk_request, llm_inference_http_request_chunk_result, llm_inference_http_request_start_request, llm_inference_http_request_start_result, llm_inference_http_request_start_transport, llm_inference_http_response_chunk_error, llm_inference_http_response_chunk_request, llm_inference_http_response_chunk_result, llm_inference_http_response_start_request, llm_inference_http_response_start_result, llm_inference_set_provider_result, local_model_auto_registration, local_model_azure_ml_identity, local_model_descriptor, local_model_disk_requirement, local_model_download_progress, local_model_gpu_requirement, local_model_limits, local_model_machine_row, local_model_machine_view, local_model_notice, local_model_operation, local_models_configure_request, local_models_event, local_models_model_id_request, local_models_model_request, local_model_source, local_models_refresh_request, local_models_setup_request, local_models_snapshot, local_model_status, local_models_view, local_models_watch_request, local_model_timeline_message, local_session_metadata_value, location_permissions_cleanup_result, logged_in_user, login_provider_kind, log_request, log_result, lsp_configuration_problem, lsp_configuration_snapshot, lsp_global_configuration_request, lsp_initialize_request, lsp_probe_exit_status, lsp_probe_request, lsp_probe_result, lsp_server_summary, lsp_set_enabled_request, lsp_warmup_error, lsp_warmup_result, managed_communication_settings, managed_communication_support, managed_fusion_tier, managed_mcp_server_config, managed_permission_evaluation, managed_permission_operation, managed_permission_operation_kind, managed_permissions_evaluate_request, managed_permissions_evaluate_result, managed_permission_verdict, managed_plugin_assignment, managed_plugin_retry_entry, managed_plugin_retry_status, managed_session_info, managed_setting_meta, managed_settings_apply_controls_params, managed_settings_apply_controls_result, managed_settings_bypass_disable_source, managed_settings_bypass_policy_resolution, managed_settings_channel, managed_settings_compose_layer, managed_settings_compose_request, managed_settings_compose_result, managed_settings_diagnostic, managed_settings_diagnostic_severity, managed_settings_ingest_and_retain_result, managed_settings_ingest_params, managed_settings_ingest_result, managed_settings_layer, managed_settings_load_remote_control_params, managed_settings_load_remote_control_result, managed_settings_log_level, managed_settings_log_message, managed_settings_meta, managed_settings_parse_client_value_params, managed_settings_parse_client_value_result, managed_settings_policy_helper_authority, managed_settings_policy_helper_reason, managed_settings_read_device_result, managed_settings_read_result, managed_settings_resolve_bypass_disable_transition_params, managed_settings_resolve_bypass_disable_transition_result, managed_settings_resolved_data, managed_settings_resolve_device_force_login_orgs_gate_params, managed_settings_resolve_effective_value_params, managed_settings_resolve_effective_value_result, managed_settings_resolve_request, managed_settings_resolve_result, managed_settings_resolve_startup_policy_params, managed_settings_resolve_startup_policy_result, managed_settings_retain_policy_params, managed_settings_schema_result, managed_settings_server_policy_cache_mode, managed_settings_server_policy_resolution, managed_settings_validate_request, managed_settings_validate_result, managed_settings_values, marketplace_add_result, marketplace_browse_result, marketplace_info, marketplace_list_result, marketplace_migration_result, marketplace_migration_status, marketplace_plugin_info, marketplace_refresh_entry, marketplace_refresh_result, marketplace_remove_result, mcp_allowed_server, mcp_apply_install_request, mcp_apply_uninstall_request, mcp_apps_call_tool_request, mcp_apps_diagnose_capability, mcp_apps_diagnose_request, mcp_apps_diagnose_result, mcp_apps_diagnose_server, mcp_apps_host_context, mcp_apps_host_context_details, mcp_apps_host_context_details_available_display_mode, mcp_apps_host_context_details_display_mode, mcp_apps_host_context_details_platform, mcp_apps_host_context_details_theme, mcp_apps_list_tools_request, mcp_apps_list_tools_result, mcp_apps_read_resource_request, mcp_apps_read_resource_result, mcp_apps_resource_content, mcp_apps_set_host_context_details, mcp_apps_set_host_context_details_available_display_mode, mcp_apps_set_host_context_details_display_mode, mcp_apps_set_host_context_details_platform, mcp_apps_set_host_context_details_theme, mcp_apps_set_host_context_request, mcp_call_tool_request, mcp_call_tool_result, mcp_cancel_sampling_execution_params, mcp_cancel_sampling_execution_result, mcp_config_add_request, mcp_config_disable_request, mcp_config_enable_request, mcp_config_list, mcp_config_remove_request, mcp_config_update_request, mcp_configured_server, mcp_configured_server_list, mcp_configured_server_state, mcp_configure_git_hub_request, mcp_configure_git_hub_result, mcp_diagnostic_details, mcp_diagnostic_direction, mcp_diagnostic_kind, mcp_diagnostic_source_configuration, mcp_disable_request, mcp_discover_request, mcp_discover_result, mcp_discovery_diagnostic, mcp_discovery_memory_config, mcp_discovery_options, mcp_discovery_server_config, mcp_elicitation_form_mode, mcp_enable_request, mcp_execute_sampling_params, mcp_execute_sampling_request, mcp_execute_sampling_result, mcp_external_client_exchange_request, mcp_external_client_request, mcp_external_client_result, mcp_external_client_snapshot, mcp_failed_server, mcp_filtered_server, mcp_git_hub_workspace, mcp_headers_handle_pending_headers_refresh_request, mcp_headers_handle_pending_headers_refresh_request_request, mcp_headers_handle_pending_headers_refresh_request_result, mcp_host_state, mcp_ide_config, mcp_installation_failure_reason, mcp_installation_input, mcp_installation_management_outcome, mcp_installation_management_result, mcp_installation_operation_request, mcp_installation_operation_status, mcp_installation_outcome, mcp_installation_remote_configuration, mcp_installation_result, mcp_installation_review, mcp_installation_secret, mcp_installation_secret_storage, mcp_installations_request, mcp_installation_state, mcp_installation_summary, mcp_install_plan, mcp_is_server_running_request, mcp_is_server_running_result, mcp_list_builtin_server_names_result, mcp_list_tools_request, mcp_list_tools_result, mcp_oauth_authenticate_request, mcp_oauth_authenticate_result, mcp_oauth_authentication_state_changed_request, mcp_oauth_cancel_login_request, mcp_oauth_cancel_login_result, mcp_oauth_check_dcr_support_request, mcp_oauth_check_dcr_support_result, mcp_oauth_complete_request, mcp_oauth_dispose_store_request, mcp_oauth_fetch_protected_resource_metadata_request, mcp_oauth_fetch_protected_resource_metadata_result, mcp_oauth_flow_identity_request, mcp_oauth_flow_static_client_config, mcp_oauth_flow_store, mcp_oauth_handle_pending_request, mcp_oauth_handle_pending_result, mcp_oauth_is_microsoft_authorization_server_request, mcp_oauth_is_microsoft_authorization_server_result, mcp_oauth_login_grant_type, mcp_oauth_login_request, mcp_oauth_login_result, mcp_oauth_pending_request_response, mcp_oauth_prepare_login_request, mcp_oauth_prepare_login_result, mcp_oauth_probe_needs_auth_reason, mcp_oauth_probe_request, mcp_oauth_probe_result, mcp_oauth_respond_request, mcp_oauth_respond_result, mcp_oauth_save_static_client_secret_request, mcp_oauth_static_client_config, mcp_oauth_static_client_config_request, mcp_oauth_static_client_config_result, mcp_oauth_stored_grant_request, mcp_oauth_store_key_request, mcp_oauth_test_connection_request, mcp_oauth_test_connection_result, mcp_oauth_test_connection_transport, mcp_owned_oauth_login_status, mcp_plan_configuration_change, mcp_plan_configuration_operation, mcp_plan_enum_value_type, mcp_plan_install_planned, mcp_plan_install_request, mcp_plan_install_result, mcp_plan_install_source, mcp_plan_install_source_candidate, mcp_plan_install_source_candidate_kind, mcp_plan_install_source_card, mcp_plan_install_source_card_kind, mcp_plan_package_install_method, mcp_plan_package_transport, mcp_plan_policy_decision, mcp_plan_policy_result, mcp_plan_policy_source, mcp_plan_provenance, mcp_plan_remote_install_method, mcp_plan_remote_transport, mcp_plan_required_value, mcp_plan_required_value_enum, mcp_plan_required_value_enum_kind, mcp_plan_required_value_scalar, mcp_plan_required_value_scalar_kind, mcp_plan_resource_identity, mcp_plan_scalar_value_type, mcp_plan_scope, mcp_plan_secret_placeholder, mcp_plan_secret_reference, mcp_plan_target, mcp_plan_transport_choice, mcp_plan_transport_choice_package, mcp_plan_transport_choice_remote, mcp_plan_uninstall_request, mcp_plan_value_category, mcp_prepared_install, mcp_prepare_install_request, mcp_prompt, mcp_prompt_argument, mcp_prompt_icon, mcp_prompt_message, mcp_prompt_role, mcp_prompts_get_request, mcp_prompts_get_result, mcp_prompts_list_request, mcp_prompts_list_result, mcp_register_external_client_request, mcp_registry_cancel_request, mcp_registry_cancel_result, mcp_registry_request_id_result, mcp_registry_search_request, mcp_registry_search_result, mcp_reload_config, mcp_reload_with_config_request, mcp_remove_git_hub_result, mcp_resolve_git_hub_config_request, mcp_resolve_git_hub_config_result, mcp_resource, mcp_resource_annotations, mcp_resource_content, mcp_resource_icon, mcp_resources_list_request, mcp_resources_list_result, mcp_resources_list_templates_request, mcp_resources_list_templates_result, mcp_resources_read_request, mcp_resources_read_result, mcp_resource_template, mcp_restart_server_request, mcp_safe_for_telemetry, mcp_safe_for_telemetry_fields, mcp_sampling_execution_action, mcp_sampling_execution_result, mcp_serializable_server_config, mcp_server, mcp_server_auth_config, mcp_server_auth_config_redirect_port, mcp_server_card_embedded, mcp_server_card_embedded_kind, mcp_server_card_media_type, mcp_server_card_reference, mcp_server_card_url, mcp_server_card_url_kind, mcp_server_config, mcp_server_config_defer_tools, mcp_server_config_http, mcp_server_config_http_oauth_grant_type, mcp_server_config_http_type, mcp_server_config_local, mcp_server_config_local_type, mcp_server_config_memory, mcp_server_config_memory_type, mcp_server_config_stdio, mcp_server_config_stdio_type, mcp_server_failure_info, mcp_server_list, mcp_server_needs_auth_info, mcp_server_ownership, mcp_server_tool_token_breakdown, mcp_set_env_value_mode_details, mcp_set_env_value_mode_params, mcp_set_env_value_mode_result, mcp_should_exclude_git_hub_tools_request, mcp_should_exclude_git_hub_tools_result, mcp_source_file, mcp_source_plugin, mcp_source_ref, mcp_start_server_config, mcp_start_server_request, mcp_start_servers_result, mcp_stop_server_request, mcp_task_metadata, mcp_tool_result, mcp_tools, mcp_tool_token_breakdown_result, mcp_tool_token_count, mcp_tool_ui, mcp_tool_ui_visibility, mcp_uninstall_plan, mcp_unregister_external_client_request, memory_configuration, memory_mode, memory_store_request, metadata_context_attribution_result, metadata_context_heaviest_messages_request, metadata_context_heaviest_messages_result, metadata_context_info_request, metadata_context_info_result, metadata_get_working_directory_context_request, metadata_get_working_directory_context_result, metadata_is_processing_result, metadata_recompute_context_tokens_request, metadata_recompute_context_tokens_result, metadata_record_context_change_request, metadata_record_context_change_result, metadata_set_working_directory_request, metadata_set_working_directory_result, metadata_snapshot_current_mode, metadata_snapshot_remote_metadata, metadata_snapshot_remote_metadata_repository, metadata_snapshot_remote_metadata_task_type, metadata_update_client_metadata_request, model, model_apply_startup_overlay_request, model_artifact_details, model_billing, model_billing_promo, model_billing_token_prices, model_billing_token_prices_long_context, model_capabilities, model_capabilities_limits, model_capabilities_limits_vision, model_capabilities_override, model_capabilities_override_limits, model_capabilities_override_limits_vision, model_capabilities_override_supports, model_capabilities_supports, model_clear_startup_seed_request, model_clear_startup_seed_result, model_get_reasoning_summaries_request, model_get_reasoning_summaries_result, model_list, model_list_request, model_load_authorization_error, model_load_error_details, model_load_error_request, model_message, model_picker_category, model_picker_persistence_request, model_picker_price_category, model_picker_settings_context, model_policy, model_policy_state, model_provider_adapter_catalog, model_provider_adapter_descriptor, model_provider_adapter_operation_descriptor, model_provider_attribution, model_provider_automatic_discovery_mode, model_provider_automatic_discovery_policy, model_provider_availability_request, model_provider_availability_result, model_provider_configuration_disposition, model_provider_configuration_plan, model_provider_descriptor, model_provider_discover_request, model_provider_discover_result, model_provider_discovery_network_scope, model_provider_get_status_request, model_provider_instance, model_provider_instance_reference, model_provider_models_list_request, model_provider_operation_outcome, model_provider_operation_outcome_code, model_provider_prepare_configuration_request, model_provider_provenance, model_provider_provenance_source, model_provider_save_configuration_request, model_provider_status, model_provider_warning, model_set_allowed_models_request, model_set_allowed_models_result, model_set_reasoning_effort_request, model_set_reasoning_effort_result, models_list_request, models_list_token_price_units_request, model_startup_admission_request, model_startup_admission_result, model_switch_auto_tier_request, model_switch_auto_tier_result, model_switch_auto_tier_status, model_switch_confirmation, model_switch_fusion_tier_request, model_switch_to_request, model_switch_to_result, model_token_price_unit, model_token_price_unit_list, model_warning_text, mode_set_request, mode_set_result, move_mcp_loading_to_background_result, named_provider_config, name_get_result, name_set_auto_request, name_set_auto_result, name_set_request, network_authenticate_basic_options, network_authenticate_basic_request, network_authenticate_basic_result, network_authenticate_negotiate_options, network_authenticate_negotiate_request, network_authenticate_negotiate_result, network_resolve_proxy_options, network_resolve_proxy_request, network_resolve_proxy_result, network_scope, network_set_provider_request, open_canvas_instance, options_update_additional_content_exclusion_policy, options_update_additional_content_exclusion_policy_rule, options_update_additional_content_exclusion_policy_rule_source, options_update_additional_content_exclusion_policy_scope, options_update_context_tier, options_update_env_value_mode, options_update_reasoning_summary, options_update_tool_filter_precedence, pending_external_tool_request, pending_external_tool_request_list, pending_permission_request, pending_permission_request_list, permission_decision, permission_decision_approved, permission_decision_approved_for_location, permission_decision_approved_for_session, permission_decision_approve_for_location, permission_decision_approve_for_location_approval, permission_decision_approve_for_location_approval_commands, permission_decision_approve_for_location_approval_custom_tool, permission_decision_approve_for_location_approval_extension_env_access, permission_decision_approve_for_location_approval_extension_management, permission_decision_approve_for_location_approval_extension_permission_access, permission_decision_approve_for_location_approval_mcp, permission_decision_approve_for_location_approval_mcp_sampling, permission_decision_approve_for_location_approval_memory, permission_decision_approve_for_location_approval_read, permission_decision_approve_for_location_approval_workflow, permission_decision_approve_for_location_approval_write, permission_decision_approve_for_session, permission_decision_approve_for_session_approval, permission_decision_approve_for_session_approval_commands, permission_decision_approve_for_session_approval_custom_tool, permission_decision_approve_for_session_approval_extension_env_access, permission_decision_approve_for_session_approval_extension_management, permission_decision_approve_for_session_approval_extension_permission_access, permission_decision_approve_for_session_approval_mcp, permission_decision_approve_for_session_approval_mcp_sampling, permission_decision_approve_for_session_approval_memory, permission_decision_approve_for_session_approval_read, permission_decision_approve_for_session_approval_workflow, permission_decision_approve_for_session_approval_write, permission_decision_approve_once, permission_decision_approve_permanently, permission_decision_approve_read_only_for_session, permission_decision_cancelled, permission_decision_context, permission_decision_denied_by_content_exclusion_policy, permission_decision_denied_by_permission_request_hook, permission_decision_denied_by_rules, permission_decision_denied_interactively_by_user, permission_decision_denied_no_approval_rule_and_could_not_request_from_user, permission_decision_outcome, permission_decision_reject, permission_decision_request, permission_decision_surface, permission_decision_user_not_available, permission_location_add_tool_approval_params, permission_location_apply_params, permission_location_apply_result, permission_location_resolve_params, permission_location_resolve_result, permission_location_type, permission_mode_source, permission_paths_add_params, permission_paths_allowed_check_params, permission_paths_allowed_check_result, permission_paths_config, permission_paths_list, permission_paths_update_primary_params, permission_paths_workspace_check_params, permission_paths_workspace_check_result, permission_prompt_shown_notification, permission_request_result, permission_response_capability, permission_rules_set, permissions_additional_directories_list_result, permissions_allow_all_baseline, permissions_capabilities, permissions_clear_resume_escalation_request, permissions_clear_resume_escalation_result, permissions_configure_additional_content_exclusion_policy, permissions_configure_additional_content_exclusion_policy_rule, permissions_configure_additional_content_exclusion_policy_rule_source, permissions_configure_additional_content_exclusion_policy_scope, permissions_configure_assisted_approval_context, permissions_configure_params, permissions_configure_result, permissions_evaluate_managed_policy_params, permissions_evaluate_managed_policy_result, permissions_folder_trust_add_trusted_result, permissions_get_allow_all_result, permissions_get_mode_request, permissions_get_mode_result, permissions_locations_add_tool_approval_details, permissions_locations_add_tool_approval_details_commands, permissions_locations_add_tool_approval_details_custom_tool, permissions_locations_add_tool_approval_details_extension_env_access, permissions_locations_add_tool_approval_details_extension_management, permissions_locations_add_tool_approval_details_extension_permission_access, permissions_locations_add_tool_approval_details_mcp, permissions_locations_add_tool_approval_details_mcp_sampling, permissions_locations_add_tool_approval_details_memory, permissions_locations_add_tool_approval_details_read, permissions_locations_add_tool_approval_details_workflow, permissions_locations_add_tool_approval_details_write, permissions_locations_add_tool_approval_result, permissions_managed_review_required_request, permissions_modify_rules_params, permissions_modify_rules_result, permissions_modify_rules_scope, permissions_notify_prompt_shown_result, permissions_paths_add_result, permissions_paths_list_request, permissions_paths_update_primary_result, permissions_pending_requests_request, permissions_reset_session_approvals_request, permissions_reset_session_approvals_result, permissions_set_approve_all_request, permissions_set_approve_all_result, permissions_set_approve_all_source, permissions_set_mode_request, permissions_set_mode_result, permissions_set_required_request, permissions_set_required_result, permissions_urls_set_unrestricted_mode_result, permission_urls_config, permission_urls_set_unrestricted_mode_params, persistence_write_raw_json_locked_request, persistence_write_raw_json_locked_result, ping_request, ping_result, plan_read_result, plan_read_sql_todos_result, plan_read_sql_todos_with_dependencies_result, plan_sql_todo_dependency, plan_sql_todos_row, plan_update_request, plugin, plugin_activation_status, plugin_apply_install_request, plugin_check_update_request, plugin_installation_failure_reason, plugin_installation_file_review, plugin_installation_location, plugin_installation_management_outcome, plugin_installation_management_result, plugin_installation_mcp_server_review, plugin_installation_mcp_transport, plugin_installation_outcome, plugin_installation_result, plugin_installation_review, plugin_installation_source, plugin_installation_summary, plugin_install_plan, plugin_install_result, plugin_install_staging_mode, plugin_list, plugin_list_result, plugin_marketplace_check_update_request, plugin_marketplace_live_state, plugin_marketplace_search_entry, plugin_marketplace_search_error, plugin_marketplace_search_request, plugin_marketplace_search_result, plugin_plan_install_request, plugins_activate_request, plugins_activate_result, plugins_builtin_set_request, plugins_disable_request, plugins_enable_request, plugins_install_request, plugins_list_request, plugins_marketplaces_add_request, plugins_marketplaces_browse_request, plugins_marketplaces_refresh_request, plugins_marketplaces_remove_request, plugins_reload_request, plugins_uninstall_request, plugins_update_request, plugin_update_all_entry, plugin_update_all_result, plugin_update_check_result, plugin_update_result, protocol_append_mode, protocol_customize_mode, protocol_external_tool_defer, protocol_external_tool_definition, protocol_external_tool_namespace, protocol_image_generation_options, protocol_marker_section_override, protocol_replace_mode, protocol_section_override, protocol_static_section_action, protocol_static_section_override, protocol_status_response, protocol_system_message_append_config, protocol_system_message_config, protocol_system_message_customize_config, protocol_system_message_replace_config, provider_add_request, provider_add_result, provider_config_azure, provider_config_model_provider, provider_config_transport, provider_config_type, provider_config_wire_api, provider_endpoint, provider_endpoint_transport, provider_endpoint_type, provider_endpoint_wire_api, provider_get_endpoint_request, provider_model_config, provider_session_token, provider_status, provider_sync_request, provider_sync_result, provider_token_acquire_request, provider_token_acquire_result, provider_update_model_request, provider_update_provider_request, provider_withdraw_request, provider_withdraw_result, push_attachment, push_attachment_blob, push_attachment_directory, push_attachment_file, push_attachment_file_line_range, push_attachment_git_hub_actions_job, push_attachment_git_hub_commit, push_attachment_git_hub_file, push_attachment_git_hub_file_diff, push_attachment_git_hub_file_diff_side, push_attachment_git_hub_reference, push_attachment_git_hub_reference_type, push_attachment_git_hub_release, push_attachment_git_hub_repository, push_attachment_git_hub_snippet, push_attachment_git_hub_tree_comparison, push_attachment_git_hub_tree_comparison_side, push_attachment_git_hub_url, push_attachment_selection, push_attachment_selection_details, push_attachment_selection_details_end, push_attachment_selection_details_start, push_git_hub_repo_ref, queue_append_steering_request, queue_begin_deferred_idle_drain_request, queue_begin_deferred_idle_drain_result, queue_consume_system_notifications_request, queued_command_handled, queued_command_not_handled, queued_command_result, queued_command_wait_requirement, queue_defer_session_idle_request, queue_duplicate_at_request, queue_duplicate_at_result, queue_enqueue_resume_pending_result, queue_finish_deferred_idle_drain_request, queue_finish_deferred_idle_drain_result, queue_has_pending_result, queue_insert_at_request, queue_insert_at_result, queue_insert_message, queue_move_item_request, queue_move_item_result, queue_pending_items, queue_pending_items_kind, queue_pending_items_result, queue_remove_at_request, queue_remove_at_result, queue_remove_most_recent_result, queue_send_now_request, queue_send_now_result, queue_set_drain_paused_request, queue_snapshot_result, queue_update_text_request, queue_update_text_result, queue_withdraw_message_request, queue_withdraw_message_result, quota_take_warnings_result, quota_warning_projection, register_event_interest_params, register_event_interest_result, release_event_interest_params, remote_attach_mission_control_request, remote_attach_mission_control_result, remote_check_send_admission_request, remote_control_config, remote_control_config_existing_mc_session, remote_control_status, remote_control_status_active, remote_control_status_connecting, remote_control_status_error, remote_control_status_off, remote_control_status_result, remote_control_stop_result, remote_control_transfer_result, remote_enable_request, remote_enable_result, remote_notify_steerable_changed_request, remote_notify_steerable_changed_result, remote_session_connection_result, remote_session_host_status, remote_session_metadata_repository, remote_session_metadata_task_type, remote_session_metadata_value, remote_session_mode, remote_session_page_entry, remote_session_page_failure, remote_session_repository, repo_settings_edit_request, repo_settings_edit_scope, repo_settings_read_raw_request, repo_settings_read_raw_result, repo_settings_write_all_request, repo_settings_write_key_request, response_format, runtime_open_browser_request, sandbox_apply_defaults_request, sandbox_check_enforcement_command_result, sandbox_check_platform_support_result, sandbox_check_windows_host_loopback_support_result, sandbox_config, sandbox_config_auth, sandbox_configs_equal_params, sandbox_configs_equal_result, sandbox_config_source, sandbox_config_user_policy, sandbox_config_user_policy_filesystem, sandbox_config_user_policy_network, sandbox_config_user_policy_network_proxy, sandbox_config_user_policy_seatbelt, sandbox_consume_onboarding_result, sandbox_credentials_config, sandbox_credential_suggestion, sandbox_credential_suggestions_result, sandbox_disable_for_session_request, sandbox_disable_for_session_result, sandbox_docs_url_result, sandbox_effective_for_optional_params, sandbox_effective_for_optional_result, sandbox_enforcement_command_allowed_params, sandbox_enforcement_status, sandbox_filter_picker_candidates_params, sandbox_filter_picker_candidates_result, sandbox_get_remote_mcp_egress_request, sandbox_get_remote_mcp_egress_result, sandbox_get_temporary_directory_result, sandbox_get_unsupported_message_result, sandbox_get_unsupported_setting_disabled_notice_result, sandbox_grant_path_for_request_request, sandbox_grant_path_for_request_result, sandbox_host_capability, sandbox_host_capability_name, sandbox_host_support, sandbox_input_kind, sandbox_invoke_owned_request, sandbox_invoke_owned_result, sandbox_learning_mode_start_params, sandbox_learning_mode_start_result, sandbox_masked_env_var, sandbox_normalize_input_params, sandbox_normalize_input_result, sandbox_owned_operation, sandbox_path_grant_warning_params, sandbox_path_grant_warning_result, sandbox_picker_candidate, sandbox_policy_presentation_params, sandbox_policy_presentation_result, sandbox_prepare_picker_policy_params, sandbox_prepare_picker_policy_result, sandbox_proxy_ca_check_installation_support_result, sandbox_proxy_ca_check_relevance_result, sandbox_proxy_ca_create_result, sandbox_proxy_ca_get_declined_result, sandbox_proxy_ca_profile_request, sandbox_proxy_ca_request, sandbox_proxy_ca_rotate_if_untrusted_result, sandbox_proxy_ca_state, sandbox_proxy_ca_status, sandbox_proxy_ca_trust_certificate_request, sandbox_proxy_secret_get_result, sandbox_proxy_secret_location, sandbox_proxy_secret_save_request, sandbox_proxy_secret_save_result, sandbox_reset_session_choices_request, sandbox_resolve_floored_config_params, sandbox_resolve_floored_config_result, sandbox_session_change, sandbox_session_state, sandbox_settings_apply_defaults_result, sandbox_settings_get_path_result, sandbox_settings_load_request, sandbox_settings_load_result, sandbox_settings_persist_path_grant_request, sandbox_settings_update_request, sandbox_transport_owner, sandbox_unsupported_startup_notice_params, sandbox_unsupported_startup_notice_result, saved_provider_configuration_add_model_request, saved_provider_configuration_add_model_result, saved_provider_configuration_provider, saved_provider_configuration_provider_input, saved_provider_configuration_read_result, saved_provider_configuration_remove_model_request, saved_provider_configuration_remove_model_result, saved_provider_configuration_type, saved_provider_configuration_update_model_request, saved_provider_configuration_update_model_result, saved_provider_configuration_update_provider_request, saved_provider_configuration_update_provider_result, saved_provider_credential_status, schedule_add_at_request, schedule_add_cron_request, schedule_add_request, schedule_add_result, schedule_add_self_paced_request, schedule_entry, schedule_has_self_paced_result, schedule_list, schedule_rearm_self_paced_request, schedule_stop_request, schedule_stop_result, secret_filter_format, secrets_add_filter_values_request, secrets_add_filter_values_result, secrets_filter_request, secrets_filter_result, secrets_remove_filter_values_request, secrets_remove_filter_values_result, send_agent_mode, send_and_wait_result, send_attachments_to_message_params, send_message_item, send_messages_request, send_messages_result, send_mode, send_request, send_result, send_system_notification_request, server_agent_list, server_instruction_source_list, server_skill, server_skill_list, session_accounts_logout_result, session_activity, session_agent_list_request, session_auth_login_request, session_auth_logout_user_request, session_auth_status, session_auth_switch_request, session_bulk_delete_result, session_cancel_all_background_agents_result, session_capability, session_commands_list_request, session_completion_item, session_connected_ide_info, session_context, session_context_host_type, session_dynamic_context_config, session_dynamic_context_get_config_response, session_dynamic_context_set_config_request, session_enrich_metadata_result, session_event_log_publish_request, session_event_log_publish_result, session_event_publish_request, session_event_publish_result, session_feature_flag_configuration, session_feature_flags_configure_request, session_feature_flags_configure_result, session_feature_flags_mode, session_feature_flags_read_request, session_feature_flags_read_result, session_feature_flags_update_request, session_feature_flags_update_result, session_fs_append_file_request, session_fs_error, session_fs_error_code, session_fs_exists_request, session_fs_exists_result, session_fs_mkdir_request, session_fs_readdir_request, session_fs_readdir_result, session_fs_readdir_with_types_entry, session_fs_readdir_with_types_entry_type, session_fs_readdir_with_types_request, session_fs_readdir_with_types_result, session_fs_read_file_bytes_request, session_fs_read_file_bytes_result, session_fs_read_file_range_request, session_fs_read_file_range_result, session_fs_read_file_request, session_fs_read_file_result, session_fs_rename_request, session_fs_rm_request, session_fs_set_provider_capabilities, session_fs_set_provider_conventions, session_fs_set_provider_request, session_fs_set_provider_result, session_fs_sqlite_exists_request, session_fs_sqlite_exists_result, session_fs_sqlite_query_request, session_fs_sqlite_query_result, session_fs_sqlite_query_type, session_fs_sqlite_transaction_error, session_fs_sqlite_transaction_error_class, session_fs_sqlite_transaction_request, session_fs_sqlite_transaction_result, session_fs_sqlite_transaction_statement, session_fs_stat_request, session_fs_stat_result, session_fs_write_file_bytes_request, session_fs_write_file_request, session_git_hub_auth_get_all_auth_available_result, session_git_hub_auth_logout_result, session_git_hub_auth_logout_user_result, session_history_compact_request, session_installed_plugin, session_installed_plugin_source, session_installed_plugin_source_git_hub, session_installed_plugin_source_local, session_installed_plugin_source_url, session_limit_prediction_baseline_data, session_limit_prediction_client_type, session_limit_prediction_details, session_limit_prediction_predict_request, session_limit_prediction_request, session_limit_prediction_result, session_limit_prediction_source, session_limit_prediction_tier, session_limit_prediction_tier_option, session_limit_prediction_unavailable_reason, session_list, session_list_entry, session_list_filter, session_load_deferred_repo_hooks_result, session_log_level, session_lsp_diagnose_request, session_lsp_diagnose_result, session_lsp_list_result, session_lsp_set_request, session_lsp_start_result, session_managed_permissions, session_managed_settings, session_management_close_request, session_management_close_result, session_management_configure_request, session_management_create_host_request, session_management_create_request, session_management_create_result, session_management_list_request, session_management_list_result, session_management_message_request, session_management_message_result, session_management_policy, session_management_scope, session_management_tool_overrides, session_mcp_apps_call_tool_result, session_mcp_call_tool_request, session_mcp_external_client_exchange_request, session_mcp_external_client_exchange_result, session_mcp_ide_state_result, session_mcp_oauth_authenticate_request, session_mcp_oauth_authenticate_result, session_mcp_oauth_cancel_flow_request, session_mcp_oauth_cancel_login_request, session_mcp_oauth_cancel_login_result, session_mcp_oauth_dispose_store_request, session_mcp_oauth_has_valid_tokens_request, session_mcp_oauth_has_valid_tokens_result, session_mcp_oauth_prepare_flow_request, session_mcp_oauth_prepare_login_request, session_mcp_oauth_prepare_login_result, session_mcp_oauth_save_static_client_secret_request, session_mcp_oauth_store_key_request, session_mcp_oauth_store_key_result, session_mcp_oauth_test_connection_request, session_mcp_oauth_test_connection_result, session_mcp_oauth_try_refresh_tokens_request, session_mcp_oauth_try_refresh_tokens_result, session_mcp_set_connected_ide_info_params, session_metadata_get_working_directory_context_request, session_metadata_get_working_directory_context_result, session_metadata_snapshot, session_mode, session_model_clear_startup_seed_request, session_model_clear_startup_seed_result, session_model_describe_load_error_request, session_model_describe_load_error_result, session_model_list, session_model_list_request, session_model_price_category, session_open_agent_options, session_open_event_options, session_open_execution_options, session_open_experiment_options, session_open_filesystem_options, session_open_git_hub_options, session_open_git_options, session_open_hook_options, session_open_inference_options, session_open_instruction_options, session_open_interaction_options, session_open_mcp_options, session_open_options, session_open_options_additional_content_exclusion_policy, session_open_options_additional_content_exclusion_policy_rule, session_open_options_additional_content_exclusion_policy_rule_source, session_open_options_additional_content_exclusion_policy_scope, session_open_options_env_value_mode, session_open_options_reasoning_summary, session_open_params, session_open_permission_options, session_open_plugin_options, session_open_policy_options, session_open_result, session_open_skill_options, session_open_state_options, session_open_tool_options, session_permissions_get_allow_all_result, session_permissions_get_required_result, session_permissions_managed_review_required_request, session_permissions_managed_review_required_result, session_plugin_defaults, session_plugins_disable_request, session_plugins_enable_request, session_plugins_install_request, session_plugins_marketplaces_refresh_request, session_plugins_reload_request, session_plugins_retry_managed_request, session_plugins_retry_managed_result, session_provider_get_endpoint_request, session_providers_models_diagnose_request, session_providers_models_diagnose_result, session_provider_update_model_request, session_provider_update_provider_request, session_prune_result, session_quota_delegate_warning, session_quota_get_result, session_quota_plan_tier, session_quota_projection, session_quota_refresh_result, session_quota_snapshot, session_quota_take_warnings_result, session_remote_publish_state_request, session_remote_read_projection_request, session_remote_read_projection_result, session_remote_reattach_request, session_remote_reattach_result, session_remote_send_with_admission_request, session_sandbox_get_remote_mcp_egress_request, session_sandbox_get_remote_mcp_egress_result, session_sandbox_get_state_result, session_sandbox_invoke_owned_request, session_sandbox_invoke_owned_result, session_sandbox_reset_session_choices_request, session_sandbox_reset_session_choices_result, sessions_bulk_delete_request, sessions_check_in_use_request, sessions_check_in_use_result, sessions_client_metadata_entry, sessions_close_request, sessions_close_result, sessions_create_workspace_request, sessions_create_workspace_result, sessions_delete_request, sessions_enrich_metadata_request, session_set_credentials_params, session_set_credentials_result, session_settings_built_in_tool_availability_snapshot, session_settings_evaluate_predicate_request, session_settings_evaluate_predicate_result, session_settings_job_snapshot, session_settings_model_snapshot, session_settings_online_evaluation_snapshot, session_settings_patch, session_settings_predicate_name, session_settings_repo_snapshot, session_settings_snapshot, session_settings_validation_snapshot, sessions_find_by_prefix_request, sessions_find_by_prefix_result, sessions_find_by_task_id_request, sessions_find_by_task_id_result, sessions_fork_request, sessions_fork_result, sessions_get_board_entry_count_request, sessions_get_board_entry_count_result, sessions_get_client_metadata_request, sessions_get_client_metadata_result, sessions_get_event_file_path_request, sessions_get_event_file_path_result, sessions_get_last_for_context_request, sessions_get_last_for_context_result, sessions_get_metadata_request, sessions_get_metadata_result, sessions_get_persisted_remote_steerable_request, sessions_get_persisted_remote_steerable_result, sessions_has_events_request, sessions_has_events_result, session_sizes, sessions_list_non_empty_session_ids_request, sessions_list_non_empty_session_ids_result, sessions_list_remote_page_request, sessions_list_remote_page_result, sessions_list_request, sessions_load_deferred_repo_hooks_request, sessions_load_workspace_request, sessions_load_workspace_result, sessions_open_attach, sessions_open_cloud, sessions_open_create, sessions_open_handoff, sessions_open_handoff_task_type, sessions_open_progress, sessions_open_progress_status, sessions_open_progress_step, sessions_open_remote, sessions_open_resume, sessions_open_resume_last, sessions_open_status, session_source, sessions_prune_old_request, sessions_read_persisted_events_request, sessions_release_lock_request, sessions_release_lock_result, sessions_reload_plugin_hooks_request, sessions_reload_plugin_hooks_result, sessions_save_request, sessions_save_result, sessions_set_additional_plugins_request, sessions_set_additional_plugins_result, sessions_set_remote_control_steering_request, sessions_start_remote_control_request, sessions_stop_remote_control_request, sessions_transfer_remote_control_request, sessions_update_workspace_fields_request, sessions_update_workspace_fields_result, session_telemetry_engagement, session_ui_register_direct_auto_mode_switch_handler_request, session_update_agent_options, session_update_event_options, session_update_execution_options, session_update_experiment_options, session_update_git_hub_options, session_update_git_options, session_update_hook_options, session_update_inference_options, session_update_instruction_options, session_update_interaction_options, session_update_mcp_options, session_update_options_params, session_update_options_result, session_update_permission_options, session_update_plugin_options, session_update_policy_options, session_update_skill_options, session_update_state_options, session_update_tool_options, session_usage_set_code_changes_request, session_visibility_status, session_workflow_pause_at_checkpoint_result, session_working_directory_context, session_working_directory_context_host_type, session_working_directory_context_with_client, settable_auth_info, settable_token_auth_info, settings_edit_operation, settings_edit_result, settings_edit_status, settings_redact_value_for_display_request, settings_redact_value_for_display_result, settings_remove_raw_key_request, settings_remove_raw_key_result, shell_build_interactive_environment_request, shell_build_interactive_environment_result, shell_cancel_user_requested_request, shell_credentials, shell_exec_request, shell_exec_result, shell_execute_user_requested_request, shell_init_profile, shell_init_script, shell_init_script_shell, shell_kill_request, shell_kill_result, shell_kill_signal, shell_options, shutdown_request, skill, skill_apply_install_request, skill_apply_uninstall_request, skill_discovery_path, skill_discovery_path_list, skill_discovery_scope, skill_installation_failure_reason, skill_installation_file_review, skill_installation_location, skill_installation_management_outcome, skill_installation_management_result, skill_installation_operation_request, skill_installation_operation_status, skill_installation_outcome, skill_installation_ownership_state, skill_installation_result, skill_installation_review, skill_installation_scope, skill_installation_session_state, skill_installation_source, skill_installations_request, skill_installation_summary, skill_install_plan, skill_install_source_kind, skill_install_source_scope, skill_list, skill_plan_install_request, skill_plan_uninstall_request, skill_provider_descriptor, skill_provider_list_request, skill_provider_list_result, skill_provider_read_request, skill_provider_read_result, skill_remove_source_entry, skill_remove_source_kind, skills_config_set_disabled_skills_request, skills_config_set_skill_disabled_request, skills_disable_request, skills_discover_request, skills_enable_request, skill_set_enabled_request, skills_get_discovery_paths_request, skills_get_invoked_result, skills_install_source_request, skills_install_source_result, skills_invoked_skill, skills_load_diagnostics, skills_remove_source_inventory, skills_remove_source_outcome, skills_remove_source_request, skills_remove_source_result, skill_uninstall_plan, slash_command_add_timeline_entry_result, slash_command_agent_prompt_result, slash_command_completed_result, slash_command_info, slash_command_input, slash_command_input_choice, slash_command_input_completion, slash_command_invocation_result, slash_command_kind, slash_command_model_picker_dialog, slash_command_select_subcommand_option, slash_command_select_subcommand_result, slash_command_set_model_result, slash_command_set_plan_model_result, slash_command_show_dialog_result, slash_command_text_result, slash_command_timeline_entry, staff_log_level_migration_status, staff_update_channel_migration_status, standalone_extension_admission, subagent_settings_config, subagent_settings_entry, subagent_settings_entry_context_tier, system_message_block, task_agent_info, task_agent_progress, task_analytics_classify_trajectory_request, task_analytics_classify_trajectory_result, task_analytics_judge, task_analytics_trajectory_classification, task_analytics_trajectory_validation, task_client_active_status, task_client_execution_mode, task_client_info, task_client_owner, task_client_owner_kind, task_client_owner_presence, task_client_progress, task_client_status, task_client_type, task_client_update, task_complete_data, task_completion_decision, task_execution_mode, task_info, task_kind, task_list, task_progress_line, tasks_cancel_request, tasks_cancel_result, tasks_get_current_promotable_result, tasks_get_progress_request, tasks_get_progress_result, task_shell_info, task_shell_info_attachment_mode, task_shell_output_exit, task_shell_progress, tasks_promote_current_to_background_result, tasks_promote_to_background_request, tasks_promote_to_background_result, tasks_read_output_request, tasks_read_output_result, tasks_refresh_result, tasks_register_request, tasks_register_result, tasks_remove_request, tasks_remove_result, tasks_send_message_request, tasks_send_message_result, tasks_start_agent_request, tasks_start_agent_result, task_status, tasks_update_request, tasks_update_result, tasks_wait_for_pending_result, team_plugin_marketplace, team_plugin_marketplace_source, telemetry_set_feature_overrides_request, token_auth_info, token_price_unit, token_provider_auth_info, tool, tool_list, tool_result, tool_result_expanded, tool_result_new_message, tool_result_type, tools_execute_request, tools_get_builtin_agent_flag_overrides_result, tools_get_builtin_descriptors_request, tools_get_builtin_descriptors_result, tools_get_current_metadata_result, tools_get_subagent_settings_result, tools_initialize_and_validate_result, tools_list_pending_requests_request, tools_list_request, tools_set_request, tools_set_result, tools_shell_descriptor_config, tools_task_complete_event_data_request, tools_update_subagent_settings_result, ui_auto_mode_switch_response, ui_elicitation_array_any_of_field, ui_elicitation_array_any_of_field_items, ui_elicitation_array_any_of_field_items_any_of, ui_elicitation_array_enum_field, ui_elicitation_array_enum_field_items, ui_elicitation_field_value, ui_elicitation_request, ui_elicitation_response, ui_elicitation_response_action, ui_elicitation_response_content, ui_elicitation_result, ui_elicitation_schema, ui_elicitation_schema_property, ui_elicitation_schema_property_boolean, ui_elicitation_schema_property_number, ui_elicitation_schema_property_number_type, ui_elicitation_schema_property_string, ui_elicitation_schema_property_string_format, ui_elicitation_string_enum_field, ui_elicitation_string_one_of_field, ui_elicitation_string_one_of_field_one_of, ui_ephemeral_query_request, ui_ephemeral_query_result, ui_exit_plan_mode_action, ui_exit_plan_mode_response, ui_handle_pending_auto_mode_switch_request, ui_handle_pending_elicitation_request, ui_handle_pending_exit_plan_mode_request, ui_handle_pending_result, ui_handle_pending_sampling_request, ui_handle_pending_sampling_response, ui_handle_pending_session_limits_exhausted_request, ui_handle_pending_user_input_request, ui_register_direct_auto_mode_switch_handler_request, ui_register_direct_auto_mode_switch_handler_result, ui_session_limits_exhausted_response, ui_session_limits_exhausted_response_action, ui_thread_run_request, ui_unregister_direct_auto_mode_switch_handler_request, ui_unregister_direct_auto_mode_switch_handler_result, ui_user_input_response, unsupported_enqueue_command_result, update_subagent_settings_request, usage_get_metrics_result, usage_set_code_changes_request, user_auth_info, user_requested_shell_command_result, user_setting_metadata, user_settings_apply_top_key_request, user_settings_apply_top_key_result, user_settings_build_runtime_request, user_settings_build_runtime_result, user_settings_edit_request, user_settings_get_paths_request, user_settings_get_paths_result, user_settings_get_result, user_settings_governance_keys_result, user_settings_host_context, user_settings_load_and_merge_repo_request, user_settings_load_and_merge_repo_result, user_settings_load_for_config_dir_request, user_settings_load_for_config_dir_result, user_settings_load_for_edit_result, user_settings_load_repo_request, user_settings_load_repo_result, user_settings_load_with_warning_result, user_settings_merge_managed_and_user_params, user_settings_merge_managed_and_user_result, user_settings_merge_repo_value_params, user_settings_merge_repo_value_result, user_settings_migrate_obsolete_on_disk_request, user_settings_migrate_obsolete_on_disk_result, user_settings_migrate_obsolete_on_disk_status, user_settings_migrate_staff_log_level_once_request, user_settings_migrate_staff_log_level_once_result, user_settings_migrate_staff_update_channel_once_result, user_settings_normalize_request, user_settings_normalize_result, user_settings_path_result, user_settings_problem, user_settings_problem_location, user_settings_problem_source, user_settings_problems_request, user_settings_problems_result, user_settings_reset_staff_model_selection_once_request, user_settings_reset_staff_model_selection_once_result, user_settings_set_hook_disabled_request, user_settings_set_hook_disabled_result, user_settings_set_request, user_settings_unknown_keys_warning_request, user_settings_unknown_keys_warning_result, user_settings_update_request, user_settings_update_result, user_settings_validate_request, user_settings_validate_result, user_settings_validation_issue, user_settings_write_all_request, user_settings_write_key_request, visibility_get_result, visibility_set_request, visibility_set_result, workflow_abort_request, workflow_ack_result, workflow_agent_context_observation, workflow_agent_model_observation, workflow_agent_options, workflow_agent_reasoning_effort_observation, workflow_agent_request, workflow_agent_result, workflow_agent_summary, workflow_cancel_request, workflow_current_phase, workflow_declared_limits, workflow_durable_operation, workflow_execute_request, workflow_execute_result, workflow_get_run_progress_request, workflow_get_run_request, workflow_journal_get_request, workflow_journal_get_result, workflow_journal_put_request, workflow_list_runs_request, workflow_list_runs_result, workflow_log_line, workflow_log_line_kind, workflow_log_request, workflow_pause_checkpoint_action, workflow_pause_checkpoint_request, workflow_pause_checkpoint_result, workflow_pause_info, workflow_pause_request, workflow_phase_observation, workflow_phase_status, workflow_progress_line, workflow_progress_page, workflow_resume_request, workflow_resume_result, workflow_run_consumed, workflow_run_detail, workflow_run_failure, workflow_run_failure_kind, workflow_run_limits, workflow_run_options, workflow_run_request, workflow_run_result, workflow_run_status, workflow_run_summary, workflow_run_terminal, workflow_tool_resume_request, workflow_tool_run_options, workflow_tool_run_request, workspace_diff_contents, workspace_diff_file_change, workspace_diff_file_change_type, workspace_diff_mode, workspace_diff_result, workspaces_add_summary_request, workspaces_add_summary_result, workspaces_autopilot_objective_exists_result, workspaces_checkpoints, workspaces_create_directory_request, workspaces_create_file_request, workspaces_delete_autopilot_objective_result, workspaces_diff_request, workspaces_ensure_request, workspaces_get_workspace_result, workspaces_list_checkpoints_result, workspaces_list_files_result, workspaces_read_autopilot_objective_result, workspaces_read_checkpoint_request, workspaces_read_checkpoint_result, workspaces_read_file_request, workspaces_read_file_result, workspaces_remove_path_request, workspaces_rename_path_request, workspaces_save_large_paste_request, workspaces_save_large_paste_result, workspaces_stat_file_request, workspaces_stat_file_result, workspaces_truncate_summaries_request, workspace_summary_host_type, workspaces_update_metadata_request, workspaces_workspace_details_host_type, workspaces_write_autopilot_objective_request, workspaces_write_autopilot_objective_result, azure_ml_status_result, connector_session_account_result, host_authenticate_result, managed_settings_current_snapshot_result, session_auth_info_result, session_context_attribution, session_context_info, subagent_settings, task_progress, workspace_summary)
+        return RPC(abort_request, abort_result, accepted_enqueue_command_result, account, account_all_users, account_auth_info, account_describe_auth_info_request, account_describe_auth_info_result, account_get_all_users_result, account_get_current_auth_result, account_get_gist_support_request, account_get_gist_support_result, account_get_host_url_request, account_get_host_url_result, account_get_quota_request, account_get_quota_result, account_get_token_env_var_result, account_get_web_url_request, account_get_web_url_result, account_health, account_kind, account_login_process_request, account_login_process_result, account_login_request, account_login_result, account_logout_request, account_logout_result, account_quota_snapshot, accounts_get_active_result, accounts_list, accounts_list_request, accounts_logout_request, accounts_set_credentials_request, accounts_switch_active_request, account_subscribe_copilot_free_request, account_subscribe_copilot_free_result, adaptive_thinking_support, agent_discovery_path, agent_discovery_path_list, agent_discovery_path_scope, agent_file_location, agent_get_current_result, agent_info, agent_info_source, agent_list, agent_list_request, agent_registry_ensure_dir_result, agent_registry_error, agent_registry_list_entries_request, agent_registry_list_entries_result, agent_registry_live_target_entry, agent_registry_live_target_entry_attention_kind, agent_registry_live_target_entry_kind, agent_registry_live_target_entry_last_terminal_event, agent_registry_live_target_entry_status, agent_registry_location_request, agent_registry_log_capture, agent_registry_log_capture_open_error_reason, agent_registry_pid_request, agent_registry_remove_entry_result, agent_registry_spawn_error, agent_registry_spawn_permission_mode, agent_registry_spawn_registry_timeout, agent_registry_spawn_request, agent_registry_spawn_result, agent_registry_spawn_spawned, agent_registry_spawn_validation_error, agent_registry_spawn_validation_error_field, agent_registry_spawn_validation_error_reason, agent_reload_result, agents_create_file_request, agents_create_file_result, agents_custom_agent_initial_model_decision_params, agents_custom_agent_initial_model_decision_result, agents_discover_request, agent_select_request, agent_select_result, agent_set_prompt_request, agents_generate_file_content_request, agents_generate_file_content_result, agents_get_available_builtins_request, agents_get_available_builtins_result, agents_get_builtin_definition_request, agents_get_builtin_definition_result, agents_get_builtin_listing_definition_request, agents_get_builtin_listing_definition_result, agents_get_builtins_result, agents_get_discovery_paths_request, agents_list_tool_categories_result, agents_validate_name_request, agents_validate_name_result, agent_tool_category, agent_tool_category_id, ahp_connection_authenticate_request, ahp_connection_create_request, ahp_connection_create_session_request, ahp_connection_create_session_result, ahp_connection_dispose_session_request, ahp_connection_event, ahp_connection_log_open_request, ahp_connection_log_request, ahp_connection_log_write_request, ahp_connection_model_selection, ahp_connection_project_options, ahp_connection_read_events_result, ahp_connection_request, ahp_connection_resource_auth_result, ahp_connections_authenticate_result, ahp_connection_select_session_request, ahp_connection_select_session_result, ahp_connection_session_options, ahp_connection_state_result, ahp_connection_transport, ahp_session_admission_callback_request, ahp_session_admission_callback_result, ahp_session_admission_phase, ahp_session_attach_request, ahp_session_attach_result, ahp_session_detach_request, ahp_session_lease_phase, ahp_session_lease_request, ahp_session_lease_result, ahp_session_metadata, ahp_session_projection_request, ahp_session_projection_result, ahp_session_publish_request, ahp_session_send_admission_request, api_key_auth_info, attached_provider_configuration_add_model_request, authenticated_authority_grant, authenticated_authority_update, auth_identity, auth_identity_metadata, auth_info, auth_info_type, auth_login_account, auth_login_advance_request, auth_login_begin_request, auth_login_begun, auth_login_cancel_request, auth_login_identity, auth_login_identity_list, auth_login_list_request, auth_login_method, auth_login_mode, auth_login_result_dto, auth_login_result_status, auth_login_step, auth_provider_descriptor, auth_providers_list, auth_validation_error, auth_validation_errors, autopilot_evaluate_idle_continuation_outcome, autopilot_evaluate_idle_continuation_result, autopilot_objective_credit_limit, autopilot_objective_get_state_result, autopilot_objective_set_stay_in_autopilot_request, autopilot_objective_state, autopilot_objective_status, autopilot_options, auto_tier_billing, auto_tier_billing_promo, auto_tier_descriptor, auto_tier_metadata, auto_tier_status, azure_ml_cancel_result, azure_ml_catalog_request, azure_ml_catalog_result, azure_ml_catalog_retry_mode, azure_ml_catalog_warning, azure_ml_discard_request, azure_ml_download_id_request, azure_ml_download_request, azure_ml_download_result, azure_ml_download_status, azure_ml_family_lease_result, azure_ml_family_release_request, azure_ml_family_request, azure_ml_gpu_memory, azure_ml_hardware_result, azure_ml_latest_request, azure_ml_license, azure_ml_model, azure_ml_profile, azure_ml_registration_kind, azure_ml_registration_operation, azure_ml_registration_request, azure_ml_registration_result, azure_ml_registry, azure_ml_resolve_request, azure_ml_resolve_result, builtin_agent_summary, built_in_model_catalog, built_in_model_catalog_entry, builtin_tool_descriptor, builtin_tool_format, builtin_tool_format_type, builtin_tool_input_schema, builtin_tool_input_schema_type, builtin_tool_safe_for_telemetry, builtin_tool_safe_telemetry_fields, cafe_metrics_embedded_package_identity, cafe_metrics_launch_scenario, cafe_metrics_record_cli_ready_request, cafe_metrics_record_resume_result_request, cafe_metrics_release, cafe_metrics_resolve_admission_request, cafe_metrics_resolve_admission_result, cafe_metrics_resume_outcome, cafe_metrics_resume_reason, cafe_metrics_resume_stage, cafe_metrics_shutdown_request, cafe_metrics_start_refusal, cafe_metrics_start_request, cafe_metrics_start_result, cancel_user_requested_shell_command_result, canvas_action, canvas_action_invoke_request, canvas_action_invoke_result, canvas_close_request, canvas_host_context, canvas_host_context_capabilities, canvas_json_schema, canvas_list, canvas_list_open_result, canvas_open_request, canvas_provider_close_request, canvas_provider_invoke_action_request, canvas_provider_open_request, canvas_provider_open_result, canvas_provider_register_request, canvas_provider_unregister_request, canvas_session_context, canvas_source_close_request, capi_session_options, card_digest, card_digest_algorithm, card_digest_value, catalog_agent_plugin_candidate, catalog_agent_plugin_candidate_kind, catalog_agent_plugin_candidate_provenance, catalog_agent_plugin_compatibility_tag, catalog_agent_plugin_component, catalog_agent_plugin_installability, catalog_agent_plugin_install_plan, catalog_agent_plugin_install_source, catalog_agent_plugin_marketplace_source, catalog_agent_plugin_marketplace_source_kind, catalog_agent_plugin_materialization_source, catalog_agent_plugin_materialization_source_kind, catalog_agent_plugin_media_type, catalog_agent_plugin_repository_source, catalog_agent_plugin_repository_source_kind, catalog_ai_skill_candidate, catalog_ai_skill_candidate_kind, catalog_ai_skill_candidate_provenance, catalog_ai_skill_installability, catalog_ai_skill_media_type, catalog_authentication_required_error, catalog_authentication_required_reason, catalog_candidate, catalog_candidate_kind, catalog_candidate_source, catalog_candidate_source_embedded, catalog_candidate_source_url, catalog_capability, catalog_capability_id, catalog_client_contract, catalog_contract_violation_error, catalog_contract_violation_reason, catalog_feed_available_entry, catalog_feed_available_status, catalog_feed_entry, catalog_feed_filtered_entry, catalog_feed_filtered_status, catalog_feed_unavailable_entry, catalog_feed_unavailable_reason, catalog_feed_unavailable_status, catalog_generated_feed_description, catalog_get_generated_feed_request, catalog_get_generated_feed_succeeded, catalog_get_saved_feed_request, catalog_get_saved_feed_succeeded, catalog_handle_rejected_error, catalog_handle_rejection_reason, catalog_handle_type, catalog_invalid_request_error, catalog_invalid_request_field, catalog_malformed_card_error, catalog_malformed_card_reason, catalog_materialization_reference, catalog_mcp_server_candidate, catalog_mcp_server_candidate_kind, catalog_mcp_server_candidate_provenance, catalog_mcp_server_installability, catalog_media_type, catalog_negotiated_contract, catalog_negotiation_refused_error, catalog_negotiation_refused_reason, catalog_network_failure_error, catalog_network_failure_reason, catalog_not_installable_error, catalog_not_installable_reason, catalog_plan_install_from_reference_request, catalog_plugin_repository_source, catalog_policy_rejected_error, catalog_recommend_request, catalog_reference_installation_failure_reason, catalog_reference_installation_outcome, catalog_reference_installation_result, catalog_resource_generated_feed_result, catalog_resource_identity, catalog_resource_saved_feed_result, catalog_resource_version, catalog_saved_feed_description, catalog_search_page, catalog_search_pagination, catalog_search_request, catalog_search_result, catalog_search_succeeded, catalog_search_total_count_relation, catalog_selection_cancelled, catalog_selection_decision, catalog_selection_declined, catalog_selection_foreign, catalog_selection_invalid, catalog_selection_replayed, catalog_selection_request, catalog_selection_result, catalog_selection_selected, catalog_selection_stale, catalog_selection_timed_out, catalog_selection_wrong_kind, catalog_trust_eligibility, catalog_trust_provenance, catalog_trust_snapshot, catalog_trust_snapshot_absent, catalog_trust_snapshot_absent_status, catalog_trust_snapshot_current, catalog_trust_snapshot_current_status, catalog_trust_snapshot_downgraded, catalog_trust_snapshot_downgraded_status, catalog_trust_snapshot_malformed, catalog_trust_snapshot_malformed_status, catalog_trust_snapshot_revoked, catalog_trust_snapshot_revoked_status, catalog_trust_snapshot_schema_version, catalog_trust_snapshot_stale, catalog_trust_snapshot_stale_status, catalog_trust_snapshot_unsupported, catalog_trust_snapshot_unsupported_status, catalog_trust_source, catalog_trust_tier, catalog_unavailable_error, catalog_unavailable_reason, catalog_unavailable_transport_error, catalog_unavailable_transport_reason, catalog_unsafe_retrieval_error, catalog_unsafe_retrieval_reason, catalog_unsupported_kind_error, client_metadata, client_task_cancel_reason, client_task_cancel_request, client_task_cancel_result, cloud_tasks_create_params, cloud_tasks_create_result, cloud_tasks_delete_params, cloud_tasks_delete_result, cloud_tasks_get_params, cloud_tasks_get_result, cloud_tasks_get_session_logs_params, cloud_tasks_get_session_logs_result, cloud_tasks_get_session_params, cloud_tasks_get_session_replay_params, cloud_tasks_get_session_replay_result, cloud_tasks_get_sharing_status_params, cloud_tasks_resolve_task_id_params, cloud_tasks_resolve_task_id_result, cloud_tasks_set_sharing_status_params, cloud_tasks_sharing_status_result, command_list, commands_finalize_invocation_effect_request, commands_finalize_invocation_effect_result, commands_handle_pending_command_request, commands_handle_pending_command_result, commands_invocation_effect_outcome, commands_invocation_origin, commands_invoke_request, commands_list_request, commands_report_queued_command_wait_request, commands_report_queued_command_wait_result, commands_respond_to_queued_command_request, commands_respond_to_queued_command_result, completions_get_trigger_characters_result, completions_request_request, completions_request_result, configure_session_extensions_params, connect_client_info, connected_remote_session_metadata, connected_remote_session_metadata_kind, connected_remote_session_metadata_repository, connector_account_request, connector_authorization_requirement, connector_authorization_scope, connector_availability, connector_capabilities, connector_catalog_entry, connector_catalog_result, connector_catalog_status, connector_connect_request, connector_connect_result, connector_continue_request, connector_disconnect_result, connector_discovery_account, connector_discovery_account_list, connector_discovery_account_request, connector_discovery_auth_info, connector_discovery_availability, connector_discovery_capabilities, connector_discovery_catalog_entry, connector_discovery_catalog_result, connector_mcp_status, connector_reconcile_request, connector_runtime_status, connector_session_account, connector_status, connect_remote_session_params, connect_request, connect_result, content_exclusion_check_paths_request, content_exclusion_check_paths_result, content_exclusion_path_check, content_exclusion_validate_policies_request, content_exclusion_validate_policies_result, content_filter_mode, context_heaviest_message, copilot_api_token_auth_info, copilot_user_response, copilot_user_response_endpoints, copilot_user_response_quota_snapshots, copilot_user_response_quota_snapshots_chat, copilot_user_response_quota_snapshots_completions, copilot_user_response_quota_snapshots_premium_interactions, credential_context_error_code, credential_context_error_data, current_model, current_tool_metadata, customization_reload_outcome, customization_reload_status, customization_reload_subsystem, customizations_reload_result, debug_collect_logs_collected_entry, debug_collect_logs_destination, debug_collect_logs_entry, debug_collect_logs_entry_kind, debug_collect_logs_include, debug_collect_logs_redaction, debug_collect_logs_request, debug_collect_logs_result, debug_collect_logs_result_kind, debug_collect_logs_skipped_entry, debug_collect_logs_source, decision_answer, decision_context, decision_error_data, decision_error_kind, decision_level, decision_level_probability, decision_model_info, decision_model_limits, decision_option, decision_option_probability, decision_question, decisions_ask_request, decisions_ask_result, decision_usage, decision_violation, diagnostic_cursor_status, diagnostic_entry, diagnostic_log_level, diagnostics_configuration, diagnostics_configure_request, diagnostic_severity, diagnostic_source, diagnostic_sources_configuration, diagnostics_read_request, diagnostics_read_result, discovered_canvas, discovered_extension, discovered_extension_mode, discovered_extension_plugin, discovered_extensions, discovered_extensions_disable_request, discovered_extensions_enable_request, discovered_extension_source, discovered_hook, discovered_mcp_server, discovered_mcp_server_type, discovered_model, discovered_model_list, eligible_plugin_extension_entry, enqueue_command_params, enqueue_command_result, entra_auth_config, entra_token_acquire_reason, entra_token_acquire_request, entra_token_acquire_result, entra_token_get_token_request, env_auth_info, environment_capabilities, environment_kind, environments_delete_request, environments_delete_result, environments_get_request, environments_get_result, environments_list_request, environments_list_result, event_log_read_request, event_log_release_interest_result, event_log_tail_result, event_log_types, events_agent_scope, events_cursor_status, events_read_direction, events_read_result, events_read_view, execute_command_params, execute_command_result, extension, extension_context_push_input, extension_launch_profile, extension_launch_provider_resolve_request, extension_launch_provider_resolve_result, extension_list, extension_managed_policy, extensions_disable_request, extensions_enable_request, extension_source, extension_status, external_tool_result, external_tool_text_result_for_llm, external_tool_text_result_for_llm_binary_results_for_llm, external_tool_text_result_for_llm_binary_results_for_llm_type, external_tool_text_result_for_llm_content, external_tool_text_result_for_llm_content_audio, external_tool_text_result_for_llm_content_image, external_tool_text_result_for_llm_content_resource, external_tool_text_result_for_llm_content_resource_details, external_tool_text_result_for_llm_content_resource_link, external_tool_text_result_for_llm_content_resource_link_icon, external_tool_text_result_for_llm_content_resource_link_icon_theme, external_tool_text_result_for_llm_content_shell_exit, external_tool_text_result_for_llm_content_terminal, external_tool_text_result_for_llm_content_text, feature_flag_assignments_update, feature_flag_availability, feature_flag_config_patch, feature_flag_enabled_override, feature_flag_exp_override_query, feature_flag_metadata, feature_flag_reasoning_summaries_arm, feature_flag_service_configure_params, feature_flag_service_read_params, feature_flag_service_read_result, feature_flag_service_snapshot, feature_flag_service_update_params, feature_flags_metadata_result, feature_flags_resolve_request, feature_flags_resolve_result, feature_flags_resolve_startup_gates_request, feature_flags_resolve_startup_gates_result, feature_flag_value, feedback_upload_cancel_result, feedback_upload_operation_request, feedback_upload_outcome, feedback_upload_phase, feedback_upload_progress, feedback_upload_read_request, feedback_upload_snapshot, feedback_upload_start_request, feedback_upload_status, fetch_cancel_result, fetch_create_result, fetch_file_error_data, fetch_file_error_kind, fetch_file_operation, fetch_header, fetch_proxy_env, fetch_proxy_route, fetch_read_result, fetch_redirect, fetch_request_id, fetch_resolve_proxy_request, fetch_resolve_proxy_result, fetch_response_mode, fetch_send_params, fetch_send_result, fetch_transport_error_data, fetch_transport_error_kind, file_log_level, file_log_open_request, file_log_operation, file_log_resource, file_log_write_request, filter_mapping, fleet_start_request, fleet_start_result, folder_trust_add_params, folder_trust_check_params, folder_trust_check_result, folder_trust_is_trusted_params, force_login_orgs_decision, forge_proposal_change_type, forge_proposal_fail_stale_request, forge_proposal_fail_stale_result, forge_proposal_manifest_entry, forge_proposal_reconcile_request, forge_proposal_reconcile_result, forge_proposal_record, forge_proposal_scope, forge_proposal_status, forge_proposal_summary, forge_proposal_trigger_mode, forge_proposal_workspace_before_request, forge_proposal_workspace_before_result, fusion_tier, gh_cli_auth_info, git_boolean_result, git_branch_request, git_change_counts_result, git_commit_all_request, git_commit_all_result, git_context_request, git_create_and_push_branch_request, git_created_worktree, git_current_branch_remote_result, git_cwd_request, git_default_branch_request, git_detect_remote_hosts_request, git_diff_changes_request, git_diff_changes_result, git_diff_change_type, git_diff_file_change, git_diff_request, git_find_root_request, git_hub_branch_pull_request, git_hub_branch_pull_request_lookup_request, git_hub_branch_pull_request_lookup_result, git_hub_branch_pull_request_lookup_status, git_hub_create_secret_gist_request, git_hub_create_secret_gist_result, git_hub_environment, git_hub_fetch_cancel_result, git_hub_fetch_header, git_hub_fetch_http_error, git_hub_fetch_operation, git_hub_fetch_operation_request, git_hub_fetch_pinned_address, git_hub_fetch_proxy_environment, git_hub_fetch_request, git_hub_fetch_request_id, git_hub_fetch_result, git_hub_fetch_retry_config, git_hub_mcp_options, git_hub_owner_option, git_hub_owners_cancel_request, git_hub_owners_cancel_result, git_hub_owners_list_request, git_hub_owners_list_result, git_hub_owners_request_id_result, git_hub_pull_request_check, git_hub_pull_request_check_status, git_hub_release_abandon_request_params, git_hub_release_abandon_request_result, git_hub_release_cancel_request, git_hub_release_cancel_result, git_hub_release_download_asset_request, git_hub_release_download_asset_result, git_hub_release_download_kind, git_hub_release_download_progress_request, git_hub_release_download_progress_result, git_hub_release_lookup_kind, git_hub_release_lookup_request, git_hub_release_lookup_result, git_hub_release_package_identity, git_hub_release_query, git_hub_release_request_id_result, git_hub_release_snapshot_asset, git_hub_release_snapshot_entry, git_hub_release_snapshot_request, git_hub_release_snapshot_result, git_hub_release_update_channel, git_hub_repository_at_path_request, git_hub_repository_at_path_result, git_hub_repository_by_id_request, git_hub_repository_by_id_result, git_hub_repository_identity, git_hub_repository_owner_name, git_hub_secret_gist_file, git_hub_secret_gist_use_case, git_hub_telemetry_client_info, git_hub_telemetry_event, git_hub_telemetry_notification, git_hub_token_acquire_reason, git_hub_token_acquire_request, git_hub_token_acquire_result, git_inherit_trust_request, git_moved_worktree, git_move_worktree_request, git_move_worktree_result, git_named_worktree_request, git_optional_string_result, git_prepared_worktree, git_read_head_file_request, git_remote_host_detection, git_remote_repository, git_remotes_result, git_repo_identifier_info, git_repo_identifier_result, git_repos_from_remotes_request, git_repos_from_remotes_result, git_resource_worktree_request, git_root_result, git_string_result, git_working_tree_status, git_working_tree_status_request, git_worktree_request, git_worktree_summary_request, global_state_load_for_config_dir_request, global_state_load_result, global_state_write_key_request, handle_pending_tool_call_request, handle_pending_tool_call_result, history_abort_manual_compaction_result, history_cancel_background_compaction_result, history_clear_context_request, history_clear_context_result, history_compact_context_window, history_compact_request, history_compact_result, history_file_restore_skip_reason, history_list_rewind_points_result, history_preview_rewind_request, history_preview_rewind_result, history_rewind_change_type, history_rewind_file_preview, history_rewind_mode, history_rewind_outcome, history_rewind_point, history_rewind_request, history_rewind_result, history_rewind_unavailable_reason, history_set_compaction_config_request, history_skipped_file_restore, history_summarize_for_handoff_result, history_truncate_request, history_truncate_result, hmac_auth_info, hook_invoke_request, hook_invoke_response, hook_origin, hooks_discover_request, hooks_discover_result, hook_type, host_authenticate_request, host_authentication, host_authentication_cancelled_notification, host_authentication_result, host_cancel_authentication_request, host_configuration, host_credential_lifecycle_action, host_credential_lifecycle_request, host_credential_lifecycle_result, host_diagnostics, host_dispose_request, host_empty_result, host_environment_credentials, host_error_reporting_status, host_exited_notification, host_exit_reason, host_git_hub_environment_options, host_list_sessions_request, host_list_sessions_result, host_local_server_configuration, host_local_server_options, host_publish_session_request, host_publish_session_result, host_ready_request, host_register_session_request, host_session_authentication, host_session_create_callback, host_session_create_request, host_session_create_result, host_session_released_notification, host_session_release_request, host_session_summary, host_set_session_creation_policy_request, host_start_request, host_start_result, host_unpublish_session_request, host_unpublish_session_result, host_unregister_session_request, host_validate_authentication_request, ide_connection_state, image_tool_model, image_tool_model_availability, image_tool_model_operation, image_tool_model_pricing, installation_catalogue_identity, installation_confirmation_request, installation_confirmation_response, installation_decision, installation_review, installed_plugin, installed_plugin_info, installed_plugin_source, installed_plugin_source_git_hub, installed_plugin_source_local, installed_plugin_source_url, installed_plugin_verified_source, instruction_discovery_path, instruction_discovery_path_kind, instruction_discovery_path_list, instruction_discovery_path_location, instructions_discover_repo_sources_request, instructions_discover_request, instructions_get_discovery_paths_request, instructions_get_sources_result, instructions_init_prompt_result, instruction_source, instruction_source_location, instruction_source_type, interrupt_main_turn_request, interrupt_main_turn_result, json_schema_response_format, lifecycle_diagnostics_configuration, lifecycle_diagnostics_read_request, lifecycle_diagnostics_read_result, llm_inference_headers, llm_inference_http_request_chunk_request, llm_inference_http_request_chunk_result, llm_inference_http_request_start_request, llm_inference_http_request_start_result, llm_inference_http_request_start_transport, llm_inference_http_response_chunk_error, llm_inference_http_response_chunk_request, llm_inference_http_response_chunk_result, llm_inference_http_response_start_request, llm_inference_http_response_start_result, llm_inference_set_provider_result, local_model_auto_registration, local_model_azure_ml_identity, local_model_descriptor, local_model_disk_requirement, local_model_download_progress, local_model_gpu_requirement, local_model_limits, local_model_machine_row, local_model_machine_view, local_model_notice, local_model_operation, local_models_configure_request, local_models_event, local_models_model_id_request, local_models_model_request, local_model_source, local_models_refresh_request, local_models_setup_request, local_models_snapshot, local_model_status, local_models_view, local_models_watch_request, local_model_timeline_message, local_session_metadata_value, location_permissions_cleanup_result, logged_in_user, login_provider_kind, log_request, log_result, lsp_configuration_problem, lsp_configuration_snapshot, lsp_global_configuration_request, lsp_initialize_request, lsp_probe_exit_status, lsp_probe_request, lsp_probe_result, lsp_server_summary, lsp_set_enabled_request, lsp_warmup_error, lsp_warmup_result, managed_communication_settings, managed_communication_support, managed_fusion_tier, managed_mcp_server_config, managed_permission_evaluation, managed_permission_operation, managed_permission_operation_kind, managed_permissions_evaluate_request, managed_permissions_evaluate_result, managed_permission_verdict, managed_plugin_assignment, managed_plugin_retry_entry, managed_plugin_retry_status, managed_session_info, managed_setting_meta, managed_settings_apply_controls_params, managed_settings_apply_controls_result, managed_settings_bypass_disable_source, managed_settings_bypass_policy_resolution, managed_settings_channel, managed_settings_compose_layer, managed_settings_compose_request, managed_settings_compose_result, managed_settings_diagnostic, managed_settings_diagnostic_severity, managed_settings_ingest_and_retain_result, managed_settings_ingest_params, managed_settings_ingest_result, managed_settings_layer, managed_settings_load_remote_control_params, managed_settings_load_remote_control_result, managed_settings_log_level, managed_settings_log_message, managed_settings_meta, managed_settings_parse_client_value_params, managed_settings_parse_client_value_result, managed_settings_policy_helper_authority, managed_settings_policy_helper_reason, managed_settings_read_device_result, managed_settings_read_result, managed_settings_resolve_bypass_disable_transition_params, managed_settings_resolve_bypass_disable_transition_result, managed_settings_resolved_data, managed_settings_resolve_device_force_login_orgs_gate_params, managed_settings_resolve_effective_value_params, managed_settings_resolve_effective_value_result, managed_settings_resolve_request, managed_settings_resolve_result, managed_settings_resolve_startup_policy_params, managed_settings_resolve_startup_policy_result, managed_settings_retain_policy_params, managed_settings_schema_result, managed_settings_server_policy_cache_mode, managed_settings_server_policy_resolution, managed_settings_validate_request, managed_settings_validate_result, managed_settings_values, marketplace_add_result, marketplace_browse_result, marketplace_info, marketplace_list_result, marketplace_migration_result, marketplace_migration_status, marketplace_plugin_info, marketplace_refresh_entry, marketplace_refresh_result, marketplace_remove_result, mcp_additional_config_source, mcp_allowed_server, mcp_apply_install_request, mcp_apply_uninstall_request, mcp_apps_call_tool_request, mcp_apps_diagnose_capability, mcp_apps_diagnose_request, mcp_apps_diagnose_result, mcp_apps_diagnose_server, mcp_apps_host_context, mcp_apps_host_context_details, mcp_apps_host_context_details_available_display_mode, mcp_apps_host_context_details_display_mode, mcp_apps_host_context_details_platform, mcp_apps_host_context_details_theme, mcp_apps_list_tools_request, mcp_apps_list_tools_result, mcp_apps_read_resource_request, mcp_apps_read_resource_result, mcp_apps_resource_content, mcp_apps_set_host_context_details, mcp_apps_set_host_context_details_available_display_mode, mcp_apps_set_host_context_details_display_mode, mcp_apps_set_host_context_details_platform, mcp_apps_set_host_context_details_theme, mcp_apps_set_host_context_request, mcp_call_tool_request, mcp_call_tool_result, mcp_cancel_sampling_execution_params, mcp_cancel_sampling_execution_result, mcp_computer_use_apply_configuration_request, mcp_computer_use_apply_configuration_result, mcp_config_add_request, mcp_config_compose_additional_request, mcp_config_compose_additional_result, mcp_config_disable_request, mcp_config_enable_request, mcp_config_for_config_dir_request, mcp_config_list, mcp_config_list_request, mcp_config_merge_sources_request, mcp_config_merge_sources_result, mcp_config_remove_request, mcp_config_source_diagnostic, mcp_config_update_request, mcp_configured_server, mcp_configured_server_list, mcp_configured_server_state, mcp_configure_git_hub_request, mcp_configure_git_hub_result, mcp_config_user_server_names_result, mcp_diagnostic_details, mcp_diagnostic_direction, mcp_diagnostic_kind, mcp_diagnostic_source_configuration, mcp_disable_request, mcp_discover_request, mcp_discover_result, mcp_discovery_diagnostic, mcp_discovery_memory_config, mcp_discovery_options, mcp_discovery_server_config, mcp_elicitation_form_mode, mcp_enable_request, mcp_execute_sampling_params, mcp_execute_sampling_request, mcp_execute_sampling_result, mcp_external_client_exchange_request, mcp_external_client_request, mcp_external_client_result, mcp_external_client_snapshot, mcp_failed_server, mcp_filtered_server, mcp_git_hub_invocation_tool_options, mcp_git_hub_resolve_invocation_request, mcp_git_hub_resolve_invocation_result, mcp_git_hub_workspace, mcp_headers_handle_pending_headers_refresh_request, mcp_headers_handle_pending_headers_refresh_request_request, mcp_headers_handle_pending_headers_refresh_request_result, mcp_host_state, mcp_ide_config, mcp_installation_failure_reason, mcp_installation_input, mcp_installation_management_outcome, mcp_installation_management_result, mcp_installation_operation_request, mcp_installation_operation_status, mcp_installation_outcome, mcp_installation_remote_configuration, mcp_installation_result, mcp_installation_review, mcp_installation_secret, mcp_installation_secret_storage, mcp_installations_request, mcp_installation_state, mcp_installation_summary, mcp_install_plan, mcp_invocation_audience, mcp_is_server_running_request, mcp_is_server_running_result, mcp_list_builtin_server_names_result, mcp_list_tools_request, mcp_list_tools_result, mcp_oauth_authenticate_request, mcp_oauth_authenticate_result, mcp_oauth_authentication_state_changed_request, mcp_oauth_cancel_login_request, mcp_oauth_cancel_login_result, mcp_oauth_check_dcr_support_request, mcp_oauth_check_dcr_support_result, mcp_oauth_complete_request, mcp_oauth_dispose_store_request, mcp_oauth_fetch_protected_resource_metadata_request, mcp_oauth_fetch_protected_resource_metadata_result, mcp_oauth_flow_identity_request, mcp_oauth_flow_static_client_config, mcp_oauth_flow_store, mcp_oauth_handle_pending_request, mcp_oauth_handle_pending_result, mcp_oauth_is_microsoft_authorization_server_request, mcp_oauth_is_microsoft_authorization_server_result, mcp_oauth_login_grant_type, mcp_oauth_login_request, mcp_oauth_login_result, mcp_oauth_pending_request_response, mcp_oauth_prepare_login_request, mcp_oauth_prepare_login_result, mcp_oauth_probe_needs_auth_reason, mcp_oauth_probe_request, mcp_oauth_probe_result, mcp_oauth_respond_request, mcp_oauth_respond_result, mcp_oauth_save_static_client_secret_request, mcp_oauth_static_client_config, mcp_oauth_static_client_config_request, mcp_oauth_static_client_config_result, mcp_oauth_stored_grant_request, mcp_oauth_store_key_request, mcp_oauth_test_connection_request, mcp_oauth_test_connection_result, mcp_oauth_test_connection_transport, mcp_owned_oauth_login_status, mcp_plan_configuration_change, mcp_plan_configuration_operation, mcp_plan_enum_value_type, mcp_plan_install_planned, mcp_plan_install_request, mcp_plan_install_result, mcp_plan_install_source, mcp_plan_install_source_candidate, mcp_plan_install_source_candidate_kind, mcp_plan_install_source_card, mcp_plan_install_source_card_kind, mcp_plan_package_install_method, mcp_plan_package_transport, mcp_plan_policy_decision, mcp_plan_policy_result, mcp_plan_policy_source, mcp_plan_provenance, mcp_plan_remote_install_method, mcp_plan_remote_transport, mcp_plan_required_value, mcp_plan_required_value_enum, mcp_plan_required_value_enum_kind, mcp_plan_required_value_scalar, mcp_plan_required_value_scalar_kind, mcp_plan_resource_identity, mcp_plan_scalar_value_type, mcp_plan_scope, mcp_plan_secret_placeholder, mcp_plan_secret_reference, mcp_plan_target, mcp_plan_transport_choice, mcp_plan_transport_choice_package, mcp_plan_transport_choice_remote, mcp_plan_uninstall_request, mcp_plan_value_category, mcp_prepared_install, mcp_prepare_install_request, mcp_prompt, mcp_prompt_argument, mcp_prompt_icon, mcp_prompt_message, mcp_prompt_role, mcp_prompts_get_request, mcp_prompts_get_result, mcp_prompts_list_request, mcp_prompts_list_result, mcp_register_external_client_request, mcp_registry_cancel_request, mcp_registry_cancel_result, mcp_registry_request_id_result, mcp_registry_search_request, mcp_registry_search_result, mcp_reload_config, mcp_reload_with_config_request, mcp_remove_git_hub_result, mcp_resolve_git_hub_config_request, mcp_resolve_git_hub_config_result, mcp_resource, mcp_resource_annotations, mcp_resource_content, mcp_resource_icon, mcp_resources_list_request, mcp_resources_list_result, mcp_resources_list_templates_request, mcp_resources_list_templates_result, mcp_resources_read_request, mcp_resources_read_result, mcp_resource_template, mcp_restart_server_request, mcp_safe_for_telemetry, mcp_safe_for_telemetry_fields, mcp_sampling_execution_action, mcp_sampling_execution_result, mcp_serializable_server_config, mcp_server, mcp_server_auth_config, mcp_server_auth_config_redirect_port, mcp_server_card_embedded, mcp_server_card_embedded_kind, mcp_server_card_media_type, mcp_server_card_reference, mcp_server_card_url, mcp_server_card_url_kind, mcp_server_config, mcp_server_config_defer_tools, mcp_server_config_http, mcp_server_config_http_oauth_grant_type, mcp_server_config_http_type, mcp_server_config_local, mcp_server_config_local_type, mcp_server_config_memory, mcp_server_config_memory_type, mcp_server_config_stdio, mcp_server_config_stdio_type, mcp_server_failure_info, mcp_server_list, mcp_server_needs_auth_info, mcp_server_ownership, mcp_server_tool_token_breakdown, mcp_set_env_value_mode_details, mcp_set_env_value_mode_params, mcp_set_env_value_mode_result, mcp_should_exclude_git_hub_tools_request, mcp_should_exclude_git_hub_tools_result, mcp_source_file, mcp_source_plugin, mcp_source_ref, mcp_start_server_config, mcp_start_server_request, mcp_start_servers_result, mcp_stop_server_request, mcp_task_metadata, mcp_tool_result, mcp_tools, mcp_tool_token_breakdown_result, mcp_tool_token_count, mcp_tool_ui, mcp_tool_ui_visibility, mcp_uninstall_plan, mcp_unregister_external_client_request, memories_import_semantic_request, memories_import_semantic_result, memory_configuration, memory_mode, memory_store_request, metadata_context_attribution_result, metadata_context_heaviest_messages_request, metadata_context_heaviest_messages_result, metadata_context_info_request, metadata_context_info_result, metadata_get_working_directory_context_request, metadata_get_working_directory_context_result, metadata_is_processing_result, metadata_recompute_context_tokens_request, metadata_recompute_context_tokens_result, metadata_record_context_change_request, metadata_record_context_change_result, metadata_set_working_directory_request, metadata_set_working_directory_result, metadata_snapshot_current_mode, metadata_snapshot_remote_metadata, metadata_snapshot_remote_metadata_repository, metadata_snapshot_remote_metadata_task_type, metadata_update_client_metadata_request, model, model_apply_startup_overlay_request, model_artifact_details, model_billing, model_billing_promo, model_billing_token_prices, model_billing_token_prices_long_context, model_capabilities, model_capabilities_limits, model_capabilities_limits_vision, model_capabilities_override, model_capabilities_override_limits, model_capabilities_override_limits_vision, model_capabilities_override_supports, model_capabilities_supports, model_clear_startup_seed_request, model_clear_startup_seed_result, model_generate_branch_slug_request, model_generate_branch_slug_result, model_get_reasoning_summaries_request, model_get_reasoning_summaries_result, model_list, model_list_request, model_load_authorization_error, model_load_error_details, model_load_error_request, model_message, model_picker_category, model_picker_persistence_request, model_picker_price_category, model_picker_settings_context, model_policy, model_policy_state, model_provider_adapter_catalog, model_provider_adapter_descriptor, model_provider_adapter_operation_descriptor, model_provider_attribution, model_provider_automatic_discovery_mode, model_provider_automatic_discovery_policy, model_provider_availability_request, model_provider_availability_result, model_provider_configuration_disposition, model_provider_configuration_plan, model_provider_descriptor, model_provider_discover_request, model_provider_discover_result, model_provider_discovery_network_scope, model_provider_get_status_request, model_provider_instance, model_provider_instance_reference, model_provider_models_list_request, model_provider_operation_outcome, model_provider_operation_outcome_code, model_provider_prepare_configuration_request, model_provider_provenance, model_provider_provenance_source, model_provider_save_configuration_request, model_provider_status, model_provider_warning, model_set_allowed_models_request, model_set_allowed_models_result, model_set_reasoning_effort_request, model_set_reasoning_effort_result, models_list_request, models_list_token_price_units_request, model_startup_admission_request, model_startup_admission_result, model_switch_auto_tier_request, model_switch_auto_tier_result, model_switch_auto_tier_status, model_switch_confirmation, model_switch_fusion_tier_request, model_switch_to_request, model_switch_to_result, model_token_price_unit, model_token_price_unit_list, model_warning_text, mode_set_request, mode_set_result, move_mcp_loading_to_background_result, named_provider_config, name_generate_request, name_get_result, name_set_auto_request, name_set_auto_result, name_set_request, network_authenticate_basic_options, network_authenticate_basic_request, network_authenticate_basic_result, network_authenticate_negotiate_options, network_authenticate_negotiate_request, network_authenticate_negotiate_result, network_resolve_proxy_options, network_resolve_proxy_request, network_resolve_proxy_result, network_scope, network_set_provider_request, open_canvas_instance, options_update_additional_content_exclusion_policy, options_update_additional_content_exclusion_policy_rule, options_update_additional_content_exclusion_policy_rule_source, options_update_additional_content_exclusion_policy_scope, options_update_context_tier, options_update_env_value_mode, options_update_reasoning_summary, options_update_tool_filter_precedence, pending_external_tool_request, pending_external_tool_request_list, pending_permission_request, pending_permission_request_list, permission_decision, permission_decision_approved, permission_decision_approved_for_location, permission_decision_approved_for_session, permission_decision_approve_for_location, permission_decision_approve_for_location_approval, permission_decision_approve_for_location_approval_commands, permission_decision_approve_for_location_approval_custom_tool, permission_decision_approve_for_location_approval_extension_env_access, permission_decision_approve_for_location_approval_extension_management, permission_decision_approve_for_location_approval_extension_permission_access, permission_decision_approve_for_location_approval_mcp, permission_decision_approve_for_location_approval_mcp_sampling, permission_decision_approve_for_location_approval_memory, permission_decision_approve_for_location_approval_read, permission_decision_approve_for_location_approval_workflow, permission_decision_approve_for_location_approval_write, permission_decision_approve_for_session, permission_decision_approve_for_session_approval, permission_decision_approve_for_session_approval_commands, permission_decision_approve_for_session_approval_custom_tool, permission_decision_approve_for_session_approval_extension_env_access, permission_decision_approve_for_session_approval_extension_management, permission_decision_approve_for_session_approval_extension_permission_access, permission_decision_approve_for_session_approval_mcp, permission_decision_approve_for_session_approval_mcp_sampling, permission_decision_approve_for_session_approval_memory, permission_decision_approve_for_session_approval_read, permission_decision_approve_for_session_approval_workflow, permission_decision_approve_for_session_approval_write, permission_decision_approve_once, permission_decision_approve_permanently, permission_decision_approve_read_only_for_session, permission_decision_cancelled, permission_decision_context, permission_decision_denied_by_content_exclusion_policy, permission_decision_denied_by_permission_request_hook, permission_decision_denied_by_rules, permission_decision_denied_interactively_by_user, permission_decision_denied_no_approval_rule_and_could_not_request_from_user, permission_decision_outcome, permission_decision_reject, permission_decision_request, permission_decision_surface, permission_decision_user_not_available, permission_location_add_tool_approval_params, permission_location_apply_params, permission_location_apply_result, permission_location_resolve_params, permission_location_resolve_result, permission_location_type, permission_mode_source, permission_paths_add_params, permission_paths_allowed_check_params, permission_paths_allowed_check_result, permission_paths_config, permission_paths_list, permission_paths_update_primary_params, permission_paths_workspace_check_params, permission_paths_workspace_check_result, permission_prompt_shown_notification, permission_request_result, permission_response_capability, permission_rules_set, permissions_additional_directories_list_result, permissions_allow_all_baseline, permissions_capabilities, permissions_clear_resume_escalation_request, permissions_clear_resume_escalation_result, permissions_configure_additional_content_exclusion_policy, permissions_configure_additional_content_exclusion_policy_rule, permissions_configure_additional_content_exclusion_policy_rule_source, permissions_configure_additional_content_exclusion_policy_scope, permissions_configure_assisted_approval_context, permissions_configure_params, permissions_configure_result, permissions_evaluate_managed_policy_params, permissions_evaluate_managed_policy_result, permissions_folder_trust_add_trusted_result, permissions_get_allow_all_result, permissions_get_mode_request, permissions_get_mode_result, permissions_locations_add_tool_approval_details, permissions_locations_add_tool_approval_details_commands, permissions_locations_add_tool_approval_details_custom_tool, permissions_locations_add_tool_approval_details_extension_env_access, permissions_locations_add_tool_approval_details_extension_management, permissions_locations_add_tool_approval_details_extension_permission_access, permissions_locations_add_tool_approval_details_mcp, permissions_locations_add_tool_approval_details_mcp_sampling, permissions_locations_add_tool_approval_details_memory, permissions_locations_add_tool_approval_details_read, permissions_locations_add_tool_approval_details_workflow, permissions_locations_add_tool_approval_details_write, permissions_locations_add_tool_approval_result, permissions_managed_review_required_request, permissions_modify_rules_params, permissions_modify_rules_result, permissions_modify_rules_scope, permissions_notify_prompt_shown_result, permissions_paths_add_result, permissions_paths_list_request, permissions_paths_update_primary_result, permissions_pending_requests_request, permissions_reset_session_approvals_request, permissions_reset_session_approvals_result, permissions_set_approve_all_request, permissions_set_approve_all_result, permissions_set_approve_all_source, permissions_set_mode_request, permissions_set_mode_result, permissions_set_required_request, permissions_set_required_result, permissions_urls_set_unrestricted_mode_result, permission_urls_config, permission_urls_set_unrestricted_mode_params, persistence_barrier_request, persistence_write_raw_json_locked_request, persistence_write_raw_json_locked_result, ping_request, ping_result, plan_read_result, plan_read_sql_todos_result, plan_read_sql_todos_with_dependencies_result, plan_sql_todo_dependency, plan_sql_todos_row, plan_update_request, plugin, plugin_activation_status, plugin_apply_install_request, plugin_builtin_discover_request, plugin_builtin_discover_result, plugin_check_update_request, plugin_inspect_inventory_request, plugin_installation_failure_reason, plugin_installation_file_review, plugin_installation_location, plugin_installation_management_outcome, plugin_installation_management_result, plugin_installation_mcp_server_review, plugin_installation_mcp_transport, plugin_installation_outcome, plugin_installation_result, plugin_installation_review, plugin_installation_source, plugin_installation_summary, plugin_install_plan, plugin_install_result, plugin_install_staging_mode, plugin_invocation_inventory_entry, plugin_invocation_inventory_result, plugin_list, plugin_list_result, plugin_marketplace_check_update_request, plugin_marketplace_live_state, plugin_marketplace_search_entry, plugin_marketplace_search_error, plugin_marketplace_search_request, plugin_marketplace_search_result, plugin_plan_install_request, plugin_policy_diagnostic, plugin_policy_resolve_invocation_request, plugin_policy_resolve_invocation_result, plugins_activate_request, plugins_activate_result, plugins_builtin_resolve_activation_request, plugins_builtin_resolve_activation_result, plugins_builtin_set_request, plugins_disable_request, plugins_enable_request, plugins_install_request, plugins_invocation_request, plugins_list_request, plugins_marketplaces_add_request, plugins_marketplaces_browse_request, plugins_marketplaces_refresh_request, plugins_marketplaces_remove_request, plugin_sources_resolve_request, plugin_sources_resolve_result, plugins_reload_request, plugins_uninstall_request, plugins_update_request, plugin_update_all_entry, plugin_update_all_result, plugin_update_check_result, plugin_update_result, process_login_account, process_login_context, process_login_persistence, process_login_policy_context, protocol_append_mode, protocol_customize_mode, protocol_external_tool_defer, protocol_external_tool_definition, protocol_external_tool_namespace, protocol_image_generation_options, protocol_marker_section_override, protocol_replace_mode, protocol_section_override, protocol_static_section_action, protocol_static_section_override, protocol_status_response, protocol_system_message_append_config, protocol_system_message_config, protocol_system_message_customize_config, protocol_system_message_replace_config, provider_add_request, provider_add_result, provider_config_azure, provider_config_model_provider, provider_config_transport, provider_config_type, provider_config_wire_api, provider_endpoint, provider_endpoint_transport, provider_endpoint_type, provider_endpoint_wire_api, provider_get_endpoint_request, provider_model_config, provider_session_token, provider_status, provider_sync_request, provider_sync_result, provider_token_acquire_request, provider_token_acquire_result, provider_update_model_request, provider_update_provider_request, provider_withdraw_request, provider_withdraw_result, push_attachment, push_attachment_blob, push_attachment_directory, push_attachment_file, push_attachment_file_line_range, push_attachment_git_hub_actions_job, push_attachment_git_hub_commit, push_attachment_git_hub_file, push_attachment_git_hub_file_diff, push_attachment_git_hub_file_diff_side, push_attachment_git_hub_reference, push_attachment_git_hub_reference_type, push_attachment_git_hub_release, push_attachment_git_hub_repository, push_attachment_git_hub_snippet, push_attachment_git_hub_tree_comparison, push_attachment_git_hub_tree_comparison_side, push_attachment_git_hub_url, push_attachment_selection, push_attachment_selection_details, push_attachment_selection_details_end, push_attachment_selection_details_start, push_git_hub_repo_ref, queue_append_steering_request, queue_begin_deferred_idle_drain_request, queue_begin_deferred_idle_drain_result, queue_consume_system_notifications_request, queued_command_handled, queued_command_not_handled, queued_command_result, queued_command_wait_requirement, queue_defer_session_idle_request, queue_duplicate_at_request, queue_duplicate_at_result, queue_enqueue_resume_pending_result, queue_finish_deferred_idle_drain_request, queue_finish_deferred_idle_drain_result, queue_has_pending_result, queue_insert_at_request, queue_insert_at_result, queue_insert_message, queue_move_item_request, queue_move_item_result, queue_pending_items, queue_pending_items_kind, queue_pending_items_result, queue_remove_at_request, queue_remove_at_result, queue_remove_most_recent_result, queue_send_now_request, queue_send_now_result, queue_set_drain_paused_request, queue_snapshot_result, queue_update_text_request, queue_update_text_result, queue_withdraw_message_request, queue_withdraw_message_result, quota_take_warnings_result, quota_warning_projection, register_event_interest_params, register_event_interest_result, release_event_interest_params, remote_attach_mission_control_request, remote_attach_mission_control_result, remote_check_send_admission_request, remote_control_config, remote_control_config_existing_mc_session, remote_control_status, remote_control_status_active, remote_control_status_connecting, remote_control_status_error, remote_control_status_off, remote_control_status_result, remote_control_stop_result, remote_control_transfer_result, remote_enable_request, remote_enable_result, remote_notify_steerable_changed_request, remote_notify_steerable_changed_result, remote_session_connection_result, remote_session_host_status, remote_session_metadata_repository, remote_session_metadata_task_type, remote_session_metadata_value, remote_session_mode, remote_session_page_entry, remote_session_page_failure, remote_session_repository, repo_settings_edit_request, repo_settings_edit_scope, repo_settings_read_raw_request, repo_settings_read_raw_result, repo_settings_write_all_request, repo_settings_write_key_request, repository_disabled_key, repository_disabled_names_request, repository_disabled_names_result, research_list_reports_result, research_stored_report, response_format, runtime_open_browser_request, sandbox_apply_defaults_request, sandbox_check_enforcement_command_result, sandbox_check_platform_support_result, sandbox_check_windows_host_loopback_support_result, sandbox_config, sandbox_config_auth, sandbox_configs_equal_params, sandbox_configs_equal_result, sandbox_config_source, sandbox_config_user_policy, sandbox_config_user_policy_filesystem, sandbox_config_user_policy_network, sandbox_config_user_policy_network_proxy, sandbox_config_user_policy_seatbelt, sandbox_consume_onboarding_result, sandbox_credentials_config, sandbox_credential_suggestion, sandbox_credential_suggestions_result, sandbox_disable_for_session_request, sandbox_disable_for_session_result, sandbox_docs_url_result, sandbox_effective_for_optional_params, sandbox_effective_for_optional_result, sandbox_enforcement_command_allowed_params, sandbox_enforcement_status, sandbox_filter_picker_candidates_params, sandbox_filter_picker_candidates_result, sandbox_get_remote_mcp_egress_request, sandbox_get_remote_mcp_egress_result, sandbox_get_temporary_directory_result, sandbox_get_unsupported_message_result, sandbox_get_unsupported_setting_disabled_notice_result, sandbox_grant_path_for_request_request, sandbox_grant_path_for_request_result, sandbox_host_capability, sandbox_host_capability_name, sandbox_host_support, sandbox_input_kind, sandbox_invoke_owned_request, sandbox_invoke_owned_result, sandbox_learning_mode_start_params, sandbox_learning_mode_start_result, sandbox_masked_env_var, sandbox_normalize_input_params, sandbox_normalize_input_result, sandbox_owned_operation, sandbox_path_grant_warning_params, sandbox_path_grant_warning_result, sandbox_picker_candidate, sandbox_policy_presentation_params, sandbox_policy_presentation_result, sandbox_prepare_picker_policy_params, sandbox_prepare_picker_policy_result, sandbox_proxy_ca_check_installation_support_result, sandbox_proxy_ca_check_relevance_result, sandbox_proxy_ca_create_result, sandbox_proxy_ca_get_declined_result, sandbox_proxy_ca_profile_request, sandbox_proxy_ca_request, sandbox_proxy_ca_rotate_if_untrusted_result, sandbox_proxy_ca_state, sandbox_proxy_ca_status, sandbox_proxy_ca_trust_certificate_request, sandbox_proxy_secret_get_result, sandbox_proxy_secret_location, sandbox_proxy_secret_save_request, sandbox_proxy_secret_save_result, sandbox_reset_session_choices_request, sandbox_resolve_floored_config_params, sandbox_resolve_floored_config_result, sandbox_session_change, sandbox_session_state, sandbox_settings_apply_defaults_result, sandbox_settings_get_path_result, sandbox_settings_load_request, sandbox_settings_load_result, sandbox_settings_persist_path_grant_request, sandbox_settings_update_request, sandbox_transport_owner, sandbox_unsupported_startup_notice_params, sandbox_unsupported_startup_notice_result, saved_provider_configuration_add_model_request, saved_provider_configuration_add_model_result, saved_provider_configuration_provider, saved_provider_configuration_provider_input, saved_provider_configuration_read_result, saved_provider_configuration_remove_model_request, saved_provider_configuration_remove_model_result, saved_provider_configuration_type, saved_provider_configuration_update_model_request, saved_provider_configuration_update_model_result, saved_provider_configuration_update_provider_request, saved_provider_configuration_update_provider_result, saved_provider_credential_status, schedule_add_at_request, schedule_add_cron_request, schedule_add_request, schedule_add_result, schedule_add_self_paced_request, schedule_entry, schedule_has_self_paced_result, schedule_list, schedule_rearm_self_paced_request, schedule_stop_request, schedule_stop_result, secret_filter_format, secrets_add_filter_values_request, secrets_add_filter_values_result, secrets_filter_request, secrets_filter_result, secrets_remove_filter_values_request, secrets_remove_filter_values_result, semantic_import_diagnostic, semantic_memory_conflict_policy, semantic_memory_import_counts, semantic_memory_import_item_result, semantic_memory_import_item_status, semantic_session_import_counts, send_agent_mode, send_and_wait_result, send_attachments_to_message_params, send_message_item, send_messages_request, send_messages_result, send_mode, send_request, send_result, send_system_notification_request, server_agent_list, server_instruction_source_list, server_skill, server_skill_list, session_accounts_logout_result, session_activity, session_agent_list_request, session_auth_login_request, session_auth_logout_user_request, session_auth_status, session_auth_switch_request, session_bulk_delete_result, session_cancel_all_background_agents_result, session_capability, session_commands_list_request, session_completion_item, session_connected_ide_info, session_context, session_context_host_type, session_dynamic_context_config, session_dynamic_context_get_config_response, session_dynamic_context_set_config_request, session_enrich_metadata_result, session_event_log_publish_request, session_event_log_publish_result, session_event_publish_request, session_event_publish_result, session_extensions_configure_host_request, session_extensions_inspect_service_result, session_extensions_set_management_tools_enabled_request, session_extensions_set_management_tools_enabled_result, session_feature_flag_configuration, session_feature_flags_configure_request, session_feature_flags_configure_result, session_feature_flags_mode, session_feature_flags_read_request, session_feature_flags_read_result, session_feature_flags_update_request, session_feature_flags_update_result, session_fs_append_file_request, session_fs_error, session_fs_error_code, session_fs_exists_request, session_fs_exists_result, session_fs_mkdir_request, session_fs_readdir_request, session_fs_readdir_result, session_fs_readdir_with_types_entry, session_fs_readdir_with_types_entry_type, session_fs_readdir_with_types_request, session_fs_readdir_with_types_result, session_fs_read_file_bytes_request, session_fs_read_file_bytes_result, session_fs_read_file_range_request, session_fs_read_file_range_result, session_fs_read_file_request, session_fs_read_file_result, session_fs_rename_request, session_fs_rm_request, session_fs_set_provider_capabilities, session_fs_set_provider_conventions, session_fs_set_provider_request, session_fs_set_provider_result, session_fs_sqlite_exists_request, session_fs_sqlite_exists_result, session_fs_sqlite_query_request, session_fs_sqlite_query_result, session_fs_sqlite_query_type, session_fs_sqlite_transaction_error, session_fs_sqlite_transaction_error_class, session_fs_sqlite_transaction_request, session_fs_sqlite_transaction_result, session_fs_sqlite_transaction_statement, session_fs_stat_request, session_fs_stat_result, session_fs_write_file_bytes_request, session_fs_write_file_request, session_git_hub_auth_get_all_auth_available_result, session_git_hub_auth_logout_result, session_git_hub_auth_logout_user_result, session_history_compact_request, session_installed_plugin, session_installed_plugin_source, session_installed_plugin_source_git_hub, session_installed_plugin_source_local, session_installed_plugin_source_url, session_limit_prediction_baseline_data, session_limit_prediction_client_type, session_limit_prediction_details, session_limit_prediction_predict_request, session_limit_prediction_request, session_limit_prediction_result, session_limit_prediction_source, session_limit_prediction_tier, session_limit_prediction_tier_option, session_limit_prediction_unavailable_reason, session_list, session_list_entry, session_list_filter, session_load_deferred_repo_hooks_result, session_log_level, session_lsp_diagnose_request, session_lsp_diagnose_result, session_lsp_list_result, session_lsp_set_request, session_lsp_start_result, session_managed_permissions, session_managed_settings, session_management_close_request, session_management_close_result, session_management_configure_request, session_management_create_host_request, session_management_create_request, session_management_create_result, session_management_list_request, session_management_list_result, session_management_message_request, session_management_message_result, session_management_policy, session_management_scope, session_management_tool_overrides, session_mcp_apps_call_tool_result, session_mcp_call_tool_request, session_mcp_external_client_exchange_request, session_mcp_external_client_exchange_result, session_mcp_ide_state_result, session_mcp_inspect_configuration_request, session_mcp_oauth_authenticate_request, session_mcp_oauth_authenticate_result, session_mcp_oauth_cancel_flow_request, session_mcp_oauth_cancel_login_request, session_mcp_oauth_cancel_login_result, session_mcp_oauth_dispose_store_request, session_mcp_oauth_has_valid_tokens_request, session_mcp_oauth_has_valid_tokens_result, session_mcp_oauth_prepare_flow_request, session_mcp_oauth_prepare_login_request, session_mcp_oauth_prepare_login_result, session_mcp_oauth_save_static_client_secret_request, session_mcp_oauth_store_key_request, session_mcp_oauth_store_key_result, session_mcp_oauth_test_connection_request, session_mcp_oauth_test_connection_result, session_mcp_oauth_try_refresh_tokens_request, session_mcp_oauth_try_refresh_tokens_result, session_mcp_set_connected_ide_info_params, session_metadata_get_working_directory_context_request, session_metadata_get_working_directory_context_result, session_metadata_snapshot, session_mode, session_model_clear_startup_seed_request, session_model_clear_startup_seed_result, session_model_describe_load_error_request, session_model_describe_load_error_result, session_model_generate_branch_slug_request, session_model_generate_branch_slug_result, session_model_list, session_model_list_request, session_model_price_category, session_name_generate_request, session_name_generate_result, session_open_agent_options, session_open_event_options, session_open_execution_options, session_open_experiment_options, session_open_filesystem_options, session_open_git_hub_options, session_open_git_options, session_open_hook_options, session_open_inference_options, session_open_instruction_options, session_open_interaction_options, session_open_mcp_options, session_open_options, session_open_options_additional_content_exclusion_policy, session_open_options_additional_content_exclusion_policy_rule, session_open_options_additional_content_exclusion_policy_rule_source, session_open_options_additional_content_exclusion_policy_scope, session_open_options_env_value_mode, session_open_options_reasoning_summary, session_open_params, session_open_permission_options, session_open_plugin_options, session_open_policy_options, session_open_result, session_open_skill_options, session_open_state_options, session_open_tool_options, session_permissions_get_allow_all_result, session_permissions_get_required_result, session_permissions_managed_review_required_request, session_permissions_managed_review_required_result, session_persistence_barrier_phase, session_persistence_barrier_request, session_persistence_barrier_result, session_persistence_flush_request, session_plugin_defaults, session_plugin_inspect_extension_contributions_request, session_plugin_inspect_extension_contributions_result, session_plugin_inventory_entry, session_plugin_inventory_result, session_plugins_disable_request, session_plugins_enable_request, session_plugins_install_request, session_plugins_marketplaces_refresh_request, session_plugins_reload_request, session_plugins_retry_managed_request, session_plugins_retry_managed_result, session_provider_get_endpoint_request, session_providers_models_diagnose_request, session_providers_models_diagnose_result, session_provider_update_model_request, session_provider_update_provider_request, session_prune_result, session_quota_delegate_warning, session_quota_get_result, session_quota_plan_tier, session_quota_projection, session_quota_refresh_result, session_quota_snapshot, session_quota_take_warnings_result, session_remote_publish_state_request, session_remote_read_projection_request, session_remote_read_projection_result, session_remote_reattach_request, session_remote_reattach_result, session_remote_send_with_admission_request, session_repository_disabled_names_request, session_sandbox_get_remote_mcp_egress_request, session_sandbox_get_remote_mcp_egress_result, session_sandbox_get_state_result, session_sandbox_invoke_owned_request, session_sandbox_invoke_owned_result, session_sandbox_reset_session_choices_request, session_sandbox_reset_session_choices_result, sessions_bulk_delete_request, sessions_check_in_use_request, sessions_check_in_use_result, sessions_client_metadata_entry, sessions_close_request, sessions_close_result, sessions_create_workspace_request, sessions_create_workspace_result, sessions_delete_request, sessions_enrich_metadata_request, session_set_credentials_params, session_set_credentials_result, session_settings_built_in_tool_availability_snapshot, session_settings_evaluate_predicate_request, session_settings_evaluate_predicate_result, session_settings_job_snapshot, session_settings_model_snapshot, session_settings_online_evaluation_snapshot, session_settings_patch, session_settings_predicate_name, session_settings_repo_snapshot, session_settings_snapshot, session_settings_validation_snapshot, sessions_find_by_prefix_request, sessions_find_by_prefix_result, sessions_find_by_task_id_request, sessions_find_by_task_id_result, sessions_fork_request, sessions_fork_result, sessions_get_board_entry_count_request, sessions_get_board_entry_count_result, sessions_get_client_metadata_request, sessions_get_client_metadata_result, sessions_get_event_file_path_request, sessions_get_event_file_path_result, sessions_get_last_for_context_request, sessions_get_last_for_context_result, sessions_get_metadata_request, sessions_get_metadata_result, sessions_get_persisted_remote_steerable_request, sessions_get_persisted_remote_steerable_result, sessions_has_events_request, sessions_has_events_result, sessions_import_semantic_request, sessions_import_semantic_result, session_sizes, session_skill_inventory_entry, session_skill_resource_install_request, session_skill_resource_remove_request, session_skills_inspect_inventory_result, sessions_list_non_empty_session_ids_request, sessions_list_non_empty_session_ids_result, sessions_list_remote_page_request, sessions_list_remote_page_result, sessions_list_request, sessions_load_deferred_repo_hooks_request, sessions_load_workspace_request, sessions_load_workspace_result, sessions_open_attach, sessions_open_cloud, sessions_open_create, sessions_open_handoff, sessions_open_handoff_task_type, sessions_open_progress, sessions_open_progress_status, sessions_open_progress_step, sessions_open_remote, sessions_open_resume, sessions_open_resume_last, sessions_open_status, session_source, sessions_prune_old_request, sessions_read_persisted_events_request, sessions_release_lock_request, sessions_release_lock_result, sessions_reload_plugin_hooks_request, sessions_reload_plugin_hooks_result, sessions_save_request, sessions_save_result, sessions_set_additional_plugins_request, sessions_set_additional_plugins_result, sessions_set_remote_control_steering_request, sessions_start_remote_control_request, sessions_stop_remote_control_request, sessions_transfer_remote_control_request, sessions_update_workspace_fields_request, sessions_update_workspace_fields_result, sessions_validate_name_request, sessions_validate_name_result, session_telemetry_engagement, session_ui_register_direct_auto_mode_switch_handler_request, session_update_agent_options, session_update_event_options, session_update_execution_options, session_update_experiment_options, session_update_git_hub_options, session_update_git_options, session_update_hook_options, session_update_inference_options, session_update_instruction_options, session_update_interaction_options, session_update_mcp_options, session_update_options_params, session_update_options_result, session_update_permission_options, session_update_plugin_options, session_update_policy_options, session_update_skill_options, session_update_state_options, session_update_tool_options, session_usage_set_code_changes_request, session_visibility_status, session_workflow_pause_at_checkpoint_result, session_working_directory_context, session_working_directory_context_host_type, session_working_directory_context_with_client, settable_auth_info, settable_token_auth_info, settings_edit_operation, settings_edit_result, settings_edit_status, settings_redact_value_for_display_request, settings_redact_value_for_display_result, settings_remove_raw_key_request, settings_remove_raw_key_result, shell_build_interactive_environment_request, shell_build_interactive_environment_result, shell_cancel_user_requested_request, shell_credentials, shell_exec_request, shell_exec_result, shell_execute_user_requested_request, shell_init_profile, shell_init_script, shell_init_script_shell, shell_kill_request, shell_kill_result, shell_kill_signal, shell_options, shutdown_request, skill, skill_apply_install_request, skill_apply_uninstall_request, skill_discovery_path, skill_discovery_path_list, skill_discovery_scope, skill_installation_failure_reason, skill_installation_file_review, skill_installation_location, skill_installation_management_outcome, skill_installation_management_result, skill_installation_operation_request, skill_installation_operation_status, skill_installation_outcome, skill_installation_ownership_state, skill_installation_result, skill_installation_review, skill_installation_scope, skill_installation_session_state, skill_installation_source, skill_installations_request, skill_installation_summary, skill_install_plan, skill_install_source_kind, skill_install_source_scope, skill_list, skill_plan_install_request, skill_plan_uninstall_request, skill_provider_descriptor, skill_provider_list_request, skill_provider_list_result, skill_provider_read_request, skill_provider_read_result, skill_remove_source_entry, skill_remove_source_kind, skill_resource_context, skill_resource_discover_request, skill_resource_discover_result, skill_resource_install_kind, skill_resource_install_request, skill_resource_install_result, skill_resource_install_scope, skill_resource_remove_kind, skill_resource_remove_request, skill_resource_remove_result, skill_resource_set_enabled_request, skills_config_set_disabled_skills_request, skills_config_set_skill_disabled_request, skills_disable_request, skills_discover_request, skills_enable_request, skill_set_enabled_request, skills_get_discovery_paths_request, skills_get_invoked_result, skills_install_source_request, skills_install_source_result, skills_invoked_skill, skills_load_diagnostics, skills_remove_source_inventory, skills_remove_source_outcome, skills_remove_source_request, skills_remove_source_result, skill_uninstall_plan, slash_command_add_timeline_entry_result, slash_command_agent_prompt_result, slash_command_completed_result, slash_command_info, slash_command_input, slash_command_input_choice, slash_command_input_completion, slash_command_invocation_result, slash_command_kind, slash_command_model_picker_dialog, slash_command_select_subcommand_option, slash_command_select_subcommand_result, slash_command_set_model_result, slash_command_set_plan_model_result, slash_command_show_dialog_result, slash_command_text_result, slash_command_timeline_entry, staff_log_level_migration_status, staff_update_channel_migration_status, standalone_extension_admission, subagent_settings_config, subagent_settings_entry, subagent_settings_entry_context_tier, system_message_block, task_agent_info, task_agent_progress, task_analytics_classify_trajectory_request, task_analytics_classify_trajectory_result, task_analytics_judge, task_analytics_trajectory_classification, task_analytics_trajectory_validation, task_client_active_status, task_client_execution_mode, task_client_info, task_client_owner, task_client_owner_kind, task_client_owner_presence, task_client_progress, task_client_status, task_client_type, task_client_update, task_complete_data, task_completion_decision, task_execution_mode, task_info, task_kind, task_list, task_progress_line, tasks_cancel_request, tasks_cancel_result, tasks_get_current_promotable_result, tasks_get_progress_request, tasks_get_progress_result, task_shell_info, task_shell_info_attachment_mode, task_shell_output_exit, task_shell_progress, tasks_promote_current_to_background_result, tasks_promote_to_background_request, tasks_promote_to_background_result, tasks_read_output_request, tasks_read_output_result, tasks_refresh_result, tasks_register_request, tasks_register_result, tasks_remove_request, tasks_remove_result, tasks_send_message_request, tasks_send_message_result, tasks_start_agent_request, tasks_start_agent_result, task_status, tasks_update_request, tasks_update_result, tasks_wait_for_pending_result, team_plugin_marketplace, team_plugin_marketplace_source, telemetry_set_feature_overrides_request, token_auth_info, token_price_unit, token_provider_auth_info, tool, tool_list, tool_result, tool_result_expanded, tool_result_new_message, tool_result_type, tools_execute_request, tools_get_builtin_agent_flag_overrides_result, tools_get_builtin_descriptors_request, tools_get_builtin_descriptors_result, tools_get_current_metadata_result, tools_get_subagent_settings_result, tools_initialize_and_validate_result, tools_list_pending_requests_request, tools_list_request, tools_set_request, tools_set_result, tools_shell_descriptor_config, tools_task_complete_event_data_request, tools_update_subagent_settings_result, ui_auto_mode_switch_response, ui_elicitation_array_any_of_field, ui_elicitation_array_any_of_field_items, ui_elicitation_array_any_of_field_items_any_of, ui_elicitation_array_enum_field, ui_elicitation_array_enum_field_items, ui_elicitation_field_value, ui_elicitation_request, ui_elicitation_response, ui_elicitation_response_action, ui_elicitation_response_content, ui_elicitation_result, ui_elicitation_schema, ui_elicitation_schema_property, ui_elicitation_schema_property_boolean, ui_elicitation_schema_property_number, ui_elicitation_schema_property_number_type, ui_elicitation_schema_property_string, ui_elicitation_schema_property_string_format, ui_elicitation_string_enum_field, ui_elicitation_string_one_of_field, ui_elicitation_string_one_of_field_one_of, ui_ephemeral_query_request, ui_ephemeral_query_result, ui_exit_plan_mode_action, ui_exit_plan_mode_response, ui_handle_pending_auto_mode_switch_request, ui_handle_pending_elicitation_request, ui_handle_pending_exit_plan_mode_request, ui_handle_pending_result, ui_handle_pending_sampling_request, ui_handle_pending_sampling_response, ui_handle_pending_session_limits_exhausted_request, ui_handle_pending_user_input_request, ui_register_direct_auto_mode_switch_handler_request, ui_register_direct_auto_mode_switch_handler_result, ui_session_limits_exhausted_response, ui_session_limits_exhausted_response_action, ui_thread_run_request, ui_unregister_direct_auto_mode_switch_handler_request, ui_unregister_direct_auto_mode_switch_handler_result, ui_user_input_response, unsupported_enqueue_command_result, update_subagent_settings_request, usage_get_metrics_result, usage_set_code_changes_request, user_auth_info, user_requested_shell_command_result, user_setting_metadata, user_settings_apply_top_key_request, user_settings_apply_top_key_result, user_settings_build_runtime_request, user_settings_build_runtime_result, user_settings_edit_request, user_settings_for_context_request, user_settings_for_working_directory_request, user_settings_get_or_create_ahp_environment_compute_id_result, user_settings_get_paths_request, user_settings_get_paths_result, user_settings_get_result, user_settings_governance_keys_result, user_settings_host_context, user_settings_load_and_merge_repo_request, user_settings_load_and_merge_repo_result, user_settings_load_for_config_dir_request, user_settings_load_for_config_dir_result, user_settings_load_for_edit_result, user_settings_load_for_working_directory_result, user_settings_load_repo_request, user_settings_load_repo_result, user_settings_load_with_warning_request, user_settings_load_with_warning_result, user_settings_merge_managed_and_user_params, user_settings_merge_managed_and_user_result, user_settings_merge_repo_value_params, user_settings_merge_repo_value_result, user_settings_migrate_obsolete_on_disk_request, user_settings_migrate_obsolete_on_disk_result, user_settings_migrate_obsolete_on_disk_status, user_settings_migrate_staff_log_level_once_request, user_settings_migrate_staff_log_level_once_result, user_settings_migrate_staff_update_channel_once_result, user_settings_normalize_request, user_settings_normalize_result, user_settings_path_result, user_settings_problem, user_settings_problem_location, user_settings_problem_source, user_settings_problems_request, user_settings_problems_result, user_settings_reset_staff_model_selection_once_request, user_settings_reset_staff_model_selection_once_result, user_settings_set_hook_disabled_request, user_settings_set_hook_disabled_result, user_settings_set_request, user_settings_unknown_keys_warning_request, user_settings_unknown_keys_warning_result, user_settings_update_request, user_settings_update_result, user_settings_validate_request, user_settings_validate_result, user_settings_validation_issue, user_settings_write_all_request, user_settings_write_key_request, user_settings_write_keys_request, user_settings_write_keys_result, utility_prompt_result, utility_prompt_result_kind, visibility_get_result, visibility_set_request, visibility_set_result, workflow_abort_request, workflow_ack_result, workflow_agent_context_observation, workflow_agent_model_observation, workflow_agent_options, workflow_agent_reasoning_effort_observation, workflow_agent_request, workflow_agent_result, workflow_agent_summary, workflow_cancel_request, workflow_current_phase, workflow_declared_limits, workflow_durable_operation, workflow_execute_request, workflow_execute_result, workflow_get_run_progress_request, workflow_get_run_request, workflow_journal_get_request, workflow_journal_get_result, workflow_journal_put_request, workflow_list_runs_request, workflow_list_runs_result, workflow_log_line, workflow_log_line_kind, workflow_log_request, workflow_pause_checkpoint_action, workflow_pause_checkpoint_request, workflow_pause_checkpoint_result, workflow_pause_info, workflow_pause_request, workflow_phase_observation, workflow_phase_status, workflow_progress_line, workflow_progress_page, workflow_resume_request, workflow_resume_result, workflow_run_consumed, workflow_run_detail, workflow_run_failure, workflow_run_failure_kind, workflow_run_limits, workflow_run_options, workflow_run_request, workflow_run_result, workflow_run_status, workflow_run_summary, workflow_run_terminal, workflow_tool_resume_request, workflow_tool_run_options, workflow_tool_run_request, workspace_diff_contents, workspace_diff_file_change, workspace_diff_file_change_type, workspace_diff_mode, workspace_diff_result, workspaces_add_summary_request, workspaces_add_summary_result, workspaces_autopilot_objective_exists_result, workspaces_checkpoints, workspaces_create_directory_request, workspaces_create_file_request, workspaces_delete_autopilot_objective_result, workspaces_diff_request, workspaces_ensure_request, workspaces_get_workspace_result, workspaces_list_checkpoints_result, workspaces_list_files_result, workspaces_read_autopilot_objective_result, workspaces_read_checkpoint_request, workspaces_read_checkpoint_result, workspaces_read_file_request, workspaces_read_file_result, workspaces_remove_path_request, workspaces_rename_path_request, workspaces_save_large_paste_request, workspaces_save_large_paste_result, workspaces_stat_file_request, workspaces_stat_file_result, workspaces_truncate_summaries_request, workspace_summary_host_type, workspaces_update_metadata_request, workspaces_workspace_details_host_type, workspaces_write_autopilot_objective_request, workspaces_write_autopilot_objective_result, azure_ml_status_result, connector_session_account_result, host_authenticate_result, managed_settings_current_snapshot_result, session_auth_info_result, session_context_attribution, session_context_info, subagent_settings, task_progress, workspace_summary)
 
     def to_dict(self) -> dict:
         result: dict = {}
@@ -82506,6 +85983,8 @@ class RPC:
         result["AccountGetWebUrlResult"] = to_class(_AccountGetWebURLResult, self.account_get_web_url_result)
         result["AccountHealth"] = to_enum(AccountHealth, self.account_health)
         result["AccountKind"] = to_enum(AccountKind, self.account_kind)
+        result["AccountLoginProcessRequest"] = to_class(_AccountLoginProcessRequest, self.account_login_process_request)
+        result["AccountLoginProcessResult"] = to_class(_AccountLoginProcessResult, self.account_login_process_result)
         result["AccountLoginRequest"] = to_class(AccountLoginRequest, self.account_login_request)
         result["AccountLoginResult"] = to_class(AccountLoginResult, self.account_login_result)
         result["AccountLogoutRequest"] = to_class(AccountLogoutRequest, self.account_logout_request)
@@ -83132,6 +86611,8 @@ class RPC:
         result["GitHubBranchPullRequestLookupRequest"] = to_class(_GitHubBranchPullRequestLookupRequest, self.git_hub_branch_pull_request_lookup_request)
         result["GitHubBranchPullRequestLookupResult"] = to_class(_GitHubBranchPullRequestLookupResult, self.git_hub_branch_pull_request_lookup_result)
         result["GitHubBranchPullRequestLookupStatus"] = to_enum(_GitHubBranchPullRequestLookupStatus, self.git_hub_branch_pull_request_lookup_status)
+        result["GitHubCreateSecretGistRequest"] = to_class(_GitHubCreateSecretGistRequest, self.git_hub_create_secret_gist_request)
+        result["GitHubCreateSecretGistResult"] = to_class(_GitHubCreateSecretGistResult, self.git_hub_create_secret_gist_result)
         result["GitHubEnvironment"] = to_class(GitHubEnvironment, self.git_hub_environment)
         result["GitHubFetchCancelResult"] = to_class(_GitHubFetchCancelResult, self.git_hub_fetch_cancel_result)
         result["GitHubFetchHeader"] = to_class(_GitHubFetchHeader, self.git_hub_fetch_header)
@@ -83179,6 +86660,8 @@ class RPC:
         result["GitHubRepositoryByIdResult"] = to_class(_GitHubRepositoryByIDResult, self.git_hub_repository_by_id_result)
         result["GitHubRepositoryIdentity"] = to_class(GitHubRepositoryIdentity, self.git_hub_repository_identity)
         result["GitHubRepositoryOwnerName"] = to_class(_GitHubRepositoryOwnerName, self.git_hub_repository_owner_name)
+        result["GitHubSecretGistFile"] = to_class(_GitHubSecretGistFile, self.git_hub_secret_gist_file)
+        result["GitHubSecretGistUseCase"] = to_enum(_GitHubSecretGistUseCase, self.git_hub_secret_gist_use_case)
         result["GitHubTelemetryClientInfo"] = to_class(GitHubTelemetryClientInfo, self.git_hub_telemetry_client_info)
         result["GitHubTelemetryEvent"] = to_class(GitHubTelemetryEvent, self.git_hub_telemetry_event)
         result["GitHubTelemetryNotification"] = to_class(GitHubTelemetryNotification, self.git_hub_telemetry_notification)
@@ -83436,6 +86919,7 @@ class RPC:
         result["MarketplaceRefreshEntry"] = to_class(MarketplaceRefreshEntry, self.marketplace_refresh_entry)
         result["MarketplaceRefreshResult"] = to_class(MarketplaceRefreshResult, self.marketplace_refresh_result)
         result["MarketplaceRemoveResult"] = to_class(MarketplaceRemoveResult, self.marketplace_remove_result)
+        result["McpAdditionalConfigSource"] = to_class(MCPAdditionalConfigSource, self.mcp_additional_config_source)
         result["McpAllowedServer"] = to_class(MCPAllowedServer, self.mcp_allowed_server)
         result["McpApplyInstallRequest"] = to_class(MCPApplyInstallRequest, self.mcp_apply_install_request)
         result["McpApplyUninstallRequest"] = to_class(MCPApplyUninstallRequest, self.mcp_apply_uninstall_request)
@@ -83465,17 +86949,27 @@ class RPC:
         result["McpCallToolResult"] = from_union([lambda x: from_dict(lambda x: x, x), from_none], self.mcp_call_tool_result)
         result["McpCancelSamplingExecutionParams"] = to_class(MCPCancelSamplingExecutionParams, self.mcp_cancel_sampling_execution_params)
         result["McpCancelSamplingExecutionResult"] = to_class(MCPCancelSamplingExecutionResult, self.mcp_cancel_sampling_execution_result)
+        result["McpComputerUseApplyConfigurationRequest"] = to_class(_MCPComputerUseApplyConfigurationRequest, self.mcp_computer_use_apply_configuration_request)
+        result["McpComputerUseApplyConfigurationResult"] = to_class(_MCPComputerUseApplyConfigurationResult, self.mcp_computer_use_apply_configuration_result)
         result["McpConfigAddRequest"] = to_class(MCPConfigAddRequest, self.mcp_config_add_request)
+        result["McpConfigComposeAdditionalRequest"] = to_class(_MCPConfigComposeAdditionalRequest, self.mcp_config_compose_additional_request)
+        result["McpConfigComposeAdditionalResult"] = to_class(MCPConfigComposeAdditionalResult, self.mcp_config_compose_additional_result)
         result["McpConfigDisableRequest"] = to_class(MCPConfigDisableRequest, self.mcp_config_disable_request)
         result["McpConfigEnableRequest"] = to_class(MCPConfigEnableRequest, self.mcp_config_enable_request)
+        result["McpConfigForConfigDirRequest"] = to_class(_MCPConfigForConfigDirRequest, self.mcp_config_for_config_dir_request)
         result["McpConfigList"] = to_class(MCPConfigList, self.mcp_config_list)
+        result["McpConfigListRequest"] = to_class(MCPConfigListRequest, self.mcp_config_list_request)
+        result["McpConfigMergeSourcesRequest"] = to_class(_MCPConfigMergeSourcesRequest, self.mcp_config_merge_sources_request)
+        result["McpConfigMergeSourcesResult"] = to_class(_MCPConfigMergeSourcesResult, self.mcp_config_merge_sources_result)
         result["McpConfigRemoveRequest"] = to_class(MCPConfigRemoveRequest, self.mcp_config_remove_request)
+        result["McpConfigSourceDiagnostic"] = to_class(_MCPConfigSourceDiagnostic, self.mcp_config_source_diagnostic)
         result["McpConfigUpdateRequest"] = to_class(MCPConfigUpdateRequest, self.mcp_config_update_request)
         result["McpConfiguredServer"] = to_class(MCPConfiguredServer, self.mcp_configured_server)
         result["McpConfiguredServerList"] = to_class(MCPConfiguredServerList, self.mcp_configured_server_list)
         result["McpConfiguredServerState"] = to_class(MCPConfiguredServerState, self.mcp_configured_server_state)
         result["McpConfigureGitHubRequest"] = to_class(_MCPConfigureGitHubRequest, self.mcp_configure_git_hub_request)
         result["McpConfigureGitHubResult"] = to_class(MCPConfigureGitHubResult, self.mcp_configure_git_hub_result)
+        result["McpConfigUserServerNamesResult"] = to_class(_MCPConfigUserServerNamesResult, self.mcp_config_user_server_names_result)
         result["McpDiagnosticDetails"] = to_class(MCPDiagnosticDetails, self.mcp_diagnostic_details)
         result["McpDiagnosticDirection"] = to_enum(MCPDiagnosticDirection, self.mcp_diagnostic_direction)
         result["McpDiagnosticKind"] = to_enum(MCPDiagnosticKind, self.mcp_diagnostic_kind)
@@ -83498,6 +86992,9 @@ class RPC:
         result["McpExternalClientSnapshot"] = to_class(MCPExternalClientSnapshot, self.mcp_external_client_snapshot)
         result["McpFailedServer"] = to_class(MCPFailedServer, self.mcp_failed_server)
         result["McpFilteredServer"] = to_class(MCPFilteredServer, self.mcp_filtered_server)
+        result["McpGitHubInvocationToolOptions"] = to_class(_MCPGitHubInvocationToolOptions, self.mcp_git_hub_invocation_tool_options)
+        result["McpGitHubResolveInvocationRequest"] = to_class(_MCPGitHubResolveInvocationRequest, self.mcp_git_hub_resolve_invocation_request)
+        result["McpGitHubResolveInvocationResult"] = to_class(_MCPGitHubResolveInvocationResult, self.mcp_git_hub_resolve_invocation_result)
         result["McpGitHubWorkspace"] = to_class(_MCPGitHubWorkspace, self.mcp_git_hub_workspace)
         result["McpHeadersHandlePendingHeadersRefreshRequest"] = to_class(MCPHeadersHandlePendingHeadersRefreshRequest, self.mcp_headers_handle_pending_headers_refresh_request)
         result["McpHeadersHandlePendingHeadersRefreshRequestRequest"] = to_class(MCPHeadersHandlePendingHeadersRefreshRequestRequest, self.mcp_headers_handle_pending_headers_refresh_request_request)
@@ -83520,6 +87017,7 @@ class RPC:
         result["McpInstallationState"] = to_enum(MCPInstallationState, self.mcp_installation_state)
         result["McpInstallationSummary"] = to_class(MCPInstallationSummary, self.mcp_installation_summary)
         result["McpInstallPlan"] = to_class(MCPInstallPlan, self.mcp_install_plan)
+        result["McpInvocationAudience"] = to_class(_MCPInvocationAudience, self.mcp_invocation_audience)
         result["McpIsServerRunningRequest"] = to_class(MCPIsServerRunningRequest, self.mcp_is_server_running_request)
         result["McpIsServerRunningResult"] = to_class(MCPIsServerRunningResult, self.mcp_is_server_running_result)
         result["McpListBuiltinServerNamesResult"] = to_class(_MCPListBuiltinServerNamesResult, self.mcp_list_builtin_server_names_result)
@@ -83684,6 +87182,8 @@ class RPC:
         result["McpToolUiVisibility"] = to_enum(MCPToolUIVisibility, self.mcp_tool_ui_visibility)
         result["McpUninstallPlan"] = to_class(MCPUninstallPlan, self.mcp_uninstall_plan)
         result["McpUnregisterExternalClientRequest"] = to_class(_MCPUnregisterExternalClientRequest, self.mcp_unregister_external_client_request)
+        result["MemoriesImportSemanticRequest"] = to_class(MemoriesImportSemanticRequest, self.memories_import_semantic_request)
+        result["MemoriesImportSemanticResult"] = to_class(MemoriesImportSemanticResult, self.memories_import_semantic_result)
         result["MemoryConfiguration"] = to_class(MemoryConfiguration, self.memory_configuration)
         result["MemoryMode"] = to_enum(MemoryMode, self.memory_mode)
         result["MemoryStoreRequest"] = to_class(MemoryStoreRequest, self.memory_store_request)
@@ -83723,6 +87223,8 @@ class RPC:
         result["ModelCapabilitiesSupports"] = to_class(ModelCapabilitiesSupports, self.model_capabilities_supports)
         result["ModelClearStartupSeedRequest"] = to_class(_ModelClearStartupSeedRequest, self.model_clear_startup_seed_request)
         result["ModelClearStartupSeedResult"] = to_class(_ModelClearStartupSeedResult, self.model_clear_startup_seed_result)
+        result["ModelGenerateBranchSlugRequest"] = to_class(_ModelGenerateBranchSlugRequest, self.model_generate_branch_slug_request)
+        result["ModelGenerateBranchSlugResult"] = to_class(_ModelGenerateBranchSlugResult, self.model_generate_branch_slug_result)
         result["ModelGetReasoningSummariesRequest"] = to_class(ModelGetReasoningSummariesRequest, self.model_get_reasoning_summaries_request)
         result["ModelGetReasoningSummariesResult"] = to_class(ModelGetReasoningSummariesResult, self.model_get_reasoning_summaries_result)
         result["ModelList"] = to_class(ModelList, self.model_list)
@@ -83785,6 +87287,7 @@ class RPC:
         result["ModeSetResult"] = to_class(ModeSetResult, self.mode_set_result)
         result["MoveMcpLoadingToBackgroundResult"] = to_class(MoveMCPLoadingToBackgroundResult, self.move_mcp_loading_to_background_result)
         result["NamedProviderConfig"] = to_class(NamedProviderConfig, self.named_provider_config)
+        result["NameGenerateRequest"] = to_class(_NameGenerateRequest, self.name_generate_request)
         result["NameGetResult"] = to_class(NameGetResult, self.name_get_result)
         result["NameSetAutoRequest"] = to_class(NameSetAutoRequest, self.name_set_auto_request)
         result["NameSetAutoResult"] = to_class(NameSetAutoResult, self.name_set_auto_result)
@@ -83929,6 +87432,7 @@ class RPC:
         result["PermissionsUrlsSetUnrestrictedModeResult"] = to_class(PermissionsUrlsSetUnrestrictedModeResult, self.permissions_urls_set_unrestricted_mode_result)
         result["PermissionUrlsConfig"] = to_class(PermissionUrlsConfig, self.permission_urls_config)
         result["PermissionUrlsSetUnrestrictedModeParams"] = to_class(PermissionUrlsSetUnrestrictedModeParams, self.permission_urls_set_unrestricted_mode_params)
+        result["PersistenceBarrierRequest"] = to_class(_PersistenceBarrierRequest, self.persistence_barrier_request)
         result["PersistenceWriteRawJsonLockedRequest"] = to_class(PersistenceWriteRawJSONLockedRequest, self.persistence_write_raw_json_locked_request)
         result["PersistenceWriteRawJsonLockedResult"] = to_class(PersistenceWriteRawJSONLockedResult, self.persistence_write_raw_json_locked_result)
         result["PingRequest"] = to_class(PingRequest, self.ping_request)
@@ -83942,7 +87446,10 @@ class RPC:
         result["Plugin"] = to_class(Plugin, self.plugin)
         result["PluginActivationStatus"] = to_enum(PluginActivationStatus, self.plugin_activation_status)
         result["PluginApplyInstallRequest"] = to_class(PluginApplyInstallRequest, self.plugin_apply_install_request)
+        result["PluginBuiltinDiscoverRequest"] = to_class(_PluginBuiltinDiscoverRequest, self.plugin_builtin_discover_request)
+        result["PluginBuiltinDiscoverResult"] = to_class(PluginBuiltinDiscoverResult, self.plugin_builtin_discover_result)
         result["PluginCheckUpdateRequest"] = to_class(PluginCheckUpdateRequest, self.plugin_check_update_request)
+        result["PluginInspectInventoryRequest"] = to_class(_PluginInspectInventoryRequest, self.plugin_inspect_inventory_request)
         result["PluginInstallationFailureReason"] = to_enum(PluginInstallationFailureReason, self.plugin_installation_failure_reason)
         result["PluginInstallationFileReview"] = to_class(PluginInstallationFileReview, self.plugin_installation_file_review)
         result["PluginInstallationLocation"] = to_class(PluginInstallationLocation, self.plugin_installation_location)
@@ -83958,6 +87465,8 @@ class RPC:
         result["PluginInstallPlan"] = to_class(PluginInstallPlan, self.plugin_install_plan)
         result["PluginInstallResult"] = to_class(PluginInstallResult, self.plugin_install_result)
         result["PluginInstallStagingMode"] = to_enum(PluginInstallStagingMode, self.plugin_install_staging_mode)
+        result["PluginInvocationInventoryEntry"] = to_class(_PluginInvocationInventoryEntry, self.plugin_invocation_inventory_entry)
+        result["PluginInvocationInventoryResult"] = to_class(_PluginInvocationInventoryResult, self.plugin_invocation_inventory_result)
         result["PluginList"] = to_class(PluginList, self.plugin_list)
         result["PluginListResult"] = to_class(PluginListResult, self.plugin_list_result)
         result["PluginMarketplaceCheckUpdateRequest"] = to_class(PluginMarketplaceCheckUpdateRequest, self.plugin_marketplace_check_update_request)
@@ -83967,17 +87476,25 @@ class RPC:
         result["PluginMarketplaceSearchRequest"] = to_class(PluginMarketplaceSearchRequest, self.plugin_marketplace_search_request)
         result["PluginMarketplaceSearchResult"] = to_class(PluginMarketplaceSearchResult, self.plugin_marketplace_search_result)
         result["PluginPlanInstallRequest"] = to_class(PluginPlanInstallRequest, self.plugin_plan_install_request)
+        result["PluginPolicyDiagnostic"] = to_class(_PluginPolicyDiagnostic, self.plugin_policy_diagnostic)
+        result["PluginPolicyResolveInvocationRequest"] = to_class(_PluginPolicyResolveInvocationRequest, self.plugin_policy_resolve_invocation_request)
+        result["PluginPolicyResolveInvocationResult"] = to_class(_PluginPolicyResolveInvocationResult, self.plugin_policy_resolve_invocation_result)
         result["PluginsActivateRequest"] = to_class(PluginsActivateRequest, self.plugins_activate_request)
         result["PluginsActivateResult"] = to_class(PluginsActivateResult, self.plugins_activate_result)
+        result["PluginsBuiltinResolveActivationRequest"] = to_class(_PluginsBuiltinResolveActivationRequest, self.plugins_builtin_resolve_activation_request)
+        result["PluginsBuiltinResolveActivationResult"] = to_class(_PluginsBuiltinResolveActivationResult, self.plugins_builtin_resolve_activation_result)
         result["PluginsBuiltinSetRequest"] = to_class(PluginsBuiltinSetRequest, self.plugins_builtin_set_request)
         result["PluginsDisableRequest"] = to_class(PluginsDisableRequest, self.plugins_disable_request)
         result["PluginsEnableRequest"] = to_class(PluginsEnableRequest, self.plugins_enable_request)
         result["PluginsInstallRequest"] = to_class(PluginsInstallRequest, self.plugins_install_request)
+        result["PluginsInvocationRequest"] = to_class(PluginsInvocationRequest, self.plugins_invocation_request)
         result["PluginsListRequest"] = to_class(PluginsListRequest, self.plugins_list_request)
         result["PluginsMarketplacesAddRequest"] = to_class(PluginsMarketplacesAddRequest, self.plugins_marketplaces_add_request)
         result["PluginsMarketplacesBrowseRequest"] = to_class(PluginsMarketplacesBrowseRequest, self.plugins_marketplaces_browse_request)
         result["PluginsMarketplacesRefreshRequest"] = to_class(PluginsMarketplacesRefreshRequest, self.plugins_marketplaces_refresh_request)
         result["PluginsMarketplacesRemoveRequest"] = to_class(PluginsMarketplacesRemoveRequest, self.plugins_marketplaces_remove_request)
+        result["PluginSourcesResolveRequest"] = to_class(_PluginSourcesResolveRequest, self.plugin_sources_resolve_request)
+        result["PluginSourcesResolveResult"] = to_class(_PluginSourcesResolveResult, self.plugin_sources_resolve_result)
         result["PluginsReloadRequest"] = self.plugins_reload_request
         result["PluginsUninstallRequest"] = to_class(PluginsUninstallRequest, self.plugins_uninstall_request)
         result["PluginsUpdateRequest"] = to_class(PluginsUpdateRequest, self.plugins_update_request)
@@ -83985,6 +87502,10 @@ class RPC:
         result["PluginUpdateAllResult"] = to_class(PluginUpdateAllResult, self.plugin_update_all_result)
         result["PluginUpdateCheckResult"] = to_class(PluginUpdateCheckResult, self.plugin_update_check_result)
         result["PluginUpdateResult"] = to_class(PluginUpdateResult, self.plugin_update_result)
+        result["ProcessLoginAccount"] = to_class(_ProcessLoginAccount, self.process_login_account)
+        result["ProcessLoginContext"] = to_class(_ProcessLoginContext, self.process_login_context)
+        result["ProcessLoginPersistence"] = to_class(_ProcessLoginPersistence, self.process_login_persistence)
+        result["ProcessLoginPolicyContext"] = to_class(_ProcessLoginPolicyContext, self.process_login_policy_context)
         result["ProtocolAppendMode"] = to_enum(ProtocolAppendMode, self.protocol_append_mode)
         result["ProtocolCustomizeMode"] = to_enum(ProtocolCustomizeMode, self.protocol_customize_mode)
         result["ProtocolExternalToolDefer"] = to_enum(MCPServerConfigDeferTools, self.protocol_external_tool_defer)
@@ -84118,6 +87639,11 @@ class RPC:
         result["RepoSettingsReadRawResult"] = to_class(_RepoSettingsReadRawResult, self.repo_settings_read_raw_result)
         result["RepoSettingsWriteAllRequest"] = to_class(_RepoSettingsWriteAllRequest, self.repo_settings_write_all_request)
         result["RepoSettingsWriteKeyRequest"] = to_class(_RepoSettingsWriteKeyRequest, self.repo_settings_write_key_request)
+        result["RepositoryDisabledKey"] = to_enum(RepositoryDisabledKey, self.repository_disabled_key)
+        result["RepositoryDisabledNamesRequest"] = to_class(_RepositoryDisabledNamesRequest, self.repository_disabled_names_request)
+        result["RepositoryDisabledNamesResult"] = to_class(RepositoryDisabledNamesResult, self.repository_disabled_names_result)
+        result["ResearchListReportsResult"] = to_class(ResearchListReportsResult, self.research_list_reports_result)
+        result["ResearchStoredReport"] = to_class(ResearchStoredReport, self.research_stored_report)
         result["ResponseFormat"] = to_class(ResponseFormat, self.response_format)
         result["RuntimeOpenBrowserRequest"] = to_class(RuntimeOpenBrowserRequest, self.runtime_open_browser_request)
         result["SandboxApplyDefaultsRequest"] = to_class(SandboxApplyDefaultsRequest, self.sandbox_apply_defaults_request)
@@ -84232,6 +87758,12 @@ class RPC:
         result["SecretsFilterResult"] = to_class(SecretsFilterResult, self.secrets_filter_result)
         result["SecretsRemoveFilterValuesRequest"] = to_class(SecretsRemoveFilterValuesRequest, self.secrets_remove_filter_values_request)
         result["SecretsRemoveFilterValuesResult"] = to_class(SecretsRemoveFilterValuesResult, self.secrets_remove_filter_values_result)
+        result["SemanticImportDiagnostic"] = to_class(SemanticImportDiagnostic, self.semantic_import_diagnostic)
+        result["SemanticMemoryConflictPolicy"] = to_enum(SemanticMemoryConflictPolicy, self.semantic_memory_conflict_policy)
+        result["SemanticMemoryImportCounts"] = to_class(SemanticMemoryImportCounts, self.semantic_memory_import_counts)
+        result["SemanticMemoryImportItemResult"] = to_class(SemanticMemoryImportItemResult, self.semantic_memory_import_item_result)
+        result["SemanticMemoryImportItemStatus"] = to_enum(SemanticMemoryImportItemStatus, self.semantic_memory_import_item_status)
+        result["SemanticSessionImportCounts"] = to_class(SemanticSessionImportCounts, self.semantic_session_import_counts)
         result["SendAgentMode"] = to_enum(SendAgentMode, self.send_agent_mode)
         result["SendAndWaitResult"] = to_class(SendAndWaitResult, self.send_and_wait_result)
         result["SendAttachmentsToMessageParams"] = to_class(SendAttachmentsToMessageParams, self.send_attachments_to_message_params)
@@ -84269,6 +87801,10 @@ class RPC:
         result["SessionEventLogPublishResult"] = to_class(_SessionEventLogPublishResult, self.session_event_log_publish_result)
         result["SessionEventPublishRequest"] = to_class(SessionEventPublishRequest, self.session_event_publish_request)
         result["SessionEventPublishResult"] = to_class(SessionEventPublishResult, self.session_event_publish_result)
+        result["SessionExtensionsConfigureHostRequest"] = to_class(_SessionExtensionsConfigureHostRequest, self.session_extensions_configure_host_request)
+        result["SessionExtensionsInspectServiceResult"] = to_class(_SessionExtensionsInspectServiceResult, self.session_extensions_inspect_service_result)
+        result["SessionExtensionsSetManagementToolsEnabledRequest"] = to_class(_SessionExtensionsSetManagementToolsEnabledRequest, self.session_extensions_set_management_tools_enabled_request)
+        result["SessionExtensionsSetManagementToolsEnabledResult"] = from_bool(self.session_extensions_set_management_tools_enabled_result)
         result["SessionFeatureFlagConfiguration"] = to_class(_SessionFeatureFlagConfiguration, self.session_feature_flag_configuration)
         result["SessionFeatureFlagsConfigureRequest"] = to_class(SessionFeatureFlagsConfigureRequest, self.session_feature_flags_configure_request)
         result["SessionFeatureFlagsConfigureResult"] = to_class(SessionFeatureFlagsConfigureResult, self.session_feature_flags_configure_result)
@@ -84364,6 +87900,7 @@ class RPC:
         result["SessionMcpExternalClientExchangeRequest"] = to_class(SessionMCPExternalClientExchangeRequest, self.session_mcp_external_client_exchange_request)
         result["SessionMcpExternalClientExchangeResult"] = to_class(_SessionMCPExternalClientExchangeResult, self.session_mcp_external_client_exchange_result)
         result["SessionMcpIdeStateResult"] = to_class(SessionMCPIDEStateResult, self.session_mcp_ide_state_result)
+        result["SessionMcpInspectConfigurationRequest"] = to_class(_SessionMCPInspectConfigurationRequest, self.session_mcp_inspect_configuration_request)
         result["SessionMcpOauthAuthenticateRequest"] = to_class(_SessionMCPOauthAuthenticateRequest, self.session_mcp_oauth_authenticate_request)
         result["SessionMcpOauthAuthenticateResult"] = to_class(_SessionMCPOauthAuthenticateResult, self.session_mcp_oauth_authenticate_result)
         result["SessionMcpOauthCancelFlowRequest"] = to_class(_SessionMCPOauthCancelFlowRequest, self.session_mcp_oauth_cancel_flow_request)
@@ -84391,9 +87928,13 @@ class RPC:
         result["SessionModelClearStartupSeedResult"] = to_class(_SessionModelClearStartupSeedResult, self.session_model_clear_startup_seed_result)
         result["SessionModelDescribeLoadErrorRequest"] = to_class(SessionModelDescribeLoadErrorRequest, self.session_model_describe_load_error_request)
         result["SessionModelDescribeLoadErrorResult"] = to_class(_SessionModelDescribeLoadErrorResult, self.session_model_describe_load_error_result)
+        result["SessionModelGenerateBranchSlugRequest"] = to_class(_SessionModelGenerateBranchSlugRequest, self.session_model_generate_branch_slug_request)
+        result["SessionModelGenerateBranchSlugResult"] = to_class(_SessionModelGenerateBranchSlugResult, self.session_model_generate_branch_slug_result)
         result["SessionModelList"] = to_class(SessionModelList, self.session_model_list)
         result["SessionModelListRequest"] = to_class(SessionModelListRequest, self.session_model_list_request)
         result["SessionModelPriceCategory"] = to_class(SessionModelPriceCategory, self.session_model_price_category)
+        result["SessionNameGenerateRequest"] = to_class(_SessionNameGenerateRequest, self.session_name_generate_request)
+        result["SessionNameGenerateResult"] = to_class(_SessionNameGenerateResult, self.session_name_generate_result)
         result["SessionOpenAgentOptions"] = to_class(SessionOpenAgentOptions, self.session_open_agent_options)
         result["SessionOpenEventOptions"] = to_class(SessionOpenEventOptions, self.session_open_event_options)
         result["SessionOpenExecutionOptions"] = to_class(SessionOpenExecutionOptions, self.session_open_execution_options)
@@ -84425,7 +87966,15 @@ class RPC:
         result["SessionPermissionsGetRequiredResult"] = from_bool(self.session_permissions_get_required_result)
         result["SessionPermissionsManagedReviewRequiredRequest"] = to_class(SessionPermissionsManagedReviewRequiredRequest, self.session_permissions_managed_review_required_request)
         result["SessionPermissionsManagedReviewRequiredResult"] = from_bool(self.session_permissions_managed_review_required_result)
+        result["SessionPersistenceBarrierPhase"] = to_enum(_SessionPersistenceBarrierPhase, self.session_persistence_barrier_phase)
+        result["SessionPersistenceBarrierRequest"] = to_class(_SessionPersistenceBarrierRequest, self.session_persistence_barrier_request)
+        result["SessionPersistenceBarrierResult"] = to_class(_SessionPersistenceBarrierResult, self.session_persistence_barrier_result)
+        result["SessionPersistenceFlushRequest"] = to_class(_SessionPersistenceFlushRequest, self.session_persistence_flush_request)
         result["SessionPluginDefaults"] = to_class(SessionPluginDefaults, self.session_plugin_defaults)
+        result["SessionPluginInspectExtensionContributionsRequest"] = to_class(_SessionPluginInspectExtensionContributionsRequest, self.session_plugin_inspect_extension_contributions_request)
+        result["SessionPluginInspectExtensionContributionsResult"] = to_class(_SessionPluginInspectExtensionContributionsResult, self.session_plugin_inspect_extension_contributions_result)
+        result["SessionPluginInventoryEntry"] = to_class(SessionPluginInventoryEntry, self.session_plugin_inventory_entry)
+        result["SessionPluginInventoryResult"] = to_class(_SessionPluginInventoryResult, self.session_plugin_inventory_result)
         result["SessionPluginsDisableRequest"] = to_class(SessionPluginsDisableRequest, self.session_plugins_disable_request)
         result["SessionPluginsEnableRequest"] = to_class(SessionPluginsEnableRequest, self.session_plugins_enable_request)
         result["SessionPluginsInstallRequest"] = to_class(SessionPluginsInstallRequest, self.session_plugins_install_request)
@@ -84452,6 +88001,7 @@ class RPC:
         result["SessionRemoteReattachRequest"] = to_class(SessionRemoteReattachRequest, self.session_remote_reattach_request)
         result["SessionRemoteReattachResult"] = to_class(_SessionRemoteReattachResult, self.session_remote_reattach_result)
         result["SessionRemoteSendWithAdmissionRequest"] = to_class(_SessionRemoteSendWithAdmissionRequest, self.session_remote_send_with_admission_request)
+        result["SessionRepositoryDisabledNamesRequest"] = to_class(_SessionRepositoryDisabledNamesRequest, self.session_repository_disabled_names_request)
         result["SessionSandboxGetRemoteMcpEgressRequest"] = to_class(SessionSandboxGetRemoteMCPEgressRequest, self.session_sandbox_get_remote_mcp_egress_request)
         result["SessionSandboxGetRemoteMcpEgressResult"] = to_class(SessionSandboxGetRemoteMCPEgressResult, self.session_sandbox_get_remote_mcp_egress_result)
         result["SessionSandboxGetStateResult"] = to_class(SessionSandboxGetStateResult, self.session_sandbox_get_state_result)
@@ -84502,7 +88052,13 @@ class RPC:
         result["SessionsGetPersistedRemoteSteerableResult"] = to_class(SessionsGetPersistedRemoteSteerableResult, self.sessions_get_persisted_remote_steerable_result)
         result["SessionsHasEventsRequest"] = to_class(SessionsHasEventsRequest, self.sessions_has_events_request)
         result["SessionsHasEventsResult"] = to_class(SessionsHasEventsResult, self.sessions_has_events_result)
+        result["SessionsImportSemanticRequest"] = to_class(SessionsImportSemanticRequest, self.sessions_import_semantic_request)
+        result["SessionsImportSemanticResult"] = to_class(SessionsImportSemanticResult, self.sessions_import_semantic_result)
         result["SessionSizes"] = to_class(SessionSizes, self.session_sizes)
+        result["SessionSkillInventoryEntry"] = to_class(_SessionSkillInventoryEntry, self.session_skill_inventory_entry)
+        result["SessionSkillResourceInstallRequest"] = to_class(_SessionSkillResourceInstallRequest, self.session_skill_resource_install_request)
+        result["SessionSkillResourceRemoveRequest"] = to_class(_SessionSkillResourceRemoveRequest, self.session_skill_resource_remove_request)
+        result["SessionSkillsInspectInventoryResult"] = to_class(_SessionSkillsInspectInventoryResult, self.session_skills_inspect_inventory_result)
         result["SessionsListNonEmptySessionIdsRequest"] = to_class(SessionsListNonEmptySessionIDSRequest, self.sessions_list_non_empty_session_ids_request)
         result["SessionsListNonEmptySessionIdsResult"] = to_class(SessionsListNonEmptySessionIDSResult, self.sessions_list_non_empty_session_ids_result)
         result["SessionsListRemotePageRequest"] = to_class(_SessionsListRemotePageRequest, self.sessions_list_remote_page_request)
@@ -84540,6 +88096,8 @@ class RPC:
         result["SessionsTransferRemoteControlRequest"] = to_class(SessionsTransferRemoteControlRequest, self.sessions_transfer_remote_control_request)
         result["SessionsUpdateWorkspaceFieldsRequest"] = to_class(SessionsUpdateWorkspaceFieldsRequest, self.sessions_update_workspace_fields_request)
         result["SessionsUpdateWorkspaceFieldsResult"] = to_class(SessionsUpdateWorkspaceFieldsResult, self.sessions_update_workspace_fields_result)
+        result["SessionsValidateNameRequest"] = to_class(SessionsValidateNameRequest, self.sessions_validate_name_request)
+        result["SessionsValidateNameResult"] = to_class(SessionsValidateNameResult, self.sessions_validate_name_result)
         result["SessionTelemetryEngagement"] = to_class(SessionTelemetryEngagement, self.session_telemetry_engagement)
         result["SessionUiRegisterDirectAutoModeSwitchHandlerRequest"] = to_class(SessionUIRegisterDirectAutoModeSwitchHandlerRequest, self.session_ui_register_direct_auto_mode_switch_handler_request)
         result["SessionUpdateAgentOptions"] = to_class(SessionUpdateAgentOptions, self.session_update_agent_options)
@@ -84626,6 +88184,17 @@ class RPC:
         result["SkillProviderReadResult"] = to_class(_SkillProviderReadResult, self.skill_provider_read_result)
         result["SkillRemoveSourceEntry"] = to_class(SkillRemoveSourceEntry, self.skill_remove_source_entry)
         result["SkillRemoveSourceKind"] = to_enum(SkillRemoveSourceKind, self.skill_remove_source_kind)
+        result["SkillResourceContext"] = to_class(_SkillResourceContext, self.skill_resource_context)
+        result["SkillResourceDiscoverRequest"] = to_class(_SkillResourceDiscoverRequest, self.skill_resource_discover_request)
+        result["SkillResourceDiscoverResult"] = to_class(SkillResourceDiscoverResult, self.skill_resource_discover_result)
+        result["SkillResourceInstallKind"] = to_enum(SkillResourceInstallKind, self.skill_resource_install_kind)
+        result["SkillResourceInstallRequest"] = to_class(_SkillResourceInstallRequest, self.skill_resource_install_request)
+        result["SkillResourceInstallResult"] = to_class(SkillResourceInstallResult, self.skill_resource_install_result)
+        result["SkillResourceInstallScope"] = to_enum(SkillResourceInstallScope, self.skill_resource_install_scope)
+        result["SkillResourceRemoveKind"] = to_enum(SkillResourceRemoveKind, self.skill_resource_remove_kind)
+        result["SkillResourceRemoveRequest"] = to_class(_SkillResourceRemoveRequest, self.skill_resource_remove_request)
+        result["SkillResourceRemoveResult"] = to_class(SkillResourceRemoveResult, self.skill_resource_remove_result)
+        result["SkillResourceSetEnabledRequest"] = to_class(_SkillResourceSetEnabledRequest, self.skill_resource_set_enabled_request)
         result["SkillsConfigSetDisabledSkillsRequest"] = to_class(SkillsConfigSetDisabledSkillsRequest, self.skills_config_set_disabled_skills_request)
         result["SkillsConfigSetSkillDisabledRequest"] = to_class(SkillsConfigSetSkillDisabledRequest, self.skills_config_set_skill_disabled_request)
         result["SkillsDisableRequest"] = to_class(SkillsDisableRequest, self.skills_disable_request)
@@ -84798,6 +88367,9 @@ class RPC:
         result["UserSettingsBuildRuntimeRequest"] = to_class(_UserSettingsBuildRuntimeRequest, self.user_settings_build_runtime_request)
         result["UserSettingsBuildRuntimeResult"] = from_dict(lambda x: x, self.user_settings_build_runtime_result)
         result["UserSettingsEditRequest"] = to_class(_UserSettingsEditRequest, self.user_settings_edit_request)
+        result["UserSettingsForContextRequest"] = to_class(_UserSettingsForContextRequest, self.user_settings_for_context_request)
+        result["UserSettingsForWorkingDirectoryRequest"] = to_class(_UserSettingsForWorkingDirectoryRequest, self.user_settings_for_working_directory_request)
+        result["UserSettingsGetOrCreateAhpEnvironmentComputeIdResult"] = from_str(self.user_settings_get_or_create_ahp_environment_compute_id_result)
         result["UserSettingsGetPathsRequest"] = to_class(UserSettingsGetPathsRequest, self.user_settings_get_paths_request)
         result["UserSettingsGetPathsResult"] = to_class(UserSettingsGetPathsResult, self.user_settings_get_paths_result)
         result["UserSettingsGetResult"] = to_class(UserSettingsGetResult, self.user_settings_get_result)
@@ -84808,8 +88380,10 @@ class RPC:
         result["UserSettingsLoadForConfigDirRequest"] = to_class(_UserSettingsLoadForConfigDirRequest, self.user_settings_load_for_config_dir_request)
         result["UserSettingsLoadForConfigDirResult"] = from_dict(lambda x: x, self.user_settings_load_for_config_dir_result)
         result["UserSettingsLoadForEditResult"] = to_class(UserSettingsLoadForEditResult, self.user_settings_load_for_edit_result)
+        result["UserSettingsLoadForWorkingDirectoryResult"] = from_dict(lambda x: x, self.user_settings_load_for_working_directory_result)
         result["UserSettingsLoadRepoRequest"] = to_class(UserSettingsLoadRepoRequest, self.user_settings_load_repo_request)
         result["UserSettingsLoadRepoResult"] = to_class(UserSettingsLoadRepoResult, self.user_settings_load_repo_result)
+        result["UserSettingsLoadWithWarningRequest"] = to_class(_UserSettingsLoadWithWarningRequest, self.user_settings_load_with_warning_request)
         result["UserSettingsLoadWithWarningResult"] = to_class(UserSettingsLoadWithWarningResult, self.user_settings_load_with_warning_result)
         result["UserSettingsMergeManagedAndUserParams"] = to_class(_UserSettingsMergeManagedAndUserParams, self.user_settings_merge_managed_and_user_params)
         result["UserSettingsMergeManagedAndUserResult"] = to_class(UserSettingsMergeManagedAndUserResult, self.user_settings_merge_managed_and_user_result)
@@ -84843,6 +88417,10 @@ class RPC:
         result["UserSettingsValidationIssue"] = to_class(UserSettingsValidationIssue, self.user_settings_validation_issue)
         result["UserSettingsWriteAllRequest"] = to_class(UserSettingsWriteAllRequest, self.user_settings_write_all_request)
         result["UserSettingsWriteKeyRequest"] = to_class(UserSettingsWriteKeyRequest, self.user_settings_write_key_request)
+        result["UserSettingsWriteKeysRequest"] = to_class(_UserSettingsWriteKeysRequest, self.user_settings_write_keys_request)
+        result["UserSettingsWriteKeysResult"] = to_class(_UserSettingsWriteKeysResult, self.user_settings_write_keys_result)
+        result["UtilityPromptResult"] = to_class(_UtilityPromptResult, self.utility_prompt_result)
+        result["UtilityPromptResultKind"] = to_enum(_UtilityPromptResultKind, self.utility_prompt_result_kind)
         result["VisibilityGetResult"] = to_class(VisibilityGetResult, self.visibility_get_result)
         result["VisibilitySetRequest"] = to_class(VisibilitySetRequest, self.visibility_set_request)
         result["VisibilitySetResult"] = to_class(VisibilitySetResult, self.visibility_set_result)
@@ -85502,6 +89080,7 @@ SessionAccountsLogoutResult = bool
 SessionAuthInfoResult = AuthIdentity | None
 SessionCancelAllBackgroundAgentsResult = int
 SessionContextHostType = HostType
+_SessionExtensionsSetManagementToolsEnabledResult = bool
 SessionFsReaddirWithTypesEntryType = DebugCollectLogsEntryKind
 SessionGitHubAuthGetAllAuthAvailableResult = list
 SessionGitHubAuthLogoutResult = bool
@@ -85525,7 +89104,9 @@ TaskInfoExecutionMode = TaskExecutionMode
 TaskInfoStatus = TaskStatus
 ToolResult = ToolResultExpanded
 UserSettingsBuildRuntimeResult = dict
+_UserSettingsGetOrCreateAhpEnvironmentComputeIdResult = str
 UserSettingsLoadForConfigDirResult = dict
+_UserSettingsLoadForWorkingDirectoryResult = dict
 WorkspaceSummaryHostType = HostType
 WorkspacesWorkspaceDetailsHostType = HostType
 
@@ -85575,6 +89156,389 @@ def _patch_model_capabilities(data: dict) -> dict:
         elif "max_context_window_tokens" not in caps["limits"]:
             caps["limits"]["max_context_window_tokens"] = 0
     return data
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class ServerPluginsBuiltinApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def set(self, params: PluginsBuiltinSetRequest, *, timeout: float | None = None) -> None:
+        "Replaces this server's trusted built-in plugin directories while no sessions are active.\n\nArgs:\n    params: Trusted built-in plugin directories to use for this runtime process."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["paths"]}
+        await self._client.request("plugins.builtin.set", params_dict, **_timeout_kwargs(timeout))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class ServerPluginsMarketplacesApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def list(self, params: PluginsInvocationRequest | None = None, *, timeout: float | None = None) -> MarketplaceListResult:
+        "Lists all registered marketplaces (defaults + user-added).\n\nArgs:\n    params: Optional workspace settings for a plugin catalog or bulk update through the original caller's runtime. Omission retains the server's configuration.\n\nReturns:\n    All registered marketplaces, including built-in defaults."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
+        return MarketplaceListResult.from_dict(await self._client.request("plugins.marketplaces.list", params_dict, **_timeout_kwargs(timeout)))
+
+    async def migrate_retired_default(self, *, timeout: float | None = None) -> MarketplaceMigrationResult:
+        "Restores a retired default marketplace in the runtime's configured profile when a retained plugin install still needs it. Uses retained managed policy without fetching catalogs or policy. Returns the persisted result so a launcher can report the settings change before opening a session or running a plugin command. Repeated calls are guarded per profile; malformed settings and write failures reject the call.\n\nReturns:\n    The retired marketplace migration result for the runtime's configured profile."
+        return MarketplaceMigrationResult.from_dict(await self._client.request("plugins.marketplaces.migrateRetiredDefault", {}, **_timeout_kwargs(timeout)))
+
+    async def add(self, params: PluginsMarketplacesAddRequest, *, timeout: float | None = None) -> MarketplaceAddResult:
+        "Registers a new marketplace from a source (owner/repo, URL, or local path).\n\nArgs:\n    params: Marketplace source and optional working directory for relative-path resolution.\n\nReturns:\n    Result of registering a new marketplace."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["source"]}
+        return MarketplaceAddResult.from_dict(await self._client.request("plugins.marketplaces.add", params_dict, **_timeout_kwargs(timeout)))
+
+    async def remove(self, params: PluginsMarketplacesRemoveRequest, *, timeout: float | None = None) -> MarketplaceRemoveResult:
+        "Removes a previously-registered marketplace. When the marketplace has dependent plugins and `force` is not set, the marketplace is left intact and the result lists the dependents so the caller can decide whether to retry with `force=true`.\n\nArgs:\n    params: Name of the marketplace to remove and an optional force flag.\n\nReturns:\n    Outcome of the remove attempt, including dependent-plugin info when applicable."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        return MarketplaceRemoveResult.from_dict(await self._client.request("plugins.marketplaces.remove", params_dict, **_timeout_kwargs(timeout)))
+
+    async def browse(self, params: PluginsMarketplacesBrowseRequest, *, timeout: float | None = None) -> MarketplaceBrowseResult:
+        "Lists plugins advertised by a registered marketplace.\n\nArgs:\n    params: Name of the marketplace whose plugin catalog to fetch.\n\nReturns:\n    Plugins advertised by the marketplace."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        return MarketplaceBrowseResult.from_dict(await self._client.request("plugins.marketplaces.browse", params_dict, **_timeout_kwargs(timeout)))
+
+    async def refresh(self, params: PluginsMarketplacesRefreshRequest, *, timeout: float | None = None) -> MarketplaceRefreshResult:
+        "Re-fetches one or all registered marketplace catalogs.\n\nArgs:\n    params: Optional marketplace name; omit to refresh all.\n\nReturns:\n    Result of refreshing one or more marketplace catalogs."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return MarketplaceRefreshResult.from_dict(await self._client.request("plugins.marketplaces.refresh", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class ServerPluginsApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+        self.builtin = ServerPluginsBuiltinApi(client)
+        self.marketplaces = ServerPluginsMarketplacesApi(client)
+
+    async def plan_install(self, params: PluginPlanInstallRequest, *, timeout: float | None = None) -> PluginInstallationManagementResult:
+        "Plans installation of an Agent Plugin search candidate from its verified Agent Finder materialisation without writing files. Only candidates that carry a handle can be planned. The review shows only verified data, and installing leaves the plugin disabled until it is enabled through plugins.enable.\n\nArgs:\n    params: Side-effect-free planning of one Agent Plugin search candidate through its Agent Finder materialisation.\n\nReturns:\n    Agent Plugin installation planning result with the honoured contract, or a typed refusal."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","candidateHandle","policySessionId"]}
+        return PluginInstallationManagementResult.from_dict(await self._client.request("plugins.planInstall", params_dict, **_timeout_kwargs(timeout)))
+
+    async def apply_install(self, params: PluginApplyInstallRequest, *, timeout: float | None = None) -> PluginInstallationResult:
+        "Consumes one verified Agent Plugin installation plan, requests explicit human consent through installations.confirm on the original connection, then reacquires and verifies every file and registers the plugin, disabled, exactly as a direct plugin install. The installed plugin is listed, enabled and uninstalled through the existing plugins methods.\n\nArgs:\n    params: Applies exactly one retained verified Agent Plugin installation plan.\n\nReturns:\n    Agent Plugin installation result with the honoured contract, or a typed request/negotiation refusal."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","planHandle","policySessionId"]}
+        return PluginInstallationResult.from_dict(await self._client.request("plugins.applyInstall", params_dict, **_timeout_kwargs(timeout)))
+
+    async def list(self, params: PluginsListRequest | None = None, *, timeout: float | None = None) -> PluginListResult:
+        "Lists plugins installed in user/global state.\n\nArgs:\n    params: Optional read-only plugin discovery context. The runtime resolves account, policy, and workspace trust. This query does not change settings.\n\nReturns:\n    Plugins installed in user/global state."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
+        return PluginListResult.from_dict(await self._client.request("plugins.list", params_dict, **_timeout_kwargs(timeout)))
+
+    async def install(self, params: PluginsInstallRequest, *, timeout: float | None = None) -> PluginInstallResult:
+        "Installs a plugin from a marketplace, GitHub repo, URL, or local path.\n\nArgs:\n    params: Plugin source and optional working directory for relative-path resolution.\n\nReturns:\n    Result of installing a plugin."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["source"]}
+        return PluginInstallResult.from_dict(await self._client.request("plugins.install", params_dict, **_timeout_kwargs(timeout)))
+
+    async def uninstall(self, params: PluginsUninstallRequest, *, timeout: float | None = None) -> None:
+        "Uninstalls an installed plugin.\n\nArgs:\n    params: Name (or spec) of the plugin to uninstall."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        await self._client.request("plugins.uninstall", params_dict, **_timeout_kwargs(timeout))
+
+    async def update(self, params: PluginsUpdateRequest, *, timeout: float | None = None) -> PluginUpdateResult:
+        "Updates an installed plugin to its latest published version.\n\nArgs:\n    params: Name (or spec) of the plugin to update.\n\nReturns:\n    Result of updating a single plugin."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        return PluginUpdateResult.from_dict(await self._client.request("plugins.update", params_dict, **_timeout_kwargs(timeout)))
+
+    async def update_all(self, params: PluginsInvocationRequest | None = None, *, timeout: float | None = None) -> PluginUpdateAllResult:
+        "Updates every installed plugin to its latest published version.\n\nArgs:\n    params: Optional workspace settings for a plugin catalog or bulk update through the original caller's runtime. Omission retains the server's configuration.\n\nReturns:\n    Result of updating all installed plugins."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
+        return PluginUpdateAllResult.from_dict(await self._client.request("plugins.updateAll", params_dict, **_timeout_kwargs(timeout)))
+
+    async def enable(self, params: PluginsEnableRequest, *, timeout: float | None = None) -> None:
+        "Enables installed plugins for new sessions.\n\nArgs:\n    params: Plugin names (or specs) to enable, plus the optional working directory the repository-controlled guard is evaluated against."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["names"]}
+        await self._client.request("plugins.enable", params_dict, **_timeout_kwargs(timeout))
+
+    async def disable(self, params: PluginsDisableRequest, *, timeout: float | None = None) -> None:
+        "Disables installed plugins for new sessions.\n\nArgs:\n    params: Plugin names (or specs) to disable, plus the optional working directory the repository-controlled guard is evaluated against."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["names"]}
+        await self._client.request("plugins.disable", params_dict, **_timeout_kwargs(timeout))
+
+    async def activate(self, params: PluginsActivateRequest, *, timeout: float | None = None) -> PluginsActivateResult:
+        "Runs the sessionStart hooks of one built-in plugin without a session, so that the plugin can do its host setup before the first turn. Settings and managed policy that turn off the plugin or its hooks apply. The hooks run on the host, not in a session sandbox, so managed policy that turns on the sandbox prevents activation. The call fails when managed policy cannot be determined. Extension callers cannot use this method.\n\nArgs:\n    params: Built-in plugin to activate.\n\nReturns:\n    The result of a built-in plugin activation."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        return PluginsActivateResult.from_dict(await self._client.request("plugins.activate", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class ServerSkillsInstallationsApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def list(self, params: SkillInstallationsRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
+        "Lists owned verified Agent Finder Skill installations for the selected existing session. Listing is never gated by the Skill-install feature flag.\n\nArgs:\n    params: Inventory request under an explicitly selected existing session.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","policySessionId"]}
+        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.installations.list", params_dict, **_timeout_kwargs(timeout)))
+
+    async def recover(self, params: SkillInstallationsRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
+        "Reconciles interrupted owned Skill installation work for the selected existing session, then inspects owned inventory. Recovery is never gated by the Skill-install feature flag.\n\nArgs:\n    params: Inventory request under an explicitly selected existing session.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","policySessionId"]}
+        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.installations.recover", params_dict, **_timeout_kwargs(timeout)))
+
+    async def status(self, params: SkillInstallationOperationRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
+        "Inspects a known Skill installation operation on its original runtime connection. Status is never gated by the Skill-install feature flag.\n\nArgs:\n    params: Existing-operation control. A new session selector is deliberately not accepted.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","operationId"]}
+        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.installations.status", params_dict, **_timeout_kwargs(timeout)))
+
+    async def cancel(self, params: SkillInstallationOperationRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
+        "Requests cancellation of a known Skill installation operation before commit. Already-started durable work requires recovery instead of silent replay.\n\nArgs:\n    params: Existing-operation control. A new session selector is deliberately not accepted.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","operationId"]}
+        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.installations.cancel", params_dict, **_timeout_kwargs(timeout)))
+
+    async def set_enabled(self, params: SkillSetEnabledRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
+        "Atomically persists enablement for one owned Agent Finder Skill and reconciles the selected bound session. Enablement is installation-scoped by receipt identity and is never gated by the Skill-install feature flag.\n\nArgs:\n    params: Persisted enablement update for one owned Skill installation.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","installationId","enabled","policySessionId"]}
+        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.installations.setEnabled", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class ServerSkillsConfigApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def set_disabled_skills(self, params: SkillsConfigSetDisabledSkillsRequest, *, timeout: float | None = None) -> None:
+        "Replaces the global list of disabled skills.\n\nArgs:\n    params: Skill names to mark as disabled in global configuration, replacing any previous list."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["disabledSkills"]}
+        await self._client.request("skills.config.setDisabledSkills", params_dict, **_timeout_kwargs(timeout))
+
+    async def set_skill_disabled(self, params: SkillsConfigSetSkillDisabledRequest, *, timeout: float | None = None) -> None:
+        "Atomically adds or removes one skill from the disabled list.\n\nArgs:\n    params: Adds or removes a single skill from the global disabled list, leaving every other entry untouched."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name","disabled"]}
+        await self._client.request("skills.config.setSkillDisabled", params_dict, **_timeout_kwargs(timeout))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class ServerSkillsApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+        self.installations = ServerSkillsInstallationsApi(client)
+        self.config = ServerSkillsConfigApi(client)
+
+    async def plan_install(self, params: SkillPlanInstallRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
+        "Plans installation of a verified Agent Finder Skill candidate without writing files. The returned review is safe to present to a user and installing always leaves the Skill disabled until separately enabled.\n\nArgs:\n    params: Side-effect-free planning of one verified Agent Finder Skill candidate.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","candidateHandle","policySessionId"]}
+        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.planInstall", params_dict, **_timeout_kwargs(timeout)))
+
+    async def apply_install(self, params: SkillApplyInstallRequest, *, timeout: float | None = None) -> SkillInstallationResult:
+        "Consumes one verified Skill installation plan, requests explicit human consent through installations.confirm on the original connection, then revalidates and installs the Skill disabled.\n\nArgs:\n    params: Applies exactly one retained verified Skill installation plan.\n\nReturns:\n    Skill installation result with the honoured contract, or a typed request/negotiation refusal."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","planHandle","policySessionId"]}
+        return SkillInstallationResult.from_dict(await self._client.request("skills.applyInstall", params_dict, **_timeout_kwargs(timeout)))
+
+    async def plan_uninstall(self, params: SkillPlanUninstallRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
+        "Prepares a read-only removal plan for an owned verified Agent Finder Skill installation. Uninstall planning is never gated by the Skill-install feature flag.\n\nArgs:\n    params: Read-only preparation of one owned Skill removal under fresh selected-session authority.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","installationId","policySessionId"]}
+        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.planUninstall", params_dict, **_timeout_kwargs(timeout)))
+
+    async def apply_uninstall(self, params: SkillApplyUninstallRequest, *, timeout: float | None = None) -> SkillInstallationResult:
+        "Consumes an owned Skill removal plan, requests explicit human consent through installations.confirm, refuses drift, and removes the exact owned files through quarantine.\n\nArgs:\n    params: One-use application of the exact retained Skill removal plan.\n\nReturns:\n    Skill installation result with the honoured contract, or a typed request/negotiation refusal."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","planHandle","policySessionId"]}
+        return SkillInstallationResult.from_dict(await self._client.request("skills.applyUninstall", params_dict, **_timeout_kwargs(timeout)))
+
+    async def discover(self, params: SkillsDiscoverRequest, *, timeout: float | None = None) -> ServerSkillList:
+        "Discovers skills across global and project sources.\n\nArgs:\n    params: Optional project paths and additional skill directories to include in discovery.\n\nReturns:\n    Skills discovered across global and project sources."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return ServerSkillList.from_dict(await self._client.request("skills.discover", params_dict, **_timeout_kwargs(timeout)))
+
+    async def get_discovery_paths(self, params: SkillsGetDiscoveryPathsRequest, *, timeout: float | None = None) -> SkillDiscoveryPathList:
+        "Returns the canonical directories where a client may create skills that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.\n\nArgs:\n    params: Optional project paths to enumerate.\n\nReturns:\n    Canonical locations where skills can be created so the runtime will recognize them."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SkillDiscoveryPathList.from_dict(await self._client.request("skills.getDiscoveryPaths", params_dict, **_timeout_kwargs(timeout)))
+
+    async def install_source(self, params: SkillsInstallSourceRequest, *, timeout: float | None = None) -> SkillsInstallSourceResult:
+        "Installs a user-selected HTTPS or local skill file into personal or project storage, or registers a local discovery directory. This direct-source operation preserves source installation behavior; it does not accept or replace verified catalog plans, request catalog confirmation, or change skill enablement. The caller persists the returned discovery directories.\n\nArgs:\n    params: Installs a user-selected skill source without catalog plan semantics.\n\nReturns:\n    Result of direct source installation. Catalog consent and defaults remain separate."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["source","cwd","personalSkillsDir","projectSkillsDir","project","skillDirectories","userAgent"]}
+        return SkillsInstallSourceResult.from_dict(await self._client.request("skills.installSource", params_dict, **_timeout_kwargs(timeout)))
+
+    async def remove_source(self, params: SkillsRemoveSourceRequest, *, timeout: float | None = None) -> SkillsRemoveSourceOutcome:
+        "Removes a directly installed local skill or unregisters a discovery directory without deleting its contents. Directory removal needs no skill inventory. Other targets return needs-inventory without mutation when inventory is absent. This operation preserves direct-source ownership rules and does not replace receipt-backed verified uninstall plans or their consent. The caller persists returned discovery directories and manages disabled settings.\n\nArgs:\n    params: Removes a user-selected source without changing verified catalog removal.\n\nReturns:\n    Direct removal or a request for the inventory needed to resolve a file."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["target","cwd","skillDirectories"]}
+        return SkillsRemoveSourceOutcome.from_dict(await self._client.request("skills.removeSource", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class ServerAccountApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def get_quota(self, params: AccountGetQuotaRequest, *, timeout: float | None = None) -> AccountGetQuotaResult:
+        "Gets Copilot quota usage for the current or opaquely selected authenticated user.\n\nArgs:\n    params: Optional opaque account selection or compatibility GitHub token used to look up quota.\n\nReturns:\n    Quota usage snapshots for the resolved user, keyed by quota type."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return AccountGetQuotaResult.from_dict(await self._client.request("account.getQuota", params_dict, **_timeout_kwargs(timeout)))
+
+    async def get_current_auth(self, *, timeout: float | None = None) -> AccountGetCurrentAuthResult:
+        "Gets the currently active authentication credentials from the global auth manager.\n\nReturns:\n    Current authentication state"
+        return AccountGetCurrentAuthResult.from_dict(await self._client.request("account.getCurrentAuth", {}, **_timeout_kwargs(timeout)))
+
+    async def get_all_users(self, *, timeout: float | None = None) -> list:
+        "Gets all authenticated users available for account switching.\n\nReturns:\n    List of all authenticated users"
+        return list(await self._client.request("account.getAllUsers", {}, **_timeout_kwargs(timeout)))
+
+    async def login(self, params: AccountLoginRequest, *, timeout: float | None = None) -> AccountLoginResult:
+        "Validates and stores authentication credentials. When login is omitted, resolves the authenticated user from the token before persistence.\n\nArgs:\n    params: Credentials to validate and store. Omit login to resolve the authenticated user from the token.\n\nReturns:\n    Result of a successful login; throws on failure"
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["host","token"]}
+        return AccountLoginResult.from_dict(await self._client.request("account.login", params_dict, **_timeout_kwargs(timeout)))
+
+    async def logout(self, params: AccountLogoutRequest, *, timeout: float | None = None) -> AccountLogoutResult:
+        "Removes user authentication from keychain and persisted state.\n\nArgs:\n    params: User to log out\n\nReturns:\n    Logout result indicating if more users remain"
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return AccountLogoutResult.from_dict(await self._client.request("account.logout", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class ServerSessionsApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def open(self, params: SessionOpenParams, *, timeout: float | None = None) -> SessionOpenResult:
+        "Creates or resumes a local session and returns the opened session ID.\n\nArgs:\n    params: Open a session by creating, resuming, attaching, connecting to a remote, or handing off.\n\nReturns:\n    Result of opening a session."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionOpenResult.from_dict(await self._client.request("sessions.open", params_dict, **_timeout_kwargs(timeout)))
+
+    async def fork(self, params: SessionsForkRequest, *, timeout: float | None = None) -> SessionsForkResult:
+        "Creates a new session by forking persisted history from an existing session.\n\nArgs:\n    params: Source session identifier to fork from, optional event-ID boundary, and optional friendly name for the new session.\n\nReturns:\n    Identifier and optional friendly name assigned to the newly forked session."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsForkResult.from_dict(await self._client.request("sessions.fork", params_dict, **_timeout_kwargs(timeout)))
+
+    async def connect(self, params: ConnectRemoteSessionParams, *, timeout: float | None = None) -> RemoteSessionConnectionResult:
+        "Connects to an existing remote session and exposes it as an SDK session.\n\nArgs:\n    params: Remote session connection parameters.\n\nReturns:\n    Remote session connection result."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return RemoteSessionConnectionResult.from_dict(await self._client.request("sessions.connect", params_dict, **_timeout_kwargs(timeout)))
+
+    async def list(self, params: SessionsListRequest, *, timeout: float | None = None) -> SessionList:
+        "Lists sessions, optionally filtered by source and working-directory context. Returned entries are discriminated by `isRemote`: local entries carry only the lightweight `LocalSessionMetadataValue` shape; remote entries carry the full `RemoteSessionMetadataValue` shape (repository, PR number, taskType, etc.).\n\nArgs:\n    params: Optional source filter, metadata-load limit, and context filter applied to the returned sessions.\n\nReturns:\n    Sessions matching the filter, ordered most-recently-modified first."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionList.from_dict(await self._client.request("sessions.list", params_dict, **_timeout_kwargs(timeout)))
+
+    async def get_client_metadata(self, params: SessionsGetClientMetadataRequest, *, timeout: float | None = None) -> list:
+        "Reads client-owned metadata for multiple persisted local sessions without opening them. Results preserve request order and report missing, corrupt, unsupported, or temporarily unavailable sessions independently.\n\nArgs:\n    params: Bounded batch request for client-owned metadata from persisted local sessions.\n\nReturns:\n    Ordered client metadata outcomes for the requested local sessions."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionIds"]}
+        return list(await self._client.request("sessions.getClientMetadata", params_dict, **_timeout_kwargs(timeout)))
+
+    async def read_persisted_events(self, params: SessionsReadPersistedEventsRequest, *, timeout: float | None = None) -> EventsReadResult:
+        "Reads a page of durable events directly from a local session's persisted journal without creating, resuming, or activating the session. The first read pins the currently opened journal generation and its byte-length boundary; opaque cursor continuations remain on that generation across runtime-owned compaction, truncation, and rewrite operations, which replace the live path atomically, and events appended after the boundary are excluded. For cold hydration, await the first successful page before activation and establish lossless live-event buffering before resume; merge subsequent live events by ID, preserving persisted order and letting live payloads win. Continuations are process-local, single-use capabilities bound to the originating session and storage context and must be paged sequentially; concurrent or repeated use of the same cursor expires that duplicate read rather than reading the generation twice. A complete snapshot has cursorStatus 'ok' and hasMore false. Snapshots expire after five idle minutes, with at most eight retained per process and idle-only eviction under pressure; completion and cancelled-worker exit release their handles. No transcript copy is created, but retained handles may keep replaced files' disk blocks alive until release. Pages have a soft 1 MiB serialized event-array budget including resolved binary assets; one oversized event is returned alone to guarantee progress. Working memory also includes a record/lookahead and asset resolution; resolving the first binary reference may scan the full pinned generation to build a bounded offset index. If the snapshot expires, is evicted, is cancelled before a continuation is established, or becomes unreadable after an observable unsupported in-place shortening, the continuation returns cursorStatus 'expired' with an empty terminal page and never falls back to a different generation. A missing or initially unreadable journal is an RPC error. Persisted history excludes ephemeral events and may omit payloads that are reconstructed only for an active session; use the active session event stream for post-resume live events.\n\nArgs:\n    params: Pagination options for reading an inactive or active local session's persisted event journal.\n\nReturns:\n    Batch of session events returned by a read, with cursor and continuation metadata."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return EventsReadResult.from_dict(await self._client.request("sessions.readPersistedEvents", params_dict, **_timeout_kwargs(timeout)))
+
+    async def find_by_task_id(self, params: SessionsFindByTaskIDRequest, *, timeout: float | None = None) -> SessionsFindByTaskIDResult:
+        "Finds the local session bound to a GitHub task ID, if any.\n\nArgs:\n    params: GitHub task ID to look up.\n\nReturns:\n    ID of the local session bound to the given GitHub task, or omitted when none."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["taskId"]}
+        return SessionsFindByTaskIDResult.from_dict(await self._client.request("sessions.findByTaskId", params_dict, **_timeout_kwargs(timeout)))
+
+    async def find_by_prefix(self, params: SessionsFindByPrefixRequest, *, timeout: float | None = None) -> SessionsFindByPrefixResult:
+        "Resolves a UUID prefix to a unique session ID, if exactly one session matches.\n\nArgs:\n    params: UUID prefix to resolve to a unique session ID.\n\nReturns:\n    Session ID matching the prefix, omitted when no unique match exists."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["prefix"]}
+        return SessionsFindByPrefixResult.from_dict(await self._client.request("sessions.findByPrefix", params_dict, **_timeout_kwargs(timeout)))
+
+    async def get_last_for_context(self, params: SessionsGetLastForContextRequest, *, timeout: float | None = None) -> SessionsGetLastForContextResult:
+        "Returns the most-relevant prior session for a given working-directory context.\n\nArgs:\n    params: Optional working-directory context used to score session relevance.\n\nReturns:\n    Most-relevant session ID for the supplied context, or omitted when no sessions exist."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsGetLastForContextResult.from_dict(await self._client.request("sessions.getLastForContext", params_dict, **_timeout_kwargs(timeout)))
+
+    async def has_events(self, params: SessionsHasEventsRequest, *, timeout: float | None = None) -> SessionsHasEventsResult:
+        "Checks whether a local session's persisted event-log path exists, including an empty log, without opening the session or scanning the session catalog. Hosts use this to prefer an exact local session over a remote task or a UUID-prefix lookup. Metadata-only sessions without a log return false.\n\nArgs:\n    params: Local session whose persisted event-log presence to check without opening or scanning it.\n\nReturns:\n    Whether the local session has a persisted event-log path, including an empty log."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsHasEventsResult.from_dict(await self._client.request("sessions.hasEvents", params_dict, **_timeout_kwargs(timeout)))
+
+    async def get_sizes(self, *, timeout: float | None = None) -> SessionSizes:
+        "Returns the on-disk byte size of each session's workspace directory.\n\nReturns:\n    Map of sessionId -> on-disk size in bytes for each session's workspace directory."
+        return SessionSizes.from_dict(await self._client.request("sessions.getSizes", {}, **_timeout_kwargs(timeout)))
+
+    async def check_in_use(self, params: SessionsCheckInUseRequest, *, timeout: float | None = None) -> SessionsCheckInUseResult:
+        "Returns the subset of the supplied session IDs that are currently held by another running process.\n\nArgs:\n    params: Session IDs to test for live in-use locks.\n\nReturns:\n    Session IDs from the input set that are currently in use by another process."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionIds"]}
+        return SessionsCheckInUseResult.from_dict(await self._client.request("sessions.checkInUse", params_dict, **_timeout_kwargs(timeout)))
+
+    async def close(self, params: SessionsCloseRequest, *, timeout: float | None = None) -> SessionsCloseResult:
+        "Closes a session: emits shutdown, flushes pending events, releases the in-use lock, and disposes the active session.\n\nArgs:\n    params: Session ID to close.\n\nReturns:\n    Closes a session: emits shutdown, flushes pending events to disk, releases the in-use lock, disposes the active session. Idempotent: succeeds even if the session is not currently active."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsCloseResult.from_dict(await self._client.request("sessions.close", params_dict, **_timeout_kwargs(timeout)))
+
+    async def bulk_delete(self, params: SessionsBulkDeleteRequest, *, timeout: float | None = None) -> SessionBulkDeleteResult:
+        "Closes, deactivates, and deletes a set of sessions, returning the bytes freed per session.\n\nArgs:\n    params: Session IDs to close, deactivate, and delete from disk.\n\nReturns:\n    Map of sessionId -> bytes freed by removing the session's workspace directory."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionIds"]}
+        return SessionBulkDeleteResult.from_dict(await self._client.request("sessions.bulkDelete", params_dict, **_timeout_kwargs(timeout)))
+
+    async def prune_old(self, params: SessionsPruneOldRequest, *, timeout: float | None = None) -> SessionPruneResult:
+        "Deletes sessions older than the given threshold, with optional dry-run and exclusion list.\n\nArgs:\n    params: Age threshold and optional flags controlling which old sessions are pruned (or simulated when dryRun is true).\n\nReturns:\n    Outcome of the prune operation: deleted IDs, dry-run candidates, skipped IDs, total bytes freed, and the dry-run flag."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["olderThanDays"]}
+        return SessionPruneResult.from_dict(await self._client.request("sessions.pruneOld", params_dict, **_timeout_kwargs(timeout)))
+
+    async def save(self, params: SessionsSaveRequest, *, timeout: float | None = None) -> SessionsSaveResult:
+        "Flushes a session's pending events to disk.\n\nArgs:\n    params: Session ID whose pending events should be flushed to disk.\n\nReturns:\n    Flush a session's pending events to disk. No-op when no writer exists for the session (e.g., already closed)."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsSaveResult.from_dict(await self._client.request("sessions.save", params_dict, **_timeout_kwargs(timeout)))
+
+    async def release_lock(self, params: SessionsReleaseLockRequest, *, timeout: float | None = None) -> SessionsReleaseLockResult:
+        "Releases the in-use lock held by this process for a session.\n\nArgs:\n    params: Session ID whose in-use lock should be released.\n\nReturns:\n    Release the in-use lock held by this process for the given session. No-op when this process does not currently hold a lock for the session."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsReleaseLockResult.from_dict(await self._client.request("sessions.releaseLock", params_dict, **_timeout_kwargs(timeout)))
+
+    async def enrich_metadata(self, params: SessionsEnrichMetadataRequest, *, timeout: float | None = None) -> SessionEnrichMetadataResult:
+        "Backfills missing summary and context fields on the supplied session metadata records.\n\nArgs:\n    params: Session metadata records to enrich with summary and context information.\n\nReturns:\n    The enriched metadata records, with summary and context fields backfilled where available. Sessions confirmed empty and unnamed are omitted."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessions"]}
+        return SessionEnrichMetadataResult.from_dict(await self._client.request("sessions.enrichMetadata", params_dict, **_timeout_kwargs(timeout)))
+
+    async def reload_plugin_hooks(self, params: SessionsReloadPluginHooksRequest, *, timeout: float | None = None) -> SessionsReloadPluginHooksResult:
+        "Reloads user, plugin, and (optionally) repo hooks on the active session.\n\nArgs:\n    params: Active session ID and an optional flag for deferring repo-level hooks until folder trust.\n\nReturns:\n    Reload all hooks (user, plugin, optionally repo) and apply them to the active session. Call after installing or removing plugins so their hooks take effect immediately. No-op when no active session matches the given sessionId."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsReloadPluginHooksResult.from_dict(await self._client.request("sessions.reloadPluginHooks", params_dict, **_timeout_kwargs(timeout)))
+
+    async def load_deferred_repo_hooks(self, params: SessionsLoadDeferredRepoHooksRequest, *, timeout: float | None = None) -> SessionLoadDeferredRepoHooksResult:
+        "Loads previously-deferred repo-level hooks on the active session, returning queued startup prompts.\n\nArgs:\n    params: Active session ID whose deferred repo-level hooks should be loaded.\n\nReturns:\n    Queued repo-level startup prompts and the total hook command count after loading."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionLoadDeferredRepoHooksResult.from_dict(await self._client.request("sessions.loadDeferredRepoHooks", params_dict, **_timeout_kwargs(timeout)))
+
+    async def set_additional_plugins(self, params: SessionsSetAdditionalPluginsRequest, *, timeout: float | None = None) -> SessionsSetAdditionalPluginsResult:
+        "Replaces the manager-wide additional plugins registered with the session manager.\n\nArgs:\n    params: Manager-wide additional plugins to register; replaces any previously-configured set.\n\nReturns:\n    Replace the manager-wide additional plugins. New session creations and subsequent hook reloads see the new set; already-running sessions keep their existing hook installation until the next reload."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["plugins"]}
+        return SessionsSetAdditionalPluginsResult.from_dict(await self._client.request("sessions.setAdditionalPlugins", params_dict, **_timeout_kwargs(timeout)))
+
+    async def start_remote_control(self, params: SessionsStartRemoteControlRequest, *, timeout: float | None = None) -> RemoteControlStatusResult:
+        "Attaches the runtime-managed remote-control singleton to a session, awaiting initial setup. If remote control is already attached to a different session, the singleton is transferred (preserving the underlying Mission Control connection). Returns the final status.\n\nArgs:\n    params: Parameters for attaching the remote-control singleton to a session.\n\nReturns:\n    Wrapper for the singleton's current status."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["config"]}
+        return RemoteControlStatusResult.from_dict(await self._client.request("sessions.startRemoteControl", params_dict, **_timeout_kwargs(timeout)))
+
+    async def transfer_remote_control(self, params: SessionsTransferRemoteControlRequest, *, timeout: float | None = None) -> RemoteControlTransferResult:
+        "Atomically rebinds the remote-control singleton to a different session, preserving the underlying Mission Control connection. When `expectedFromSessionId` is provided and does not match the singleton's current `attachedSessionId`, the transfer is rejected with `transferred: false` and the current status is returned unchanged.\n\nArgs:\n    params: Parameters for atomically rebinding the remote-control singleton.\n\nReturns:\n    Outcome of a transferRemoteControl call."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["toSessionId"]}
+        return RemoteControlTransferResult.from_dict(await self._client.request("sessions.transferRemoteControl", params_dict, **_timeout_kwargs(timeout)))
+
+    async def set_remote_control_steering(self, params: SessionsSetRemoteControlSteeringRequest, *, timeout: float | None = None) -> RemoteControlStatusResult:
+        "Patches the steering state of the active remote-control singleton. When remote control is off, this is a no-op and the off status is returned. Today only `enabled: true` is actionable on the underlying exporter; passing `false` is reserved for future use.\n\nArgs:\n    params: Patch for the singleton's steering state.\n\nReturns:\n    Wrapper for the singleton's current status."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["enabled"]}
+        return RemoteControlStatusResult.from_dict(await self._client.request("sessions.setRemoteControlSteering", params_dict, **_timeout_kwargs(timeout)))
+
+    async def stop_remote_control(self, params: SessionsStopRemoteControlRequest, *, timeout: float | None = None) -> RemoteControlStopResult:
+        "Stops the remote-control singleton. When `expectedSessionId` is provided and does not match the singleton's current `attachedSessionId`, the stop is rejected with `stopped: false` and the current status is returned unchanged (unless `force` is set, in which case the singleton is unconditionally torn down).\n\nArgs:\n    params: Parameters for stopping the remote-control singleton.\n\nReturns:\n    Outcome of a stopRemoteControl call."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return RemoteControlStopResult.from_dict(await self._client.request("sessions.stopRemoteControl", params_dict, **_timeout_kwargs(timeout)))
+
+    async def get_remote_control_status(self, *, timeout: float | None = None) -> RemoteControlStatusResult:
+        "Returns the current state of the remote-control singleton, including the attached session id and frontend URL when active.\n\nReturns:\n    Wrapper for the singleton's current status."
+        return RemoteControlStatusResult.from_dict(await self._client.request("sessions.getRemoteControlStatus", {}, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class ServerSecretsApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def add_filter_values(self, params: SecretsAddFilterValuesRequest, *, timeout: float | None = None) -> SecretsAddFilterValuesResult:
+        "Registers secret values for best-effort redaction in session logs and exports while this client remains connected. Repeated adds are idempotent. Discouraged for runtime code: retain an owned secret registration instead. Remove rotating or unused values with secrets.removeFilterValues; historical output and late echoes may no longer be redacted after removal or disconnect.\n\nArgs:\n    params: Secret values to add to the redaction filter.\n\nReturns:\n    Confirmation that the secret values were registered."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["values"]}
+        return SecretsAddFilterValuesResult.from_dict(await self._client.request("secrets.addFilterValues", params_dict, **_timeout_kwargs(timeout)))
+
+    async def remove_filter_values(self, params: SecretsRemoveFilterValuesRequest, *, timeout: float | None = None) -> SecretsRemoveFilterValuesResult:
+        "Releases values previously added by this client. Repeated or unmatched removals are no-ops; other live registrations remain effective. Only remove values once they are reasonably unlikely to be logged again: historical output and late echoes may no longer be redacted.\n\nArgs:\n    params: Secret values this client no longer needs redacted.\n\nReturns:\n    Confirmation that this client's registrations were released."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["values"]}
+        return SecretsRemoveFilterValuesResult.from_dict(await self._client.request("secrets.removeFilterValues", params_dict, **_timeout_kwargs(timeout)))
+
+    async def filter(self, params: SecretsFilterRequest, *, timeout: float | None = None) -> SecretsFilterResult:
+        "Redacts text or JSON with the runtime's process filter, including registered values and live environment sources. Requires COPILOT_ENABLE_SECRET_FILTERING=true in the runtime's environment, as for secrets.addFilterValues.\n\nArgs:\n    params: Content to redact with the runtime's process filter.\n\nReturns:\n    Content after runtime-owned redaction."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["text"]}
+        return SecretsFilterResult.from_dict(await self._client.request("secrets.filter", params_dict, **_timeout_kwargs(timeout)))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -86051,63 +90015,14 @@ class ServerToolsApi:
 
 
 # Experimental: this API group is experimental and may change or be removed.
-class ServerAccountApi:
-    def __init__(self, client: "JsonRpcClient"):
-        self._client = client
-
-    async def get_quota(self, params: AccountGetQuotaRequest, *, timeout: float | None = None) -> AccountGetQuotaResult:
-        "Gets Copilot quota usage for the current or opaquely selected authenticated user.\n\nArgs:\n    params: Optional opaque account selection or compatibility GitHub token used to look up quota.\n\nReturns:\n    Quota usage snapshots for the resolved user, keyed by quota type."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return AccountGetQuotaResult.from_dict(await self._client.request("account.getQuota", params_dict, **_timeout_kwargs(timeout)))
-
-    async def get_current_auth(self, *, timeout: float | None = None) -> AccountGetCurrentAuthResult:
-        "Gets the currently active authentication credentials from the global auth manager.\n\nReturns:\n    Current authentication state"
-        return AccountGetCurrentAuthResult.from_dict(await self._client.request("account.getCurrentAuth", {}, **_timeout_kwargs(timeout)))
-
-    async def get_all_users(self, *, timeout: float | None = None) -> list:
-        "Gets all authenticated users available for account switching.\n\nReturns:\n    List of all authenticated users"
-        return list(await self._client.request("account.getAllUsers", {}, **_timeout_kwargs(timeout)))
-
-    async def login(self, params: AccountLoginRequest, *, timeout: float | None = None) -> AccountLoginResult:
-        "Validates and stores authentication credentials. When login is omitted, resolves the authenticated user from the token before persistence.\n\nArgs:\n    params: Credentials to validate and store. Omit login to resolve the authenticated user from the token.\n\nReturns:\n    Result of a successful login; throws on failure"
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["host","token"]}
-        return AccountLoginResult.from_dict(await self._client.request("account.login", params_dict, **_timeout_kwargs(timeout)))
-
-    async def logout(self, params: AccountLogoutRequest, *, timeout: float | None = None) -> AccountLogoutResult:
-        "Removes user authentication from keychain and persisted state.\n\nArgs:\n    params: User to log out\n\nReturns:\n    Logout result indicating if more users remain"
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return AccountLogoutResult.from_dict(await self._client.request("account.logout", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class ServerSecretsApi:
-    def __init__(self, client: "JsonRpcClient"):
-        self._client = client
-
-    async def add_filter_values(self, params: SecretsAddFilterValuesRequest, *, timeout: float | None = None) -> SecretsAddFilterValuesResult:
-        "Registers secret values for best-effort redaction in session logs and exports while this client remains connected. Repeated adds are idempotent. Discouraged for runtime code: retain an owned secret registration instead. Remove rotating or unused values with secrets.removeFilterValues; historical output and late echoes may no longer be redacted after removal or disconnect.\n\nArgs:\n    params: Secret values to add to the redaction filter.\n\nReturns:\n    Confirmation that the secret values were registered."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["values"]}
-        return SecretsAddFilterValuesResult.from_dict(await self._client.request("secrets.addFilterValues", params_dict, **_timeout_kwargs(timeout)))
-
-    async def remove_filter_values(self, params: SecretsRemoveFilterValuesRequest, *, timeout: float | None = None) -> SecretsRemoveFilterValuesResult:
-        "Releases values previously added by this client. Repeated or unmatched removals are no-ops; other live registrations remain effective. Only remove values once they are reasonably unlikely to be logged again: historical output and late echoes may no longer be redacted.\n\nArgs:\n    params: Secret values this client no longer needs redacted.\n\nReturns:\n    Confirmation that this client's registrations were released."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["values"]}
-        return SecretsRemoveFilterValuesResult.from_dict(await self._client.request("secrets.removeFilterValues", params_dict, **_timeout_kwargs(timeout)))
-
-    async def filter(self, params: SecretsFilterRequest, *, timeout: float | None = None) -> SecretsFilterResult:
-        "Redacts text or JSON with the runtime's process filter, including registered values and live environment sources. Requires COPILOT_ENABLE_SECRET_FILTERING=true in the runtime's environment, as for secrets.addFilterValues.\n\nArgs:\n    params: Content to redact with the runtime's process filter.\n\nReturns:\n    Content after runtime-owned redaction."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["text"]}
-        return SecretsFilterResult.from_dict(await self._client.request("secrets.filter", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
 class ServerMcpConfigApi:
     def __init__(self, client: "JsonRpcClient"):
         self._client = client
 
-    async def list(self, *, timeout: float | None = None) -> MCPConfigList:
-        "Lists MCP servers from user configuration.\n\nReturns:\n    User-configured MCP servers, keyed by server name."
-        return MCPConfigList.from_dict(await self._client.request("mcp.config.list", {}, **_timeout_kwargs(timeout)))
+    async def list(self, params: MCPConfigListRequest | None = None, *, timeout: float | None = None) -> MCPConfigList:
+        "Lists MCP servers from user configuration.\n\nArgs:\n    params: Optional configuration root for user MCP servers. Omission retains the connection's root.\n\nReturns:\n    User-configured MCP servers, keyed by server name."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
+        return MCPConfigList.from_dict(await self._client.request("mcp.config.list", params_dict, **_timeout_kwargs(timeout)))
 
     async def add(self, params: MCPConfigAddRequest, *, timeout: float | None = None) -> None:
         "Adds an MCP server to user configuration.\n\nArgs:\n    params: MCP server name and configuration to add to user configuration."
@@ -86237,203 +90152,6 @@ class ServerInstructionsApi:
         "Returns the canonical files and directories where a client may create custom instructions that the runtime will recognize, including ones that do not exist yet. Repository targets become active once created.\n\nArgs:\n    params: Optional project paths to include when enumerating instruction discovery targets.\n\nReturns:\n    Canonical files and directories where custom instructions can be created so the runtime will recognize them."
         params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
         return InstructionDiscoveryPathList.from_dict(await self._client.request("instructions.getDiscoveryPaths", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class ServerSkillsInstallationsApi:
-    def __init__(self, client: "JsonRpcClient"):
-        self._client = client
-
-    async def list(self, params: SkillInstallationsRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
-        "Lists owned verified Agent Finder Skill installations for the selected existing session. Listing is never gated by the Skill-install feature flag.\n\nArgs:\n    params: Inventory request under an explicitly selected existing session.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","policySessionId"]}
-        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.installations.list", params_dict, **_timeout_kwargs(timeout)))
-
-    async def recover(self, params: SkillInstallationsRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
-        "Reconciles interrupted owned Skill installation work for the selected existing session, then inspects owned inventory. Recovery is never gated by the Skill-install feature flag.\n\nArgs:\n    params: Inventory request under an explicitly selected existing session.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","policySessionId"]}
-        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.installations.recover", params_dict, **_timeout_kwargs(timeout)))
-
-    async def status(self, params: SkillInstallationOperationRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
-        "Inspects a known Skill installation operation on its original runtime connection. Status is never gated by the Skill-install feature flag.\n\nArgs:\n    params: Existing-operation control. A new session selector is deliberately not accepted.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","operationId"]}
-        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.installations.status", params_dict, **_timeout_kwargs(timeout)))
-
-    async def cancel(self, params: SkillInstallationOperationRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
-        "Requests cancellation of a known Skill installation operation before commit. Already-started durable work requires recovery instead of silent replay.\n\nArgs:\n    params: Existing-operation control. A new session selector is deliberately not accepted.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","operationId"]}
-        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.installations.cancel", params_dict, **_timeout_kwargs(timeout)))
-
-    async def set_enabled(self, params: SkillSetEnabledRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
-        "Atomically persists enablement for one owned Agent Finder Skill and reconciles the selected bound session. Enablement is installation-scoped by receipt identity and is never gated by the Skill-install feature flag.\n\nArgs:\n    params: Persisted enablement update for one owned Skill installation.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","installationId","enabled","policySessionId"]}
-        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.installations.setEnabled", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class ServerSkillsConfigApi:
-    def __init__(self, client: "JsonRpcClient"):
-        self._client = client
-
-    async def set_disabled_skills(self, params: SkillsConfigSetDisabledSkillsRequest, *, timeout: float | None = None) -> None:
-        "Replaces the global list of disabled skills.\n\nArgs:\n    params: Skill names to mark as disabled in global configuration, replacing any previous list."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["disabledSkills"]}
-        await self._client.request("skills.config.setDisabledSkills", params_dict, **_timeout_kwargs(timeout))
-
-    async def set_skill_disabled(self, params: SkillsConfigSetSkillDisabledRequest, *, timeout: float | None = None) -> None:
-        "Atomically adds or removes one skill from the disabled list.\n\nArgs:\n    params: Adds or removes a single skill from the global disabled list, leaving every other entry untouched."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name","disabled"]}
-        await self._client.request("skills.config.setSkillDisabled", params_dict, **_timeout_kwargs(timeout))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class ServerSkillsApi:
-    def __init__(self, client: "JsonRpcClient"):
-        self._client = client
-        self.installations = ServerSkillsInstallationsApi(client)
-        self.config = ServerSkillsConfigApi(client)
-
-    async def plan_install(self, params: SkillPlanInstallRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
-        "Plans installation of a verified Agent Finder Skill candidate without writing files. The returned review is safe to present to a user and installing always leaves the Skill disabled until separately enabled.\n\nArgs:\n    params: Side-effect-free planning of one verified Agent Finder Skill candidate.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","candidateHandle","policySessionId"]}
-        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.planInstall", params_dict, **_timeout_kwargs(timeout)))
-
-    async def apply_install(self, params: SkillApplyInstallRequest, *, timeout: float | None = None) -> SkillInstallationResult:
-        "Consumes one verified Skill installation plan, requests explicit human consent through installations.confirm on the original connection, then revalidates and installs the Skill disabled.\n\nArgs:\n    params: Applies exactly one retained verified Skill installation plan.\n\nReturns:\n    Skill installation result with the honoured contract, or a typed request/negotiation refusal."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","planHandle","policySessionId"]}
-        return SkillInstallationResult.from_dict(await self._client.request("skills.applyInstall", params_dict, **_timeout_kwargs(timeout)))
-
-    async def plan_uninstall(self, params: SkillPlanUninstallRequest, *, timeout: float | None = None) -> SkillInstallationManagementResult:
-        "Prepares a read-only removal plan for an owned verified Agent Finder Skill installation. Uninstall planning is never gated by the Skill-install feature flag.\n\nArgs:\n    params: Read-only preparation of one owned Skill removal under fresh selected-session authority.\n\nReturns:\n    Skill installation management result with the honoured contract, or a typed refusal."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","installationId","policySessionId"]}
-        return SkillInstallationManagementResult.from_dict(await self._client.request("skills.planUninstall", params_dict, **_timeout_kwargs(timeout)))
-
-    async def apply_uninstall(self, params: SkillApplyUninstallRequest, *, timeout: float | None = None) -> SkillInstallationResult:
-        "Consumes an owned Skill removal plan, requests explicit human consent through installations.confirm, refuses drift, and removes the exact owned files through quarantine.\n\nArgs:\n    params: One-use application of the exact retained Skill removal plan.\n\nReturns:\n    Skill installation result with the honoured contract, or a typed request/negotiation refusal."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","planHandle","policySessionId"]}
-        return SkillInstallationResult.from_dict(await self._client.request("skills.applyUninstall", params_dict, **_timeout_kwargs(timeout)))
-
-    async def discover(self, params: SkillsDiscoverRequest, *, timeout: float | None = None) -> ServerSkillList:
-        "Discovers skills across global and project sources.\n\nArgs:\n    params: Optional project paths and additional skill directories to include in discovery.\n\nReturns:\n    Skills discovered across global and project sources."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return ServerSkillList.from_dict(await self._client.request("skills.discover", params_dict, **_timeout_kwargs(timeout)))
-
-    async def get_discovery_paths(self, params: SkillsGetDiscoveryPathsRequest, *, timeout: float | None = None) -> SkillDiscoveryPathList:
-        "Returns the canonical directories where a client may create skills that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.\n\nArgs:\n    params: Optional project paths to enumerate.\n\nReturns:\n    Canonical locations where skills can be created so the runtime will recognize them."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SkillDiscoveryPathList.from_dict(await self._client.request("skills.getDiscoveryPaths", params_dict, **_timeout_kwargs(timeout)))
-
-    async def install_source(self, params: SkillsInstallSourceRequest, *, timeout: float | None = None) -> SkillsInstallSourceResult:
-        "Installs a user-selected HTTPS or local skill file into personal or project storage, or registers a local discovery directory. This direct-source operation preserves source installation behavior; it does not accept or replace verified catalog plans, request catalog confirmation, or change skill enablement. The caller persists the returned discovery directories.\n\nArgs:\n    params: Installs a user-selected skill source without catalog plan semantics.\n\nReturns:\n    Result of direct source installation. Catalog consent and defaults remain separate."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["source","cwd","personalSkillsDir","projectSkillsDir","project","skillDirectories","userAgent"]}
-        return SkillsInstallSourceResult.from_dict(await self._client.request("skills.installSource", params_dict, **_timeout_kwargs(timeout)))
-
-    async def remove_source(self, params: SkillsRemoveSourceRequest, *, timeout: float | None = None) -> SkillsRemoveSourceOutcome:
-        "Removes a directly installed local skill or unregisters a discovery directory without deleting its contents. Directory removal needs no skill inventory. Other targets return needs-inventory without mutation when inventory is absent. This operation preserves direct-source ownership rules and does not replace receipt-backed verified uninstall plans or their consent. The caller persists returned discovery directories and manages disabled settings.\n\nArgs:\n    params: Removes a user-selected source without changing verified catalog removal.\n\nReturns:\n    Direct removal or a request for the inventory needed to resolve a file."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["target","cwd","skillDirectories"]}
-        return SkillsRemoveSourceOutcome.from_dict(await self._client.request("skills.removeSource", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class ServerPluginsBuiltinApi:
-    def __init__(self, client: "JsonRpcClient"):
-        self._client = client
-
-    async def set(self, params: PluginsBuiltinSetRequest, *, timeout: float | None = None) -> None:
-        "Replaces this server's trusted built-in plugin directories while no sessions are active.\n\nArgs:\n    params: Trusted built-in plugin directories to use for this runtime process."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["paths"]}
-        await self._client.request("plugins.builtin.set", params_dict, **_timeout_kwargs(timeout))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class ServerPluginsMarketplacesApi:
-    def __init__(self, client: "JsonRpcClient"):
-        self._client = client
-
-    async def list(self, *, timeout: float | None = None) -> MarketplaceListResult:
-        "Lists all registered marketplaces (defaults + user-added).\n\nReturns:\n    All registered marketplaces, including built-in defaults."
-        return MarketplaceListResult.from_dict(await self._client.request("plugins.marketplaces.list", {}, **_timeout_kwargs(timeout)))
-
-    async def migrate_retired_default(self, *, timeout: float | None = None) -> MarketplaceMigrationResult:
-        "Restores a retired default marketplace in the runtime's configured profile when a retained plugin install still needs it. Uses retained managed policy without fetching catalogs or policy. Returns the persisted result so a launcher can report the settings change before opening a session or running a plugin command. Repeated calls are guarded per profile; malformed settings and write failures reject the call.\n\nReturns:\n    The retired marketplace migration result for the runtime's configured profile."
-        return MarketplaceMigrationResult.from_dict(await self._client.request("plugins.marketplaces.migrateRetiredDefault", {}, **_timeout_kwargs(timeout)))
-
-    async def add(self, params: PluginsMarketplacesAddRequest, *, timeout: float | None = None) -> MarketplaceAddResult:
-        "Registers a new marketplace from a source (owner/repo, URL, or local path).\n\nArgs:\n    params: Marketplace source and optional working directory for relative-path resolution.\n\nReturns:\n    Result of registering a new marketplace."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["source"]}
-        return MarketplaceAddResult.from_dict(await self._client.request("plugins.marketplaces.add", params_dict, **_timeout_kwargs(timeout)))
-
-    async def remove(self, params: PluginsMarketplacesRemoveRequest, *, timeout: float | None = None) -> MarketplaceRemoveResult:
-        "Removes a previously-registered marketplace. When the marketplace has dependent plugins and `force` is not set, the marketplace is left intact and the result lists the dependents so the caller can decide whether to retry with `force=true`.\n\nArgs:\n    params: Name of the marketplace to remove and an optional force flag.\n\nReturns:\n    Outcome of the remove attempt, including dependent-plugin info when applicable."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
-        return MarketplaceRemoveResult.from_dict(await self._client.request("plugins.marketplaces.remove", params_dict, **_timeout_kwargs(timeout)))
-
-    async def browse(self, params: PluginsMarketplacesBrowseRequest, *, timeout: float | None = None) -> MarketplaceBrowseResult:
-        "Lists plugins advertised by a registered marketplace.\n\nArgs:\n    params: Name of the marketplace whose plugin catalog to fetch.\n\nReturns:\n    Plugins advertised by the marketplace."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
-        return MarketplaceBrowseResult.from_dict(await self._client.request("plugins.marketplaces.browse", params_dict, **_timeout_kwargs(timeout)))
-
-    async def refresh(self, params: PluginsMarketplacesRefreshRequest, *, timeout: float | None = None) -> MarketplaceRefreshResult:
-        "Re-fetches one or all registered marketplace catalogs.\n\nArgs:\n    params: Optional marketplace name; omit to refresh all.\n\nReturns:\n    Result of refreshing one or more marketplace catalogs."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return MarketplaceRefreshResult.from_dict(await self._client.request("plugins.marketplaces.refresh", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class ServerPluginsApi:
-    def __init__(self, client: "JsonRpcClient"):
-        self._client = client
-        self.builtin = ServerPluginsBuiltinApi(client)
-        self.marketplaces = ServerPluginsMarketplacesApi(client)
-
-    async def plan_install(self, params: PluginPlanInstallRequest, *, timeout: float | None = None) -> PluginInstallationManagementResult:
-        "Plans installation of an Agent Plugin search candidate from its verified Agent Finder materialisation without writing files. Only candidates that carry a handle can be planned. The review shows only verified data, and installing leaves the plugin disabled until it is enabled through plugins.enable.\n\nArgs:\n    params: Side-effect-free planning of one Agent Plugin search candidate through its Agent Finder materialisation.\n\nReturns:\n    Agent Plugin installation planning result with the honoured contract, or a typed refusal."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","candidateHandle","policySessionId"]}
-        return PluginInstallationManagementResult.from_dict(await self._client.request("plugins.planInstall", params_dict, **_timeout_kwargs(timeout)))
-
-    async def apply_install(self, params: PluginApplyInstallRequest, *, timeout: float | None = None) -> PluginInstallationResult:
-        "Consumes one verified Agent Plugin installation plan, requests explicit human consent through installations.confirm on the original connection, then reacquires and verifies every file and registers the plugin, disabled, exactly as a direct plugin install. The installed plugin is listed, enabled and uninstalled through the existing plugins methods.\n\nArgs:\n    params: Applies exactly one retained verified Agent Plugin installation plan.\n\nReturns:\n    Agent Plugin installation result with the honoured contract, or a typed request/negotiation refusal."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["contract","planHandle","policySessionId"]}
-        return PluginInstallationResult.from_dict(await self._client.request("plugins.applyInstall", params_dict, **_timeout_kwargs(timeout)))
-
-    async def list(self, params: PluginsListRequest | None = None, *, timeout: float | None = None) -> PluginListResult:
-        "Lists plugins installed in user/global state.\n\nArgs:\n    params: Optional read-only plugin discovery context. The runtime resolves account, policy, and workspace trust. This query does not change settings.\n\nReturns:\n    Plugins installed in user/global state."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
-        return PluginListResult.from_dict(await self._client.request("plugins.list", params_dict, **_timeout_kwargs(timeout)))
-
-    async def install(self, params: PluginsInstallRequest, *, timeout: float | None = None) -> PluginInstallResult:
-        "Installs a plugin from a marketplace, GitHub repo, URL, or local path.\n\nArgs:\n    params: Plugin source and optional working directory for relative-path resolution.\n\nReturns:\n    Result of installing a plugin."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["source"]}
-        return PluginInstallResult.from_dict(await self._client.request("plugins.install", params_dict, **_timeout_kwargs(timeout)))
-
-    async def uninstall(self, params: PluginsUninstallRequest, *, timeout: float | None = None) -> None:
-        "Uninstalls an installed plugin.\n\nArgs:\n    params: Name (or spec) of the plugin to uninstall."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
-        await self._client.request("plugins.uninstall", params_dict, **_timeout_kwargs(timeout))
-
-    async def update(self, params: PluginsUpdateRequest, *, timeout: float | None = None) -> PluginUpdateResult:
-        "Updates an installed plugin to its latest published version.\n\nArgs:\n    params: Name (or spec) of the plugin to update.\n\nReturns:\n    Result of updating a single plugin."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
-        return PluginUpdateResult.from_dict(await self._client.request("plugins.update", params_dict, **_timeout_kwargs(timeout)))
-
-    async def update_all(self, *, timeout: float | None = None) -> PluginUpdateAllResult:
-        "Updates every installed plugin to its latest published version.\n\nReturns:\n    Result of updating all installed plugins."
-        return PluginUpdateAllResult.from_dict(await self._client.request("plugins.updateAll", {}, **_timeout_kwargs(timeout)))
-
-    async def enable(self, params: PluginsEnableRequest, *, timeout: float | None = None) -> None:
-        "Enables installed plugins for new sessions.\n\nArgs:\n    params: Plugin names (or specs) to enable, plus the optional working directory the repository-controlled guard is evaluated against."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["names"]}
-        await self._client.request("plugins.enable", params_dict, **_timeout_kwargs(timeout))
-
-    async def disable(self, params: PluginsDisableRequest, *, timeout: float | None = None) -> None:
-        "Disables installed plugins for new sessions.\n\nArgs:\n    params: Plugin names (or specs) to disable, plus the optional working directory the repository-controlled guard is evaluated against."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["names"]}
-        await self._client.request("plugins.disable", params_dict, **_timeout_kwargs(timeout))
-
-    async def activate(self, params: PluginsActivateRequest, *, timeout: float | None = None) -> PluginsActivateResult:
-        "Runs the sessionStart hooks of one built-in plugin without a session, so that the plugin can do its host setup before the first turn. Settings and managed policy that turn off the plugin or its hooks apply. The hooks run on the host, not in a session sandbox, so managed policy that turns on the sandbox prevents activation. The call fails when managed policy cannot be determined. Extension callers cannot use this method.\n\nArgs:\n    params: Built-in plugin to activate.\n\nReturns:\n    The result of a built-in plugin activation."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
-        return PluginsActivateResult.from_dict(await self._client.request("plugins.activate", params_dict, **_timeout_kwargs(timeout)))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -86600,140 +90318,6 @@ class ServerNetworkApi:
 
 
 # Experimental: this API group is experimental and may change or be removed.
-class ServerSessionsApi:
-    def __init__(self, client: "JsonRpcClient"):
-        self._client = client
-
-    async def open(self, params: SessionOpenParams, *, timeout: float | None = None) -> SessionOpenResult:
-        "Creates or resumes a local session and returns the opened session ID.\n\nArgs:\n    params: Open a session by creating, resuming, attaching, connecting to a remote, or handing off.\n\nReturns:\n    Result of opening a session."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionOpenResult.from_dict(await self._client.request("sessions.open", params_dict, **_timeout_kwargs(timeout)))
-
-    async def fork(self, params: SessionsForkRequest, *, timeout: float | None = None) -> SessionsForkResult:
-        "Creates a new session by forking persisted history from an existing session.\n\nArgs:\n    params: Source session identifier to fork from, optional event-ID boundary, and optional friendly name for the new session.\n\nReturns:\n    Identifier and optional friendly name assigned to the newly forked session."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsForkResult.from_dict(await self._client.request("sessions.fork", params_dict, **_timeout_kwargs(timeout)))
-
-    async def connect(self, params: ConnectRemoteSessionParams, *, timeout: float | None = None) -> RemoteSessionConnectionResult:
-        "Connects to an existing remote session and exposes it as an SDK session.\n\nArgs:\n    params: Remote session connection parameters.\n\nReturns:\n    Remote session connection result."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return RemoteSessionConnectionResult.from_dict(await self._client.request("sessions.connect", params_dict, **_timeout_kwargs(timeout)))
-
-    async def list(self, params: SessionsListRequest, *, timeout: float | None = None) -> SessionList:
-        "Lists sessions, optionally filtered by source and working-directory context. Returned entries are discriminated by `isRemote`: local entries carry only the lightweight `LocalSessionMetadataValue` shape; remote entries carry the full `RemoteSessionMetadataValue` shape (repository, PR number, taskType, etc.).\n\nArgs:\n    params: Optional source filter, metadata-load limit, and context filter applied to the returned sessions.\n\nReturns:\n    Sessions matching the filter, ordered most-recently-modified first."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionList.from_dict(await self._client.request("sessions.list", params_dict, **_timeout_kwargs(timeout)))
-
-    async def get_client_metadata(self, params: SessionsGetClientMetadataRequest, *, timeout: float | None = None) -> list:
-        "Reads client-owned metadata for multiple persisted local sessions without opening them. Results preserve request order and report missing, corrupt, unsupported, or temporarily unavailable sessions independently.\n\nArgs:\n    params: Bounded batch request for client-owned metadata from persisted local sessions.\n\nReturns:\n    Ordered client metadata outcomes for the requested local sessions."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionIds"]}
-        return list(await self._client.request("sessions.getClientMetadata", params_dict, **_timeout_kwargs(timeout)))
-
-    async def read_persisted_events(self, params: SessionsReadPersistedEventsRequest, *, timeout: float | None = None) -> EventsReadResult:
-        "Reads a page of durable events directly from a local session's persisted journal without creating, resuming, or activating the session. The first read pins the currently opened journal generation and its byte-length boundary; opaque cursor continuations remain on that generation across runtime-owned compaction, truncation, and rewrite operations, which replace the live path atomically, and events appended after the boundary are excluded. For cold hydration, await the first successful page before activation and establish lossless live-event buffering before resume; merge subsequent live events by ID, preserving persisted order and letting live payloads win. Continuations are process-local, single-use capabilities bound to the originating session and storage context and must be paged sequentially; concurrent or repeated use of the same cursor expires that duplicate read rather than reading the generation twice. A complete snapshot has cursorStatus 'ok' and hasMore false. Snapshots expire after five idle minutes, with at most eight retained per process and idle-only eviction under pressure; completion and cancelled-worker exit release their handles. No transcript copy is created, but retained handles may keep replaced files' disk blocks alive until release. Pages have a soft 1 MiB serialized event-array budget including resolved binary assets; one oversized event is returned alone to guarantee progress. Working memory also includes a record/lookahead and asset resolution; resolving the first binary reference may scan the full pinned generation to build a bounded offset index. If the snapshot expires, is evicted, is cancelled before a continuation is established, or becomes unreadable after an observable unsupported in-place shortening, the continuation returns cursorStatus 'expired' with an empty terminal page and never falls back to a different generation. A missing or initially unreadable journal is an RPC error. Persisted history excludes ephemeral events and may omit payloads that are reconstructed only for an active session; use the active session event stream for post-resume live events.\n\nArgs:\n    params: Pagination options for reading an inactive or active local session's persisted event journal.\n\nReturns:\n    Batch of session events returned by a read, with cursor and continuation metadata."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return EventsReadResult.from_dict(await self._client.request("sessions.readPersistedEvents", params_dict, **_timeout_kwargs(timeout)))
-
-    async def find_by_task_id(self, params: SessionsFindByTaskIDRequest, *, timeout: float | None = None) -> SessionsFindByTaskIDResult:
-        "Finds the local session bound to a GitHub task ID, if any.\n\nArgs:\n    params: GitHub task ID to look up.\n\nReturns:\n    ID of the local session bound to the given GitHub task, or omitted when none."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["taskId"]}
-        return SessionsFindByTaskIDResult.from_dict(await self._client.request("sessions.findByTaskId", params_dict, **_timeout_kwargs(timeout)))
-
-    async def find_by_prefix(self, params: SessionsFindByPrefixRequest, *, timeout: float | None = None) -> SessionsFindByPrefixResult:
-        "Resolves a UUID prefix to a unique session ID, if exactly one session matches.\n\nArgs:\n    params: UUID prefix to resolve to a unique session ID.\n\nReturns:\n    Session ID matching the prefix, omitted when no unique match exists."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["prefix"]}
-        return SessionsFindByPrefixResult.from_dict(await self._client.request("sessions.findByPrefix", params_dict, **_timeout_kwargs(timeout)))
-
-    async def get_last_for_context(self, params: SessionsGetLastForContextRequest, *, timeout: float | None = None) -> SessionsGetLastForContextResult:
-        "Returns the most-relevant prior session for a given working-directory context.\n\nArgs:\n    params: Optional working-directory context used to score session relevance.\n\nReturns:\n    Most-relevant session ID for the supplied context, or omitted when no sessions exist."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsGetLastForContextResult.from_dict(await self._client.request("sessions.getLastForContext", params_dict, **_timeout_kwargs(timeout)))
-
-    async def has_events(self, params: SessionsHasEventsRequest, *, timeout: float | None = None) -> SessionsHasEventsResult:
-        "Checks whether a local session's persisted event-log path exists, including an empty log, without opening the session or scanning the session catalog. Hosts use this to prefer an exact local session over a remote task or a UUID-prefix lookup. Metadata-only sessions without a log return false.\n\nArgs:\n    params: Local session whose persisted event-log presence to check without opening or scanning it.\n\nReturns:\n    Whether the local session has a persisted event-log path, including an empty log."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsHasEventsResult.from_dict(await self._client.request("sessions.hasEvents", params_dict, **_timeout_kwargs(timeout)))
-
-    async def get_sizes(self, *, timeout: float | None = None) -> SessionSizes:
-        "Returns the on-disk byte size of each session's workspace directory.\n\nReturns:\n    Map of sessionId -> on-disk size in bytes for each session's workspace directory."
-        return SessionSizes.from_dict(await self._client.request("sessions.getSizes", {}, **_timeout_kwargs(timeout)))
-
-    async def check_in_use(self, params: SessionsCheckInUseRequest, *, timeout: float | None = None) -> SessionsCheckInUseResult:
-        "Returns the subset of the supplied session IDs that are currently held by another running process.\n\nArgs:\n    params: Session IDs to test for live in-use locks.\n\nReturns:\n    Session IDs from the input set that are currently in use by another process."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionIds"]}
-        return SessionsCheckInUseResult.from_dict(await self._client.request("sessions.checkInUse", params_dict, **_timeout_kwargs(timeout)))
-
-    async def close(self, params: SessionsCloseRequest, *, timeout: float | None = None) -> SessionsCloseResult:
-        "Closes a session: emits shutdown, flushes pending events, releases the in-use lock, and disposes the active session.\n\nArgs:\n    params: Session ID to close.\n\nReturns:\n    Closes a session: emits shutdown, flushes pending events to disk, releases the in-use lock, disposes the active session. Idempotent: succeeds even if the session is not currently active."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsCloseResult.from_dict(await self._client.request("sessions.close", params_dict, **_timeout_kwargs(timeout)))
-
-    async def bulk_delete(self, params: SessionsBulkDeleteRequest, *, timeout: float | None = None) -> SessionBulkDeleteResult:
-        "Closes, deactivates, and deletes a set of sessions, returning the bytes freed per session.\n\nArgs:\n    params: Session IDs to close, deactivate, and delete from disk.\n\nReturns:\n    Map of sessionId -> bytes freed by removing the session's workspace directory."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionIds"]}
-        return SessionBulkDeleteResult.from_dict(await self._client.request("sessions.bulkDelete", params_dict, **_timeout_kwargs(timeout)))
-
-    async def prune_old(self, params: SessionsPruneOldRequest, *, timeout: float | None = None) -> SessionPruneResult:
-        "Deletes sessions older than the given threshold, with optional dry-run and exclusion list.\n\nArgs:\n    params: Age threshold and optional flags controlling which old sessions are pruned (or simulated when dryRun is true).\n\nReturns:\n    Outcome of the prune operation: deleted IDs, dry-run candidates, skipped IDs, total bytes freed, and the dry-run flag."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["olderThanDays"]}
-        return SessionPruneResult.from_dict(await self._client.request("sessions.pruneOld", params_dict, **_timeout_kwargs(timeout)))
-
-    async def save(self, params: SessionsSaveRequest, *, timeout: float | None = None) -> SessionsSaveResult:
-        "Flushes a session's pending events to disk.\n\nArgs:\n    params: Session ID whose pending events should be flushed to disk.\n\nReturns:\n    Flush a session's pending events to disk. No-op when no writer exists for the session (e.g., already closed)."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsSaveResult.from_dict(await self._client.request("sessions.save", params_dict, **_timeout_kwargs(timeout)))
-
-    async def release_lock(self, params: SessionsReleaseLockRequest, *, timeout: float | None = None) -> SessionsReleaseLockResult:
-        "Releases the in-use lock held by this process for a session.\n\nArgs:\n    params: Session ID whose in-use lock should be released.\n\nReturns:\n    Release the in-use lock held by this process for the given session. No-op when this process does not currently hold a lock for the session."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsReleaseLockResult.from_dict(await self._client.request("sessions.releaseLock", params_dict, **_timeout_kwargs(timeout)))
-
-    async def enrich_metadata(self, params: SessionsEnrichMetadataRequest, *, timeout: float | None = None) -> SessionEnrichMetadataResult:
-        "Backfills missing summary and context fields on the supplied session metadata records.\n\nArgs:\n    params: Session metadata records to enrich with summary and context information.\n\nReturns:\n    The enriched metadata records, with summary and context fields backfilled where available. Sessions confirmed empty and unnamed are omitted."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessions"]}
-        return SessionEnrichMetadataResult.from_dict(await self._client.request("sessions.enrichMetadata", params_dict, **_timeout_kwargs(timeout)))
-
-    async def reload_plugin_hooks(self, params: SessionsReloadPluginHooksRequest, *, timeout: float | None = None) -> SessionsReloadPluginHooksResult:
-        "Reloads user, plugin, and (optionally) repo hooks on the active session.\n\nArgs:\n    params: Active session ID and an optional flag for deferring repo-level hooks until folder trust.\n\nReturns:\n    Reload all hooks (user, plugin, optionally repo) and apply them to the active session. Call after installing or removing plugins so their hooks take effect immediately. No-op when no active session matches the given sessionId."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsReloadPluginHooksResult.from_dict(await self._client.request("sessions.reloadPluginHooks", params_dict, **_timeout_kwargs(timeout)))
-
-    async def load_deferred_repo_hooks(self, params: SessionsLoadDeferredRepoHooksRequest, *, timeout: float | None = None) -> SessionLoadDeferredRepoHooksResult:
-        "Loads previously-deferred repo-level hooks on the active session, returning queued startup prompts.\n\nArgs:\n    params: Active session ID whose deferred repo-level hooks should be loaded.\n\nReturns:\n    Queued repo-level startup prompts and the total hook command count after loading."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionLoadDeferredRepoHooksResult.from_dict(await self._client.request("sessions.loadDeferredRepoHooks", params_dict, **_timeout_kwargs(timeout)))
-
-    async def set_additional_plugins(self, params: SessionsSetAdditionalPluginsRequest, *, timeout: float | None = None) -> SessionsSetAdditionalPluginsResult:
-        "Replaces the manager-wide additional plugins registered with the session manager.\n\nArgs:\n    params: Manager-wide additional plugins to register; replaces any previously-configured set.\n\nReturns:\n    Replace the manager-wide additional plugins. New session creations and subsequent hook reloads see the new set; already-running sessions keep their existing hook installation until the next reload."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["plugins"]}
-        return SessionsSetAdditionalPluginsResult.from_dict(await self._client.request("sessions.setAdditionalPlugins", params_dict, **_timeout_kwargs(timeout)))
-
-    async def start_remote_control(self, params: SessionsStartRemoteControlRequest, *, timeout: float | None = None) -> RemoteControlStatusResult:
-        "Attaches the runtime-managed remote-control singleton to a session, awaiting initial setup. If remote control is already attached to a different session, the singleton is transferred (preserving the underlying Mission Control connection). Returns the final status.\n\nArgs:\n    params: Parameters for attaching the remote-control singleton to a session.\n\nReturns:\n    Wrapper for the singleton's current status."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["config"]}
-        return RemoteControlStatusResult.from_dict(await self._client.request("sessions.startRemoteControl", params_dict, **_timeout_kwargs(timeout)))
-
-    async def transfer_remote_control(self, params: SessionsTransferRemoteControlRequest, *, timeout: float | None = None) -> RemoteControlTransferResult:
-        "Atomically rebinds the remote-control singleton to a different session, preserving the underlying Mission Control connection. When `expectedFromSessionId` is provided and does not match the singleton's current `attachedSessionId`, the transfer is rejected with `transferred: false` and the current status is returned unchanged.\n\nArgs:\n    params: Parameters for atomically rebinding the remote-control singleton.\n\nReturns:\n    Outcome of a transferRemoteControl call."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["toSessionId"]}
-        return RemoteControlTransferResult.from_dict(await self._client.request("sessions.transferRemoteControl", params_dict, **_timeout_kwargs(timeout)))
-
-    async def set_remote_control_steering(self, params: SessionsSetRemoteControlSteeringRequest, *, timeout: float | None = None) -> RemoteControlStatusResult:
-        "Patches the steering state of the active remote-control singleton. When remote control is off, this is a no-op and the off status is returned. Today only `enabled: true` is actionable on the underlying exporter; passing `false` is reserved for future use.\n\nArgs:\n    params: Patch for the singleton's steering state.\n\nReturns:\n    Wrapper for the singleton's current status."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["enabled"]}
-        return RemoteControlStatusResult.from_dict(await self._client.request("sessions.setRemoteControlSteering", params_dict, **_timeout_kwargs(timeout)))
-
-    async def stop_remote_control(self, params: SessionsStopRemoteControlRequest, *, timeout: float | None = None) -> RemoteControlStopResult:
-        "Stops the remote-control singleton. When `expectedSessionId` is provided and does not match the singleton's current `attachedSessionId`, the stop is rejected with `stopped: false` and the current status is returned unchanged (unless `force` is set, in which case the singleton is unconditionally torn down).\n\nArgs:\n    params: Parameters for stopping the remote-control singleton.\n\nReturns:\n    Outcome of a stopRemoteControl call."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return RemoteControlStopResult.from_dict(await self._client.request("sessions.stopRemoteControl", params_dict, **_timeout_kwargs(timeout)))
-
-    async def get_remote_control_status(self, *, timeout: float | None = None) -> RemoteControlStatusResult:
-        "Returns the current state of the remote-control singleton, including the attached session id and frontend URL when active.\n\nReturns:\n    Wrapper for the singleton's current status."
-        return RemoteControlStatusResult.from_dict(await self._client.request("sessions.getRemoteControlStatus", {}, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
 class ServerShellApi:
     def __init__(self, client: "JsonRpcClient"):
         self._client = client
@@ -86805,6 +90389,11 @@ class ServerRpc:
     """Typed server-scoped RPC methods."""
     def __init__(self, client: "JsonRpcClient"):
         self._client = client
+        self.plugins = ServerPluginsApi(client)
+        self.skills = ServerSkillsApi(client)
+        self.account = ServerAccountApi(client)
+        self.sessions = ServerSessionsApi(client)
+        self.secrets = ServerSecretsApi(client)
         self.providers = ServerProvidersApi(client)
         self.local_models = ServerLocalModelsApi(client)
         self.logging = ServerLoggingApi(client)
@@ -86819,13 +90408,9 @@ class ServerRpc:
         self.decisions = ServerDecisionsApi(client)
         self.content_exclusion = ServerContentExclusionApi(client)
         self.tools = ServerToolsApi(client)
-        self.account = ServerAccountApi(client)
-        self.secrets = ServerSecretsApi(client)
         self.mcp = ServerMcpApi(client)
         self.extensions = ServerExtensionsApi(client)
         self.instructions = ServerInstructionsApi(client)
-        self.skills = ServerSkillsApi(client)
-        self.plugins = ServerPluginsApi(client)
         self.catalog = ServerCatalogApi(client)
         self.agents = ServerAgentsApi(client)
         self.commands = ServerCommandsApi(client)
@@ -86834,7 +90419,6 @@ class ServerRpc:
         self.llm_inference = ServerLlmInferenceApi(client)
         self.fetch = ServerFetchApi(client)
         self.network = ServerNetworkApi(client)
-        self.sessions = ServerSessionsApi(client)
         self.shell = ServerShellApi(client)
         self.agent_registry = ServerAgentRegistryApi(client)
         self.connectors = ServerConnectorsApi(client)
@@ -86849,6 +90433,246 @@ class ServerRpc:
     async def register_extension_launch_provider(self, *, timeout: float | None = None) -> None:
         "Registers the calling SDK client as the per-entrypoint extension launch provider. Call before creating any sessions. When omitted, the runtime uses its built-in extension launcher.\n\n.. warning:: This API is experimental and may change or be removed in future versions."
         await self._client.request("registerExtensionLaunchProvider", {}, **_timeout_kwargs(timeout))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerPluginsPolicyApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def _resolve_for_invocation(self, params: _PluginPolicyResolveInvocationRequest, *, timeout: float | None = None) -> _PluginPolicyResolveInvocationResult:
+        "Resolves plugin policy through the original connection's credential owner and retains the effective managed settings layers.\n\nArgs:\n    params: Resolves plugin policy through the requesting connection's original credential owner.\n\nReturns:\n    Resolved plugin policy and authoritative failure posture. Fresh successful resolutions retain the original policy layers for mutation guards; cache-only inspection never changes retained policy.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["workingDirectory","policyHelperEnabled","cacheOnly","strict","clientName","userAgent","platform","homeDirectory"]}
+        return _PluginPolicyResolveInvocationResult.from_dict(await self._client.request("plugins.policy.resolveForInvocation", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerPluginsBuiltinApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def _discover(self, params: _PluginBuiltinDiscoverRequest, *, timeout: float | None = None) -> PluginBuiltinDiscoverResult:
+        "Discovers bundled plugins through the installed distribution resolver and authoritative manifest scanner.\n\nArgs:\n    params: Locates bundled plugin manifests relative to one installed host directory.\n\nReturns:\n    Bundled plugin records and diagnostics from the original manifest scanner.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["baseDirectory"]}
+        return PluginBuiltinDiscoverResult.from_dict(await self._client.request("plugins.builtin.discover", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _resolve_activation(self, params: _PluginsBuiltinResolveActivationRequest, *, timeout: float | None = None) -> _PluginsBuiltinResolveActivationResult:
+        "Resolves bundled Browser activation from managed-over-user whole-plugin policy through this connection's original credential owner. Preserves policy-helper and forced-refresh failures and the existing two-second inspection budget.\n\nArgs:\n    params: Resolve managed Browser activation through the connection's original credential owner.\n\nReturns:\n    Browser activation after the managed-over-user whole-plugin policy.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["clientName","workingDirectory","userSettings","audience"]}
+        return _PluginsBuiltinResolveActivationResult.from_dict(await self._client.request("plugins.builtin.resolveActivation", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerPluginsSourcesApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def _resolve(self, params: _PluginSourcesResolveRequest, *, timeout: float | None = None) -> _PluginSourcesResolveResult:
+        "Resolves persisted, explicit, and trusted live plugins with runtime-owned managed policy. Live records remain separate from persisted installations.\n\nArgs:\n    params: Resolves active plugin sources with runtime-owned folder trust and managed policy.\n\nReturns:\n    Active plugins and the separate persisted inventory, without persisting live directory records.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["configDir","workingDirectory"]}
+        return _PluginSourcesResolveResult.from_dict(await self._client.request("plugins.sources.resolve", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerPluginsApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+        self.policy = _InternalServerPluginsPolicyApi(client)
+        self.builtin = _InternalServerPluginsBuiltinApi(client)
+        self.sources = _InternalServerPluginsSourcesApi(client)
+
+    async def _inspect_inventory(self, params: _PluginInspectInventoryRequest, *, timeout: float | None = None) -> _PluginInvocationInventoryResult:
+        "Lists plugin inventory with invocation settings and policy without changing the existing plugin list operation.\n\nArgs:\n    params: Inspects persisted and live plugins under an explicit effective configuration without changing the existing user-only plugins.list API.\n\nReturns:\n    Persisted, live, built-in, and host-directory plugins with canonical shadowing and scan diagnostics.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["workingDirectory","configOverride","seedEnabledPluginsFromInstalled"]}
+        return _PluginInvocationInventoryResult.from_dict(await self._client.request("plugins.inspectInventory", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerSkillsResourcesApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def _discover(self, params: _SkillResourceDiscoverRequest, *, timeout: float | None = None) -> SkillResourceDiscoverResult:
+        "Loads standalone skill records and diagnostics with explicit host settings, workspace paths, and plugin sources.\n\nArgs:\n    params: Loads full local skill records, including disabled records and command metadata.\n\nReturns:\n    Full local skill inventory and report-and-ignore source diagnostics.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["host"]}
+        return SkillResourceDiscoverResult.from_dict(await self._client.request("skills.resources.discover", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _install(self, params: _SkillResourceInstallRequest, *, timeout: float | None = None) -> SkillResourceInstallResult:
+        "Registers a skill directory or installs a local or HTTPS definition through the original runtime owner.\n\nArgs:\n    params: Registers a skill directory or installs a local or HTTPS skill definition.\n\nReturns:\n    The persisted result of a skill source installation.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["host","source"]}
+        return SkillResourceInstallResult.from_dict(await self._client.request("skills.resources.install", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _remove(self, params: _SkillResourceRemoveRequest, *, timeout: float | None = None) -> SkillResourceRemoveResult:
+        "Removes a personal or project skill or unregisters a directory with the existing scoped removal rules.\n\nArgs:\n    params: Removes a personal or project skill, or unregisters a custom directory.\n\nReturns:\n    The completed skill removal, with conservative disabled-state cleanup.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["host","target"]}
+        return SkillResourceRemoveResult.from_dict(await self._client.request("skills.resources.remove", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _set_enabled(self, params: _SkillResourceSetEnabledRequest, *, timeout: float | None = None) -> None:
+        "Atomically changes one user's skill disable entry under explicit host settings paths.\n\nArgs:\n    params: Atomically changes only one user's disabled skill entry under explicit host paths.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["host","name","enabled"]}
+        await self._client.request("skills.resources.setEnabled", params_dict, **_timeout_kwargs(timeout))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerSkillsApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+        self.resources = _InternalServerSkillsResourcesApi(client)
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerAccountApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def _login_process(self, params: _AccountLoginProcessRequest, *, timeout: float | None = None) -> _AccountLoginProcessResult:
+        "Runs a connection-owned interactive account login through the original process authentication handle, preserving device and browser flows, policy, persistence, and cancellation.\n\nArgs:\n    params: A pre-session login action. Every action after open retains the same credential and persistence owner.\n\nReturns:\n    The result of one connection-owned pre-session login action.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return _AccountLoginProcessResult.from_dict(await self._client.request("account.loginProcess", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _describe_auth_info(self, params: _AccountDescribeAuthInfoRequest, *, timeout: float | None = None) -> _AccountDescribeAuthInfoResult:
+        "Renders the sign-in banner and the one-line account description the runtime uses for an authentication identity. The runtime words these in several places for its own callers, so a host that announces a sign-in or an account switch should render them from here rather than composing its own, which would let the two spellings drift apart.\n\nArgs:\n    params: The authentication identity whose shared wording should be rendered.\n\nReturns:\n    The wording the runtime uses for an authentication identity.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["identity"]}
+        return _AccountDescribeAuthInfoResult.from_dict(await self._client.request("account.describeAuthInfo", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _get_gist_support(self, params: _AccountGetGistSupportRequest, *, timeout: float | None = None) -> _AccountGetGistSupportResult:
+        "Reports whether the supplied identity can create gists. Gists are unavailable on GitHub Enterprise Cloud with data residency, and to Enterprise Managed Users on github.com, so a host that offers gist actions should hide or disable them when this reports no support.\n\nArgs:\n    params: The authentication identity whose gist support should be reported.\n\nReturns:\n    Whether the identity can create gists, and why not when it cannot.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["identity"]}
+        return _AccountGetGistSupportResult.from_dict(await self._client.request("account.getGistSupport", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _get_web_url(self, params: _AccountGetWebURLRequest, *, timeout: float | None = None) -> _AccountGetWebURLResult:
+        "Resolves a path on the identity's GitHub host into an absolute URL. A bound host can instead select its live credential owner with authOwnerId; this form rejects extensions, foreign owners, and a simultaneous identity. Falls back to the public host only when neither identity nor authOwnerId is supplied.\n\nArgs:\n    params: A path to resolve against the selected GitHub host.\n\nReturns:\n    An absolute URL on the selected GitHub host.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["path"]}
+        return _AccountGetWebURLResult.from_dict(await self._client.request("account.getWebUrl", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _get_token_env_var(self, *, timeout: float | None = None) -> _AccountGetTokenEnvVarResult:
+        "Names the environment variable supplying a classic personal access token, if one is set. A classic token cannot be upgraded in place, so a host that finds one should tell the user which variable to unset rather than starting an interactive sign-in that the variable would override.\n\nReturns:\n    The environment variable supplying a classic personal access token, when one is set.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        return _AccountGetTokenEnvVarResult.from_dict(await self._client.request("account.getTokenEnvVar", {}, **_timeout_kwargs(timeout)))
+
+    async def _subscribe_copilot_free(self, params: _AccountSubscribeCopilotFreeRequest, *, timeout: float | None = None) -> _AccountSubscribeCopilotFreeResult:
+        "Enrolls the supplied identity in Copilot Free. A host offers this when a signed-in user has no Copilot subscription, so that signing up does not mean leaving for a browser. The runtime resolves the identity's credential itself, so the caller sends none. Read `kind` before `status`: an identity whose credential cannot be resolved answers `no-token` rather than failing the call, because that asks the user to sign in again rather than reporting that enrollment broke. Enrolling an already-enrolled account succeeds and reports `already_subscribed`. This does not refresh the caller's cached account state; a host that shows subscription status should re-read it afterwards.\n\nArgs:\n    params: The authentication identity to enroll in Copilot Free.\n\nReturns:\n    What came of a Copilot Free enrollment attempt.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["identity"]}
+        return _AccountSubscribeCopilotFreeResult.from_dict(await self._client.request("account.subscribeCopilotFree", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _get_host_url(self, params: _AccountGetHostURLRequest, *, timeout: float | None = None) -> _AccountGetHostURLResult:
+        "Resolves the base URL of the GitHub host from its configured names, normalizing a bare hostname into an `https://` URL and falling back to the public github.com host when neither name is set. Unlike `account.getWebUrl` this needs no identity, so a host can reach it before anyone has signed in -- which is when an enterprise instance must already be known.\n\nArgs:\n    params: Configured names of the GitHub host to resolve.\n\nReturns:\n    Absolute base URL of the GitHub host.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return _AccountGetHostURLResult.from_dict(await self._client.request("account.getHostUrl", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerSessionsForgeProposalsApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def _workspace_before(self, params: ForgeProposalWorkspaceBeforeRequest, *, timeout: float | None = None) -> ForgeProposalWorkspaceBeforeResult:
+        "Reads a Forge proposal's before-generation capture from the canonical store owned by the configured runtime host. The request cannot select a database.\n\nArgs:\n    params: Proposal identifier whose before-generation capture is requested.\n\nReturns:\n    Stored before-generation capture, or null when no capture exists.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["id"]}
+        return ForgeProposalWorkspaceBeforeResult.from_dict(await self._client.request("sessions.forgeProposals.workspaceBefore", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _reconcile(self, params: ForgeProposalReconcileRequest, *, timeout: float | None = None) -> ForgeProposalReconcileResult:
+        "Reconciles a generated artifact with canonical Forge proposals. Reuses a ready or reviewing fingerprint, completes an eligible generation, or creates and completes an on-demand generation. Existing store transitions retain their transaction and persisted compatibility semantics. SDK skill-review clients can use the same canonical lifecycle without implementing another store.\n\nArgs:\n    params: Reconciles a generated artifact with the configured canonical store.\n\nReturns:\n    Existing ready proposal or completed generation; null for an ineligible automatic generation.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["scope","triggerMode","fingerprint","manifest","summary"]}
+        return ForgeProposalReconcileResult.from_dict(await self._client.request("sessions.forgeProposals.reconcile", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _fail_stale(self, params: ForgeProposalFailStaleRequest, *, timeout: float | None = None) -> ForgeProposalFailStaleResult:
+        "Marks stale generating proposals failed in the configured canonical store. The runtime clock and existing store transition own the cutoff and persisted update.\n\nArgs:\n    params: Fails stale generations in one canonical proposal scope.\n\nReturns:\n    Number of generations that the canonical store marked failed.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["scope"]}
+        return ForgeProposalFailStaleResult.from_dict(await self._client.request("sessions.forgeProposals.failStale", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerSessionsApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+        self.forge_proposals = _InternalServerSessionsForgeProposalsApi(client)
+
+    async def _validate_name(self, params: SessionsValidateNameRequest, *, timeout: float | None = None) -> SessionsValidateNameResult:
+        "Validates an explicit session name with the canonical session naming rules and returns an optional error.\n\nArgs:\n    params: A friendly name to validate before a session mutation.\n\nReturns:\n    The shared session-name policy decision.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        return SessionsValidateNameResult.from_dict(await self._client.request("sessions.validateName", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _import_semantic(self, params: SessionsImportSemanticRequest, *, timeout: float | None = None) -> SessionsImportSemanticResult:
+        "Validates semantic session JSONL and imports canonical events into a fresh local session with rollback. Dry runs perform no authentication, network calls, or writes.\n\nArgs:\n    params: Semantic conversation input for local import or validation.\n\nReturns:\n    Semantic session import outcome.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["jsonl","inputPath","defaultWorkingDirectory"]}
+        return SessionsImportSemanticResult.from_dict(await self._client.request("sessions.importSemantic", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _get_metadata(self, params: SessionsGetMetadataRequest, *, timeout: float | None = None) -> SessionsGetMetadataResult:
+        "Reads lightweight persisted metadata for one local session without opening it.\n\nArgs:\n    params: Session ID whose persisted metadata should be read.\n\nReturns:\n    Persisted local session metadata when the session exists.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsGetMetadataResult.from_dict(await self._client.request("sessions.getMetadata", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _list_remote_page(self, params: _SessionsListRemotePageRequest, *, timeout: float | None = None) -> _SessionsListRemotePageResult:
+        "Lists one step of the signed-in user's Mission Control tasks, including archived tasks, as remote session metadata. Each step follows the task list's `Link: rel=\"next\"` header (falling back to the next page number when there is none) for up to one active and one archived page, and returns a continuation for the next step. HTTP failures are reported in `failure` rather than as an RPC error so callers keep the status, payload and `retryAfterMs`.\n\nArgs:\n    params: Requests the next step of a Mission Control task listing that follows `Link: rel=\"next\"` pagination.\n\nReturns:\n    One step of a Mission Control task listing: up to one active page and one archived page.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["maxRecords"]}
+        return _SessionsListRemotePageResult.from_dict(await self._client.request("sessions.listRemotePage", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _list_non_empty_session_ids(self, params: SessionsListNonEmptySessionIDSRequest, *, timeout: float | None = None) -> SessionsListNonEmptySessionIDSResult:
+        "Lists recent local session IDs that contain user-visible history, omitting housekeeping-only sessions.\n\nArgs:\n    params: Limit for non-empty local session IDs.\n\nReturns:\n    Recent local session IDs that contain user-visible history.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsListNonEmptySessionIDSResult.from_dict(await self._client.request("sessions.listNonEmptySessionIds", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _get_event_file_path(self, params: SessionsGetEventFilePathRequest, *, timeout: float | None = None) -> SessionsGetEventFilePathResult:
+        "Computes the absolute path to a session's persisted events.jsonl file. Internal: filesystem paths are only meaningful in-process (CLI and runtime share a filesystem). Currently used by the CLI's contribution-graph feature to read historical events directly. Remote SDK consumers must not depend on this; a proper event-query API would replace it if the contribution graph ever needed to work over the wire.\n\nArgs:\n    params: Session ID whose event-log file path to compute.\n\nReturns:\n    Absolute path to the session's events.jsonl file on disk.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsGetEventFilePathResult.from_dict(await self._client.request("sessions.getEventFilePath", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _get_persisted_remote_steerable(self, params: SessionsGetPersistedRemoteSteerableRequest, *, timeout: float | None = None) -> SessionsGetPersistedRemoteSteerableResult:
+        "Returns a session's persisted remote-steerable flag, if any has been recorded. Internal: this is CLI-specific book-keeping used by `--continue` / `--resume` to inherit the prior session's remote-steerable preference. SDK consumers that want similar behavior should manage their own persistence around start/stop calls rather than relying on this runtime-side flag.\n\nArgs:\n    params: Session ID to look up the persisted remote-steerable flag for.\n\nReturns:\n    The session's persisted remote-steerable flag, or omitted when no value has been persisted.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsGetPersistedRemoteSteerableResult.from_dict(await self._client.request("sessions.getPersistedRemoteSteerable", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _delete(self, params: SessionsDeleteRequest, *, timeout: float | None = None) -> None:
+        "Deletes one local session from disk after running the same lifecycle hooks as the session manager.\n\nArgs:\n    params: Session ID to delete from disk.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        await self._client.request("sessions.delete", params_dict, **_timeout_kwargs(timeout))
+
+    async def _create_workspace(self, params: SessionsCreateWorkspaceRequest, *, timeout: float | None = None) -> SessionsCreateWorkspaceResult:
+        "Creates the workspace record for a session that has not been opened yet. A host that hands a session off to another application — writing the record and then launching that application against the session ID — needs the record on disk before any session exists to carry it, which the session-scoped workspace methods cannot do. Replaces any existing record and resets the checkpoint index. When writing to the local filesystem, a stored `fork_count` survives on disk. Returns the record it built, so a surviving stored `fork_count` can differ from the answer.\n\nArgs:\n    params: Identity, state location and starting context for a workspace record.\n\nReturns:\n    The workspace record that was written.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionStatePath","convention"]}
+        return SessionsCreateWorkspaceResult.from_dict(await self._client.request("sessions.createWorkspace", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _load_workspace(self, params: SessionsLoadWorkspaceRequest, *, timeout: float | None = None) -> SessionsLoadWorkspaceResult:
+        "Reads a session's workspace record straight from disk, without opening the session. Resuming by session ID has to know where the session lives before it can connect, so the lookup cannot come from the session-scoped workspace methods, which resolve their location from a live session's context. Returns no record when the file is absent.\n\nArgs:\n    params: Where the session's state lives, as a root directory and the session ID under it.\n\nReturns:\n    The workspace record on disk, omitted when the session has none.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionsHome"]}
+        return SessionsLoadWorkspaceResult.from_dict(await self._client.request("sessions.loadWorkspace", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _update_workspace_fields(self, params: SessionsUpdateWorkspaceFieldsRequest, *, timeout: float | None = None) -> SessionsUpdateWorkspaceFieldsResult:
+        "Merges fields into a session's workspace record on disk, creating the record when it is absent. The counterpart to `sessions.loadWorkspace`, for the same before-the-session-exists case. It preserves stored workspace-schema fields the request does not supply, does not preserve stored keys outside the workspace schema, and never replaces a stored `fork_count`.\n\nArgs:\n    params: Where the session's state lives, plus workspace-schema fields to merge into its workspace record. Stored keys outside the schema are not preserved, and a stored `fork_count` is never replaced.\n\nReturns:\n    The merge completed. The record carries the supplied workspace-schema fields, but a stored `fork_count` stays.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionsHome","fieldsJson"]}
+        return SessionsUpdateWorkspaceFieldsResult.from_dict(await self._client.request("sessions.updateWorkspaceFields", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _get_board_entry_count(self, params: SessionsGetBoardEntryCountRequest, *, timeout: float | None = None) -> SessionsGetBoardEntryCountResult:
+        "Gets the dynamic-context board entry count associated with a session, when available. Internal: this exists solely so CLI telemetry events (`rem_spawn_gate`, `rem_consolidation_complete`) can pair START / END board counts around the detached rem-agent spawn. \"Dynamic context board\" is a runtime-internal concept that is not part of the public SDK contract; the long-term plan is to relocate the telemetry emission into the runtime so this method can be deleted entirely.\n\nArgs:\n    params: Session ID whose board entry count should be returned.\n\nReturns:\n    Dynamic-context board entry count, when available.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        return SessionsGetBoardEntryCountResult.from_dict(await self._client.request("sessions.getBoardEntryCount", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _configure_session_extensions(self, params: _ConfigureSessionExtensionsParams, *, timeout: float | None = None) -> None:
+        "Attaches (or detaches) an in-process ExtensionController delegate for the given session in a local host adapter. Pass `controller: undefined` to detach. Internal because the controller cannot cross the JSON-RPC boundary; the runtime manages its own session extension service.\n\nArgs:\n    params: Params to attach or detach an in-process ExtensionController delegate.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
+        await self._client.request("sessions.configureSessionExtensions", params_dict, **_timeout_kwargs(timeout))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerMemoriesApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def _import_semantic(self, params: MemoriesImportSemanticRequest, *, timeout: float | None = None) -> MemoriesImportSemanticResult:
+        "Validates and imports semantic memory JSONL through original-owner credentials and scoped runtime sessions. Preserves account policy and conflicts. Dry runs perform no authentication, network calls, or writes.\n\nArgs:\n    params: Memory import input. Authentication remains bound to the calling runtime owner.\n\nReturns:\n    Semantic memory import outcome.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["jsonl","workingDirectory"]}
+        return MemoriesImportSemanticResult.from_dict(await self._client.request("memories.importSemantic", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerSecretsApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def _filter_for_host(self, params: SecretsFilterRequest, *, timeout: float | None = None) -> SecretsFilterResult:
+        "Redacts host output with the runtime's current secret sources, including when SDK-managed secret registration is disabled. Extensions cannot call this method. Does not retain the input.\n\nArgs:\n    params: Content to redact with the runtime's process filter.\n\nReturns:\n    Content after runtime-owned redaction.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["text"]}
+        return SecretsFilterResult.from_dict(await self._client.request("secrets.filterForHost", params_dict, **_timeout_kwargs(timeout)))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -87322,9 +91146,10 @@ class _InternalServerUserSettingsApi:
         "Reports the on-disk path of the settings document `user.settings.loadWithWarning` and `user.settings.set` read and write. Resolved the same way those methods resolve it, so a host that shows or opens the settings file names the file the runtime actually uses, including the extensionless legacy `settings` file when that is what is present.\n\nReturns:\n    The on-disk location of the user's settings document.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
         return UserSettingsPathResult.from_dict(await self._client.request("user.settings.getPath", {}, **_timeout_kwargs(timeout)))
 
-    async def _load_with_warning(self, *, timeout: float | None = None) -> UserSettingsLoadWithWarningResult:
-        "Reads the user's stored settings together with the diagnostic raised while reading them. This is `user.settings.loadForConfigDir` without a `configDir` plus the reason part of the document was ignored: that one answers the document alone, so a caller cannot tell a clean read from a salvaged one. Read this when the caller is about to write the file back, where accepting a partial parse would discard every value the loader could not read. The settings that did load are still reported alongside the warning, so a consumer may surface it and continue instead of failing.\n\nReturns:\n    The user's stored settings, together with any diagnostic raised while reading them.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        return UserSettingsLoadWithWarningResult.from_dict(await self._client.request("user.settings.loadWithWarning", {}, **_timeout_kwargs(timeout)))
+    async def _load_with_warning(self, params: _UserSettingsLoadWithWarningRequest | None = None, *, timeout: float | None = None) -> UserSettingsLoadWithWarningResult:
+        "Reads stored settings together with parser diagnostics. Omit context to keep the server's paths and hook environment. An optional trusted-host context selects both instead. The settings that did load remain available alongside the warning, so a consumer can report a partial read without discarding its result.\n\nArgs:\n    params: Selects an optional trusted-host context for settings and parser diagnostics.\n\nReturns:\n    The user's stored settings, together with any diagnostic raised while reading them.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
+        return UserSettingsLoadWithWarningResult.from_dict(await self._client.request("user.settings.loadWithWarning", params_dict, **_timeout_kwargs(timeout)))
 
     async def _merge_managed_and_user(self, params: _UserSettingsMergeManagedAndUserParams, *, timeout: float | None = None) -> UserSettingsMergeManagedAndUserResult:
         "Folds a user settings layer over a managed (enterprise policy) layer and returns the merged settings. The managed layer's governance keys win, `autoTier` resolves through its overridable form, and the two per-entry control maps (`enabledPlugins`, `extraKnownMarketplaces`) union across the layers and are then stamped back from the managed layer, so each entry an administrator declares wins while the user keeps control of the rest. The parameters are named for their layers rather than being a generic base/override pair: nothing about a settings object identifies which layer produced it, so the runtime cannot detect a transposed call, and transposing one resolves the governance keys in the user's favour instead of the administrator's. Supplying only one layer returns it unchanged, and supplying neither returns an empty object. Rejects a managed `autoTier` that is neither a user-configurable tier nor a single-key overridable form, rather than silently dropping it.\n\nArgs:\n    params: The managed (enterprise policy) layer and the user layer to fold together. The field names carry the layer identity: nothing about a settings object identifies which layer produced it, so a generic base/override pair would let a caller transpose them and silently resolve the governance keys in the user's favour.\n\nReturns:\n    The user layer folded over the managed layer.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
@@ -87379,7 +91204,7 @@ class _InternalServerUserSettingsApi:
         return UserSettingsGovernanceKeysResult.from_dict(await self._client.request("user.settings.listGovernanceKeys", {}, **_timeout_kwargs(timeout)))
 
     async def _edit(self, params: _UserSettingsEditRequest, *, timeout: float | None = None) -> _SettingsEditResult:
-        "Atomically edits one canonical user setting inside its settings-file lock. Reads, canonicalizes touched aliases, applies the edit, validates the resulting top-level setting and writes before releasing the lock. An explicit autoUpdatesChannel set completes the staff migration in the same transaction. Only a malformed existing file returns `invalid`; refused keys, invalid values and I/O errors reject the call.\n\nArgs:\n    params: One atomic edit of a canonical setting in settings.json.\n\nReturns:\n    Outcome of an atomic user or repository settings edit.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        "Atomically edits one canonical user setting inside its settings-file lock. Reads, canonicalizes touched aliases, applies the edit, validates the resulting top-level setting and writes before releasing the lock. An explicit autoUpdatesChannel set completes the staff migration in the same transaction. Only a malformed existing file returns `invalid`; refused keys, invalid values and I/O errors reject the call. Optional trusted-host context selects paths and hook environment; configDir and context cannot be combined.\n\nArgs:\n    params: One atomic edit of a canonical setting in settings.json.\n\nReturns:\n    Outcome of an atomic user or repository settings edit.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
         params_dict = params.to_dict()
         _validate_settings_integers(params_dict)
         return _SettingsEditResult.from_dict(await self._client.request("user.settings.edit", params_dict, **_timeout_kwargs(timeout)))
@@ -87426,10 +91251,30 @@ class _InternalServerUserSettingsApi:
         return UserSettingsLoadForEditResult.from_dict(await self._client.request("user.settings.loadForEdit", params_dict, **_timeout_kwargs(timeout)))
 
     async def _validate(self, params: UserSettingsValidateRequest, *, timeout: float | None = None) -> UserSettingsValidateResult:
-        "Validates one top-level setting subtree without writing it, reporting each problem with the path it applies to. Scoped to a single top-level key on purpose: validating the whole file would reject an edit whenever an unrelated pre-existing field is malformed, locking the user out of the very tool that could fix it.\n\nArgs:\n    params: A single top-level setting subtree to validate.\n\nReturns:\n    Outcome of validating one top-level setting subtree.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        "Validates one top-level setting subtree without writing it, reporting each problem with the path it applies to. Scoped to a single top-level key on purpose: validating the whole file would reject an edit whenever an unrelated pre-existing field is malformed, locking the user out of the very tool that could fix it. Optional trusted-host context supplies the hook environment; omission keeps the existing process defaults.\n\nArgs:\n    params: A single top-level setting subtree to validate.\n\nReturns:\n    Outcome of validating one top-level setting subtree.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
         params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["topKey"]}
         _validate_settings_integers(params_dict)
         return UserSettingsValidateResult.from_dict(await self._client.request("user.settings.validate", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _repository_disabled_names(self, params: _RepositoryDisabledNamesRequest, *, timeout: float | None = None) -> RepositoryDisabledNamesResult:
+        "Reads advisory repository-owned resource disables under explicit host paths and persisted workspace trust.\n\nArgs:\n    params: Reads only the trusted repository contribution to one resource disable list.\n\nReturns:\n    The advisory repository disable list. A read failure returns no names and a diagnostic, rather than blocking a listing or mutation.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["context","workingDirectory","key"]}
+        return RepositoryDisabledNamesResult.from_dict(await self._client.request("user.settings.repositoryDisabledNames", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _load_for_working_directory(self, params: _UserSettingsForWorkingDirectoryRequest, *, timeout: float | None = None) -> dict:
+        "Reads contextual user settings with the trusted repository overlay for one working directory.\n\nArgs:\n    params: Reads a contextual user document with trusted repository settings for one working directory.\n\nReturns:\n    The normalized user document with trusted repository settings.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["context","workingDirectory"]}
+        return dict(await self._client.request("user.settings.loadForWorkingDirectory", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _write_keys(self, params: _UserSettingsWriteKeysRequest, *, timeout: float | None = None) -> _UserSettingsWriteKeysResult:
+        "Atomically writes and deletes top-level settings keys without replacing unrelated stored values or malformed documents.\n\nArgs:\n    params: An atomic set of top-level settings updates that preserves unrelated stored values.\n\nReturns:\n    Reports whether the atomic update succeeded or the existing document was invalid.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["context","settings","deleteKeys"]}
+        return _UserSettingsWriteKeysResult.from_dict(await self._client.request("user.settings.writeKeys", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _get_or_create_ahp_environment_compute_id(self, params: _UserSettingsForContextRequest, *, timeout: float | None = None) -> str:
+        "Atomically returns or creates the AHP environment compute identity under the explicit host settings context.\n\nArgs:\n    params: Selects the settings document and hook environment for an explicit host.\n\nReturns:\n    The persisted AHP environment compute identity.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["context"]}
+        return str(await self._client.request("user.settings.getOrCreateAhpEnvironmentComputeId", params_dict, **_timeout_kwargs(timeout)))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -87664,38 +91509,24 @@ class _InternalServerToolsApi:
 
 
 # Experimental: this API group is experimental and may change or be removed.
-class _InternalServerAccountApi:
+class _InternalServerMcpConfigApi:
     def __init__(self, client: "JsonRpcClient"):
         self._client = client
 
-    async def _describe_auth_info(self, params: _AccountDescribeAuthInfoRequest, *, timeout: float | None = None) -> _AccountDescribeAuthInfoResult:
-        "Renders the sign-in banner and the one-line account description the runtime uses for an authentication identity. The runtime words these in several places for its own callers, so a host that announces a sign-in or an account switch should render them from here rather than composing its own, which would let the two spellings drift apart.\n\nArgs:\n    params: The authentication identity whose shared wording should be rendered.\n\nReturns:\n    The wording the runtime uses for an authentication identity.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["identity"]}
-        return _AccountDescribeAuthInfoResult.from_dict(await self._client.request("account.describeAuthInfo", params_dict, **_timeout_kwargs(timeout)))
+    async def _compose_additional(self, params: _MCPConfigComposeAdditionalRequest, *, timeout: float | None = None) -> MCPConfigComposeAdditionalResult:
+        "Validates and composes additional MCP documents in precedence order without modifying persisted configuration.\n\nArgs:\n    params: Validates and combines additional MCP documents in source order.\n\nReturns:\n    Validated additional MCP servers in source precedence order. Runtime-owned filtering remains outside the serialized document.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sources"]}
+        return MCPConfigComposeAdditionalResult.from_dict(await self._client.request("mcp.config.composeAdditional", params_dict, **_timeout_kwargs(timeout)))
 
-    async def _get_gist_support(self, params: _AccountGetGistSupportRequest, *, timeout: float | None = None) -> _AccountGetGistSupportResult:
-        "Reports whether the supplied identity can create gists. Gists are unavailable on GitHub Enterprise Cloud with data residency, and to Enterprise Managed Users on github.com, so a host that offers gist actions should hide or disable them when this reports no support.\n\nArgs:\n    params: The authentication identity whose gist support should be reported.\n\nReturns:\n    Whether the identity can create gists, and why not when it cannot.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["identity"]}
-        return _AccountGetGistSupportResult.from_dict(await self._client.request("account.getGistSupport", params_dict, **_timeout_kwargs(timeout)))
+    async def _user_server_names_for_config_dir(self, params: _MCPConfigForConfigDirRequest, *, timeout: float | None = None) -> _MCPConfigUserServerNamesResult:
+        "Reads fresh persisted user MCP server names under an explicit configuration root, including invalid entries but excluding installation-owned entries. Leaves the validated cache unchanged and requires a trusted host or direct SDK caller.\n\nArgs:\n    params: Selects an explicit user MCP configuration root without changing the connection owner.\n\nReturns:\n    Fresh user MCP server names, including invalid entries but excluding installation-owned entries. This read does not change the validated configuration cache.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["configDir"]}
+        return _MCPConfigUserServerNamesResult.from_dict(await self._client.request("mcp.config.userServerNamesForConfigDir", params_dict, **_timeout_kwargs(timeout)))
 
-    async def _get_web_url(self, params: _AccountGetWebURLRequest, *, timeout: float | None = None) -> _AccountGetWebURLResult:
-        "Resolves a path on the identity's GitHub host into an absolute URL. A bound host can instead select its live credential owner with authOwnerId; this form rejects extensions, foreign owners, and a simultaneous identity. Falls back to the public host only when neither identity nor authOwnerId is supplied.\n\nArgs:\n    params: A path to resolve against the selected GitHub host.\n\nReturns:\n    An absolute URL on the selected GitHub host.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["path"]}
-        return _AccountGetWebURLResult.from_dict(await self._client.request("account.getWebUrl", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _get_token_env_var(self, *, timeout: float | None = None) -> _AccountGetTokenEnvVarResult:
-        "Names the environment variable supplying a classic personal access token, if one is set. A classic token cannot be upgraded in place, so a host that finds one should tell the user which variable to unset rather than starting an interactive sign-in that the variable would override.\n\nReturns:\n    The environment variable supplying a classic personal access token, when one is set.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        return _AccountGetTokenEnvVarResult.from_dict(await self._client.request("account.getTokenEnvVar", {}, **_timeout_kwargs(timeout)))
-
-    async def _subscribe_copilot_free(self, params: _AccountSubscribeCopilotFreeRequest, *, timeout: float | None = None) -> _AccountSubscribeCopilotFreeResult:
-        "Enrolls the supplied identity in Copilot Free. A host offers this when a signed-in user has no Copilot subscription, so that signing up does not mean leaving for a browser. The runtime resolves the identity's credential itself, so the caller sends none. Read `kind` before `status`: an identity whose credential cannot be resolved answers `no-token` rather than failing the call, because that asks the user to sign in again rather than reporting that enrollment broke. Enrolling an already-enrolled account succeeds and reports `already_subscribed`. This does not refresh the caller's cached account state; a host that shows subscription status should re-read it afterwards.\n\nArgs:\n    params: The authentication identity to enroll in Copilot Free.\n\nReturns:\n    What came of a Copilot Free enrollment attempt.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["identity"]}
-        return _AccountSubscribeCopilotFreeResult.from_dict(await self._client.request("account.subscribeCopilotFree", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _get_host_url(self, params: _AccountGetHostURLRequest, *, timeout: float | None = None) -> _AccountGetHostURLResult:
-        "Resolves the base URL of the GitHub host from its configured names, normalizing a bare hostname into an `https://` URL and falling back to the public github.com host when neither name is set. Unlike `account.getWebUrl` this needs no identity, so a host can reach it before anyone has signed in -- which is when an enterprise instance must already be known.\n\nArgs:\n    params: Configured names of the GitHub host to resolve.\n\nReturns:\n    Absolute base URL of the GitHub host.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return _AccountGetHostURLResult.from_dict(await self._client.request("account.getHostUrl", params_dict, **_timeout_kwargs(timeout)))
+    async def _merge_sources(self, params: _MCPConfigMergeSourcesRequest, *, timeout: float | None = None) -> _MCPConfigMergeSourcesResult:
+        "Composes explicit MCP source inventories through the shared loader, including trusted workspace and on-device sources. This read-only result grants no execution authority.\n\nArgs:\n    params: Read-only MCP configuration composition from explicit source inventories. The result grants no execution authority.\n\nReturns:\n    The composed MCP configuration and all omitted-source diagnostics.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["workingDirectory","configDir"]}
+        return _MCPConfigMergeSourcesResult.from_dict(await self._client.request("mcp.config.mergeSources", params_dict, **_timeout_kwargs(timeout)))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -87745,11 +91576,36 @@ class _InternalServerMcpOauthApi:
 
 
 # Experimental: this API group is experimental and may change or be removed.
+class _InternalServerMcpGitHubApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def _resolve_for_invocation(self, params: _MCPGitHubResolveInvocationRequest, *, timeout: float | None = None) -> _MCPGitHubResolveInvocationResult:
+        "Resolves a secret-free built-in GitHub MCP descriptor through this connection's original credential owner. Preserves invocation tool overrides, shell filters, Azure DevOps narrowing, and cached GitHub IQ selection within the existing two-second inspection budget. Does not start an MCP connection.\n\nArgs:\n    params: Resolve the authentication-derived built-in without a session or MCP connection.\n\nReturns:\n    A secret-free GitHub descriptor, an ordinary signed-out result, or a bounded degraded result.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["workingDirectory","userSettings","disabledServers","integrationId","audience"]}
+        return _MCPGitHubResolveInvocationResult.from_dict(await self._client.request("mcp.github.resolveForInvocation", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalServerMcpComputerUseApi:
+    def __init__(self, client: "JsonRpcClient"):
+        self._client = client
+
+    async def _apply_configuration(self, params: _MCPComputerUseApplyConfigurationRequest, *, timeout: float | None = None) -> _MCPComputerUseApplyConfigurationResult:
+        "Applies the runtime host's existing Computer Use platform overlay to a complete MCP server map and effective disabled list. Preserves configuration and provenance outside that overlay and starts no server.\n\nArgs:\n    params: Apply the host's Computer Use platform overlay without starting a server.\n\nReturns:\n    Effective configuration after the existing platform overlay.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["servers","disabledServers","enabledServers"]}
+        return _MCPComputerUseApplyConfigurationResult.from_dict(await self._client.request("mcp.computerUse.applyConfiguration", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
 class _InternalServerMcpApi:
     def __init__(self, client: "JsonRpcClient"):
         self._client = client
+        self.config = _InternalServerMcpConfigApi(client)
         self.registry = _InternalServerMcpRegistryApi(client)
         self.oauth = _InternalServerMcpOauthApi(client)
+        self.github = _InternalServerMcpGitHubApi(client)
+        self.computer_use = _InternalServerMcpComputerUseApi(client)
 
     async def _list_builtin_server_names(self, *, timeout: float | None = None) -> _MCPListBuiltinServerNamesResult:
         "Lists the MCP servers the runtime supplies itself, so a host that disables the built-ins wholesale suppresses exactly the set the runtime would otherwise add. The names are fixed for a build and depend on no configuration, session or account.\n\nReturns:\n    Names of the MCP servers the runtime supplies itself.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
@@ -87902,89 +91758,6 @@ class _InternalServerRuntimeApi:
         "Opens an authorization URL using the same browser policy as the runtime's OAuth flows, including BROWSER and COPILOT_DEBUG_BROWSER. Refuses extension callers.\n\nArgs:\n    params: An authorization URL for the host browser.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
         params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["url"]}
         await self._client.request("runtime.openBrowser", params_dict, **_timeout_kwargs(timeout))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class _InternalServerSessionsForgeProposalsApi:
-    def __init__(self, client: "JsonRpcClient"):
-        self._client = client
-
-    async def _workspace_before(self, params: ForgeProposalWorkspaceBeforeRequest, *, timeout: float | None = None) -> ForgeProposalWorkspaceBeforeResult:
-        "Reads a Forge proposal's before-generation capture from the canonical store owned by the configured runtime host. The request cannot select a database.\n\nArgs:\n    params: Proposal identifier whose before-generation capture is requested.\n\nReturns:\n    Stored before-generation capture, or null when no capture exists.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["id"]}
-        return ForgeProposalWorkspaceBeforeResult.from_dict(await self._client.request("sessions.forgeProposals.workspaceBefore", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _reconcile(self, params: ForgeProposalReconcileRequest, *, timeout: float | None = None) -> ForgeProposalReconcileResult:
-        "Reconciles a generated artifact with canonical Forge proposals. Reuses a ready or reviewing fingerprint, completes an eligible generation, or creates and completes an on-demand generation. Existing store transitions retain their transaction and persisted compatibility semantics. SDK skill-review clients can use the same canonical lifecycle without implementing another store.\n\nArgs:\n    params: Reconciles a generated artifact with the configured canonical store.\n\nReturns:\n    Existing ready proposal or completed generation; null for an ineligible automatic generation.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["scope","triggerMode","fingerprint","manifest","summary"]}
-        return ForgeProposalReconcileResult.from_dict(await self._client.request("sessions.forgeProposals.reconcile", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _fail_stale(self, params: ForgeProposalFailStaleRequest, *, timeout: float | None = None) -> ForgeProposalFailStaleResult:
-        "Marks stale generating proposals failed in the configured canonical store. The runtime clock and existing store transition own the cutoff and persisted update.\n\nArgs:\n    params: Fails stale generations in one canonical proposal scope.\n\nReturns:\n    Number of generations that the canonical store marked failed.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["scope"]}
-        return ForgeProposalFailStaleResult.from_dict(await self._client.request("sessions.forgeProposals.failStale", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class _InternalServerSessionsApi:
-    def __init__(self, client: "JsonRpcClient"):
-        self._client = client
-        self.forge_proposals = _InternalServerSessionsForgeProposalsApi(client)
-
-    async def _get_metadata(self, params: SessionsGetMetadataRequest, *, timeout: float | None = None) -> SessionsGetMetadataResult:
-        "Reads lightweight persisted metadata for one local session without opening it.\n\nArgs:\n    params: Session ID whose persisted metadata should be read.\n\nReturns:\n    Persisted local session metadata when the session exists.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsGetMetadataResult.from_dict(await self._client.request("sessions.getMetadata", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _list_remote_page(self, params: _SessionsListRemotePageRequest, *, timeout: float | None = None) -> _SessionsListRemotePageResult:
-        "Lists one step of the signed-in user's Mission Control tasks, including archived tasks, as remote session metadata. Each step follows the task list's `Link: rel=\"next\"` header (falling back to the next page number when there is none) for up to one active and one archived page, and returns a continuation for the next step. HTTP failures are reported in `failure` rather than as an RPC error so callers keep the status, payload and `retryAfterMs`.\n\nArgs:\n    params: Requests the next step of a Mission Control task listing that follows `Link: rel=\"next\"` pagination.\n\nReturns:\n    One step of a Mission Control task listing: up to one active page and one archived page.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["maxRecords"]}
-        return _SessionsListRemotePageResult.from_dict(await self._client.request("sessions.listRemotePage", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _list_non_empty_session_ids(self, params: SessionsListNonEmptySessionIDSRequest, *, timeout: float | None = None) -> SessionsListNonEmptySessionIDSResult:
-        "Lists recent local session IDs that contain user-visible history, omitting housekeeping-only sessions.\n\nArgs:\n    params: Limit for non-empty local session IDs.\n\nReturns:\n    Recent local session IDs that contain user-visible history.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsListNonEmptySessionIDSResult.from_dict(await self._client.request("sessions.listNonEmptySessionIds", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _get_event_file_path(self, params: SessionsGetEventFilePathRequest, *, timeout: float | None = None) -> SessionsGetEventFilePathResult:
-        "Computes the absolute path to a session's persisted events.jsonl file. Internal: filesystem paths are only meaningful in-process (CLI and runtime share a filesystem). Currently used by the CLI's contribution-graph feature to read historical events directly. Remote SDK consumers must not depend on this; a proper event-query API would replace it if the contribution graph ever needed to work over the wire.\n\nArgs:\n    params: Session ID whose event-log file path to compute.\n\nReturns:\n    Absolute path to the session's events.jsonl file on disk.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsGetEventFilePathResult.from_dict(await self._client.request("sessions.getEventFilePath", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _get_persisted_remote_steerable(self, params: SessionsGetPersistedRemoteSteerableRequest, *, timeout: float | None = None) -> SessionsGetPersistedRemoteSteerableResult:
-        "Returns a session's persisted remote-steerable flag, if any has been recorded. Internal: this is CLI-specific book-keeping used by `--continue` / `--resume` to inherit the prior session's remote-steerable preference. SDK consumers that want similar behavior should manage their own persistence around start/stop calls rather than relying on this runtime-side flag.\n\nArgs:\n    params: Session ID to look up the persisted remote-steerable flag for.\n\nReturns:\n    The session's persisted remote-steerable flag, or omitted when no value has been persisted.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsGetPersistedRemoteSteerableResult.from_dict(await self._client.request("sessions.getPersistedRemoteSteerable", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _delete(self, params: SessionsDeleteRequest, *, timeout: float | None = None) -> None:
-        "Deletes one local session from disk after running the same lifecycle hooks as the session manager.\n\nArgs:\n    params: Session ID to delete from disk.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        await self._client.request("sessions.delete", params_dict, **_timeout_kwargs(timeout))
-
-    async def _create_workspace(self, params: SessionsCreateWorkspaceRequest, *, timeout: float | None = None) -> SessionsCreateWorkspaceResult:
-        "Creates the workspace record for a session that has not been opened yet. A host that hands a session off to another application — writing the record and then launching that application against the session ID — needs the record on disk before any session exists to carry it, which the session-scoped workspace methods cannot do. Replaces any existing record and resets the checkpoint index. When writing to the local filesystem, a stored `fork_count` survives on disk. Returns the record it built, so a surviving stored `fork_count` can differ from the answer.\n\nArgs:\n    params: Identity, state location and starting context for a workspace record.\n\nReturns:\n    The workspace record that was written.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionStatePath","convention"]}
-        return SessionsCreateWorkspaceResult.from_dict(await self._client.request("sessions.createWorkspace", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _load_workspace(self, params: SessionsLoadWorkspaceRequest, *, timeout: float | None = None) -> SessionsLoadWorkspaceResult:
-        "Reads a session's workspace record straight from disk, without opening the session. Resuming by session ID has to know where the session lives before it can connect, so the lookup cannot come from the session-scoped workspace methods, which resolve their location from a live session's context. Returns no record when the file is absent.\n\nArgs:\n    params: Where the session's state lives, as a root directory and the session ID under it.\n\nReturns:\n    The workspace record on disk, omitted when the session has none.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionsHome"]}
-        return SessionsLoadWorkspaceResult.from_dict(await self._client.request("sessions.loadWorkspace", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _update_workspace_fields(self, params: SessionsUpdateWorkspaceFieldsRequest, *, timeout: float | None = None) -> SessionsUpdateWorkspaceFieldsResult:
-        "Merges fields into a session's workspace record on disk, creating the record when it is absent. The counterpart to `sessions.loadWorkspace`, for the same before-the-session-exists case. It preserves stored workspace-schema fields the request does not supply, does not preserve stored keys outside the workspace schema, and never replaces a stored `fork_count`.\n\nArgs:\n    params: Where the session's state lives, plus workspace-schema fields to merge into its workspace record. Stored keys outside the schema are not preserved, and a stored `fork_count` is never replaced.\n\nReturns:\n    The merge completed. The record carries the supplied workspace-schema fields, but a stored `fork_count` stays.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None or k in ["sessionsHome","fieldsJson"]}
-        return SessionsUpdateWorkspaceFieldsResult.from_dict(await self._client.request("sessions.updateWorkspaceFields", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _get_board_entry_count(self, params: SessionsGetBoardEntryCountRequest, *, timeout: float | None = None) -> SessionsGetBoardEntryCountResult:
-        "Gets the dynamic-context board entry count associated with a session, when available. Internal: this exists solely so CLI telemetry events (`rem_spawn_gate`, `rem_consolidation_complete`) can pair START / END board counts around the detached rem-agent spawn. \"Dynamic context board\" is a runtime-internal concept that is not part of the public SDK contract; the long-term plan is to relocate the telemetry emission into the runtime so this method can be deleted entirely.\n\nArgs:\n    params: Session ID whose board entry count should be returned.\n\nReturns:\n    Dynamic-context board entry count, when available.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        return SessionsGetBoardEntryCountResult.from_dict(await self._client.request("sessions.getBoardEntryCount", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _configure_session_extensions(self, params: _ConfigureSessionExtensionsParams, *, timeout: float | None = None) -> None:
-        "Attaches (or detaches) an in-process ExtensionController delegate for the given session in a local host adapter. Pass `controller: undefined` to detach. Internal because the controller cannot cross the JSON-RPC boundary; the runtime manages its own session extension service.\n\nArgs:\n    params: Params to attach or detach an in-process ExtensionController delegate.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
-        await self._client.request("sessions.configureSessionExtensions", params_dict, **_timeout_kwargs(timeout))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -88159,6 +91932,12 @@ class _InternalServerRpc:
     """Internal SDK server-scoped RPC methods. Not part of the public API."""
     def __init__(self, client: "JsonRpcClient"):
         self._client = client
+        self.plugins = _InternalServerPluginsApi(client)
+        self.skills = _InternalServerSkillsApi(client)
+        self.account = _InternalServerAccountApi(client)
+        self.sessions = _InternalServerSessionsApi(client)
+        self.memories = _InternalServerMemoriesApi(client)
+        self.secrets = _InternalServerSecretsApi(client)
         self.git = _InternalServerGitApi(client)
         self.ahp = _InternalServerAhpApi(client)
         self.sandbox = _InternalServerSandboxApi(client)
@@ -88172,7 +91951,6 @@ class _InternalServerRpc:
         self.host = _InternalServerHostApi(client)
         self.providers_source = _InternalServerProvidersSourceApi(client)
         self.tools = _InternalServerToolsApi(client)
-        self.account = _InternalServerAccountApi(client)
         self.mcp = _InternalServerMcpApi(client)
         self.instructions = _InternalServerInstructionsApi(client)
         self.agents = _InternalServerAgentsApi(client)
@@ -88181,7 +91959,6 @@ class _InternalServerRpc:
         self.git_hub_repository = _InternalServerGitHubRepositoryApi(client)
         self.git_hub_owners = _InternalServerGitHubOwnersApi(client)
         self.runtime = _InternalServerRuntimeApi(client)
-        self.sessions = _InternalServerSessionsApi(client)
         self.agent_registry = _InternalServerAgentRegistryApi(client)
         self.git_hub_fetch = _InternalServerGitHubFetchApi(client)
         self.git_hub_release = _InternalServerGitHubReleaseApi(client)
@@ -88192,6 +91969,240 @@ class _InternalServerRpc:
         "Performs the SDK server connection handshake and validates the optional connection token. Marked internal because this is JSON-RPC transport plumbing invoked automatically by an SDK client's own `connect()` wrapper, not a user-facing method. Stays internal as long as the SDK client owns the handshake; would only become public if the SDK ever exposed the raw schema surface to consumers without a connection wrapper.\n\nArgs:\n    params: Connection-level opt-ins for the `server.connect` handshake. Transport authentication is consumed by the native protocol boundary before dispatch.\n\nReturns:\n    Handshake result reporting the server's protocol version and package version on success.\n\n.. warning:: This API is experimental and may change or be removed in future versions.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
         params_dict = {k: v for k, v in params.to_dict().items() if v is not None}
         return _ConnectResult.from_dict(await self._client.request("connect", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class ExtensionsApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def get_policy(self, *, timeout: float | None = None) -> ExtensionManagedPolicy:
+        "Returns the runtime-derived standalone extension admission policy for the session's actual project and managed-settings context. enforcementVersion 1 means this runtime enforces strictPluginOnlyCustomization for executable extensions. Hosts executing independent extension targets must deny standalone targets unless standalone is allowed; plugin_only requires runtime-verified eligible plugin provenance, not a caller-supplied source label or transport bridge. pending is not confirmed absence. Older runtimes return method-not-found and must not be represented as enforcing this restriction. Re-read on managed-settings changes; a snapshot is not a launch authorization token.\n\nReturns:\n    Runtime support and session-context standalone executable extension policy."
+        return ExtensionManagedPolicy.from_dict(await self._client.request("session.extensions.getPolicy", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+    async def list(self, *, timeout: float | None = None) -> ExtensionList:
+        "Lists extensions discovered for the session and their current status.\n\nReturns:\n    Extensions discovered for the session, with their current status."
+        return ExtensionList.from_dict(await self._client.request("session.extensions.list", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+    async def enable(self, params: ExtensionsEnableRequest, *, timeout: float | None = None) -> None:
+        "Enables an extension for the session and persists the preference when the session has a settings store. Hosts synchronizing effective membership should use extensions.reconcile instead.\n\nArgs:\n    params: Source-qualified extension identifier to enable for the session."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["id"]}
+        params_dict["sessionId"] = self._session_id
+        await self._client.request("session.extensions.enable", params_dict, **_timeout_kwargs(timeout))
+
+    async def disable(self, params: ExtensionsDisableRequest, *, timeout: float | None = None) -> None:
+        "Disables an extension for the session and persists the preference when the session has a settings store. Hosts synchronizing effective membership should use extensions.reconcile instead.\n\nArgs:\n    params: Source-qualified extension identifier to disable for the session."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["id"]}
+        params_dict["sessionId"] = self._session_id
+        await self._client.request("session.extensions.disable", params_dict, **_timeout_kwargs(timeout))
+
+    async def reload(self, *, timeout: float | None = None) -> None:
+        "Reloads extension definitions and processes for the session."
+        await self._client.request("session.extensions.reload", {"sessionId": self._session_id}, **_timeout_kwargs(timeout))
+
+    async def reconcile(self, *, timeout: float | None = None) -> ExtensionList:
+        "Host-only reconciliation of authoritative session-effective extension membership and enablement. Refreshes runtime-owned discovery and preferences without persisting settings, installing plugins, or restarting unchanged activations. Returns ExtensionList only after required starts and process/contribution cleanup settle. Success means every stop, cleanup, contribution refresh and revalidation completed; an enabled extension that fails to start does not fail reconciliation and is reported with status failed, so read statuses rather than assuming every enabled extension is running. Takes no caller inventory or overrides. Missing controllers, unready/incomplete discovery, unavailable workspaces, superseded inputs, and other lifecycle failures (including managed-policy launch denials and failed stops or cleanup) are errors, not empty membership. Independently proven revocations may be applied before an error; retry converges without restarting healthy activations. Error data contains lifecycleChangesApplied and code: extension_reconciliation_host_required, extension_reconciliation_unavailable, extension_reconciliation_not_ready, extension_reconciliation_discovery_failed, extension_reconciliation_workspace_unavailable, extension_reconciliation_superseded, or extension_reconciliation_lifecycle_failed. Mark host reconciliation state applied only on success. On older runtimes, method-not-found must not fall back to global discovery and persistent extension disables.\n\nReturns:\n    Extensions discovered for the session, with their current status."
+        return ExtensionList.from_dict(await self._client.request("session.extensions.reconcile", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+    async def send_attachments_to_message(self, params: SendAttachmentsToMessageParams, *, timeout: float | None = None) -> None:
+        "Push attachments into the next user-message turn from an extension. The host should surface them as composer pills and forward them via the next session.send call. Callable only by extension-owned connections.\n\nArgs:\n    params: Parameters for session.extensions.sendAttachmentsToMessage."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["attachments"]}
+        params_dict["sessionId"] = self._session_id
+        await self._client.request("session.extensions.sendAttachmentsToMessage", params_dict, **_timeout_kwargs(timeout))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class PluginsMarketplacesApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def list(self, *, timeout: float | None = None) -> MarketplaceListResult:
+        "Lists registered and enterprise-managed desired marketplaces using the live session's retained policy.\n\nReturns:\n    All registered marketplaces, including built-in defaults."
+        return MarketplaceListResult.from_dict(await self._client.request("session.plugins.marketplaces.list", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+    async def add(self, params: PluginsMarketplacesAddRequest, *, timeout: float | None = None) -> MarketplaceAddResult:
+        "Adds a marketplace when permitted by the live session's retained managed policy.\n\nArgs:\n    params: Marketplace source and optional working directory for relative-path resolution.\n\nReturns:\n    Result of registering a new marketplace."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["source"]}
+        params_dict["sessionId"] = self._session_id
+        return MarketplaceAddResult.from_dict(await self._client.request("session.plugins.marketplaces.add", params_dict, **_timeout_kwargs(timeout)))
+
+    async def remove(self, params: PluginsMarketplacesRemoveRequest, *, timeout: float | None = None) -> MarketplaceRemoveResult:
+        "Removes a marketplace when permitted by the live session's retained managed policy.\n\nArgs:\n    params: Name of the marketplace to remove and an optional force flag.\n\nReturns:\n    Outcome of the remove attempt, including dependent-plugin info when applicable."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        params_dict["sessionId"] = self._session_id
+        return MarketplaceRemoveResult.from_dict(await self._client.request("session.plugins.marketplaces.remove", params_dict, **_timeout_kwargs(timeout)))
+
+    async def browse(self, params: PluginsMarketplacesBrowseRequest, *, timeout: float | None = None) -> MarketplaceBrowseResult:
+        "Browses a marketplace resolved through the live session's working directory and retained managed policy.\n\nArgs:\n    params: Name of the marketplace whose plugin catalog to fetch.\n\nReturns:\n    Plugins advertised by the marketplace."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        params_dict["sessionId"] = self._session_id
+        return MarketplaceBrowseResult.from_dict(await self._client.request("session.plugins.marketplaces.browse", params_dict, **_timeout_kwargs(timeout)))
+
+    async def refresh(self, params: SessionPluginsMarketplacesRefreshRequest | None = None, *, timeout: float | None = None) -> MarketplaceRefreshResult:
+        "Refreshes marketplaces resolved through the live session's working directory and retained managed policy.\n\nArgs:\n    params: Optional marketplace name; omit to refresh all.\n\nReturns:\n    Result of refreshing one or more marketplace catalogs."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
+        params_dict["sessionId"] = self._session_id
+        return MarketplaceRefreshResult.from_dict(await self._client.request("session.plugins.marketplaces.refresh", params_dict, **_timeout_kwargs(timeout)))
+
+    async def search(self, params: PluginMarketplaceSearchRequest, *, timeout: float | None = None) -> PluginMarketplaceSearchResult:
+        "Searches all configured plugin marketplaces using the session's authoritative configuration, credentials, working directory, and managed policy. Returns installation state and partial errors. This is not Agent Finder search.\n\nArgs:\n    params: Searches all configured plugin marketplaces, not the Agent Finder catalog.\n\nReturns:\n    Matching plugins across configured marketplaces, with partial failures."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["query"]}
+        params_dict["sessionId"] = self._session_id
+        return PluginMarketplaceSearchResult.from_dict(await self._client.request("session.plugins.marketplaces.search", params_dict, **_timeout_kwargs(timeout)))
+
+    async def check_update(self, params: PluginMarketplaceCheckUpdateRequest, *, timeout: float | None = None) -> PluginUpdateCheckResult:
+        "Probes a configured marketplace's revision without refreshing or creating its cached checkout.\n\nArgs:\n    params: Identifies a marketplace to probe without refreshing its checkout.\n\nReturns:\n    Update availability without installation or checkout mutation. An error means availability is unknown."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        params_dict["sessionId"] = self._session_id
+        return PluginUpdateCheckResult.from_dict(await self._client.request("session.plugins.marketplaces.checkUpdate", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class PluginsApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+        self.marketplaces = PluginsMarketplacesApi(client, session_id)
+
+    async def list(self, *, timeout: float | None = None) -> PluginList:
+        "Lists globally installed, live, built-in, and enterprise-managed desired plugins using the live session's authoritative account, working directory, and retained managed policy.\n\nReturns:\n    Plugins installed for the session, with their enabled state and version metadata."
+        return PluginList.from_dict(await self._client.request("session.plugins.list", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+    async def install(self, params: SessionPluginsInstallRequest, *, timeout: float | None = None) -> PluginInstallResult:
+        "Installs a plugin using the live session's authoritative account, working directory, and retained managed policy.\n\nArgs:\n    params: Plugin source resolved relative to the session's authoritative working directory.\n\nReturns:\n    Result of installing a plugin."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["source"]}
+        params_dict["sessionId"] = self._session_id
+        return PluginInstallResult.from_dict(await self._client.request("session.plugins.install", params_dict, **_timeout_kwargs(timeout)))
+
+    async def uninstall(self, params: PluginsUninstallRequest, *, timeout: float | None = None) -> None:
+        "Uninstalls a plugin when permitted by the live session's retained managed policy.\n\nArgs:\n    params: Name (or spec) of the plugin to uninstall."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        params_dict["sessionId"] = self._session_id
+        await self._client.request("session.plugins.uninstall", params_dict, **_timeout_kwargs(timeout))
+
+    async def update(self, params: PluginsUpdateRequest, *, timeout: float | None = None) -> PluginUpdateResult:
+        "Updates an installed plugin using the live session's authoritative account, working directory, and retained managed policy.\n\nArgs:\n    params: Name (or spec) of the plugin to update.\n\nReturns:\n    Result of updating a single plugin."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        params_dict["sessionId"] = self._session_id
+        return PluginUpdateResult.from_dict(await self._client.request("session.plugins.update", params_dict, **_timeout_kwargs(timeout)))
+
+    async def enable(self, params: SessionPluginsEnableRequest, *, timeout: float | None = None) -> None:
+        "Enables installed plugins when permitted by the live session's retained managed policy.\n\nArgs:\n    params: Plugin names (or specs) to enable in the session's authoritative working directory."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["names"]}
+        params_dict["sessionId"] = self._session_id
+        await self._client.request("session.plugins.enable", params_dict, **_timeout_kwargs(timeout))
+
+    async def disable(self, params: SessionPluginsDisableRequest, *, timeout: float | None = None) -> None:
+        "Disables installed plugins when permitted by the live session's retained managed policy.\n\nArgs:\n    params: Plugin names (or specs) to disable in the session's authoritative working directory."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["names"]}
+        params_dict["sessionId"] = self._session_id
+        await self._client.request("session.plugins.disable", params_dict, **_timeout_kwargs(timeout))
+
+    async def get_defaults(self, *, timeout: float | None = None) -> SessionPluginDefaults:
+        "Reads Team and managed soft plugin defaults for the live session. Does not install plugins or persist user preferences.\n\nReturns:\n    Soft plugin defaults for this session, without persistent user preferences or hard policy."
+        return SessionPluginDefaults.from_dict(await self._client.request("session.plugins.getDefaults", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+    async def check_update(self, params: PluginCheckUpdateRequest, *, timeout: float | None = None) -> PluginUpdateCheckResult:
+        "Compares an installed plugin version with its cached marketplace catalog. Never fetches or refreshes the checkout.\n\nArgs:\n    params: Identifies a plugin and its configured marketplace without accepting configuration or policy overrides.\n\nReturns:\n    Update availability without installation or checkout mutation. An error means availability is unknown."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name","marketplace"]}
+        params_dict["sessionId"] = self._session_id
+        return PluginUpdateCheckResult.from_dict(await self._client.request("session.plugins.checkUpdate", params_dict, **_timeout_kwargs(timeout)))
+
+    async def reload(self, params: SessionPluginsReloadRequest | None = None, *, timeout: float | None = None) -> None:
+        "Reloads the session's plugin set, refreshing MCP servers, custom agents, hooks, and skills cache so SDK-driven changes via `server.plugins.*` take effect immediately.\n\nArgs:\n    params: Optional flags controlling which side effects the reload performs."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
+        params_dict["sessionId"] = self._session_id
+        await self._client.request("session.plugins.reload", params_dict, **_timeout_kwargs(timeout))
+
+    async def retry_managed(self, params: SessionPluginsRetryManagedRequest | None = None, *, timeout: float | None = None) -> SessionPluginsRetryManagedResult:
+        "Installs or updates the plugins the session's managed settings require now, without waiting for the next automatic attempt after a failure, then reloads plugins. Reports progress and failures with the same `session.info` and `session.warning` events as automatic preparation. Fails when the runtime does not prepare managed plugins for the session.\n\nArgs:\n    params: Plugins required by the session's managed settings to install or update again.\n\nReturns:\n    Per-plugin outcomes of retrying the plugins required by the session's managed settings."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
+        params_dict["sessionId"] = self._session_id
+        return SessionPluginsRetryManagedResult.from_dict(await self._client.request("session.plugins.retryManaged", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class NameApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def get(self, *, timeout: float | None = None) -> NameGetResult:
+        "Gets the session's friendly name.\n\nReturns:\n    The session's friendly name, or null when not yet set."
+        return NameGetResult.from_dict(await self._client.request("session.name.get", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+    async def set(self, params: NameSetRequest, *, timeout: float | None = None) -> None:
+        "Sets the session's friendly name.\n\nArgs:\n    params: New friendly name to apply to the session."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
+        params_dict["sessionId"] = self._session_id
+        await self._client.request("session.name.set", params_dict, **_timeout_kwargs(timeout))
+
+    async def set_auto(self, params: NameSetAutoRequest, *, timeout: float | None = None) -> NameSetAutoResult:
+        "Persists an auto-generated session summary as the session's name when no user-set name exists.\n\nArgs:\n    params: Auto-generated session summary to apply as the session's name when no user-set name exists.\n\nReturns:\n    Indicates whether the auto-generated summary was applied as the session's name."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["summary"]}
+        params_dict["sessionId"] = self._session_id
+        return NameSetAutoResult.from_dict(await self._client.request("session.name.setAuto", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class ModelApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def get_current(self, *, timeout: float | None = None) -> CurrentModel:
+        "Gets the session's authoritative model snapshot, including the committed Auto preference and any newer unclaimed Auto preference waiting for a future user turn.\n\nReturns:\n    The session's authoritative model snapshot. Auto preference fields are configuration for the virtual `auto` model and do not change the selected model identifier. The context tier reflects `Session.getContextTier()`, restored from the session journal on resume."
+        return CurrentModel.from_dict(await self._client.request("session.model.getCurrent", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+    async def startup_admission(self, params: ModelStartupAdmissionRequest, *, timeout: float | None = None) -> ModelStartupAdmissionResult:
+        "Reads the session's cached startup model state without fetching a catalog or resolving credentials. An interactive host can claim the one-time enablement prompt after applying its startup configuration. Claims remain shared with the owning host and are scoped to this session's lifetime.\n\nArgs:\n    params: Options for a host's startup model admission check.\n\nReturns:\n    A cached startup model snapshot and an optional one-time enablement prompt. This check never resolves credentials or fetches a catalog."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None}
+        params_dict["sessionId"] = self._session_id
+        return ModelStartupAdmissionResult.from_dict(await self._client.request("session.model.startupAdmission", params_dict, **_timeout_kwargs(timeout)))
+
+    async def switch_to(self, params: ModelSwitchToRequest, *, timeout: float | None = None) -> ModelSwitchToResult:
+        "Switches the session to a model and optional reasoning configuration.\n\nArgs:\n    params: Target model identifier and optional reasoning effort, summary, capability overrides, and context tier.\n\nReturns:\n    The model identifier active on the session after the switch."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["modelId"]}
+        params_dict["sessionId"] = self._session_id
+        return ModelSwitchToResult.from_dict(await self._client.request("session.model.switchTo", params_dict, **_timeout_kwargs(timeout)))
+
+    async def switch_auto_tier(self, params: ModelSwitchAutoTierRequest, *, timeout: float | None = None) -> ModelSwitchAutoTierResult:
+        "Requests an Auto preference change without changing the session's selected model. The latest unclaimed request wins; the runtime commits it only after a later prompt using the `auto` model mints a usable model and token pair. A `pending` response confirms that the request was accepted, not that it committed. Observe eventual success through `session.model_change`, failure through the ephemeral `session.auto_tier_switch_failed` event, or current unclaimed state through `session.model.getCurrent`.\n\nArgs:\n    params: An Auto preference request for the session. This updates Auto configuration only; it does not change the selected model to `auto`.\n\nReturns:\n    Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["autoTier"]}
+        params_dict["sessionId"] = self._session_id
+        return ModelSwitchAutoTierResult.from_dict(await self._client.request("session.model.switchAutoTier", params_dict, **_timeout_kwargs(timeout)))
+
+    async def switch_fusion_tier(self, params: ModelSwitchFusionTierRequest, *, timeout: float | None = None) -> ModelSwitchAutoTierResult:
+        "Requests a Copilot Fusion tier without changing the session's selected model, naming the tier as the CLI's `--fusion-tier` does. The runtime resolves the tier to the Auto routing preference it stands for and then behaves exactly like `switchAutoTier`: the latest unclaimed request wins, and the runtime commits it only after a later prompt using the `auto` model mints a usable model and token pair.\n\nArgs:\n    params: A Copilot Fusion tier request for the session, named as the CLI's `--fusion-tier` names it. The runtime resolves the tier to the Auto routing preference it stands for and requests that preference exactly as `switchAutoTier` does. This updates Auto configuration only; it does not change the selected model to `auto`.\n\nReturns:\n    Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["fusionTier"]}
+        params_dict["sessionId"] = self._session_id
+        return ModelSwitchAutoTierResult.from_dict(await self._client.request("session.model.switchFusionTier", params_dict, **_timeout_kwargs(timeout)))
+
+    async def set_allowed_models(self, params: ModelSetAllowedModelsRequest, *, timeout: float | None = None) -> ModelSetAllowedModelsResult:
+        "Replaces or clears the host-supplied model allowlist for a running session.\n\nArgs:\n    params: Host-supplied exact model selection IDs to allow for this running session. CAPI IDs are intersected with repository `.github/allowed_models.txt` policy; provider-qualified IDs remain exempt from repository-only policy but are restricted by this host list. Omit or pass null to clear the host restriction; an explicit empty or disjoint list is rejected. Validation and pre-selection fallback failures preserve the previous restriction. Failures after a fallback selection commits retain the new restriction and selected model; callers should inspect current session state after such an error.\n\nReturns:\n    The applied host allowlist and effective session model policy after intersection."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None}
+        params_dict["sessionId"] = self._session_id
+        return ModelSetAllowedModelsResult.from_dict(await self._client.request("session.model.setAllowedModels", params_dict, **_timeout_kwargs(timeout)))
+
+    async def set_reasoning_effort(self, params: ModelSetReasoningEffortRequest, *, timeout: float | None = None) -> ModelSetReasoningEffortResult:
+        "Updates the session's reasoning effort without changing the selected model.\n\nArgs:\n    params: Reasoning effort level to apply to the currently selected model.\n\nReturns:\n    Update the session's reasoning effort without changing the selected model. Use `switchTo` instead when you also need to change the model. The runtime applies the effort to the next new model request, including tool continuations, without changing retries of an already-started request."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["reasoningEffort"]}
+        params_dict["sessionId"] = self._session_id
+        return ModelSetReasoningEffortResult.from_dict(await self._client.request("session.model.setReasoningEffort", params_dict, **_timeout_kwargs(timeout)))
+
+    async def get_reasoning_summaries(self, params: ModelGetReasoningSummariesRequest, *, timeout: float | None = None) -> ModelGetReasoningSummariesResult:
+        "Computes whether the session's current model shows reasoning summaries and how a host should present them: the default Ctrl+T visibility, reasoning headers, the hidden-summaries hint, and whether a persisted `showReasoning` setting is redundant. The runtime folds in the session's model catalog, selection and reasoning-summaries experiment assignment; the host supplies only its own persisted setting and current visibility. This method reads the session's resolved model catalog rather than resolving it, so call `session.model.list` first on a session that has not listed models or run a turn; until then the result is `ready: false`. A session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider, never caches one and stays `ready: false`.\n\nArgs:\n    params: Host presentation state the reasoning-summaries policy depends on.\n\nReturns:\n    Reasoning-summaries presentation policy for the session's current model."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None}
+        params_dict["sessionId"] = self._session_id
+        return ModelGetReasoningSummariesResult.from_dict(await self._client.request("session.model.getReasoningSummaries", params_dict, **_timeout_kwargs(timeout)))
+
+    async def list(self, params: SessionModelListRequest | None = None, *, timeout: float | None = None) -> SessionModelList:
+        "Lists models available to this session using its own auth and integration context. Connected hosts (CLI TUI, GitHub App) should call this through the session client so remote sessions return the remote CLI's available models rather than the caller's.\n\nArgs:\n    params: Optional listing options.\n\nReturns:\n    The list of models available to this session."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
+        params_dict["sessionId"] = self._session_id
+        return SessionModelList.from_dict(await self._client.request("session.model.list", params_dict, **_timeout_kwargs(timeout)))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -88882,65 +92893,6 @@ class WorkflowApi:
 
 
 # Experimental: this API group is experimental and may change or be removed.
-class ModelApi:
-    def __init__(self, client: "JsonRpcClient", session_id: str):
-        self._client = client
-        self._session_id = session_id
-
-    async def get_current(self, *, timeout: float | None = None) -> CurrentModel:
-        "Gets the session's authoritative model snapshot, including the committed Auto preference and any newer unclaimed Auto preference waiting for a future user turn.\n\nReturns:\n    The session's authoritative model snapshot. Auto preference fields are configuration for the virtual `auto` model and do not change the selected model identifier. The context tier reflects `Session.getContextTier()`, restored from the session journal on resume."
-        return CurrentModel.from_dict(await self._client.request("session.model.getCurrent", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
-
-    async def startup_admission(self, params: ModelStartupAdmissionRequest, *, timeout: float | None = None) -> ModelStartupAdmissionResult:
-        "Reads the session's cached startup model state without fetching a catalog or resolving credentials. An interactive host can claim the one-time enablement prompt after applying its startup configuration. Claims remain shared with the owning host and are scoped to this session's lifetime.\n\nArgs:\n    params: Options for a host's startup model admission check.\n\nReturns:\n    A cached startup model snapshot and an optional one-time enablement prompt. This check never resolves credentials or fetches a catalog."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None}
-        params_dict["sessionId"] = self._session_id
-        return ModelStartupAdmissionResult.from_dict(await self._client.request("session.model.startupAdmission", params_dict, **_timeout_kwargs(timeout)))
-
-    async def switch_to(self, params: ModelSwitchToRequest, *, timeout: float | None = None) -> ModelSwitchToResult:
-        "Switches the session to a model and optional reasoning configuration.\n\nArgs:\n    params: Target model identifier and optional reasoning effort, summary, capability overrides, and context tier.\n\nReturns:\n    The model identifier active on the session after the switch."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["modelId"]}
-        params_dict["sessionId"] = self._session_id
-        return ModelSwitchToResult.from_dict(await self._client.request("session.model.switchTo", params_dict, **_timeout_kwargs(timeout)))
-
-    async def switch_auto_tier(self, params: ModelSwitchAutoTierRequest, *, timeout: float | None = None) -> ModelSwitchAutoTierResult:
-        "Requests an Auto preference change without changing the session's selected model. The latest unclaimed request wins; the runtime commits it only after a later prompt using the `auto` model mints a usable model and token pair. A `pending` response confirms that the request was accepted, not that it committed. Observe eventual success through `session.model_change`, failure through the ephemeral `session.auto_tier_switch_failed` event, or current unclaimed state through `session.model.getCurrent`.\n\nArgs:\n    params: An Auto preference request for the session. This updates Auto configuration only; it does not change the selected model to `auto`.\n\nReturns:\n    Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["autoTier"]}
-        params_dict["sessionId"] = self._session_id
-        return ModelSwitchAutoTierResult.from_dict(await self._client.request("session.model.switchAutoTier", params_dict, **_timeout_kwargs(timeout)))
-
-    async def switch_fusion_tier(self, params: ModelSwitchFusionTierRequest, *, timeout: float | None = None) -> ModelSwitchAutoTierResult:
-        "Requests a Copilot Fusion tier without changing the session's selected model, naming the tier as the CLI's `--fusion-tier` does. The runtime resolves the tier to the Auto routing preference it stands for and then behaves exactly like `switchAutoTier`: the latest unclaimed request wins, and the runtime commits it only after a later prompt using the `auto` model mints a usable model and token pair.\n\nArgs:\n    params: A Copilot Fusion tier request for the session, named as the CLI's `--fusion-tier` names it. The runtime resolves the tier to the Auto routing preference it stands for and requests that preference exactly as `switchAutoTier` does. This updates Auto configuration only; it does not change the selected model to `auto`.\n\nReturns:\n    Immediate acknowledgement and Auto preference snapshot after a switch request. This result never implies that a pending preference committed."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["fusionTier"]}
-        params_dict["sessionId"] = self._session_id
-        return ModelSwitchAutoTierResult.from_dict(await self._client.request("session.model.switchFusionTier", params_dict, **_timeout_kwargs(timeout)))
-
-    async def set_allowed_models(self, params: ModelSetAllowedModelsRequest, *, timeout: float | None = None) -> ModelSetAllowedModelsResult:
-        "Replaces or clears the host-supplied model allowlist for a running session.\n\nArgs:\n    params: Host-supplied exact model selection IDs to allow for this running session. CAPI IDs are intersected with repository `.github/allowed_models.txt` policy; provider-qualified IDs remain exempt from repository-only policy but are restricted by this host list. Omit or pass null to clear the host restriction; an explicit empty or disjoint list is rejected. Validation and pre-selection fallback failures preserve the previous restriction. Failures after a fallback selection commits retain the new restriction and selected model; callers should inspect current session state after such an error.\n\nReturns:\n    The applied host allowlist and effective session model policy after intersection."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None}
-        params_dict["sessionId"] = self._session_id
-        return ModelSetAllowedModelsResult.from_dict(await self._client.request("session.model.setAllowedModels", params_dict, **_timeout_kwargs(timeout)))
-
-    async def set_reasoning_effort(self, params: ModelSetReasoningEffortRequest, *, timeout: float | None = None) -> ModelSetReasoningEffortResult:
-        "Updates the session's reasoning effort without changing the selected model.\n\nArgs:\n    params: Reasoning effort level to apply to the currently selected model.\n\nReturns:\n    Update the session's reasoning effort without changing the selected model. Use `switchTo` instead when you also need to change the model. The runtime applies the effort to the next new model request, including tool continuations, without changing retries of an already-started request."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["reasoningEffort"]}
-        params_dict["sessionId"] = self._session_id
-        return ModelSetReasoningEffortResult.from_dict(await self._client.request("session.model.setReasoningEffort", params_dict, **_timeout_kwargs(timeout)))
-
-    async def get_reasoning_summaries(self, params: ModelGetReasoningSummariesRequest, *, timeout: float | None = None) -> ModelGetReasoningSummariesResult:
-        "Computes whether the session's current model shows reasoning summaries and how a host should present them: the default Ctrl+T visibility, reasoning headers, the hidden-summaries hint, and whether a persisted `showReasoning` setting is redundant. The runtime folds in the session's model catalog, selection and reasoning-summaries experiment assignment; the host supplies only its own persisted setting and current visibility. This method reads the session's resolved model catalog rather than resolving it, so call `session.model.list` first on a session that has not listed models or run a turn; until then the result is `ready: false`. A session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider, never caches one and stays `ready: false`.\n\nArgs:\n    params: Host presentation state the reasoning-summaries policy depends on.\n\nReturns:\n    Reasoning-summaries presentation policy for the session's current model."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None}
-        params_dict["sessionId"] = self._session_id
-        return ModelGetReasoningSummariesResult.from_dict(await self._client.request("session.model.getReasoningSummaries", params_dict, **_timeout_kwargs(timeout)))
-
-    async def list(self, params: SessionModelListRequest | None = None, *, timeout: float | None = None) -> SessionModelList:
-        "Lists models available to this session using its own auth and integration context. Connected hosts (CLI TUI, GitHub App) should call this through the session client so remote sessions return the remote CLI's available models rather than the caller's.\n\nArgs:\n    params: Optional listing options.\n\nReturns:\n    The list of models available to this session."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
-        params_dict["sessionId"] = self._session_id
-        return SessionModelList.from_dict(await self._client.request("session.model.list", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
 class FeatureFlagsApi:
     def __init__(self, client: "JsonRpcClient", session_id: str):
         self._client = client
@@ -88997,29 +92949,6 @@ class ModeApi:
         params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["mode"]}
         params_dict["sessionId"] = self._session_id
         return ModeSetResult.from_dict(await self._client.request("session.mode.set", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class NameApi:
-    def __init__(self, client: "JsonRpcClient", session_id: str):
-        self._client = client
-        self._session_id = session_id
-
-    async def get(self, *, timeout: float | None = None) -> NameGetResult:
-        "Gets the session's friendly name.\n\nReturns:\n    The session's friendly name, or null when not yet set."
-        return NameGetResult.from_dict(await self._client.request("session.name.get", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
-
-    async def set(self, params: NameSetRequest, *, timeout: float | None = None) -> None:
-        "Sets the session's friendly name.\n\nArgs:\n    params: New friendly name to apply to the session."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
-        params_dict["sessionId"] = self._session_id
-        await self._client.request("session.name.set", params_dict, **_timeout_kwargs(timeout))
-
-    async def set_auto(self, params: NameSetAutoRequest, *, timeout: float | None = None) -> NameSetAutoResult:
-        "Persists an auto-generated session summary as the session's name when no user-set name exists.\n\nArgs:\n    params: Auto-generated session summary to apply as the session's name when no user-set name exists.\n\nReturns:\n    Indicates whether the auto-generated summary was applied as the session's name."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["summary"]}
-        params_dict["sessionId"] = self._session_id
-        return NameSetAutoResult.from_dict(await self._client.request("session.name.setAuto", params_dict, **_timeout_kwargs(timeout)))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -89506,117 +93435,6 @@ class ManagedSettingsApi:
 
 
 # Experimental: this API group is experimental and may change or be removed.
-class PluginsMarketplacesApi:
-    def __init__(self, client: "JsonRpcClient", session_id: str):
-        self._client = client
-        self._session_id = session_id
-
-    async def list(self, *, timeout: float | None = None) -> MarketplaceListResult:
-        "Lists registered and enterprise-managed desired marketplaces using the live session's retained policy.\n\nReturns:\n    All registered marketplaces, including built-in defaults."
-        return MarketplaceListResult.from_dict(await self._client.request("session.plugins.marketplaces.list", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
-
-    async def add(self, params: PluginsMarketplacesAddRequest, *, timeout: float | None = None) -> MarketplaceAddResult:
-        "Adds a marketplace when permitted by the live session's retained managed policy.\n\nArgs:\n    params: Marketplace source and optional working directory for relative-path resolution.\n\nReturns:\n    Result of registering a new marketplace."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["source"]}
-        params_dict["sessionId"] = self._session_id
-        return MarketplaceAddResult.from_dict(await self._client.request("session.plugins.marketplaces.add", params_dict, **_timeout_kwargs(timeout)))
-
-    async def remove(self, params: PluginsMarketplacesRemoveRequest, *, timeout: float | None = None) -> MarketplaceRemoveResult:
-        "Removes a marketplace when permitted by the live session's retained managed policy.\n\nArgs:\n    params: Name of the marketplace to remove and an optional force flag.\n\nReturns:\n    Outcome of the remove attempt, including dependent-plugin info when applicable."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
-        params_dict["sessionId"] = self._session_id
-        return MarketplaceRemoveResult.from_dict(await self._client.request("session.plugins.marketplaces.remove", params_dict, **_timeout_kwargs(timeout)))
-
-    async def browse(self, params: PluginsMarketplacesBrowseRequest, *, timeout: float | None = None) -> MarketplaceBrowseResult:
-        "Browses a marketplace resolved through the live session's working directory and retained managed policy.\n\nArgs:\n    params: Name of the marketplace whose plugin catalog to fetch.\n\nReturns:\n    Plugins advertised by the marketplace."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
-        params_dict["sessionId"] = self._session_id
-        return MarketplaceBrowseResult.from_dict(await self._client.request("session.plugins.marketplaces.browse", params_dict, **_timeout_kwargs(timeout)))
-
-    async def refresh(self, params: SessionPluginsMarketplacesRefreshRequest | None = None, *, timeout: float | None = None) -> MarketplaceRefreshResult:
-        "Refreshes marketplaces resolved through the live session's working directory and retained managed policy.\n\nArgs:\n    params: Optional marketplace name; omit to refresh all.\n\nReturns:\n    Result of refreshing one or more marketplace catalogs."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
-        params_dict["sessionId"] = self._session_id
-        return MarketplaceRefreshResult.from_dict(await self._client.request("session.plugins.marketplaces.refresh", params_dict, **_timeout_kwargs(timeout)))
-
-    async def search(self, params: PluginMarketplaceSearchRequest, *, timeout: float | None = None) -> PluginMarketplaceSearchResult:
-        "Searches all configured plugin marketplaces using the session's authoritative configuration, credentials, working directory, and managed policy. Returns installation state and partial errors. This is not Agent Finder search.\n\nArgs:\n    params: Searches all configured plugin marketplaces, not the Agent Finder catalog.\n\nReturns:\n    Matching plugins across configured marketplaces, with partial failures."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["query"]}
-        params_dict["sessionId"] = self._session_id
-        return PluginMarketplaceSearchResult.from_dict(await self._client.request("session.plugins.marketplaces.search", params_dict, **_timeout_kwargs(timeout)))
-
-    async def check_update(self, params: PluginMarketplaceCheckUpdateRequest, *, timeout: float | None = None) -> PluginUpdateCheckResult:
-        "Probes a configured marketplace's revision without refreshing or creating its cached checkout.\n\nArgs:\n    params: Identifies a marketplace to probe without refreshing its checkout.\n\nReturns:\n    Update availability without installation or checkout mutation. An error means availability is unknown."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
-        params_dict["sessionId"] = self._session_id
-        return PluginUpdateCheckResult.from_dict(await self._client.request("session.plugins.marketplaces.checkUpdate", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class PluginsApi:
-    def __init__(self, client: "JsonRpcClient", session_id: str):
-        self._client = client
-        self._session_id = session_id
-        self.marketplaces = PluginsMarketplacesApi(client, session_id)
-
-    async def list(self, *, timeout: float | None = None) -> PluginList:
-        "Lists globally installed, live, built-in, and enterprise-managed desired plugins using the live session's authoritative account, working directory, and retained managed policy.\n\nReturns:\n    Plugins installed for the session, with their enabled state and version metadata."
-        return PluginList.from_dict(await self._client.request("session.plugins.list", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
-
-    async def install(self, params: SessionPluginsInstallRequest, *, timeout: float | None = None) -> PluginInstallResult:
-        "Installs a plugin using the live session's authoritative account, working directory, and retained managed policy.\n\nArgs:\n    params: Plugin source resolved relative to the session's authoritative working directory.\n\nReturns:\n    Result of installing a plugin."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["source"]}
-        params_dict["sessionId"] = self._session_id
-        return PluginInstallResult.from_dict(await self._client.request("session.plugins.install", params_dict, **_timeout_kwargs(timeout)))
-
-    async def uninstall(self, params: PluginsUninstallRequest, *, timeout: float | None = None) -> None:
-        "Uninstalls a plugin when permitted by the live session's retained managed policy.\n\nArgs:\n    params: Name (or spec) of the plugin to uninstall."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
-        params_dict["sessionId"] = self._session_id
-        await self._client.request("session.plugins.uninstall", params_dict, **_timeout_kwargs(timeout))
-
-    async def update(self, params: PluginsUpdateRequest, *, timeout: float | None = None) -> PluginUpdateResult:
-        "Updates an installed plugin using the live session's authoritative account, working directory, and retained managed policy.\n\nArgs:\n    params: Name (or spec) of the plugin to update.\n\nReturns:\n    Result of updating a single plugin."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name"]}
-        params_dict["sessionId"] = self._session_id
-        return PluginUpdateResult.from_dict(await self._client.request("session.plugins.update", params_dict, **_timeout_kwargs(timeout)))
-
-    async def enable(self, params: SessionPluginsEnableRequest, *, timeout: float | None = None) -> None:
-        "Enables installed plugins when permitted by the live session's retained managed policy.\n\nArgs:\n    params: Plugin names (or specs) to enable in the session's authoritative working directory."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["names"]}
-        params_dict["sessionId"] = self._session_id
-        await self._client.request("session.plugins.enable", params_dict, **_timeout_kwargs(timeout))
-
-    async def disable(self, params: SessionPluginsDisableRequest, *, timeout: float | None = None) -> None:
-        "Disables installed plugins when permitted by the live session's retained managed policy.\n\nArgs:\n    params: Plugin names (or specs) to disable in the session's authoritative working directory."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["names"]}
-        params_dict["sessionId"] = self._session_id
-        await self._client.request("session.plugins.disable", params_dict, **_timeout_kwargs(timeout))
-
-    async def get_defaults(self, *, timeout: float | None = None) -> SessionPluginDefaults:
-        "Reads Team and managed soft plugin defaults for the live session. Does not install plugins or persist user preferences.\n\nReturns:\n    Soft plugin defaults for this session, without persistent user preferences or hard policy."
-        return SessionPluginDefaults.from_dict(await self._client.request("session.plugins.getDefaults", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
-
-    async def check_update(self, params: PluginCheckUpdateRequest, *, timeout: float | None = None) -> PluginUpdateCheckResult:
-        "Compares an installed plugin version with its cached marketplace catalog. Never fetches or refreshes the checkout.\n\nArgs:\n    params: Identifies a plugin and its configured marketplace without accepting configuration or policy overrides.\n\nReturns:\n    Update availability without installation or checkout mutation. An error means availability is unknown."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["name","marketplace"]}
-        params_dict["sessionId"] = self._session_id
-        return PluginUpdateCheckResult.from_dict(await self._client.request("session.plugins.checkUpdate", params_dict, **_timeout_kwargs(timeout)))
-
-    async def reload(self, params: SessionPluginsReloadRequest | None = None, *, timeout: float | None = None) -> None:
-        "Reloads the session's plugin set, refreshing MCP servers, custom agents, hooks, and skills cache so SDK-driven changes via `server.plugins.*` take effect immediately.\n\nArgs:\n    params: Optional flags controlling which side effects the reload performs."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
-        params_dict["sessionId"] = self._session_id
-        await self._client.request("session.plugins.reload", params_dict, **_timeout_kwargs(timeout))
-
-    async def retry_managed(self, params: SessionPluginsRetryManagedRequest | None = None, *, timeout: float | None = None) -> SessionPluginsRetryManagedResult:
-        "Installs or updates the plugins the session's managed settings require now, without waiting for the next automatic attempt after a failure, then reloads plugins. Reports progress and failures with the same `session.info` and `session.warning` events as automatic preparation. Fails when the runtime does not prepare managed plugins for the session.\n\nArgs:\n    params: Plugins required by the session's managed settings to install or update again.\n\nReturns:\n    Per-plugin outcomes of retrying the plugins required by the session's managed settings."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None} if params is not None else {}
-        params_dict["sessionId"] = self._session_id
-        return SessionPluginsRetryManagedResult.from_dict(await self._client.request("session.plugins.retryManaged", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
 class ProviderApi:
     def __init__(self, client: "JsonRpcClient", session_id: str):
         self._client = client
@@ -89715,47 +93533,6 @@ class LspApi:
         params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["serverId","enabled"]}
         params_dict["sessionId"] = self._session_id
         await self._client.request("session.lsp.set", params_dict, **_timeout_kwargs(timeout))
-
-
-# Experimental: this API group is experimental and may change or be removed.
-class ExtensionsApi:
-    def __init__(self, client: "JsonRpcClient", session_id: str):
-        self._client = client
-        self._session_id = session_id
-
-    async def get_policy(self, *, timeout: float | None = None) -> ExtensionManagedPolicy:
-        "Returns the runtime-derived standalone extension admission policy for the session's actual project and managed-settings context. enforcementVersion 1 means this runtime enforces strictPluginOnlyCustomization for executable extensions. Hosts executing independent extension targets must deny standalone targets unless standalone is allowed; plugin_only requires runtime-verified eligible plugin provenance, not a caller-supplied source label or transport bridge. pending is not confirmed absence. Older runtimes return method-not-found and must not be represented as enforcing this restriction. Re-read on managed-settings changes; a snapshot is not a launch authorization token.\n\nReturns:\n    Runtime support and session-context standalone executable extension policy."
-        return ExtensionManagedPolicy.from_dict(await self._client.request("session.extensions.getPolicy", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
-
-    async def list(self, *, timeout: float | None = None) -> ExtensionList:
-        "Lists extensions discovered for the session and their current status.\n\nReturns:\n    Extensions discovered for the session, with their current status."
-        return ExtensionList.from_dict(await self._client.request("session.extensions.list", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
-
-    async def enable(self, params: ExtensionsEnableRequest, *, timeout: float | None = None) -> None:
-        "Enables an extension for the session and persists the preference when the session has a settings store. Hosts synchronizing effective membership should use extensions.reconcile instead.\n\nArgs:\n    params: Source-qualified extension identifier to enable for the session."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["id"]}
-        params_dict["sessionId"] = self._session_id
-        await self._client.request("session.extensions.enable", params_dict, **_timeout_kwargs(timeout))
-
-    async def disable(self, params: ExtensionsDisableRequest, *, timeout: float | None = None) -> None:
-        "Disables an extension for the session and persists the preference when the session has a settings store. Hosts synchronizing effective membership should use extensions.reconcile instead.\n\nArgs:\n    params: Source-qualified extension identifier to disable for the session."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["id"]}
-        params_dict["sessionId"] = self._session_id
-        await self._client.request("session.extensions.disable", params_dict, **_timeout_kwargs(timeout))
-
-    async def reload(self, *, timeout: float | None = None) -> None:
-        "Reloads extension definitions and processes for the session."
-        await self._client.request("session.extensions.reload", {"sessionId": self._session_id}, **_timeout_kwargs(timeout))
-
-    async def reconcile(self, *, timeout: float | None = None) -> ExtensionList:
-        "Host-only reconciliation of authoritative session-effective extension membership and enablement. Refreshes runtime-owned discovery and preferences without persisting settings, installing plugins, or restarting unchanged activations. Returns ExtensionList only after required starts and process/contribution cleanup settle. Success means every stop, cleanup, contribution refresh and revalidation completed; an enabled extension that fails to start does not fail reconciliation and is reported with status failed, so read statuses rather than assuming every enabled extension is running. Takes no caller inventory or overrides. Missing controllers, unready/incomplete discovery, unavailable workspaces, superseded inputs, and other lifecycle failures (including managed-policy launch denials and failed stops or cleanup) are errors, not empty membership. Independently proven revocations may be applied before an error; retry converges without restarting healthy activations. Error data contains lifecycleChangesApplied and code: extension_reconciliation_host_required, extension_reconciliation_unavailable, extension_reconciliation_not_ready, extension_reconciliation_discovery_failed, extension_reconciliation_workspace_unavailable, extension_reconciliation_superseded, or extension_reconciliation_lifecycle_failed. Mark host reconciliation state applied only on success. On older runtimes, method-not-found must not fall back to global discovery and persistent extension disables.\n\nReturns:\n    Extensions discovered for the session, with their current status."
-        return ExtensionList.from_dict(await self._client.request("session.extensions.reconcile", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
-
-    async def send_attachments_to_message(self, params: SendAttachmentsToMessageParams, *, timeout: float | None = None) -> None:
-        "Push attachments into the next user-message turn from an extension. The host should surface them as composer pills and forward them via the next session.send call. Callable only by extension-owned connections.\n\nArgs:\n    params: Parameters for session.extensions.sendAttachmentsToMessage."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["attachments"]}
-        params_dict["sessionId"] = self._session_id
-        await self._client.request("session.extensions.sendAttachmentsToMessage", params_dict, **_timeout_kwargs(timeout))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -90474,6 +94251,10 @@ class SessionRpc:
     def __init__(self, client: "JsonRpcClient", session_id: str):
         self._client = client
         self._session_id = session_id
+        self.extensions = ExtensionsApi(client, session_id)
+        self.plugins = PluginsApi(client, session_id)
+        self.name = NameApi(client, session_id)
+        self.model = ModelApi(client, session_id)
         self.mcp = McpApi(client, session_id)
         self.event_log = EventLogApi(client, session_id)
         self.remote = RemoteApi(client, session_id)
@@ -90486,11 +94267,9 @@ class SessionRpc:
         self.debug = DebugApi(client, session_id)
         self.canvas = CanvasApi(client, session_id)
         self.workflow = WorkflowApi(client, session_id)
-        self.model = ModelApi(client, session_id)
         self.feature_flags = FeatureFlagsApi(client, session_id)
         self.dynamic_context = DynamicContextApi(client, session_id)
         self.mode = ModeApi(client, session_id)
-        self.name = NameApi(client, session_id)
         self.plan = PlanApi(client, session_id)
         self.workspaces = WorkspacesApi(client, session_id)
         self.autopilot_objective = AutopilotObjectiveApi(client, session_id)
@@ -90504,11 +94283,9 @@ class SessionRpc:
         self.diagnostics = DiagnosticsApi(client, session_id)
         self.connectors = ConnectorsApi(client, session_id)
         self.managed_settings = ManagedSettingsApi(client, session_id)
-        self.plugins = PluginsApi(client, session_id)
         self.provider = ProviderApi(client, session_id)
         self.options = OptionsApi(client, session_id)
         self.lsp = LspApi(client, session_id)
-        self.extensions = ExtensionsApi(client, session_id)
         self.tools = ToolsApi(client, session_id)
         self.commands = CommandsApi(client, session_id)
         self.telemetry = TelemetryApi(client, session_id)
@@ -90568,6 +94345,103 @@ class SessionRpc:
         params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["message"]}
         params_dict["sessionId"] = self._session_id
         return LogResult.from_dict(await self._client.request("session.log", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalPersistenceApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def _flush(self, params: _SessionPersistenceFlushRequest, *, timeout: float | None = None) -> None:
+        "Flushes durable state through the original session writer, metadata, callback, and tracking owners.\n\nArgs:\n    params: Flushes durable session state through its original runtime and client owners.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None}
+        params_dict["sessionId"] = self._session_id
+        await self._client.request("session.persistence.flush", params_dict, **_timeout_kwargs(timeout))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalExtensionsApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def _set_management_tools_enabled(self, params: _SessionExtensionsSetManagementToolsEnabledRequest, *, timeout: float | None = None) -> bool:
+        "Updates the original host's live extension management-tool gate. Returns false when no service is configured.\n\nArgs:\n    params: Updates the original host's live management-tool gate without reinstalling its extension service.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["enabled"]}
+        params_dict["sessionId"] = self._session_id
+        return bool(await self._client.request("session.extensions.setManagementToolsEnabled", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _configure_host(self, params: _SessionExtensionsConfigureHostRequest, *, timeout: float | None = None) -> _SessionExtensionsInspectServiceResult:
+        "Configures the original host's extension service with runtime-owned settings, policy, plugin discovery, and lifecycle fences. Only the original session host may supply launch resources.\n\nArgs:\n    params: Host launch resources and lifecycle options for the original session's extension service.\n\nReturns:\n    Distinguishes an absent extension service from an installed service with an empty inventory.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["hostServerId","sdkPath","cliDistDir","launcherProgram","workingDirectory","launchProcesses","retainProcessesIfUnchanged","managementToolsEnabled"]}
+        params_dict["sessionId"] = self._session_id
+        return _SessionExtensionsInspectServiceResult.from_dict(await self._client.request("session.extensions.configureHost", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _inspect_service(self, *, timeout: float | None = None) -> _SessionExtensionsInspectServiceResult:
+        "Inspects whether the selected session has an attached extension service and returns its current inventory without starting or replacing it.\n\nReturns:\n    Distinguishes an absent extension service from an installed service with an empty inventory.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        return _SessionExtensionsInspectServiceResult.from_dict(await self._client.request("session.extensions.inspectService", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalPluginsApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def _inspect_extension_contributions(self, params: _SessionPluginInspectExtensionContributionsRequest, *, timeout: float | None = None) -> _SessionPluginInspectExtensionContributionsResult:
+        "Inspects extension contributions for a changed plugin under the selected session's activation policy and installation root.\n\nArgs:\n    params: Inspects extension directories contributed by a changed plugin under the selected session's activation and profile.\n\nReturns:\n    Whether a changed active plugin contributes extension directories, including empty directories.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["changedPluginSpec"]}
+        params_dict["sessionId"] = self._session_id
+        return _SessionPluginInspectExtensionContributionsResult.from_dict(await self._client.request("session.plugins.inspectExtensionContributions", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _inspect_inventory(self, *, timeout: float | None = None) -> _SessionPluginInventoryResult:
+        "Inspects available and inactive plugins with live, external, and trusted bundled provenance under the bound session's configuration and policy.\n\nReturns:\n    Available plugin inventory under the selected session's settings, policy, source roots, and trusted bundle registration.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        return _SessionPluginInventoryResult.from_dict(await self._client.request("session.plugins.inspectInventory", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalNameApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def _generate(self, params: _SessionNameGenerateRequest, *, timeout: float | None = None) -> _SessionNameGenerateResult:
+        "Generates a friendly session name with the original session's utility-model policy and renewable credentials. Does not change the stored name.\n\nArgs:\n    params: Input for utility-model session name generation.\n\nReturns:\n    Utility generation outcome under the session's model and credential policy.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["userMessage"]}
+        params_dict["sessionId"] = self._session_id
+        return _SessionNameGenerateResult.from_dict(await self._client.request("session.name.generate", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalModelApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def _generate_branch_slug(self, params: _SessionModelGenerateBranchSlugRequest, *, timeout: float | None = None) -> _SessionModelGenerateBranchSlugResult:
+        "Generates a branch slug with the original session's model policy and renewable credentials, including its established derived-name fallback.\n\nArgs:\n    params: Conversation and changes for a utility-model branch slug.\n\nReturns:\n    A generated or derived branch slug.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["conversation","changeSummary","fallbackPrefix"]}
+        params_dict["sessionId"] = self._session_id
+        return _SessionModelGenerateBranchSlugResult.from_dict(await self._client.request("session.model.generateBranchSlug", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _describe_load_error(self, params: SessionModelDescribeLoadErrorRequest, *, timeout: float | None = None) -> _SessionModelDescribeLoadErrorResult:
+        "Classifies a serialized model-catalog error and returns request identifiers, authorization details, and the bound account's Copilot settings URL. Hosts use these facts to present catalog failures without parsing provider errors or deriving enterprise URLs themselves. Does not resolve credentials or fetch models.\n\nArgs:\n    params: A serialized provider error from a failed model-catalog request.\n\nReturns:\n    Model-catalog failure facts without host-specific presentation text.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None}
+        params_dict["sessionId"] = self._session_id
+        return _SessionModelDescribeLoadErrorResult.from_dict(await self._client.request("session.model.describeLoadError", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _apply_startup_overlay(self, params: ModelApplyStartupOverlayRequest, *, timeout: float | None = None) -> ModelSwitchToResult:
+        "Resolves and applies organization-managed and repository model overlays.\n\nArgs:\n    params: Managed, repository, and CLI model overrides to overlay onto the session at startup.\n\nReturns:\n    The model identifier active on the session after the switch.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None}
+        params_dict["sessionId"] = self._session_id
+        return ModelSwitchToResult.from_dict(await self._client.request("session.model.applyStartupOverlay", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _clear_startup_seed(self, params: _SessionModelClearStartupSeedRequest, *, timeout: float | None = None) -> _SessionModelClearStartupSeedResult:
+        "Clears an unchanged startup model/provider seed before default-model resolution. Never clears a resumed or user-selected model.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["expectedModel"]}
+        params_dict["sessionId"] = self._session_id
+        return _SessionModelClearStartupSeedResult.from_dict(await self._client.request("session.model.clearStartupSeed", params_dict, **_timeout_kwargs(timeout)))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -90681,6 +94555,12 @@ class _InternalMcpApi:
         params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["serverName"]}
         params_dict["sessionId"] = self._session_id
         await self._client.request("session.mcp.unregisterExternalClient", params_dict, **_timeout_kwargs(timeout))
+
+    async def _inspect_configuration(self, params: _SessionMCPInspectConfigurationRequest, *, timeout: float | None = None) -> _MCPConfigMergeSourcesResult:
+        "Inspects source configuration without starting servers or resolving credentials. Workspace trust comes from the bound session and only a matching activation snapshot can attest the requested directory.\n\nArgs:\n    params: Inspects MCP source configuration without starting servers. The bound session owns workspace trust.\n\nReturns:\n    The composed MCP configuration and all omitted-source diagnostics.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["workingDirectory"]}
+        params_dict["sessionId"] = self._session_id
+        return _MCPConfigMergeSourcesResult.from_dict(await self._client.request("session.mcp.inspectConfiguration", params_dict, **_timeout_kwargs(timeout)))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -90872,31 +94752,6 @@ class _InternalWorkflowApi:
 
 
 # Experimental: this API group is experimental and may change or be removed.
-class _InternalModelApi:
-    def __init__(self, client: "JsonRpcClient", session_id: str):
-        self._client = client
-        self._session_id = session_id
-
-    async def _describe_load_error(self, params: SessionModelDescribeLoadErrorRequest, *, timeout: float | None = None) -> _SessionModelDescribeLoadErrorResult:
-        "Classifies a serialized model-catalog error and returns request identifiers, authorization details, and the bound account's Copilot settings URL. Hosts use these facts to present catalog failures without parsing provider errors or deriving enterprise URLs themselves. Does not resolve credentials or fetch models.\n\nArgs:\n    params: A serialized provider error from a failed model-catalog request.\n\nReturns:\n    Model-catalog failure facts without host-specific presentation text.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None}
-        params_dict["sessionId"] = self._session_id
-        return _SessionModelDescribeLoadErrorResult.from_dict(await self._client.request("session.model.describeLoadError", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _apply_startup_overlay(self, params: ModelApplyStartupOverlayRequest, *, timeout: float | None = None) -> ModelSwitchToResult:
-        "Resolves and applies organization-managed and repository model overlays.\n\nArgs:\n    params: Managed, repository, and CLI model overrides to overlay onto the session at startup.\n\nReturns:\n    The model identifier active on the session after the switch.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None}
-        params_dict["sessionId"] = self._session_id
-        return ModelSwitchToResult.from_dict(await self._client.request("session.model.applyStartupOverlay", params_dict, **_timeout_kwargs(timeout)))
-
-    async def _clear_startup_seed(self, params: _SessionModelClearStartupSeedRequest, *, timeout: float | None = None) -> _SessionModelClearStartupSeedResult:
-        "Clears an unchanged startup model/provider seed before default-model resolution. Never clears a resumed or user-selected model.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
-        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["expectedModel"]}
-        params_dict["sessionId"] = self._session_id
-        return _SessionModelClearStartupSeedResult.from_dict(await self._client.request("session.model.clearStartupSeed", params_dict, **_timeout_kwargs(timeout)))
-
-
-# Experimental: this API group is experimental and may change or be removed.
 class _InternalAutopilotApi:
     def __init__(self, client: "JsonRpcClient", session_id: str):
         self._client = client
@@ -90905,6 +94760,37 @@ class _InternalAutopilotApi:
     async def _evaluate_idle_continuation(self, *, timeout: float | None = None) -> AutopilotEvaluateIdleContinuationResult:
         "Applies the runtime-owned Autopilot continuation policy at the session-idle decision point and routes any admitted continuation through the normal session send lifecycle. Only the SDK connection that owns the session can invoke this method.\n\nReturns:\n    Result of applying the ordinary session-idle Autopilot continuation decision.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
         return AutopilotEvaluateIdleContinuationResult.from_dict(await self._client.request("session.autopilot.evaluateIdleContinuation", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalSkillsResourcesApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def _install(self, params: _SessionSkillResourceInstallRequest, *, timeout: float | None = None) -> SkillResourceInstallResult:
+        "Installs a local or HTTPS skill definition or registers a skill directory under the selected session's profile and working directory. Reuses the canonical installer and refreshes the session-owned catalog.\n\nArgs:\n    params: Install a skill with the selected session's profile and working directory.\n\nReturns:\n    The persisted result of a skill source installation.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["source"]}
+        params_dict["sessionId"] = self._session_id
+        return SkillResourceInstallResult.from_dict(await self._client.request("session.skills.resources.install", params_dict, **_timeout_kwargs(timeout)))
+
+    async def _remove(self, params: _SessionSkillResourceRemoveRequest, *, timeout: float | None = None) -> SkillResourceRemoveResult:
+        "Removes a personal or project skill or unregisters a directory under the selected session's profile. Uses the full session-owned provider inventory for conservative disabled-identity cleanup.\n\nArgs:\n    params: Remove a skill with the selected session's full inventory and profile.\n\nReturns:\n    The completed skill removal, with conservative disabled-state cleanup.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["target"]}
+        params_dict["sessionId"] = self._session_id
+        return SkillResourceRemoveResult.from_dict(await self._client.request("session.skills.resources.remove", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalSkillsApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+        self.resources = _InternalSkillsResourcesApi(client, session_id)
+
+    async def _inspect_inventory(self, *, timeout: float | None = None) -> _SessionSkillsInspectInventoryResult:
+        "Inspects full local and provider skill records under the selected session's discovery, activation, and managed policy. Preserves effective disabled identities and loader diagnostics without accepting caller paths or settings.\n\nReturns:\n    Full inventory under the selected session's discovery and activation policy.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        return _SessionSkillsInspectInventoryResult.from_dict(await self._client.request("session.skills.inspectInventory", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -90987,6 +94873,19 @@ class _InternalUiApi:
         params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["requestId","response"]}
         params_dict["sessionId"] = self._session_id
         return UIHandlePendingResult.from_dict(await self._client.request("session.ui.handleHumanExitPlanMode", params_dict, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalPermissionsApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def _repository_disabled_names(self, params: _SessionRepositoryDisabledNamesRequest, *, timeout: float | None = None) -> RepositoryDisabledNamesResult:
+        "Reads advisory repository-owned resource disables using the bound session's configuration and matching workspace trust.\n\nArgs:\n    params: Reads repository resource disables using the bound session's configuration and trust authority.\n\nReturns:\n    The advisory repository disable list. A read failure returns no names and a diagnostic, rather than blocking a listing or mutation.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["workingDirectory","key"]}
+        params_dict["sessionId"] = self._session_id
+        return RepositoryDisabledNamesResult.from_dict(await self._client.request("session.permissions.repositoryDisabledNames", params_dict, **_timeout_kwargs(timeout)))
 
 
 # Experimental: this API group is experimental and may change or be removed.
@@ -91126,11 +95025,40 @@ class _InternalCafeMetricsApi:
         await self._client.request("session.cafeMetrics.detach", {"sessionId": self._session_id}, **_timeout_kwargs(timeout))
 
 
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalResearchApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def _list_reports(self, *, timeout: float | None = None) -> ResearchListReportsResult:
+        "Lists stored Markdown research reports from the bound session's authoritative state path. Preserves missing-directory, file-stat, timestamp, and stable ordering behavior without accepting a caller path or configuration.\n\nReturns:\n    Stored Markdown reports, newest first, from the selected session.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        return ResearchListReportsResult.from_dict(await self._client.request("session.research.listReports", {"sessionId": self._session_id}, **_timeout_kwargs(timeout)))
+
+
+# Experimental: this API group is experimental and may change or be removed.
+class _InternalGitHubApi:
+    def __init__(self, client: "JsonRpcClient", session_id: str):
+        self._client = client
+        self._session_id = session_id
+
+    async def _create_secret_gist(self, params: _GitHubCreateSecretGistRequest, *, timeout: float | None = None) -> _GitHubCreateSecretGistResult:
+        "Creates a secret GitHub gist with the bound session's renewable credential owner and existing account restrictions. Preserves session and research export errors without returning credentials.\n\nArgs:\n    params: Creates a secret gist through the bound session's original credential owner.\n\nReturns:\n    The URL returned by GitHub after it creates the secret gist.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
+        params_dict: dict[str, Any] = {k: v for k, v in params.to_dict().items() if v is not None or k in ["files","description","useCase"]}
+        params_dict["sessionId"] = self._session_id
+        return _GitHubCreateSecretGistResult.from_dict(await self._client.request("session.github.createSecretGist", params_dict, **_timeout_kwargs(timeout)))
+
+
 class _InternalSessionRpc:
     """Internal SDK session-scoped RPC methods. Not part of the public API."""
     def __init__(self, client: "JsonRpcClient", session_id: str):
         self._client = client
         self._session_id = session_id
+        self.persistence = _InternalPersistenceApi(client, session_id)
+        self.extensions = _InternalExtensionsApi(client, session_id)
+        self.plugins = _InternalPluginsApi(client, session_id)
+        self.name = _InternalNameApi(client, session_id)
+        self.model = _InternalModelApi(client, session_id)
         self.mcp = _InternalMcpApi(client, session_id)
         self.event_log = _InternalEventLogApi(client, session_id)
         self.remote = _InternalRemoteApi(client, session_id)
@@ -91139,17 +95067,20 @@ class _InternalSessionRpc:
         self.canvas = _InternalCanvasApi(client, session_id)
         self.canvas_source = _InternalCanvasSourceApi(client, session_id)
         self.workflow = _InternalWorkflowApi(client, session_id)
-        self.model = _InternalModelApi(client, session_id)
         self.autopilot = _InternalAutopilotApi(client, session_id)
+        self.skills = _InternalSkillsApi(client, session_id)
         self.diagnostics = _InternalDiagnosticsApi(client, session_id)
         self.connectors = _InternalConnectorsApi(client, session_id)
         self.commands = _InternalCommandsApi(client, session_id)
         self.ui = _InternalUiApi(client, session_id)
+        self.permissions = _InternalPermissionsApi(client, session_id)
         self.settings = _InternalSettingsApi(client, session_id)
         self.queue = _InternalQueueApi(client, session_id)
         self.usage = _InternalUsageApi(client, session_id)
         self.schedule = _InternalScheduleApi(client, session_id)
         self.cafe_metrics = _InternalCafeMetricsApi(client, session_id)
+        self.research = _InternalResearchApi(client, session_id)
+        self.github = _InternalGitHubApi(client, session_id)
 
     async def _send_and_wait(self, params: SendRequest, *, timeout: float | None = None) -> SendAndWaitResult:
         "Submits one message through normal admission and waits for its request-owned completion. Returns the exact root assistant event, or an explicit aborted/no-response outcome. Cancelling or timing out the wait does not abort agent work. Unsupported execution hosts reject the method before admitting the message.\n\nArgs:\n    params: Parameters for sending a user message to the session\n\nReturns:\n    Internal request-correlated completion of one submitted message.\n\n.. warning:: This API is experimental and may change or be removed in future versions.\n\n:meta private:\n\nInternal SDK API; not part of the public surface."
@@ -91706,6 +95637,7 @@ __all__ = [
     "AccountGetQuotaResult",
     "AccountHealth",
     "AccountKind",
+    "AccountLoginProcessRequestContext",
     "AccountLoginRequest",
     "AccountLoginResult",
     "AccountLogoutRequest",
@@ -92569,6 +96501,8 @@ __all__ = [
     "LspSetEnabledRequest",
     "LspWarmupError",
     "LspWarmupResult",
+    "MCPAdditionalConfigSource",
+    "MCPAdditionalConfigSourceKind",
     "MCPAllowedServer",
     "MCPApplyInstallRequest",
     "MCPApplyUninstallRequest",
@@ -92592,9 +96526,11 @@ __all__ = [
     "MCPCancelSamplingExecutionParams",
     "MCPCancelSamplingExecutionResult",
     "MCPConfigAddRequest",
+    "MCPConfigComposeAdditionalResult",
     "MCPConfigDisableRequest",
     "MCPConfigEnableRequest",
     "MCPConfigList",
+    "MCPConfigListRequest",
     "MCPConfigRemoveRequest",
     "MCPConfigUpdateRequest",
     "MCPConfigureGitHubResult",
@@ -92858,6 +96794,8 @@ __all__ = [
     "McpServerCardReference",
     "McpServerConfigHttpOauthGrantType",
     "McpToolResult",
+    "MemoriesImportSemanticRequest",
+    "MemoriesImportSemanticResult",
     "MemoryConfiguration",
     "MemoryMode",
     "MemoryStoreRequest",
@@ -93160,6 +97098,7 @@ __all__ = [
     "Plugin",
     "PluginActivationStatus",
     "PluginApplyInstallRequest",
+    "PluginBuiltinDiscoverResult",
     "PluginCheckUpdateRequest",
     "PluginInstallPlan",
     "PluginInstallResult",
@@ -93199,6 +97138,7 @@ __all__ = [
     "PluginsDisableRequest",
     "PluginsEnableRequest",
     "PluginsInstallRequest",
+    "PluginsInvocationRequest",
     "PluginsListRequest",
     "PluginsMarketplacesAddRequest",
     "PluginsMarketplacesApi",
@@ -93365,6 +97305,10 @@ __all__ = [
     "RemoteSessionMetadataValue",
     "RemoteSessionMode",
     "RemoteSessionRepository",
+    "RepositoryDisabledKey",
+    "RepositoryDisabledNamesResult",
+    "ResearchListReportsResult",
+    "ResearchStoredReport",
     "Resource",
     "ResponseFormat",
     "ResponseFormatType",
@@ -93459,6 +97403,12 @@ __all__ = [
     "SecretsFilterResult",
     "SecretsRemoveFilterValuesRequest",
     "SecretsRemoveFilterValuesResult",
+    "SemanticImportDiagnostic",
+    "SemanticMemoryConflictPolicy",
+    "SemanticMemoryImportCounts",
+    "SemanticMemoryImportItemResult",
+    "SemanticMemoryImportItemStatus",
+    "SemanticSessionImportCounts",
     "SendAgentMode",
     "SendAndWaitResult",
     "SendAttachmentsToMessageParams",
@@ -93687,6 +97637,7 @@ __all__ = [
     "SessionPermissionsManagedReviewRequiredRequest",
     "SessionPermissionsManagedReviewRequiredResult",
     "SessionPluginDefaults",
+    "SessionPluginInventoryEntry",
     "SessionPluginsDisableRequest",
     "SessionPluginsEnableRequest",
     "SessionPluginsInstallRequest",
@@ -93789,6 +97740,8 @@ __all__ = [
     "SessionsGetPersistedRemoteSteerableResult",
     "SessionsHasEventsRequest",
     "SessionsHasEventsResult",
+    "SessionsImportSemanticRequest",
+    "SessionsImportSemanticResult",
     "SessionsListNonEmptySessionIDSRequest",
     "SessionsListNonEmptySessionIDSResult",
     "SessionsListRequest",
@@ -93829,6 +97782,8 @@ __all__ = [
     "SessionsTransferRemoteControlRequest",
     "SessionsUpdateWorkspaceFieldsRequest",
     "SessionsUpdateWorkspaceFieldsResult",
+    "SessionsValidateNameRequest",
+    "SessionsValidateNameResult",
     "SettableAuthInfo",
     "SettableAuthInfoType",
     "SettableTokenAuthInfo",
@@ -93882,6 +97837,12 @@ __all__ = [
     "SkillProviderListRequest",
     "SkillRemoveSourceEntry",
     "SkillRemoveSourceKind",
+    "SkillResourceDiscoverResult",
+    "SkillResourceInstallKind",
+    "SkillResourceInstallResult",
+    "SkillResourceInstallScope",
+    "SkillResourceRemoveKind",
+    "SkillResourceRemoveResult",
     "SkillSetEnabledRequest",
     "SkillUninstallPlan",
     "SkillsApi",

@@ -107,6 +107,37 @@ fn fixture() -> (Client, Peer) {
     )
 }
 
+#[tokio::test]
+async fn scoped_raw_observer_preserves_the_original_and_a_reused_id_replacement() {
+    let (client, mut peer) = fixture();
+    let id = uuid::Uuid::new_v4().to_string();
+    let (first_tx, mut first_rx) = mpsc::unbounded_channel();
+    let callback: AhpHostExitCallback = Arc::new(move |exit| {
+        let _ = first_tx.send(exit);
+    });
+    let original = client
+        .observe_ahp_host_exit(id.clone(), callback.clone())
+        .unwrap();
+    let duplicate = client
+        .observe_ahp_host_exit(id.clone(), Arc::new(|_| {}))
+        .err()
+        .expect("an observer must not replace the original");
+    assert_eq!(duplicate.kind(), &ErrorKind::InvalidConfig);
+    peer.exited(&id).await;
+    let first = timeout(TIMEOUT, first_rx.recv()).await.unwrap().unwrap();
+    assert_eq!(first.host_id, id);
+    assert_eq!(first.exit_code, Some(17));
+    let replacement = client.observe_ahp_host_exit(id.clone(), callback).unwrap();
+    drop(original);
+    peer.exited(&id).await;
+    let next = timeout(TIMEOUT, first_rx.recv()).await.unwrap().unwrap();
+    assert_eq!(next.host_id, id);
+    assert_eq!(next.exit_code, Some(17));
+    drop(replacement);
+    assert!(client.inner.ahp_host_callbacks.lock().is_empty());
+    client.force_stop();
+}
+
 fn start(
     client: &Client,
     options: AhpHostOptions,

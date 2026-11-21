@@ -31,6 +31,49 @@ public final class SessionExtensionsApi {
     }
 
     /**
+     * Updates the original host's live extension management-tool gate. Returns false when no service is configured.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<Boolean> setManagementToolsEnabled(SessionExtensionsSetManagementToolsEnabledParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.extensions.setManagementToolsEnabled", _p, Boolean.class);
+    }
+
+    /**
+     * Configures the original host's extension service with runtime-owned settings, policy, plugin discovery, and lifecycle fences. Only the original session host may supply launch resources.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SessionExtensionsInspectServiceResult> configureHost(SessionExtensionsConfigureHostParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.extensions.configureHost", _p, SessionExtensionsInspectServiceResult.class);
+    }
+
+    /**
+     * Inspects whether the selected session has an attached extension service and returns its current inventory without starting or replacing it.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SessionExtensionsInspectServiceResult> inspectService() {
+        return caller.invoke("session.extensions.inspectService", java.util.Map.of("sessionId", this.sessionId), SessionExtensionsInspectServiceResult.class);
+    }
+
+    /**
      * Returns the runtime-derived standalone extension admission policy for the session's actual project and managed-settings context. enforcementVersion 1 means this runtime enforces strictPluginOnlyCustomization for executable extensions. Hosts executing independent extension targets must deny standalone targets unless standalone is allowed; plugin_only requires runtime-verified eligible plugin provenance, not a caller-supplied source label or transport bridge. pending is not confirmed absence. Older runtimes return method-not-found and must not be represented as enforcing this restriction. Re-read on managed-settings changes; a snapshot is not a launch authorization token.
      *
      * @apiNote This method is experimental and may change in a future version.

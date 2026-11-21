@@ -32,6 +32,28 @@ public final class ServerSessionsApi {
     }
 
     /**
+     * Validates an explicit session name with the canonical session naming rules and returns an optional error.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SessionsValidateNameResult> validateName(SessionsValidateNameParams params) {
+        return caller.invoke("sessions.validateName", params, SessionsValidateNameResult.class);
+    }
+
+    /**
+     * Validates semantic session JSONL and imports canonical events into a fresh local session with rollback. Dry runs perform no authentication, network calls, or writes.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SessionsImportSemanticResult> importSemantic(SessionsImportSemanticParams params) {
+        return caller.invoke("sessions.importSemantic", params, SessionsImportSemanticResult.class);
+    }
+
+    /**
      * Creates or resumes a local session and returns the opened session ID.
      *
      * @apiNote This method is experimental and may change in a future version.

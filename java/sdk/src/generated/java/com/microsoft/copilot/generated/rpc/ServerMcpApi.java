@@ -30,6 +30,10 @@ public final class ServerMcpApi {
     final ServerMcpOauthApi oauth;
     /** API methods for the {@code mcp.installations} sub-namespace. */
     public final ServerMcpInstallationsApi installations;
+    /** API methods for the {@code mcp.github} sub-namespace. */
+    final ServerMcpGithubApi github;
+    /** API methods for the {@code mcp.computerUse} sub-namespace. */
+    final ServerMcpComputerUseApi computerUse;
 
     /** @param caller the RPC transport function */
     ServerMcpApi(RpcCaller caller) {
@@ -38,6 +42,8 @@ public final class ServerMcpApi {
         this.registry = new ServerMcpRegistryApi(caller);
         this.oauth = new ServerMcpOauthApi(caller);
         this.installations = new ServerMcpInstallationsApi(caller);
+        this.github = new ServerMcpGithubApi(caller);
+        this.computerUse = new ServerMcpComputerUseApi(caller);
     }
 
     /**

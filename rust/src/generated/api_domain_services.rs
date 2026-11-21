@@ -1010,18 +1010,14 @@ crate::record_serde::wire_record!(AhpConnectionTransportDirect { authenticate_wi
 /// Ask Mission Control to allocate the connection.
 #[derive(Debug, Clone, Default)]
 pub struct AhpConnectionTransportMissionControl {
-    /// Mission Control service URL.
-    pub base_url: String,
+    /// Mission Control service URL. Defaults to the original owner's COPILOT_MC_BASE_URL or GitHub API URL.
+    pub base_url: Option<String>,
     /// Target environment identifier.
     pub environment_id: String,
     /// Outgoing AHP transport discriminator.
     pub kind: AhpConnectionTransportMissionControlKind,
 }
-crate::record_serde::wire_record!(AhpConnectionTransportMissionControl {
-    base_url: "baseUrl",
-    environment_id: "environmentId",
-    kind: "kind"
-});
+crate::record_serde::wire_record!(AhpConnectionTransportMissionControl { base_url: "baseUrl" if is_none, environment_id: "environmentId", kind: "kind" });
 
 /// Creates an inert outgoing connection under the caller's existing runtime auth owner.
 ///
@@ -9012,6 +9008,8 @@ crate::record_serde::wire_record!(InstructionsDiscoverRepoSourcesRequest { addit
 /// </div>
 #[derive(Debug, Clone, Default)]
 pub struct InstructionsDiscoverRequest {
+    /// Optional configuration root for personal instructions and plugins. Omission retains the connection's root.
+    pub config_dir: Option<String>,
     /// When true, omit the host's instruction sources (user/home-level files and plugin rules), leaving only repository and working-directory sources. For multitenant deployments.
     pub exclude_host_instructions: Option<bool>,
     /// Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without ambient discovery, subject to instruction/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
@@ -9019,7 +9017,7 @@ pub struct InstructionsDiscoverRequest {
     /// Optional list of project directory paths to scan for repository/working-directory instruction sources. When omitted or empty, only user-level and plugin instruction sources are returned (no project scan).
     pub project_paths: Option<Vec<String>>,
 }
-crate::record_serde::wire_record!(InstructionsDiscoverRequest { exclude_host_instructions: "excludeHostInstructions" if is_none, instruction_directories: "instructionDirectories" if is_none, project_paths: "projectPaths" if is_none });
+crate::record_serde::wire_record!(InstructionsDiscoverRequest { config_dir: "configDir" if is_none, exclude_host_instructions: "excludeHostInstructions" if is_none, instruction_directories: "instructionDirectories" if is_none, project_paths: "projectPaths" if is_none });
 
 /// Optional project paths to include when enumerating instruction discovery targets.
 ///
@@ -10229,6 +10227,113 @@ pub struct McpTaskMetadata {
 }
 crate::record_serde::wire_record!(McpTaskMetadata { ttl: "ttl" if is_none });
 
+/// Memory import input. Authentication remains bound to the calling runtime owner.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct MemoriesImportSemanticRequest {
+    /// Validate without authentication, network access, or writes.
+    pub dry_run: Option<bool>,
+    /// Semantic memory JSONL.
+    pub jsonl: String,
+    /// Conflict policy, defaulting to error.
+    pub on_conflict: Option<SemanticMemoryConflictPolicy>,
+    /// Runtime settings overrides, with the original caller's configuration root.
+    pub settings: Option<serde_json::Value>,
+    /// Working directory for temporary, scoped memory sessions.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(MemoriesImportSemanticRequest { dry_run: "dryRun" if is_none, jsonl: "jsonl", on_conflict: "onConflict" if is_none, settings: "settings" if is_none, working_directory: "workingDirectory" });
+
+/// Number of submitted memories and their outcomes.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SemanticMemoryImportCounts {
+    /// Failed records.
+    pub failed: i64,
+    /// Successfully stored records.
+    pub imported: i64,
+    /// Duplicate or conflicting records skipped by policy.
+    pub skipped: i64,
+    /// Total validated input records.
+    pub total: i64,
+}
+crate::record_serde::wire_record!(SemanticMemoryImportCounts {
+    failed: "failed",
+    imported: "imported",
+    skipped: "skipped",
+    total: "total"
+});
+
+/// One semantic memory record outcome.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SemanticMemoryImportItemResult {
+    /// Stable operation code.
+    pub code: String,
+    /// External record identifier, when present.
+    pub external_id: Option<String>,
+    /// One-based input line.
+    pub line: i64,
+    /// Human-readable operation result.
+    pub message: String,
+    /// Outcome: imported, skipped, failed, or validated.
+    pub status: SemanticMemoryImportItemStatus,
+}
+crate::record_serde::wire_record!(SemanticMemoryImportItemResult { code: "code", external_id: "externalId" if is_none, line: "line", message: "message", status: "status" });
+
+/// Semantic memory import outcome.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct MemoriesImportSemanticResult {
+    /// Stable aggregate result code.
+    pub code: String,
+    /// Input validation diagnostics.
+    pub diagnostics: Vec<SemanticImportDiagnostic>,
+    /// Whether the call only validated input.
+    pub dry_run: bool,
+    /// Record outcome counts.
+    pub imported: SemanticMemoryImportCounts,
+    /// Human-readable aggregate result.
+    pub message: String,
+    /// Whether every record succeeded or was skipped.
+    pub ok: bool,
+    /// Individual record outcomes, in input order.
+    pub records: Vec<SemanticMemoryImportItemResult>,
+}
+crate::record_serde::wire_record!(MemoriesImportSemanticResult {
+    code: "code",
+    diagnostics: "diagnostics",
+    dry_run: "dryRun",
+    imported: "imported",
+    message: "message",
+    ok: "ok",
+    records: "records"
+});
+
 /// A memory the agent stored after validation, secret filtering and approval.
 ///
 /// <div class="warning">
@@ -10763,6 +10868,23 @@ pub struct MoveMcpLoadingToBackgroundResult {
 crate::record_serde::wire_record!(MoveMcpLoadingToBackgroundResult {
     moved_to_background: "movedToBackground"
 });
+
+/// Input for utility-model session name generation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NameGenerateRequest {
+    /// Whether a user explicitly requested the name. Defaults to false.
+    pub manual: Option<bool>,
+    /// Conversation text from which to derive a name.
+    pub user_message: String,
+}
+crate::record_serde::wire_record!(NameGenerateRequest { manual: "manual" if is_none, user_message: "userMessage" });
 
 /// The session's friendly name, or null when not yet set.
 ///
@@ -12443,6 +12565,61 @@ pub(crate) struct RepoSettingsWriteKeyRequest {
     pub value: Option<serde_json::Value>,
 }
 crate::record_serde::wire_record!(RepoSettingsWriteKeyRequest { delete: "delete" if is_none, key: "key", repo_root: "repoRoot", scope: "scope", value: "value" if is_none });
+
+/// Reads only the trusted repository contribution to one resource disable list.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RepositoryDisabledNamesRequest {
+    /// Host paths and environment that select the user document.
+    pub context: UserSettingsHostContext,
+    /// Resource disable list to inspect.
+    pub key: RepositoryDisabledKey,
+    /// Directory whose repository and persisted trust determine the overlay.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(RepositoryDisabledNamesRequest {
+    context: "context",
+    key: "key",
+    working_directory: "workingDirectory"
+});
+
+/// The advisory repository disable list. A read failure returns no names and a diagnostic, rather than blocking a listing or mutation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RepositoryDisabledNamesResult {
+    /// Repository-owned names, excluding the user contribution.
+    pub names: Vec<String>,
+    /// Debug diagnostic for a repository that could not be inspected.
+    pub warning: Option<String>,
+}
+crate::record_serde::wire_record!(RepositoryDisabledNamesResult { names: "names", warning: "warning" if is_none });
+
+/// Stored Markdown reports, newest first, from the selected session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ResearchListReportsResult {
+    /// Reports sorted by descending modification time with stable ties.
+    pub reports: Vec<ResearchStoredReport>,
+}
+crate::record_serde::wire_record!(ResearchListReportsResult { reports: "reports" });
 
 /// Provider-native structured output format. JSON Schema is forwarded without rewriting or validating the schema or the generated output.
 ///
@@ -14325,6 +14502,26 @@ pub(crate) struct UsageSetCodeChangesRequest {
 }
 crate::record_serde::wire_record!(UsageSetCodeChangesRequest { files_count: "filesCount" if is_none, lines_added: "linesAdded", lines_removed: "linesRemoved" });
 
+/// Utility generation outcome under the session's model and credential policy.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct UtilityPromptResult {
+    /// Whether generation produced a value.
+    #[doc(hidden)]
+    pub(crate) kind: UtilityPromptResultKind,
+    /// User-facing explanation, when the requested operation needs one.
+    pub message: Option<String>,
+    /// Generated value, or absent when the utility model is unavailable.
+    pub value: Option<String>,
+}
+crate::record_serde::wire_record!(UtilityPromptResult { kind: "kind", message: "message" if is_none, value: "value" if is_none });
+
 /// Current sharing status and shareable GitHub URL for a session.
 ///
 /// <div class="warning">
@@ -14377,6 +14574,26 @@ pub struct VisibilitySetResult {
     pub synced: bool,
 }
 crate::record_serde::wire_record!(VisibilitySetResult { share_url: "shareUrl" if is_none, status: "status" if is_none, synced: "synced" });
+
+/// Content after runtime-owned redaction.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SecretsFilterForHostResult {
+    /// Whether the returned content differs from the submitted text.
+    pub changed: bool,
+    /// Redacted content. JSON mode preserves the runtime's JSON serialization behavior.
+    pub value: String,
+}
+crate::record_serde::wire_record!(SecretsFilterForHostResult {
+    changed: "changed",
+    value: "value"
+});
 
 /// Snapshot and transient notifications for one connection-owned manager.
 ///
@@ -15370,6 +15587,41 @@ pub(crate) struct CloudTasksSetSharingStatusResult {
     pub sharing_status: Option<String>,
 }
 crate::record_serde::wire_record!(CloudTasksSetSharingStatusResult { credential_resolved: "credentialResolved", ok: "ok", sharing_status: "sharingStatus" if is_none });
+
+/// A typed request to the original host's retained persistence resources.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PersistenceBarrierParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+    /// Resource barrier to await.
+    pub phase: SessionPersistenceBarrierPhase,
+    /// Runtime-assigned identity for this flush, independent of concurrent flushes.
+    pub operation_id: String,
+    /// Whether the original writer must persist an otherwise empty session.
+    pub force: bool,
+    /// Native flush failure, combined with retained callback failures at completion.
+    pub native_failure: Option<String>,
+}
+crate::record_serde::wire_record!(PersistenceBarrierParams { session_id: "sessionId", phase: "phase", operation_id: "operationId", force: "force", native_failure: "nativeFailure" if is_none });
+
+/// Acknowledges completion of one original-host persistence barrier.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PersistenceBarrierResult {}
 
 /// Whether an active connection-owned transfer accepted cancellation.
 ///
@@ -21829,6 +22081,88 @@ impl<'de> Deserialize<'de> for McpElicitationFormMode {
         )?;
         Ok(match index {
             0 => Self::Form,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// Conflict handling for a semantic memory import.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum SemanticMemoryConflictPolicy {
+    /// Skip duplicate or conflicting memories.
+    #[serde(rename = "skip")]
+    Skip,
+    /// Report duplicate or conflicting memories as failures.
+    #[serde(rename = "error")]
+    Error,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for SemanticMemoryConflictPolicy {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "SemanticMemoryConflictPolicy",
+            &["skip", "error", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::Skip,
+            1 => Self::Error,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// Outcome for one validated semantic memory record.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum SemanticMemoryImportItemStatus {
+    /// The dry run accepted the record without submission.
+    #[serde(rename = "validated")]
+    Validated,
+    /// The memory service accepted the record.
+    #[serde(rename = "imported")]
+    Imported,
+    /// The selected conflict policy skipped the record.
+    #[serde(rename = "skipped")]
+    Skipped,
+    /// Validation or submission failed for this record.
+    #[serde(rename = "failed")]
+    Failed,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for SemanticMemoryImportItemStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "SemanticMemoryImportItemStatus",
+            &["validated", "imported", "skipped", "failed", "Unknown"],
+            Some(4),
+        )?;
+        Ok(match index {
+            0 => Self::Validated,
+            1 => Self::Imported,
+            2 => Self::Skipped,
+            3 => Self::Failed,
             _ => Self::Unknown,
         })
     }

@@ -2914,6 +2914,43 @@ pub(crate) struct CompactionCompleteFailureDiagnostics {
 }
 crate::record_serde::wire_record!(CompactionCompleteFailureDiagnostics { finish_reason: "finishReason" if is_none, last_attempt_failure_reason: "lastAttemptFailureReason" if is_none, provider_error_code: "providerErrorCode" if is_none, transport_error_kind: "transportErrorKind" if is_none });
 
+/// Experimental attribution linking an ordinary event to the HydraFusion turn, phase, and concrete source that produced it.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct FusionAttribution {
+    /// Idempotency identifier for the authoritative commit, when the event belongs to the selected output.
+    pub commit_id: Option<String>,
+    /// Conversation scope in which the concrete phase executed.
+    pub conversation_scope: Option<String>,
+    /// Stable identifier for the HydraFusion turn that produced the event.
+    pub fusion_id: String,
+    /// Whether this model request consumed a user steering message rather than only internal Fusion work.
+    pub has_user_steering: Option<bool>,
+    /// HydraFusion orchestration pattern selected for the turn.
+    pub pattern: String,
+    /// Identifier of the concrete phase that produced the event.
+    pub phase_id: Option<String>,
+    /// Kind of concrete phase that produced the event.
+    pub phase_kind: Option<String>,
+    /// HydraFusion routing policy used for the turn.
+    pub policy: String,
+    /// Semantic role assigned to the concrete phase.
+    pub role: Option<String>,
+    /// Concrete model that produced the attributed event.
+    pub source_model: Option<String>,
+    /// Phase whose output supplied the authoritative content, when different from the executing phase.
+    pub source_phase_id: Option<String>,
+    /// Synthetic HydraFusion model selected for the session.
+    pub synthetic_model: String,
+}
+crate::record_serde::wire_record!(FusionAttribution { commit_id: "commitId" if is_none, conversation_scope: "conversationScope" if is_none, fusion_id: "fusionId", has_user_steering: "hasUserSteering" if is_none, pattern: "pattern", phase_id: "phaseId" if is_none, phase_kind: "phaseKind" if is_none, policy: "policy", role: "role" if is_none, source_model: "sourceModel" if is_none, source_phase_id: "sourcePhaseId" if is_none, synthetic_model: "syntheticModel" });
+
 /// How far the compaction's summarizer model calls had progressed when the compaction's outcome was decided. Stream statistics describe the latest model request; durationMs and attemptCount cover every request.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CompactionCompleteSummarizerProgress {
@@ -3025,6 +3062,16 @@ pub struct SessionCompactionCompleteData {
     /// Bounded reason for a typed failed outcome. Unknown future values are preserved.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
+    /// Experimental HydraFusion attribution for a compaction a HydraFusion turn ran before its first phase.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This type is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases.
+    ///
+    /// </div>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fusion: Option<FusionAttribution>,
     /// Model identifier at admission when routing later changed to the reported compaction model
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_model: Option<String>,
@@ -4028,43 +4075,6 @@ crate::record_serde::wire_record!(AssistantServerToolProgressData {
     status: "status"
 });
 
-/// Experimental attribution linking an ordinary event to the HydraFusion turn, phase, and concrete source that produced it.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct FusionAttribution {
-    /// Idempotency identifier for the authoritative commit, when the event belongs to the selected output.
-    pub commit_id: Option<String>,
-    /// Conversation scope in which the concrete phase executed.
-    pub conversation_scope: Option<String>,
-    /// Stable identifier for the HydraFusion turn that produced the event.
-    pub fusion_id: String,
-    /// Whether this model request consumed a user steering message rather than only internal Fusion work.
-    pub has_user_steering: Option<bool>,
-    /// HydraFusion orchestration pattern selected for the turn.
-    pub pattern: String,
-    /// Identifier of the concrete phase that produced the event.
-    pub phase_id: Option<String>,
-    /// Kind of concrete phase that produced the event.
-    pub phase_kind: Option<String>,
-    /// HydraFusion routing policy used for the turn.
-    pub policy: String,
-    /// Semantic role assigned to the concrete phase.
-    pub role: Option<String>,
-    /// Concrete model that produced the attributed event.
-    pub source_model: Option<String>,
-    /// Phase whose output supplied the authoritative content, when different from the executing phase.
-    pub source_phase_id: Option<String>,
-    /// Synthetic HydraFusion model selected for the session.
-    pub synthetic_model: String,
-}
-crate::record_serde::wire_record!(FusionAttribution { commit_id: "commitId" if is_none, conversation_scope: "conversationScope" if is_none, fusion_id: "fusionId", has_user_steering: "hasUserSteering" if is_none, pattern: "pattern", phase_id: "phaseId" if is_none, phase_kind: "phaseKind" if is_none, policy: "policy", role: "role" if is_none, source_model: "sourceModel" if is_none, source_phase_id: "sourcePhaseId" if is_none, synthetic_model: "syntheticModel" });
-
 /// Session event "assistant.reasoning". Assistant reasoning content for timeline display with complete thinking text
 #[derive(Debug, Clone, Default)]
 pub struct AssistantReasoningData {
@@ -4336,7 +4346,9 @@ pub struct AssistantMessageData {
     pub client_request_id: Option<String>,
     /// The assistant's text response content
     pub content: String,
-    /// Encrypted reasoning content from OpenAI models. Session-bound and stripped on resume.
+    /// No longer emitted. For OpenAI Responses, read encrypted_content from the reasoning items in reasoningBlocks.blocks instead. Older events may still contain this field.
+    #[doc(hidden)]
+    #[deprecated]
     pub encrypted_content: Option<String>,
     /// Experimental HydraFusion source attribution for this ordinary authoritative assistant message.
     ///

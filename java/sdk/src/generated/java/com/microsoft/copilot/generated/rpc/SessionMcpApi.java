@@ -379,4 +379,20 @@ public final class SessionMcpApi {
         return caller.invoke("session.mcp.getToolTokenBreakdown", java.util.Map.of("sessionId", this.sessionId), SessionMcpGetToolTokenBreakdownResult.class);
     }
 
+    /**
+     * Inspects source configuration without starting servers or resolving credentials. Workspace trust comes from the bound session and only a matching activation snapshot can attest the requested directory.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<McpConfigMergeSourcesResult> inspectConfiguration(SessionMcpInspectConfigurationParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.mcp.inspectConfiguration", _p, McpConfigMergeSourcesResult.class);
+    }
+
 }

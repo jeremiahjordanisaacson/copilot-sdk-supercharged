@@ -1,0 +1,35 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+// AUTO-GENERATED FILE - DO NOT EDIT
+// Generated from: api.schema.json
+
+package com.microsoft.copilot.generated.rpc;
+
+import javax.annotation.processing.Generated;
+
+/**
+ * A resource disable list to which a repository may contribute names.
+ *
+ * @since 1.0.0
+ */
+@javax.annotation.processing.Generated("copilot-sdk-codegen")
+enum RepositoryDisabledKey {
+    /** The {@code disabledMcpServers} variant. */
+    DISABLEDMCPSERVERS("disabledMcpServers"),
+    /** The {@code disabledSkills} variant. */
+    DISABLEDSKILLS("disabledSkills");
+
+    private final String value;
+    RepositoryDisabledKey(String value) { this.value = value; }
+    @com.fasterxml.jackson.annotation.JsonValue
+    public String getValue() { return value; }
+    @com.fasterxml.jackson.annotation.JsonCreator
+    public static RepositoryDisabledKey fromValue(String value) {
+        for (RepositoryDisabledKey v : values()) {
+            if (v.value.equals(value)) return v;
+        }
+        throw new IllegalArgumentException("Unknown RepositoryDisabledKey value: " + value);
+    }
+}

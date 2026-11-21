@@ -446,10 +446,13 @@ The assistant's complete response for this LLM call. May include tool invocation
 | `toolRequests` | `ToolRequest[]` | | Tool calls the assistant wants to make (see below) |
 | `reasoningOpaque` | `string` | | Encrypted extended thinking (Anthropic models); session-bound |
 | `reasoningText` | `string` | | Readable reasoning text from extended thinking |
-| `encryptedContent` | `string` | | Encrypted reasoning content (OpenAI models); session-bound |
+| `encryptedContent` | `string` | | **Deprecated.** Older events can contain this field; new events omit it |
+| `reasoningBlocks` | `AssistantMessageReasoningBlocks` | | Experimental. For `provider: "openai-responses"`, reasoning items in `blocks` can contain `encrypted_content` |
 | `phase` | `string` | | Generation phase (e.g., `"thinking"` vs `"response"`) |
 | `outputTokens` | `number` | | Output tokens this message adds to replayed context, for token accounting. Use `assistant.usage` for billed usage |
 | `interactionId` | `string` | | CAPI interaction ID for telemetry |
+
+If your SDK's event decoder does not expose `reasoningBlocks`, its typed callback cannot read the ciphertext from new events. In .NET, explicitly referencing `AssistantMessageReasoningBlocks` raises the `MCPSDK001` experimental diagnostic. For readable reasoning, use `reasoningText` instead.
 
 **`ToolRequest` fields:**
 

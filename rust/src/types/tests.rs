@@ -19,6 +19,30 @@ use crate::generated::session_events::{
 use crate::rpc::SandboxConfig;
 
 #[test]
+fn instruction_discovery_preserves_explicit_roots_on_wire() {
+    let request: crate::generated::api_types::InstructionsDiscoverRequest =
+        serde_json::from_value(json!({
+            "configDir": "profile",
+            "projectPaths": ["workspace"],
+            "instructionDirectories": ["explicit-instructions"],
+            "excludeHostInstructions": true
+        }))
+        .unwrap();
+
+    let wire = serde_json::to_value(request).unwrap();
+    assert_eq!(
+        wire,
+        json!({
+            "configDir": "profile",
+            "projectPaths": ["workspace"],
+            "instructionDirectories": ["explicit-instructions"],
+            "excludeHostInstructions": true
+        }),
+        "The canonical request must retain the profile and explicit instruction roots."
+    );
+}
+
+#[test]
 fn local_model_configuration_survives_public_type_serialization() {
     let provider = json!({
         "name": "local", "type": "winml", "baseUrl": "model.gguf",

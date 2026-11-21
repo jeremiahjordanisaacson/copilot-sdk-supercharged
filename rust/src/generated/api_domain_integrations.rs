@@ -640,23 +640,6 @@ pub struct ExtensionLaunchProviderResolveResult {
 }
 crate::record_serde::wire_record!(ExtensionLaunchProviderResolveResult { launch: "launch" if is_none });
 
-/// Extensions discovered for the session, with their current status.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct ExtensionList {
-    /// Discovered extensions and their current status
-    pub extensions: Vec<Extension>,
-}
-crate::record_serde::wire_record!(ExtensionList {
-    extensions: "extensions"
-});
-
 /// Runtime support and session-context standalone executable extension policy.
 ///
 /// <div class="warning">
@@ -1263,6 +1246,32 @@ crate::record_serde::wire_record!(InstallationConfirmationResponse {
     review_fingerprint: "reviewFingerprint"
 });
 
+/// A JSON document to validate and compose.
+#[derive(Debug, Clone, Default)]
+pub struct McpAdditionalConfigSourceJson {
+    /// The source format: inline JSON or a host file.
+    pub kind: McpAdditionalConfigSourceJsonKind,
+    /// Raw JSON text.
+    pub value: String,
+}
+crate::record_serde::wire_record!(McpAdditionalConfigSourceJson {
+    kind: "kind",
+    value: "value"
+});
+
+/// A document read from the host filesystem.
+#[derive(Debug, Clone, Default)]
+pub struct McpAdditionalConfigSourceFile {
+    /// The source format: inline JSON or a host file.
+    pub kind: McpAdditionalConfigSourceFileKind,
+    /// Absolute path resolved by the caller.
+    pub path: String,
+}
+crate::record_serde::wire_record!(McpAdditionalConfigSourceFile {
+    kind: "kind",
+    path: "path"
+});
+
 /// Applies exactly one previously prepared operation on its original connection.
 ///
 /// <div class="warning">
@@ -1555,6 +1564,49 @@ crate::record_serde::wire_record!(McpCancelSamplingExecutionResult {
     cancelled: "cancelled"
 });
 
+/// Apply the host's Computer Use platform overlay without starting a server.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpComputerUseApplyConfigurationRequest {
+    /// Disabled servers after invocation precedence.
+    pub disabled_servers: Vec<String>,
+    /// Explicitly enabled servers.
+    pub enabled_servers: Vec<String>,
+    /// Complete server map, including provenance and fields unknown to older clients.
+    pub servers: serde_json::Value,
+}
+crate::record_serde::wire_record!(McpComputerUseApplyConfigurationRequest {
+    disabled_servers: "disabledServers",
+    enabled_servers: "enabledServers",
+    servers: "servers"
+});
+
+/// Effective configuration after the existing platform overlay.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpComputerUseApplyConfigurationResult {
+    /// Effective disabled server names.
+    pub disabled_servers: Vec<String>,
+    /// Server map with only the platform overlay's changes.
+    pub servers: serde_json::Value,
+}
+crate::record_serde::wire_record!(McpComputerUseApplyConfigurationResult {
+    disabled_servers: "disabledServers",
+    servers: "servers"
+});
+
 /// MCP server name and configuration to add to user configuration.
 ///
 /// <div class="warning">
@@ -1575,6 +1627,77 @@ crate::record_serde::wire_record!(McpConfigAddRequest {
     name: "name"
 });
 
+/// Extensible [`McpConfigAddRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`McpConfigAddOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfigAddOptions {
+    #[serde(flatten)]
+    legacy: McpConfigAddRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config_dir: Option<String>,
+}
+
+impl McpConfigAddOptions {
+    /// Creates options with the required inputs.
+    pub fn new(name: impl Into<String>, config: serde_json::Value) -> Self {
+        Self {
+            legacy: McpConfigAddRequest {
+                name: name.into(),
+                config,
+            },
+            config_dir: None,
+        }
+    }
+
+    /// Configuration root for the user MCP document. Omission retains the connection's root; overrides require a trusted host or direct SDK caller.
+    pub fn config_dir(mut self, value: impl Into<String>) -> Self {
+        self.config_dir = Some(value.into());
+        self
+    }
+}
+
+/// Validates and combines additional MCP documents in source order.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpConfigComposeAdditionalRequest {
+    /// Documents in low-to-high precedence order.
+    pub sources: Vec<McpAdditionalConfigSource>,
+}
+crate::record_serde::wire_record!(McpConfigComposeAdditionalRequest { sources: "sources" });
+
+/// Validated additional MCP servers in source precedence order. Runtime-owned filtering remains outside the serialized document.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpConfigComposeAdditionalResult {
+    /// Server names mapped to their validated document configuration.
+    pub mcp_servers: HashMap<String, serde_json::Value>,
+}
+crate::record_serde::wire_record!(McpConfigComposeAdditionalResult {
+    mcp_servers: "mcpServers"
+});
+
 /// MCP server names to disable for new sessions.
 ///
 /// <div class="warning">
@@ -1589,6 +1712,42 @@ pub struct McpConfigDisableRequest {
     pub names: Vec<String>,
 }
 crate::record_serde::wire_record!(McpConfigDisableRequest { names: "names" });
+
+/// Extensible [`McpConfigDisableRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`McpConfigDisableOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfigDisableOptions {
+    #[serde(flatten)]
+    legacy: McpConfigDisableRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config_dir: Option<String>,
+}
+
+impl McpConfigDisableOptions {
+    /// Creates options with the required inputs.
+    pub fn new(names: Vec<String>) -> Self {
+        Self {
+            legacy: McpConfigDisableRequest { names },
+            config_dir: None,
+        }
+    }
+
+    /// Optional configuration root for user settings. Omission retains the connection's root; overrides require a trusted host or direct SDK caller.
+    pub fn config_dir(mut self, value: impl Into<String>) -> Self {
+        self.config_dir = Some(value.into());
+        self
+    }
+}
 
 /// MCP server names to enable for new sessions.
 ///
@@ -1605,6 +1764,59 @@ pub struct McpConfigEnableRequest {
 }
 crate::record_serde::wire_record!(McpConfigEnableRequest { names: "names" });
 
+/// Extensible [`McpConfigEnableRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`McpConfigEnableOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfigEnableOptions {
+    #[serde(flatten)]
+    legacy: McpConfigEnableRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config_dir: Option<String>,
+}
+
+impl McpConfigEnableOptions {
+    /// Creates options with the required inputs.
+    pub fn new(names: Vec<String>) -> Self {
+        Self {
+            legacy: McpConfigEnableRequest { names },
+            config_dir: None,
+        }
+    }
+
+    /// Optional configuration root for user settings. Omission retains the connection's root; overrides require a trusted host or direct SDK caller.
+    pub fn config_dir(mut self, value: impl Into<String>) -> Self {
+        self.config_dir = Some(value.into());
+        self
+    }
+}
+
+/// Selects an explicit user MCP configuration root without changing the connection owner.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpConfigForConfigDirRequest {
+    /// Configuration root containing the user MCP document.
+    pub config_dir: String,
+}
+crate::record_serde::wire_record!(McpConfigForConfigDirRequest {
+    config_dir: "configDir"
+});
+
 /// User-configured MCP servers, keyed by server name.
 ///
 /// <div class="warning">
@@ -1619,6 +1831,79 @@ pub struct McpConfigList {
     pub servers: HashMap<String, serde_json::Value>,
 }
 crate::record_serde::wire_record!(McpConfigList { servers: "servers" });
+
+/// Optional configuration root for user MCP servers. Omission retains the connection's root.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpConfigListRequest {
+    /// Configuration root containing the user MCP document. Only trusted hosts or direct SDK callers can override it.
+    pub config_dir: Option<String>,
+}
+crate::record_serde::wire_record!(McpConfigListRequest { config_dir: "configDir" if is_none });
+
+/// Read-only MCP configuration composition from explicit source inventories. The result grants no execution authority.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpConfigMergeSourcesRequest {
+    /// Additional MCP configuration, merged after the other sources.
+    pub additional_config: Option<serde_json::Value>,
+    /// Host-bundled plugin records, below user and workspace configuration.
+    pub builtin_plugins: Option<Vec<serde_json::Value>>,
+    /// Configuration root for the user MCP document.
+    pub config_dir: String,
+    /// Include workspace files only where the runtime confirms folder trust.
+    pub include_workspace_sources: Option<bool>,
+    /// Resolved installed, live, and explicit plugin records in precedence order.
+    pub installed_plugins: Option<Vec<serde_json::Value>>,
+    /// Repository boundary for upward workspace discovery.
+    pub repo_root: Option<String>,
+    /// Working directory for workspace discovery and relative source references.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(McpConfigMergeSourcesRequest { additional_config: "additionalConfig" if is_none, builtin_plugins: "builtinPlugins" if is_none, config_dir: "configDir", include_workspace_sources: "includeWorkspaceSources" if is_none, installed_plugins: "installedPlugins" if is_none, repo_root: "repoRoot" if is_none, working_directory: "workingDirectory" });
+
+/// The composed MCP configuration and all omitted-source diagnostics.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpConfigMergeSourcesResult {
+    /// The complete merged configuration, including source provenance.
+    pub config: serde_json::Value,
+    /// Registry servers disabled because their MSIX container is unavailable.
+    pub odr_msix_disabled_server_names: Vec<String>,
+    /// Server names discovered through the on-device registry.
+    pub odr_server_names: Vec<String>,
+    /// Invalid user entries omitted while valid siblings remained.
+    #[doc(hidden)]
+    pub(crate) user_config_errors: Vec<McpConfigSourceDiagnostic>,
+    /// Workspace files or entries that did not load.
+    #[doc(hidden)]
+    pub(crate) workspace_errors: Vec<McpConfigSourceDiagnostic>,
+}
+crate::record_serde::wire_record!(McpConfigMergeSourcesResult {
+    config: "config",
+    odr_msix_disabled_server_names: "odrMsixDisabledServerNames",
+    odr_server_names: "odrServerNames",
+    user_config_errors: "userConfigErrors",
+    workspace_errors: "workspaceErrors"
+});
 
 /// MCP server name to remove from user configuration.
 ///
@@ -1636,6 +1921,51 @@ pub struct McpConfigRemoveRequest {
     pub name: String,
 }
 crate::record_serde::wire_record!(McpConfigRemoveRequest { auth_client_id_metadata_url: "authClientIdMetadataUrl" if is_none, name: "name" });
+
+/// Extensible [`McpConfigRemoveRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`McpConfigRemoveOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfigRemoveOptions {
+    #[serde(flatten)]
+    legacy: McpConfigRemoveRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config_dir: Option<String>,
+}
+
+impl McpConfigRemoveOptions {
+    /// Creates options with the required inputs.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            legacy: McpConfigRemoveRequest {
+                name: name.into(),
+                auth_client_id_metadata_url: None,
+            },
+            config_dir: None,
+        }
+    }
+
+    /// OAuth Client ID Metadata Document URL whose persisted credentials should also be removed.
+    pub fn auth_client_id_metadata_url(mut self, value: impl Into<String>) -> Self {
+        self.legacy.auth_client_id_metadata_url = Some(value.into());
+        self
+    }
+
+    /// Configuration root for the user MCP document and credentials. Omission retains the connection's root; overrides require a trusted host or direct SDK caller.
+    pub fn config_dir(mut self, value: impl Into<String>) -> Self {
+        self.config_dir = Some(value.into());
+        self
+    }
+}
 
 /// MCP server name and replacement configuration to write to user configuration.
 ///
@@ -1704,6 +2034,21 @@ pub struct McpConfigureGitHubResult {
     pub changed: bool,
 }
 crate::record_serde::wire_record!(McpConfigureGitHubResult { changed: "changed" });
+
+/// Fresh user MCP server names, including invalid entries but excluding installation-owned entries. This read does not change the validated configuration cache.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpConfigUserServerNamesResult {
+    /// User-owned persisted server names, including entries that validation skips.
+    pub names: Vec<String>,
+}
+crate::record_serde::wire_record!(McpConfigUserServerNamesResult { names: "names" });
 
 /// Name of the MCP server to disable for the session.
 ///
@@ -2083,6 +2428,124 @@ pub struct McpExternalClientSnapshot {
     pub tools: Vec<serde_json::Value>,
 }
 crate::record_serde::wire_record!(McpExternalClientSnapshot { config: "config" if is_none, instructions: "instructions" if is_none, server_capabilities: "serverCapabilities" if is_none, server_name: "serverName", server_version: "serverVersion", tools: "tools" });
+
+/// One invocation's GitHub MCP tool overrides.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpGitHubInvocationToolOptions {
+    /// Additional tools.
+    pub additional_tools: Option<Vec<String>>,
+    /// Additional toolsets.
+    pub additional_toolsets: Option<Vec<String>>,
+    /// Override form deferral when the shared tool resolver supports it.
+    pub disable_form_deferral: Option<bool>,
+    /// Expose all supported tools.
+    pub enable_all_tools: Option<bool>,
+    /// Select the insiders endpoint.
+    pub enable_insiders_mode: Option<bool>,
+}
+crate::record_serde::wire_record!(McpGitHubInvocationToolOptions { additional_tools: "additionalTools" if is_none, additional_toolsets: "additionalToolsets" if is_none, disable_form_deferral: "disableFormDeferral" if is_none, enable_all_tools: "enableAllTools" if is_none, enable_insiders_mode: "enableInsidersMode" if is_none });
+
+/// Feature populations for a sessionless capability inspection.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpInvocationAudience {
+    /// First launch time in Unix milliseconds.
+    pub first_launch_at_millis: Option<f64>,
+    /// Whether experimental capabilities are enabled.
+    pub is_experimental: bool,
+    /// Whether this installation belongs to staff.
+    pub is_staff: bool,
+    /// Whether this installation belongs to GitHub staff.
+    pub is_staff_github: Option<bool>,
+    /// Whether this installation belongs to Microsoft staff.
+    pub is_staff_microsoft: Option<bool>,
+    /// Whether team capabilities are enabled.
+    pub is_team: bool,
+    /// Whether streamer mode is active.
+    pub streamer_mode: bool,
+}
+crate::record_serde::wire_record!(McpInvocationAudience { first_launch_at_millis: "firstLaunchAtMillis" if is_none, is_experimental: "isExperimental", is_staff: "isStaff", is_staff_github: "isStaffGithub" if is_none, is_staff_microsoft: "isStaffMicrosoft" if is_none, is_team: "isTeam", streamer_mode: "streamerMode" });
+
+/// The session tool filters that decide whether the session still has a shell to run `gh` with.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpShouldExcludeGitHubToolsRequest {
+    /// The session's tool allowlist, when it set one. Omitted means the session constrains nothing this way.
+    pub available_tools: Option<Vec<String>>,
+    /// The session's tool denylist, when it set one. Omitted means the session constrains nothing this way.
+    pub excluded_tools: Option<Vec<String>>,
+    /// How the allowlist and denylist combine when both are set. Omitted uses the default excluded precedence; supply the session's explicit Update selection when present.
+    pub tool_filter_precedence: Option<OptionsUpdateToolFilterPrecedence>,
+}
+crate::record_serde::wire_record!(McpShouldExcludeGitHubToolsRequest { available_tools: "availableTools" if is_none, excluded_tools: "excludedTools" if is_none, tool_filter_precedence: "toolFilterPrecedence" if is_none });
+
+/// Resolve the authentication-derived built-in without a session or MCP connection.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpGitHubResolveInvocationRequest {
+    /// Existing launch populations; account identity comes only from the connection.
+    #[doc(hidden)]
+    pub(crate) audience: McpInvocationAudience,
+    /// Effective disabled servers, after enable overrides.
+    pub disabled_servers: Vec<String>,
+    /// Invocation tool overrides, above settings.
+    #[doc(hidden)]
+    pub(crate) flags: Option<McpGitHubInvocationToolOptions>,
+    /// Client integration identifier for the secret-free descriptor.
+    pub integration_id: String,
+    /// Tool filters used by the session this invocation describes.
+    #[doc(hidden)]
+    pub(crate) tool_filters: Option<McpShouldExcludeGitHubToolsRequest>,
+    /// Effective user and trusted repository settings.
+    pub user_settings: serde_json::Value,
+    /// Repository context for host detection and shell availability.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(McpGitHubResolveInvocationRequest { audience: "audience", disabled_servers: "disabledServers", flags: "flags" if is_none, integration_id: "integrationId", tool_filters: "toolFilters" if is_none, user_settings: "userSettings", working_directory: "workingDirectory" });
+
+/// A secret-free GitHub descriptor, an ordinary signed-out result, or a bounded degraded result.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpGitHubResolveInvocationResult {
+    /// Built-in descriptor without authentication headers; absent when unavailable.
+    pub server: Option<serde_json::Value>,
+    /// Whether the existing two-second resolution budget expired.
+    pub timed_out: bool,
+    /// Resolution failure detail, distinct from an ordinary signed-out result.
+    pub warning: Option<String>,
+}
+crate::record_serde::wire_record!(McpGitHubResolveInvocationResult { server: "server" if is_none, timed_out: "timedOut", warning: "warning" if is_none });
 
 /// Repository and server state for GitHub MCP exposure.
 ///
@@ -4455,25 +4918,6 @@ pub struct McpSetEnvValueModeResult {
 }
 crate::record_serde::wire_record!(McpSetEnvValueModeResult { mode: "mode" });
 
-/// The session tool filters that decide whether the session still has a shell to run `gh` with.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub(crate) struct McpShouldExcludeGitHubToolsRequest {
-    /// The session's tool allowlist, when it set one. Omitted means the session constrains nothing this way.
-    pub available_tools: Option<Vec<String>>,
-    /// The session's tool denylist, when it set one. Omitted means the session constrains nothing this way.
-    pub excluded_tools: Option<Vec<String>>,
-    /// How the allowlist and denylist combine when both are set. Omitted uses the default excluded precedence; supply the session's explicit Update selection when present.
-    pub tool_filter_precedence: Option<OptionsUpdateToolFilterPrecedence>,
-}
-crate::record_serde::wire_record!(McpShouldExcludeGitHubToolsRequest { available_tools: "availableTools" if is_none, excluded_tools: "excludedTools" if is_none, tool_filter_precedence: "toolFilterPrecedence" if is_none });
-
 /// Whether the gh-replaceable GitHub MCP tools may be clipped for the session described by the request.
 ///
 /// <div class="warning">
@@ -4603,6 +5047,43 @@ crate::record_serde::wire_record!(PluginApplyInstallRequest {
     policy_session_id: "policySessionId"
 });
 
+/// Locates bundled plugin manifests relative to one installed host directory.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginBuiltinDiscoverRequest {
+    /// Host module directory used to locate the installed distribution.
+    pub base_directory: String,
+}
+crate::record_serde::wire_record!(PluginBuiltinDiscoverRequest {
+    base_directory: "baseDirectory"
+});
+
+/// Bundled plugin records and diagnostics from the original manifest scanner.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PluginBuiltinDiscoverResult {
+    /// Scanned bundled records in host precedence order.
+    pub plugins: Vec<serde_json::Value>,
+    /// Manifest and filesystem diagnostics, including a missing required bundle.
+    pub warnings: Vec<String>,
+}
+crate::record_serde::wire_record!(PluginBuiltinDiscoverResult {
+    plugins: "plugins",
+    warnings: "warnings"
+});
+
 /// Identifies a plugin and its configured marketplace without accepting configuration or policy overrides.
 ///
 /// <div class="warning">
@@ -4622,6 +5103,31 @@ crate::record_serde::wire_record!(PluginCheckUpdateRequest {
     marketplace: "marketplace",
     name: "name"
 });
+
+/// Inspects persisted and live plugins under an explicit effective configuration without changing the existing user-only plugins.list API.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginInspectInventoryRequest {
+    /// Trusted caller-composed read configuration, not persisted by inspection.
+    pub config_override: serde_json::Value,
+    /// Includes pending managed plugins by default. False excludes uninstalled rows before source merging.
+    pub include_uninstalled: Option<bool>,
+    /// Effective policy for read-only inspection; mutation guards retain their own authority.
+    pub managed_settings: Option<serde_json::Value>,
+    /// Additional plugin directories in host precedence order.
+    pub plugin_directories: Option<Vec<String>>,
+    /// Seeds pre-migration enablement from installed records below explicit overrides.
+    pub seed_enabled_plugins_from_installed: bool,
+    /// Working directory for repository overlay and live marketplace resolution.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(PluginInspectInventoryRequest { config_override: "configOverride", include_uninstalled: "includeUninstalled" if is_none, managed_settings: "managedSettings" if is_none, plugin_directories: "pluginDirectories" if is_none, seed_enabled_plugins_from_installed: "seedEnabledPluginsFromInstalled", working_directory: "workingDirectory" });
 
 /// A verified Agent Plugin installation plan was prepared.
 #[derive(Debug, Clone, Default)]
@@ -4824,6 +5330,47 @@ pub struct PluginInstallResult {
 }
 crate::record_serde::wire_record!(PluginInstallResult { deprecation_warning: "deprecationWarning" if is_none, plugin: "plugin", post_install_message: "postInstallMessage" if is_none, skills_installed: "skillsInstalled", staging_mode: "stagingMode" if is_none, warnings: "warnings" if is_none });
 
+/// One plugin in a host invocation's complete merged inventory.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginInvocationInventoryEntry {
+    /// Whether an explicit host directory supplies this plugin.
+    pub external: bool,
+    /// Plugin metadata and effective activation.
+    pub plugin: InstalledPluginInfo,
+}
+crate::record_serde::wire_record!(PluginInvocationInventoryEntry {
+    external: "external",
+    plugin: "plugin"
+});
+
+/// Persisted, live, built-in, and host-directory plugins with canonical shadowing and scan diagnostics.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginInvocationInventoryResult {
+    /// Merged inventory in canonical precedence order.
+    #[doc(hidden)]
+    pub(crate) plugins: Vec<PluginInvocationInventoryEntry>,
+    /// Directory scan warnings in source order.
+    pub warnings: Vec<String>,
+}
+crate::record_serde::wire_record!(PluginInvocationInventoryResult {
+    plugins: "plugins",
+    warnings: "warnings"
+});
+
 /// Plugins installed for the session, with their enabled state and version metadata.
 ///
 /// <div class="warning">
@@ -4931,6 +5478,73 @@ crate::record_serde::wire_record!(PluginPlanInstallRequest {
     policy_session_id: "policySessionId"
 });
 
+/// Resolves plugin policy through the requesting connection's original credential owner.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginPolicyResolveInvocationRequest {
+    /// Optional active account identity; credentials still resolve through the original owner.
+    pub auth_info: Option<AuthIdentity>,
+    /// Reads account and server policy from local caches without network access.
+    pub cache_only: bool,
+    /// Host client identity supplied to the policy helper.
+    pub client_name: String,
+    /// Host home directory for policy and cache locations.
+    pub home_directory: String,
+    /// Host platform in Node platform spelling.
+    pub platform: String,
+    /// Whether a configured policy helper may run.
+    pub policy_helper_enabled: bool,
+    /// Retains authoritative source layers for subsequent guarded mutations.
+    pub retain_policy: Option<bool>,
+    /// Stops on ingestion exceptions instead of reloading the device layer.
+    pub strict: bool,
+    /// Host user agent supplied to policy retrieval.
+    pub user_agent: String,
+    /// Working directory used by a directory-sensitive policy helper.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(PluginPolicyResolveInvocationRequest { auth_info: "authInfo" if is_none, cache_only: "cacheOnly", client_name: "clientName", home_directory: "homeDirectory", platform: "platform", policy_helper_enabled: "policyHelperEnabled", retain_policy: "retainPolicy" if is_none, strict: "strict", user_agent: "userAgent", working_directory: "workingDirectory" });
+
+/// Resolved plugin policy and authoritative failure posture. Fresh successful resolutions retain the original policy layers for mutation guards; cache-only inspection never changes retained policy.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginPolicyResolveInvocationResult {
+    /// Resolution diagnostics in source order.
+    #[doc(hidden)]
+    pub(crate) diagnostics: Vec<PluginPolicyDiagnostic>,
+    /// Whether this host has a configured helper.
+    pub policy_helper_configured: bool,
+    /// Whether helper failure requires refusal.
+    pub policy_helper_fail_closed: bool,
+    /// Whether the helper failed.
+    pub policy_helper_load_failed: bool,
+    /// Server resolution error, when present.
+    pub server_fetch_error: Option<String>,
+    /// Whether the server policy could not be resolved.
+    pub server_fetch_failed: bool,
+    /// Whether required fresh confirmation failed and the caller must refuse.
+    pub server_forced_refresh_failure: bool,
+    /// Raw server policy for hosts that inspect the account layer alone.
+    pub server_response: Option<serde_json::Value>,
+    /// Whether no usable credential was available.
+    pub server_token_unavailable: bool,
+    /// Effective device, server, and helper settings when available.
+    pub settings: Option<serde_json::Value>,
+}
+crate::record_serde::wire_record!(PluginPolicyResolveInvocationResult { diagnostics: "diagnostics", policy_helper_configured: "policyHelperConfigured", policy_helper_fail_closed: "policyHelperFailClosed", policy_helper_load_failed: "policyHelperLoadFailed", server_fetch_error: "serverFetchError" if is_none, server_fetch_failed: "serverFetchFailed", server_forced_refresh_failure: "serverForcedRefreshFailure", server_response: "serverResponse" if is_none, server_token_unavailable: "serverTokenUnavailable", settings: "settings" if is_none });
+
 /// Built-in plugin to activate.
 ///
 /// <div class="warning">
@@ -4962,6 +5576,53 @@ pub struct PluginsActivateResult {
     pub status: PluginActivationStatus,
 }
 crate::record_serde::wire_record!(PluginsActivateResult { message: "message" if is_none, status: "status" });
+
+/// Resolve managed Browser activation through the connection's original credential owner.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginsBuiltinResolveActivationRequest {
+    /// Existing launch populations for the policy-helper gate.
+    #[doc(hidden)]
+    pub(crate) audience: McpInvocationAudience,
+    /// Embedding client identity for the policy helper.
+    pub client_name: String,
+    /// Effective user and trusted repository settings.
+    pub user_settings: serde_json::Value,
+    /// Working directory for the policy helper.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(PluginsBuiltinResolveActivationRequest {
+    audience: "audience",
+    client_name: "clientName",
+    user_settings: "userSettings",
+    working_directory: "workingDirectory"
+});
+
+/// Browser activation after the managed-over-user whole-plugin policy.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginsBuiltinResolveActivationResult {
+    /// Whether the bundled Browser may contribute MCP servers.
+    pub browser_enabled: bool,
+    /// Whether policy resolution exceeded the existing two-second budget.
+    pub timed_out: bool,
+}
+crate::record_serde::wire_record!(PluginsBuiltinResolveActivationResult {
+    browser_enabled: "browserEnabled",
+    timed_out: "timedOut"
+});
 
 /// Trusted built-in plugin directories to use for this runtime process.
 ///
@@ -5028,6 +5689,25 @@ pub struct PluginsInstallRequest {
     pub working_directory: Option<String>,
 }
 crate::record_serde::wire_record!(PluginsInstallRequest { source: "source", working_directory: "workingDirectory" if is_none });
+
+/// Optional workspace settings for a plugin catalog or bulk update through the original caller's runtime. Omission retains the server's configuration.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PluginsInvocationRequest {
+    /// Effective user and repository settings for this invocation. Runtime-owned managed restrictions still apply.
+    pub config_override: Option<serde_json::Value>,
+    /// Managed settings supplied by the host for canonical plugin policy evaluation. This value does not select a credential owner.
+    pub managed_settings: Option<serde_json::Value>,
+    /// Working directory whose repository settings and plugin sources apply to this invocation.
+    pub working_directory: Option<String>,
+}
+crate::record_serde::wire_record!(PluginsInvocationRequest { config_override: "configOverride" if is_none, managed_settings: "managedSettings" if is_none, working_directory: "workingDirectory" if is_none });
 
 /// Optional read-only plugin discovery context. The runtime resolves account, policy, and workspace trust. This query does not change settings.
 ///
@@ -5109,6 +5789,48 @@ pub struct PluginsMarketplacesRemoveRequest {
     pub name: String,
 }
 crate::record_serde::wire_record!(PluginsMarketplacesRemoveRequest { force: "force" if is_none, name: "name" });
+
+/// Resolves active plugin sources with runtime-owned folder trust and managed policy.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginSourcesResolveRequest {
+    /// Configuration root for user settings and persisted installations.
+    pub config_dir: String,
+    /// Explicit plugin directories in host precedence order.
+    pub plugin_directories: Option<Vec<String>>,
+    /// Working directory for trusted repository overlays and live marketplaces.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(PluginSourcesResolveRequest { config_dir: "configDir", plugin_directories: "pluginDirectories" if is_none, working_directory: "workingDirectory" });
+
+/// Active plugins and the separate persisted inventory, without persisting live directory records.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginSourcesResolveResult {
+    /// Live directory records, including inactive records that still own their names.
+    pub live_plugins: Option<Vec<serde_json::Value>>,
+    /// Whether this pass confirmed the live tier instead of using persisted fallback.
+    pub live_tier_known: Option<bool>,
+    /// Persisted ambient records, including disabled or shadowed installations.
+    pub persisted_plugins: Vec<serde_json::Value>,
+    /// Active records, including trusted live marketplaces and explicit directories.
+    pub plugins: Vec<serde_json::Value>,
+    /// Scanner and live-marketplace warnings for this exact source pass.
+    pub warnings: Vec<String>,
+}
+crate::record_serde::wire_record!(PluginSourcesResolveResult { live_plugins: "livePlugins" if is_none, live_tier_known: "liveTierKnown" if is_none, persisted_plugins: "persistedPlugins", plugins: "plugins", warnings: "warnings" });
 
 /// Optional flags controlling which side effects the reload performs.
 ///
@@ -5877,6 +6599,177 @@ crate::record_serde::wire_record!(SkillRemoveSourceEntry {
     source: "source"
 });
 
+/// Host-owned paths and environment for standalone skill management.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SkillResourceContext {
+    /// Settings paths and hook environment for the original host.
+    pub context: UserSettingsHostContext,
+    /// Workspace directory for repository sources and relative paths.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(SkillResourceContext {
+    context: "context",
+    working_directory: "workingDirectory"
+});
+
+/// Loads full local skill records, including disabled records and command metadata.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SkillResourceDiscoverRequest {
+    /// Host paths and working directory.
+    #[doc(hidden)]
+    pub(crate) host: SkillResourceContext,
+    /// Explicit plugin directories, appended after persisted and live plugin sources.
+    pub plugin_directories: Option<Vec<String>>,
+}
+crate::record_serde::wire_record!(SkillResourceDiscoverRequest { host: "host", plugin_directories: "pluginDirectories" if is_none });
+
+/// Full local skill inventory and report-and-ignore source diagnostics.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SkillResourceDiscoverResult {
+    /// Sources that failed to load; the remaining inventory is incomplete.
+    pub errors: Vec<String>,
+    /// Local skill records with invocation identity, content paths, and command metadata.
+    pub skills: Vec<serde_json::Value>,
+    /// Explicit plugin scan warnings, separate from skill loader diagnostics.
+    pub source_warnings: Vec<String>,
+    /// Nonfatal loader and manifest warnings.
+    pub warnings: Vec<String>,
+}
+crate::record_serde::wire_record!(SkillResourceDiscoverResult {
+    errors: "errors",
+    skills: "skills",
+    source_warnings: "sourceWarnings",
+    warnings: "warnings"
+});
+
+/// Registers a skill directory or installs a local or HTTPS skill definition.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SkillResourceInstallRequest {
+    /// Host paths and working directory.
+    #[doc(hidden)]
+    pub(crate) host: SkillResourceContext,
+    /// Use the preferred project creation directory instead of personal storage.
+    pub project: Option<bool>,
+    /// Local file, directory, or HTTPS source.
+    pub source: String,
+    /// User agent for the existing runtime HTTPS fetcher.
+    pub user_agent: Option<String>,
+}
+crate::record_serde::wire_record!(SkillResourceInstallRequest { host: "host", project: "project" if is_none, source: "source", user_agent: "userAgent" if is_none });
+
+/// The persisted result of a skill source installation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SkillResourceInstallResult {
+    /// Source classification.
+    pub kind: SkillResourceInstallKind,
+    /// Skill name, absent for a registered directory.
+    pub name: Option<String>,
+    /// Installed definition path or registered directory.
+    pub path: String,
+    /// Destination scope, absent for a registered directory.
+    pub scope: Option<SkillResourceInstallScope>,
+}
+crate::record_serde::wire_record!(SkillResourceInstallResult { kind: "kind", name: "name" if is_none, path: "path", scope: "scope" if is_none });
+
+/// Removes a personal or project skill, or unregisters a custom directory.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SkillResourceRemoveRequest {
+    /// Host paths and working directory.
+    #[doc(hidden)]
+    pub(crate) host: SkillResourceContext,
+    /// Skill name or registered directory.
+    pub target: String,
+}
+crate::record_serde::wire_record!(SkillResourceRemoveRequest {
+    host: "host",
+    target: "target"
+});
+
+/// The completed skill removal, with conservative disabled-state cleanup.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SkillResourceRemoveResult {
+    /// Removed storage tier.
+    pub kind: SkillResourceRemoveKind,
+    /// Removed skill name, absent for a registered directory.
+    pub name: Option<String>,
+    /// Removed definition path or unregistered directory.
+    pub path: String,
+}
+crate::record_serde::wire_record!(SkillResourceRemoveResult { kind: "kind", name: "name" if is_none, path: "path" });
+
+/// Atomically changes only one user's disabled skill entry under explicit host paths.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SkillResourceSetEnabledRequest {
+    /// Desired user-scope enablement.
+    pub enabled: bool,
+    /// Host paths and working directory.
+    #[doc(hidden)]
+    pub(crate) host: SkillResourceContext,
+    /// Invocation name to enable or disable.
+    pub name: String,
+}
+crate::record_serde::wire_record!(SkillResourceSetEnabledRequest {
+    enabled: "enabled",
+    host: "host",
+    name: "name"
+});
+
 /// Skill names to mark as disabled in global configuration, replacing any previous list.
 ///
 /// <div class="warning">
@@ -6230,7 +7123,7 @@ pub struct SkillsRemoveSourceRequest {
 }
 crate::record_serde::wire_record!(SkillsRemoveSourceRequest { cwd: "cwd", inventory: "inventory" if is_none, skill_directories: "skillDirectories", target: "target" });
 
-/// User-configured MCP servers, keyed by server name.
+/// Resolved plugin policy and authoritative failure posture. Fresh successful resolutions retain the original policy layers for mutation guards; cache-only inspection never changes retained policy.
 ///
 /// <div class="warning">
 ///
@@ -6239,13 +7132,32 @@ crate::record_serde::wire_record!(SkillsRemoveSourceRequest { cwd: "cwd", invent
 ///
 /// </div>
 #[derive(Debug, Clone, Default)]
-pub struct McpConfigListResult {
-    /// All MCP servers from user config, keyed by name
-    pub servers: HashMap<String, serde_json::Value>,
+pub(crate) struct PluginsPolicyResolveForInvocationResult {
+    /// Resolution diagnostics in source order.
+    #[doc(hidden)]
+    pub(crate) diagnostics: Vec<PluginPolicyDiagnostic>,
+    /// Whether this host has a configured helper.
+    pub policy_helper_configured: bool,
+    /// Whether helper failure requires refusal.
+    pub policy_helper_fail_closed: bool,
+    /// Whether the helper failed.
+    pub policy_helper_load_failed: bool,
+    /// Server resolution error, when present.
+    pub server_fetch_error: Option<String>,
+    /// Whether the server policy could not be resolved.
+    pub server_fetch_failed: bool,
+    /// Whether required fresh confirmation failed and the caller must refuse.
+    pub server_forced_refresh_failure: bool,
+    /// Raw server policy for hosts that inspect the account layer alone.
+    pub server_response: Option<serde_json::Value>,
+    /// Whether no usable credential was available.
+    pub server_token_unavailable: bool,
+    /// Effective device, server, and helper settings when available.
+    pub settings: Option<serde_json::Value>,
 }
-crate::record_serde::wire_record!(McpConfigListResult { servers: "servers" });
+crate::record_serde::wire_record!(PluginsPolicyResolveForInvocationResult { diagnostics: "diagnostics", policy_helper_configured: "policyHelperConfigured", policy_helper_fail_closed: "policyHelperFailClosed", policy_helper_load_failed: "policyHelperLoadFailed", server_fetch_error: "serverFetchError" if is_none, server_fetch_failed: "serverFetchFailed", server_forced_refresh_failure: "serverForcedRefreshFailure", server_response: "serverResponse" if is_none, server_token_unavailable: "serverTokenUnavailable", settings: "settings" if is_none });
 
-/// Request id naming a cancellable registry search.
+/// Persisted, live, built-in, and host-directory plugins with canonical shadowing and scan diagnostics.
 ///
 /// <div class="warning">
 ///
@@ -6254,65 +7166,17 @@ crate::record_serde::wire_record!(McpConfigListResult { servers: "servers" });
 ///
 /// </div>
 #[derive(Debug, Clone, Default)]
-pub(crate) struct McpRegistryAllocateRequestIdResult {
-    /// Request ID for `mcp.registry.search` and `mcp.registry.cancel`. It serves one search. Allocation can reclaim unused IDs at the 1,024-ID reservation limit.
-    pub request_id: i64,
+pub(crate) struct PluginsInspectInventoryResult {
+    /// Merged inventory in canonical precedence order.
+    #[doc(hidden)]
+    pub(crate) plugins: Vec<PluginInvocationInventoryEntry>,
+    /// Directory scan warnings in source order.
+    pub warnings: Vec<String>,
 }
-crate::record_serde::wire_record!(McpRegistryAllocateRequestIdResult {
-    request_id: "requestId"
+crate::record_serde::wire_record!(PluginsInspectInventoryResult {
+    plugins: "plugins",
+    warnings: "warnings"
 });
-
-/// Extensions discovered from persisted Copilot home state and their effective loading mode. Launch-scoped additional plugins are not included.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct ExtensionsDiscoverResult {
-    /// Discovered user and enabled installed-plugin extensions from persisted Copilot home state
-    pub extensions: Vec<DiscoveredExtension>,
-    /// Effective extension loading mode. Defaults to load_and_augment when unset.
-    pub mode: DiscoveredExtensionMode,
-}
-crate::record_serde::wire_record!(ExtensionsDiscoverResult {
-    extensions: "extensions",
-    mode: "mode"
-});
-
-/// Skills discovered across global and project sources.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SkillsDiscoverResult {
-    /// Messages for skills that failed to load (e.g. malformed SKILL.md). Empty when host skills are excluded so host-local paths are not disclosed to multitenant callers.
-    pub errors: Option<Vec<String>>,
-    /// All discovered skills across all sources
-    pub skills: Vec<ServerSkill>,
-}
-crate::record_serde::wire_record!(SkillsDiscoverResult { errors: "errors" if is_none, skills: "skills" });
-
-/// Canonical locations where skills can be created so the runtime will recognize them.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct SkillsGetDiscoveryPathsResult {
-    /// Canonical skill create/discovery directories, in priority order
-    pub paths: Vec<SkillDiscoveryPath>,
-}
-crate::record_serde::wire_record!(SkillsGetDiscoveryPathsResult { paths: "paths" });
 
 /// Plugins installed in user/global state.
 ///
@@ -6391,6 +7255,26 @@ pub struct PluginsUpdateAllResult {
     pub results: Vec<PluginUpdateAllEntry>,
 }
 crate::record_serde::wire_record!(PluginsUpdateAllResult { results: "results" });
+
+/// Bundled plugin records and diagnostics from the original manifest scanner.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PluginsBuiltinDiscoverResult {
+    /// Scanned bundled records in host precedence order.
+    pub plugins: Vec<serde_json::Value>,
+    /// Manifest and filesystem diagnostics, including a missing required bundle.
+    pub warnings: Vec<String>,
+}
+crate::record_serde::wire_record!(PluginsBuiltinDiscoverResult {
+    plugins: "plugins",
+    warnings: "warnings"
+});
 
 /// All registered marketplaces, including built-in defaults.
 ///
@@ -6487,6 +7371,213 @@ pub struct PluginsMarketplacesRefreshResult {
     pub results: Vec<MarketplaceRefreshEntry>,
 }
 crate::record_serde::wire_record!(PluginsMarketplacesRefreshResult { results: "results" });
+
+/// Active plugins and the separate persisted inventory, without persisting live directory records.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginsSourcesResolveResult {
+    /// Live directory records, including inactive records that still own their names.
+    pub live_plugins: Option<Vec<serde_json::Value>>,
+    /// Whether this pass confirmed the live tier instead of using persisted fallback.
+    pub live_tier_known: Option<bool>,
+    /// Persisted ambient records, including disabled or shadowed installations.
+    pub persisted_plugins: Vec<serde_json::Value>,
+    /// Active records, including trusted live marketplaces and explicit directories.
+    pub plugins: Vec<serde_json::Value>,
+    /// Scanner and live-marketplace warnings for this exact source pass.
+    pub warnings: Vec<String>,
+}
+crate::record_serde::wire_record!(PluginsSourcesResolveResult { live_plugins: "livePlugins" if is_none, live_tier_known: "liveTierKnown" if is_none, persisted_plugins: "persistedPlugins", plugins: "plugins", warnings: "warnings" });
+
+/// Full local skill inventory and report-and-ignore source diagnostics.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SkillsResourcesDiscoverResult {
+    /// Sources that failed to load; the remaining inventory is incomplete.
+    pub errors: Vec<String>,
+    /// Local skill records with invocation identity, content paths, and command metadata.
+    pub skills: Vec<serde_json::Value>,
+    /// Explicit plugin scan warnings, separate from skill loader diagnostics.
+    pub source_warnings: Vec<String>,
+    /// Nonfatal loader and manifest warnings.
+    pub warnings: Vec<String>,
+}
+crate::record_serde::wire_record!(SkillsResourcesDiscoverResult {
+    errors: "errors",
+    skills: "skills",
+    source_warnings: "sourceWarnings",
+    warnings: "warnings"
+});
+
+/// The persisted result of a skill source installation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SkillsResourcesInstallResult {
+    /// Source classification.
+    pub kind: SkillResourceInstallKind,
+    /// Skill name, absent for a registered directory.
+    pub name: Option<String>,
+    /// Installed definition path or registered directory.
+    pub path: String,
+    /// Destination scope, absent for a registered directory.
+    pub scope: Option<SkillResourceInstallScope>,
+}
+crate::record_serde::wire_record!(SkillsResourcesInstallResult { kind: "kind", name: "name" if is_none, path: "path", scope: "scope" if is_none });
+
+/// The completed skill removal, with conservative disabled-state cleanup.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SkillsResourcesRemoveResult {
+    /// Removed storage tier.
+    pub kind: SkillResourceRemoveKind,
+    /// Removed skill name, absent for a registered directory.
+    pub name: Option<String>,
+    /// Removed definition path or unregistered directory.
+    pub path: String,
+}
+crate::record_serde::wire_record!(SkillsResourcesRemoveResult { kind: "kind", name: "name" if is_none, path: "path" });
+
+/// Skills discovered across global and project sources.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SkillsDiscoverResult {
+    /// Messages for skills that failed to load (e.g. malformed SKILL.md). Empty when host skills are excluded so host-local paths are not disclosed to multitenant callers.
+    pub errors: Option<Vec<String>>,
+    /// All discovered skills across all sources
+    pub skills: Vec<ServerSkill>,
+}
+crate::record_serde::wire_record!(SkillsDiscoverResult { errors: "errors" if is_none, skills: "skills" });
+
+/// Canonical locations where skills can be created so the runtime will recognize them.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SkillsGetDiscoveryPathsResult {
+    /// Canonical skill create/discovery directories, in priority order
+    pub paths: Vec<SkillDiscoveryPath>,
+}
+crate::record_serde::wire_record!(SkillsGetDiscoveryPathsResult { paths: "paths" });
+
+/// User-configured MCP servers, keyed by server name.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpConfigListResult {
+    /// All MCP servers from user config, keyed by name
+    pub servers: HashMap<String, serde_json::Value>,
+}
+crate::record_serde::wire_record!(McpConfigListResult { servers: "servers" });
+
+/// Fresh user MCP server names, including invalid entries but excluding installation-owned entries. This read does not change the validated configuration cache.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpConfigUserServerNamesForConfigDirResult {
+    /// User-owned persisted server names, including entries that validation skips.
+    pub names: Vec<String>,
+}
+crate::record_serde::wire_record!(McpConfigUserServerNamesForConfigDirResult { names: "names" });
+
+/// Request id naming a cancellable registry search.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpRegistryAllocateRequestIdResult {
+    /// Request ID for `mcp.registry.search` and `mcp.registry.cancel`. It serves one search. Allocation can reclaim unused IDs at the 1,024-ID reservation limit.
+    pub request_id: i64,
+}
+crate::record_serde::wire_record!(McpRegistryAllocateRequestIdResult {
+    request_id: "requestId"
+});
+
+/// A secret-free GitHub descriptor, an ordinary signed-out result, or a bounded degraded result.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpGitHubResolveForInvocationResult {
+    /// Built-in descriptor without authentication headers; absent when unavailable.
+    pub server: Option<serde_json::Value>,
+    /// Whether the existing two-second resolution budget expired.
+    pub timed_out: bool,
+    /// Resolution failure detail, distinct from an ordinary signed-out result.
+    pub warning: Option<String>,
+}
+crate::record_serde::wire_record!(McpGitHubResolveForInvocationResult { server: "server" if is_none, timed_out: "timedOut", warning: "warning" if is_none });
+
+/// Extensions discovered from persisted Copilot home state and their effective loading mode. Launch-scoped additional plugins are not included.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ExtensionsDiscoverResult {
+    /// Discovered user and enabled installed-plugin extensions from persisted Copilot home state
+    pub extensions: Vec<DiscoveredExtension>,
+    /// Effective extension loading mode. Defaults to load_and_augment when unset.
+    pub mode: DiscoveredExtensionMode,
+}
+crate::record_serde::wire_record!(ExtensionsDiscoverResult {
+    extensions: "extensions",
+    mode: "mode"
+});
 
 /// Identifies the target session.
 ///
@@ -7573,6 +8664,59 @@ impl<'de> Deserialize<'de> for InstallationDecision {
             _ => Self::Unknown,
         })
     }
+}
+
+/// The source format: inline JSON or a host file.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpAdditionalConfigSourceJsonKind {
+    #[serde(rename = "json")]
+    #[default]
+    Json,
+}
+impl<'de> Deserialize<'de> for McpAdditionalConfigSourceJsonKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpAdditionalConfigSourceJsonKind",
+            &["json"],
+            None,
+        )?;
+        Ok(Self::Json)
+    }
+}
+
+/// The source format: inline JSON or a host file.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpAdditionalConfigSourceFileKind {
+    #[serde(rename = "file")]
+    #[default]
+    File,
+}
+impl<'de> Deserialize<'de> for McpAdditionalConfigSourceFileKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpAdditionalConfigSourceFileKind",
+            &["file"],
+            None,
+        )?;
+        Ok(Self::File)
+    }
+}
+
+/// An additional MCP document supplied as JSON text or a host file.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum McpAdditionalConfigSource {
+    Json(McpAdditionalConfigSourceJson),
+    File(McpAdditionalConfigSourceFile),
 }
 
 /// Allowed values for the `McpAppsSetHostContextDetailsAvailableDisplayMode` enumeration.

@@ -240,6 +240,353 @@ func (r *AccountGetCurrentAuthResult) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func unmarshalAccountLoginProcessRequest(data []byte) (AccountLoginProcessRequest, error) {
+	if string(data) == "null" {
+		return nil, nil
+	}
+	type rawUnion struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+	}
+	var raw rawUnion
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	switch raw.Operation {
+	case AccountLoginProcessRequestOperationClose:
+		var d AccountLoginProcessRequestClose
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessRequestOperationComplete:
+		var d AccountLoginProcessRequestComplete
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessRequestOperationContinue:
+		var d AccountLoginProcessRequestContinue
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessRequestOperationDiscard:
+		var d AccountLoginProcessRequestDiscard
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessRequestOperationOpen:
+		var d AccountLoginProcessRequestOpen
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessRequestOperationOpenBrowser:
+		var d AccountLoginProcessRequestOpenBrowser
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessRequestOperationPolicy:
+		var d AccountLoginProcessRequestPolicy
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessRequestOperationStartDevice:
+		var d AccountLoginProcessRequestStartDevice
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessRequestOperationStartWeb:
+		var d AccountLoginProcessRequestStartWeb
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessRequestOperationToken:
+		var d AccountLoginProcessRequestToken
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	default:
+		return &RawAccountLoginProcessRequestData{Discriminator: raw.Operation, Raw: data}, nil
+	}
+}
+
+func (r RawAccountLoginProcessRequestData) MarshalJSON() ([]byte, error) {
+	if r.Raw != nil {
+		return r.Raw, nil
+	}
+	return json.Marshal(struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+	}{
+		Operation: r.Discriminator,
+	})
+}
+
+func (r AccountLoginProcessRequestClose) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessRequestClose
+	return json.Marshal(struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+		alias
+	}{
+		Operation: r.Operation(),
+		alias:     alias(r),
+	})
+}
+
+func (r AccountLoginProcessRequestComplete) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessRequestComplete
+	return json.Marshal(struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+		alias
+	}{
+		Operation: r.Operation(),
+		alias:     alias(r),
+	})
+}
+
+func (r AccountLoginProcessRequestContinue) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessRequestContinue
+	return json.Marshal(struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+		alias
+	}{
+		Operation: r.Operation(),
+		alias:     alias(r),
+	})
+}
+
+func (r AccountLoginProcessRequestDiscard) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessRequestDiscard
+	return json.Marshal(struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+		alias
+	}{
+		Operation: r.Operation(),
+		alias:     alias(r),
+	})
+}
+
+func (r AccountLoginProcessRequestOpen) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessRequestOpen
+	return json.Marshal(struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+		alias
+	}{
+		Operation: r.Operation(),
+		alias:     alias(r),
+	})
+}
+
+func (r AccountLoginProcessRequestOpenBrowser) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessRequestOpenBrowser
+	return json.Marshal(struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+		alias
+	}{
+		Operation: r.Operation(),
+		alias:     alias(r),
+	})
+}
+
+func (r AccountLoginProcessRequestPolicy) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessRequestPolicy
+	return json.Marshal(struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+		alias
+	}{
+		Operation: r.Operation(),
+		alias:     alias(r),
+	})
+}
+
+func (r AccountLoginProcessRequestStartDevice) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessRequestStartDevice
+	return json.Marshal(struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+		alias
+	}{
+		Operation: r.Operation(),
+		alias:     alias(r),
+	})
+}
+
+func (r AccountLoginProcessRequestStartWeb) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessRequestStartWeb
+	return json.Marshal(struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+		alias
+	}{
+		Operation: r.Operation(),
+		alias:     alias(r),
+	})
+}
+
+func (r AccountLoginProcessRequestToken) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessRequestToken
+	return json.Marshal(struct {
+		Operation AccountLoginProcessRequestOperation `json:"operation"`
+		alias
+	}{
+		Operation: r.Operation(),
+		alias:     alias(r),
+	})
+}
+
+func unmarshalAccountLoginProcessResult(data []byte) (AccountLoginProcessResult, error) {
+	if string(data) == "null" {
+		return nil, nil
+	}
+	type rawUnion struct {
+		Kind AccountLoginProcessResultKind `json:"kind"`
+	}
+	var raw rawUnion
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	switch raw.Kind {
+	case AccountLoginProcessResultKindDeviceCode:
+		var d AccountLoginProcessResultDeviceCode
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessResultKindDiscarded:
+		var d AccountLoginProcessResultDiscarded
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessResultKindDone:
+		var d AccountLoginProcessResultDone
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessResultKindOpened:
+		var d AccountLoginProcessResultOpened
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessResultKindPersistence:
+		var d AccountLoginProcessResultPersistence
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessResultKindPolicy:
+		var d AccountLoginProcessResultPolicy
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AccountLoginProcessResultKindWeb:
+		var d AccountLoginProcessResultWeb
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	default:
+		return &RawAccountLoginProcessResultData{Discriminator: raw.Kind, Raw: data}, nil
+	}
+}
+
+func (r RawAccountLoginProcessResultData) MarshalJSON() ([]byte, error) {
+	if r.Raw != nil {
+		return r.Raw, nil
+	}
+	return json.Marshal(struct {
+		Kind AccountLoginProcessResultKind `json:"kind"`
+	}{
+		Kind: r.Discriminator,
+	})
+}
+
+func (r AccountLoginProcessResultDeviceCode) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessResultDeviceCode
+	return json.Marshal(struct {
+		Kind AccountLoginProcessResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r AccountLoginProcessResultDiscarded) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessResultDiscarded
+	return json.Marshal(struct {
+		Kind AccountLoginProcessResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r AccountLoginProcessResultDone) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessResultDone
+	return json.Marshal(struct {
+		Kind AccountLoginProcessResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r AccountLoginProcessResultOpened) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessResultOpened
+	return json.Marshal(struct {
+		Kind AccountLoginProcessResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r AccountLoginProcessResultPersistence) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessResultPersistence
+	return json.Marshal(struct {
+		Kind AccountLoginProcessResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r AccountLoginProcessResultPolicy) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessResultPolicy
+	return json.Marshal(struct {
+		Kind AccountLoginProcessResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r AccountLoginProcessResultWeb) MarshalJSON() ([]byte, error) {
+	type alias AccountLoginProcessResultWeb
+	return json.Marshal(struct {
+		Kind AccountLoginProcessResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
 func (r *AccountLogoutRequest) UnmarshalJSON(data []byte) error {
 	type rawAccountLogoutRequest struct {
 		AuthInfo    json.RawMessage `json:"authInfo,omitempty"`
@@ -6527,6 +6874,69 @@ func (r *LocalModelMachineRow) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func unmarshalMCPAdditionalConfigSource(data []byte) (MCPAdditionalConfigSource, error) {
+	if string(data) == "null" {
+		return nil, nil
+	}
+	type rawUnion struct {
+		Kind MCPAdditionalConfigSourceKind `json:"kind"`
+	}
+	var raw rawUnion
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	switch raw.Kind {
+	case MCPAdditionalConfigSourceKindFile:
+		var d MCPAdditionalConfigSourceFile
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case MCPAdditionalConfigSourceKindJSON:
+		var d MCPAdditionalConfigSourceJSON
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	default:
+		return &RawMCPAdditionalConfigSourceData{Discriminator: raw.Kind, Raw: data}, nil
+	}
+}
+
+func (r RawMCPAdditionalConfigSourceData) MarshalJSON() ([]byte, error) {
+	if r.Raw != nil {
+		return r.Raw, nil
+	}
+	return json.Marshal(struct {
+		Kind MCPAdditionalConfigSourceKind `json:"kind"`
+	}{
+		Kind: r.Discriminator,
+	})
+}
+
+func (r MCPAdditionalConfigSourceFile) MarshalJSON() ([]byte, error) {
+	type alias MCPAdditionalConfigSourceFile
+	return json.Marshal(struct {
+		Kind MCPAdditionalConfigSourceKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r MCPAdditionalConfigSourceJSON) MarshalJSON() ([]byte, error) {
+	type alias MCPAdditionalConfigSourceJSON
+	return json.Marshal(struct {
+		Kind MCPAdditionalConfigSourceKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
 func matchesMCPSerializableServerConfigMCPServerConfigHTTP(data []byte) bool {
 	var rawType struct {
 		Type json.RawMessage `json:"type"`
@@ -6619,8 +7029,9 @@ func (r RawMCPSerializableServerConfigData) MarshalJSON() ([]byte, error) {
 
 func (r *MCPConfigAddRequest) UnmarshalJSON(data []byte) error {
 	type rawMCPConfigAddRequest struct {
-		Config json.RawMessage `json:"config"`
-		Name   string          `json:"name"`
+		Config    json.RawMessage `json:"config"`
+		ConfigDir *string         `json:"configDir,omitempty"`
+		Name      string          `json:"name"`
 	}
 	var raw rawMCPConfigAddRequest
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -6633,7 +7044,50 @@ func (r *MCPConfigAddRequest) UnmarshalJSON(data []byte) error {
 		}
 		r.Config = value
 	}
+	r.ConfigDir = raw.ConfigDir
 	r.Name = raw.Name
+	return nil
+}
+
+func (r *MCPConfigComposeAdditionalRequest) UnmarshalJSON(data []byte) error {
+	type rawMCPConfigComposeAdditionalRequest struct {
+		Sources []json.RawMessage `json:"sources"`
+	}
+	var raw rawMCPConfigComposeAdditionalRequest
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Sources != nil {
+		r.Sources = make([]MCPAdditionalConfigSource, 0, len(raw.Sources))
+		for _, rawItem := range raw.Sources {
+			value, err := unmarshalMCPAdditionalConfigSource(rawItem)
+			if err != nil {
+				return err
+			}
+			r.Sources = append(r.Sources, value)
+		}
+	}
+	return nil
+}
+
+func (r *MCPConfigComposeAdditionalResult) UnmarshalJSON(data []byte) error {
+	type rawMCPConfigComposeAdditionalResult struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	var raw rawMCPConfigComposeAdditionalResult
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.MCPServers != nil {
+		r.MCPServers = make(map[string]MCPSerializableServerConfig, len(raw.MCPServers))
+		for key, rawValue := range raw.MCPServers {
+			value, err := unmarshalMCPSerializableServerConfig(rawValue)
+			if err != nil {
+				return err
+			}
+			r.MCPServers[key] = value
+		}
+	}
 	return nil
 }
 
@@ -14946,6 +15400,11 @@ func (r UserSettingsWriteKeyRequest) MarshalJSON() ([]byte, error) {
 	return settingsMarshalJSON(wire(r))
 }
 
+func (r UserSettingsWriteKeysRequest) MarshalJSON() ([]byte, error) {
+	type wire UserSettingsWriteKeysRequest
+	return settingsMarshalJSON(wire(r))
+}
+
 func unmarshalWorkflowRunFailure(data []byte) (WorkflowRunFailure, error) {
 	if string(data) == "null" {
 		return nil, nil
@@ -15293,6 +15752,12 @@ func settingsGeneratedValue(value any) (any, bool) {
 		return wire(v), true
 	case *UserSettingsWriteKeyRequest:
 		type wire UserSettingsWriteKeyRequest
+		return (*wire)(v), true
+	case UserSettingsWriteKeysRequest:
+		type wire UserSettingsWriteKeysRequest
+		return wire(v), true
+	case *UserSettingsWriteKeysRequest:
+		type wire UserSettingsWriteKeysRequest
 		return (*wire)(v), true
 	}
 	return nil, false

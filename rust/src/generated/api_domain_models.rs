@@ -199,6 +199,42 @@ pub(crate) struct ModelClearStartupSeedResult {
 }
 crate::record_serde::wire_record!(ModelClearStartupSeedResult { cleared: "cleared" });
 
+/// Conversation and changes for a utility-model branch slug.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ModelGenerateBranchSlugRequest {
+    /// Summary of the changes the branch will contain.
+    pub change_summary: String,
+    /// Conversation messages in their original order.
+    pub conversation: Vec<String>,
+    /// Prefix for the established derived-name fallback.
+    pub fallback_prefix: String,
+    /// Original task, when available.
+    pub task_prompt: Option<String>,
+}
+crate::record_serde::wire_record!(ModelGenerateBranchSlugRequest { change_summary: "changeSummary", conversation: "conversation", fallback_prefix: "fallbackPrefix", task_prompt: "taskPrompt" if is_none });
+
+/// A generated or derived branch slug.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ModelGenerateBranchSlugResult {
+    /// Branch slug under the runtime's existing fallback policy.
+    pub slug: String,
+}
+crate::record_serde::wire_record!(ModelGenerateBranchSlugResult { slug: "slug" });
+
 /// Host presentation state the reasoning-summaries policy depends on.
 ///
 /// <div class="warning">
