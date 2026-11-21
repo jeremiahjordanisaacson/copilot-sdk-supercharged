@@ -2637,6 +2637,60 @@ crate::record_serde::wire_record!(GitWorktreeSummaryRequest {
     max_files: "maxFiles"
 });
 
+/// Attaches Mission Control polling and steering to this locally retained remote-session facade. Credentials remain with the runtime owner and resolve for each request.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RemoteAttachMissionControlRequest {
+    /// Registered credential owner, when the host uses one.
+    pub auth_context_id: Option<String>,
+    /// Identity whose credential and endpoints the runtime resolves.
+    pub auth_info: AuthIdentity,
+    /// Explicit Mission Control endpoint; omission derives it from the identity.
+    pub base_url: Option<String>,
+    /// Explicit frontend origin; omission derives it from the identity.
+    pub frontend_base_url: Option<String>,
+    /// Integration identifier sent to Mission Control.
+    pub integration_id: String,
+    /// Previously observed events, including events excluded from replay.
+    pub observed_events_json: String,
+    /// Poll interval in milliseconds; omission uses the runtime default.
+    pub poll_interval_ms: Option<i64>,
+    /// Public facade identifier used for the host's frontend URL registration.
+    pub public_session_id: String,
+    /// Whether this facade permits steering.
+    pub remote_steerable: bool,
+    /// Repository name associated with the remote task.
+    pub repository_name: Option<String>,
+    /// Repository owner associated with the remote task.
+    pub repository_owner: Option<String>,
+    /// Whether the attachment provides remote JSON-RPC commands.
+    pub rpc_enabled: bool,
+    /// Cloud task whose events and commands this session follows.
+    pub task_id: String,
+}
+crate::record_serde::wire_record!(RemoteAttachMissionControlRequest { auth_context_id: "authContextId" if is_none, auth_info: "authInfo", base_url: "baseUrl" if is_none, frontend_base_url: "frontendBaseUrl" if is_none, integration_id: "integrationId", observed_events_json: "observedEventsJson", poll_interval_ms: "pollIntervalMs" if is_none, public_session_id: "publicSessionId", remote_steerable: "remoteSteerable", repository_name: "repositoryName" if is_none, repository_owner: "repositoryOwner" if is_none, rpc_enabled: "rpcEnabled", task_id: "taskId" });
+
+/// Reports whether this call created the attachment. An existing attachment remains unchanged.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RemoteAttachMissionControlResult {
+    /// True when this call starts polling; false when the session already has an attachment.
+    pub started: bool,
+}
+crate::record_serde::wire_record!(RemoteAttachMissionControlResult { started: "started" });
+
 /// Remote control is connected to a local session.
 ///
 /// <div class="warning">

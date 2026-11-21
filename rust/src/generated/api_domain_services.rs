@@ -550,6 +550,59 @@ pub struct AgentReloadResult {
 }
 crate::record_serde::wire_record!(AgentReloadResult { agents: "agents" });
 
+/// An agent file to create without replacing an existing file.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AgentsCreateFileRequest {
+    /// The agent description.
+    pub description: String,
+    /// Enabled groups. Omit for all tools; an empty list enables no tools.
+    pub enabled_categories: Option<Vec<AgentToolCategoryId>>,
+    /// The agent instructions.
+    pub instructions: String,
+    /// The directory owner.
+    pub location: AgentFileLocation,
+    /// The display name used to derive the filename.
+    pub name: String,
+    /// The project root.
+    pub project_path: String,
+    /// The user configuration root.
+    pub user_config_dir: String,
+}
+crate::record_serde::wire_record!(AgentsCreateFileRequest { description: "description", enabled_categories: "enabledCategories" if is_none, instructions: "instructions", location: "location", name: "name", project_path: "projectPath", user_config_dir: "userConfigDir" });
+
+/// The new file exists.
+#[derive(Debug, Clone, Default)]
+pub struct AgentsCreateFileResultSuccess {
+    /// The created file path.
+    pub file_path: String,
+    /// Agent file creation outcome.
+    pub kind: AgentsCreateFileResultSuccessKind,
+}
+crate::record_serde::wire_record!(AgentsCreateFileResultSuccess {
+    file_path: "filePath",
+    kind: "kind"
+});
+
+/// Creation failed without replacing an existing agent.
+#[derive(Debug, Clone, Default)]
+pub struct AgentsCreateFileResultError {
+    /// Agent file creation outcome.
+    pub kind: AgentsCreateFileResultErrorKind,
+    /// The error message to show to the author.
+    pub message: String,
+}
+crate::record_serde::wire_record!(AgentsCreateFileResultError {
+    kind: "kind",
+    message: "message"
+});
+
 /// The models a custom agent asks for, and the models actually available.
 ///
 /// <div class="warning">
@@ -657,6 +710,42 @@ crate::record_serde::wire_record!(AgentSetPromptRequest {
     id: "id",
     prompt: "prompt"
 });
+
+/// Agent content to render without file access.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AgentsGenerateFileContentRequest {
+    /// The agent description.
+    pub description: String,
+    /// The agent instructions.
+    pub instructions: String,
+    /// The display name.
+    pub name: String,
+    /// Tool names to emit. Omit for all tools; an empty list enables no tools.
+    pub tools: Option<Vec<String>>,
+}
+crate::record_serde::wire_record!(AgentsGenerateFileContentRequest { description: "description", instructions: "instructions", name: "name", tools: "tools" if is_none });
+
+/// Rendered agent Markdown.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AgentsGenerateFileContentResult {
+    /// The complete agent file content.
+    pub content: String,
+}
+crate::record_serde::wire_record!(AgentsGenerateFileContentResult { content: "content" });
 
 /// The feature flags to evaluate shipped agents against.
 ///
@@ -818,6 +907,76 @@ pub struct AgentsGetDiscoveryPathsRequest {
     pub project_paths: Option<Vec<String>>,
 }
 crate::record_serde::wire_record!(AgentsGetDiscoveryPathsRequest { agent_directories: "agentDirectories" if is_none, exclude_host_agents: "excludeHostAgents" if is_none, project_paths: "projectPaths" if is_none });
+
+/// A selectable agent tool group.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AgentToolCategory {
+    /// The stable, closed category identifier.
+    pub id: AgentToolCategoryId,
+    /// The display label.
+    pub label: String,
+    /// Tool names in their canonical order.
+    pub tools: Vec<String>,
+}
+crate::record_serde::wire_record!(AgentToolCategory {
+    id: "id",
+    label: "label",
+    tools: "tools"
+});
+
+/// The canonical tool groups in display order.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AgentsListToolCategoriesResult {
+    /// The selectable tool groups.
+    pub categories: Vec<AgentToolCategory>,
+}
+crate::record_serde::wire_record!(AgentsListToolCategoriesResult {
+    categories: "categories"
+});
+
+/// A proposed agent name.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AgentsValidateNameRequest {
+    /// The name to check for a usable filename.
+    pub name: String,
+}
+crate::record_serde::wire_record!(AgentsValidateNameRequest { name: "name" });
+
+/// Whether the name produces a nonempty filename.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AgentsValidateNameResult {
+    /// True when the name contains an ASCII letter or digit.
+    pub valid: bool,
+}
+crate::record_serde::wire_record!(AgentsValidateNameResult { valid: "valid" });
 
 /// Authenticates pending protected resources with the connection's renewable credential source.
 ///
@@ -4326,12 +4485,14 @@ pub(crate) struct CloudTasksDeleteParams {
     pub base_url: Option<String>,
     /// Name of the embedding client, reported to Mission Control so the service can attribute the request.
     pub integration_id: String,
+    /// When true, stop without an HTTP request if the identity has no nonempty GitHub credential. Omission preserves the existing request behavior, including the Mission Control access-token override.
+    pub require_credential: Option<bool>,
     /// Identifier of the cloud task to delete.
     pub task_id: String,
 }
-crate::record_serde::wire_record!(CloudTasksDeleteParams { auth_context_id: "authContextId" if is_none, auth_info: "authInfo", base_url: "baseUrl" if is_none, integration_id: "integrationId", task_id: "taskId" });
+crate::record_serde::wire_record!(CloudTasksDeleteParams { auth_context_id: "authContextId" if is_none, auth_info: "authInfo", base_url: "baseUrl" if is_none, integration_id: "integrationId", require_credential: "requireCredential" if is_none, task_id: "taskId" });
 
-/// The HTTP outcome of deleting a cloud task. The deletion returns no body, so a successful call carries nothing beyond `ok`; a failed one is described by the remaining fields rather than raised as an error, so a caller can surface the service's own explanation.
+/// The HTTP outcome of deleting a cloud task. When `requireCredential` is true, `credentialResolved` distinguishes missing credentials from an HTTP outcome. HTTP failures retain the service's explanation instead of being raised as errors.
 ///
 /// <div class="warning">
 ///
@@ -4341,6 +4502,8 @@ crate::record_serde::wire_record!(CloudTasksDeleteParams { auth_context_id: "aut
 /// </div>
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CloudTasksDeleteResult {
+    /// Present when requireCredential is true. False means no credential was resolved and no HTTP request was made.
+    pub credential_resolved: Option<bool>,
     /// Human-readable failure explanation, when the call failed.
     pub error_message: Option<String>,
     /// The error body the service returned, preserved verbatim so a host can surface the service's own message.
@@ -4350,7 +4513,7 @@ pub(crate) struct CloudTasksDeleteResult {
     /// HTTP status code of the response, when one was received.
     pub status_code: Option<i32>,
 }
-crate::record_serde::wire_record!(CloudTasksDeleteResult { error_message: "errorMessage" if is_none, error_payload_json: "errorPayloadJson" if is_none, ok: "ok", status_code: "statusCode" if is_none });
+crate::record_serde::wire_record!(CloudTasksDeleteResult { credential_resolved: "credentialResolved" if is_none, error_message: "errorMessage" if is_none, error_payload_json: "errorPayloadJson" if is_none, ok: "ok", status_code: "statusCode" if is_none });
 
 /// Identifies one cloud coding-agent task and the credential to read it under.
 ///
@@ -4447,6 +4610,30 @@ pub(crate) struct CloudTasksGetSessionLogsResult {
     pub status_code: Option<i32>,
 }
 crate::record_serde::wire_record!(CloudTasksGetSessionLogsResult { debug_messages: "debugMessages" if is_none, error_kind: "errorKind" if is_none, error_message: "errorMessage" if is_none, error_payload_json: "errorPayloadJson" if is_none, error_string: "errorString" if is_none, logs_json: "logsJson" if is_none, ok: "ok", resolved: "resolved", status_code: "statusCode" if is_none });
+
+/// Identifies a Mission Control session and the identity that reads its connection target.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CloudTasksGetSessionParams {
+    /// Registered credential owner, when the host uses one.
+    pub auth_context_id: Option<String>,
+    /// Identity whose credential and Copilot endpoint the runtime resolves for this request.
+    pub auth_info: AuthIdentity,
+    /// Live session owned by this SDK server whose retained credential authenticates the lookup.
+    /// The identity must match that session. Cannot be combined with authContextId.
+    pub credential_session_id: Option<String>,
+    /// Integration identifier sent to Mission Control.
+    pub integration_id: String,
+    /// Remote Mission Control session identifier.
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(CloudTasksGetSessionParams { auth_context_id: "authContextId" if is_none, auth_info: "authInfo", credential_session_id: "credentialSessionId" if is_none, integration_id: "integrationId", session_id: "sessionId" });
 
 /// Identifies one cloud coding-agent task whose recorded session is to be replayed, and the credential to read it under.
 ///
@@ -12859,6 +13046,8 @@ crate::record_serde::wire_record!(SendRequestResponseFormat {
 /// </div>
 #[derive(Debug, Clone, Default)]
 pub struct SendRequest {
+    /// Set by the host when an agent wrote this message and the host delivers it in the user role, such as the kickoff of a session another agent created. Copied to the resulting user.message event. Only automatic permission decisions read it: they treat the text as another agent's message, never as the user's own words or authorization. Delivery, history and the model's view of the message are unchanged. It can only withhold human authority, never add it. Remote sessions, hosted by Mission Control or over AHP, do not carry it: their transports deliver only the prompt, so there the message is judged as it would be without the mark.
+    pub agent_authored: Option<bool>,
     /// The UI mode the agent was in when this message was sent. Defaults to the session's current mode.
     pub agent_mode: Option<SendAgentMode>,
     /// Optional attachments (files, directories, selections, blobs, GitHub references) to include with the message
@@ -12891,7 +13080,7 @@ pub struct SendRequest {
     /// If true, await completion of the agentic loop for this message before returning. Defaults to false (fire-and-forget). When true, the result still contains the same `messageId`; the caller can rely on the agent having processed the message before the call resolves. Transport-dependent tail semantics: on a LOCAL (in-process) session the wait additionally blocks until the completed turn's event tail has been dispatched to this session's in-process subscribers, so a subsequent read of subscriber state already reflects the turn; on a REMOTE session the wait resolves once the loop completes and mirrored delivery follows over the wire. Callers that need the stronger local guarantee on remote sessions should await the event stream explicitly.
     pub wait: Option<bool>,
 }
-crate::record_serde::wire_record!(SendRequest { agent_mode: "agentMode" if is_none, attachments: "attachments" if is_none, billable: "billable" if is_none, client_turn_id: "clientTurnId" if is_none, display_prompt: "displayPrompt" if is_none, mode: "mode" if is_none, prepend: "prepend" if is_none, prompt: "prompt", request_headers: "requestHeaders" if is_none, required_tool: "requiredTool" if is_none, response_format: "responseFormat" if is_none, source: "source" if is_none, traceparent: "traceparent" if is_none, tracestate: "tracestate" if is_none, wait: "wait" if is_none });
+crate::record_serde::wire_record!(SendRequest { agent_authored: "agentAuthored" if is_none, agent_mode: "agentMode" if is_none, attachments: "attachments" if is_none, billable: "billable" if is_none, client_turn_id: "clientTurnId" if is_none, display_prompt: "displayPrompt" if is_none, mode: "mode" if is_none, prepend: "prepend" if is_none, prompt: "prompt", request_headers: "requestHeaders" if is_none, required_tool: "requiredTool" if is_none, response_format: "responseFormat" if is_none, source: "source" if is_none, traceparent: "traceparent" if is_none, tracestate: "tracestate" if is_none, wait: "wait" if is_none });
 
 /// Result of sending a user message
 ///
@@ -15119,6 +15308,31 @@ pub struct LspListResult {
 }
 crate::record_serde::wire_record!(LspListResult { configs: "configs", plugin_servers: "pluginServers", plugin_warnings: "pluginWarnings", project_config_path: "projectConfigPath" if is_none, project_inspection_error: "projectInspectionError" if is_none, project_problems: "projectProblems", project_servers: "projectServers", user_config_error: "userConfigError" if is_none, user_config_path: "userConfigPath", user_disabled_servers: "userDisabledServers", user_servers: "userServers", warnings: "warnings" });
 
+/// The HTTP outcome of reading a cloud task, rather than the task alone. A 404 arrives here as a non-ok result with `statusCode` 404, not as an error, so a caller can tell an absent task apart from a failed call.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CloudTasksGetSessionResult {
+    /// Categorised failure kind, when the call failed.
+    pub error_kind: Option<String>,
+    /// Human-readable failure explanation, when the call failed.
+    pub error_message: Option<String>,
+    /// The error body the API returned, preserved verbatim so a host can surface the service's own message.
+    pub error_payload_json: Option<String>,
+    /// Whether the API returned the task successfully.
+    pub ok: bool,
+    /// The task record, as returned by the API. Present only when `ok` is true; a caller parses it itself because the runtime does not narrow the API's own shape.
+    pub payload_json: Option<String>,
+    /// HTTP status code of the response, when one was received.
+    pub status_code: Option<i32>,
+}
+crate::record_serde::wire_record!(CloudTasksGetSessionResult { error_kind: "errorKind" if is_none, error_message: "errorMessage" if is_none, error_payload_json: "errorPayloadJson" if is_none, ok: "ok", payload_json: "payloadJson" if is_none, status_code: "statusCode" if is_none });
+
 /// The sharing status a cloud task carries after the call. Read `credentialResolved` first: when it is false no request was attempted at all, which is a different outcome from a request the service declined.
 ///
 /// <div class="warning">
@@ -15334,6 +15548,43 @@ impl<'de> Deserialize<'de> for AgentDiscoveryPathScope {
         Ok(match index {
             0 => Self::User,
             1 => Self::Project,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// The owner directory for an authored agent.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum AgentFileLocation {
+    /// The project's .github/agents directory.
+    #[serde(rename = "project")]
+    Project,
+    /// The user's configuration agents directory.
+    #[serde(rename = "user")]
+    User,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for AgentFileLocation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AgentFileLocation",
+            &["project", "user", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::Project,
+            1 => Self::User,
             _ => Self::Unknown,
         })
     }
@@ -15800,6 +16051,125 @@ pub enum AgentRegistrySpawnResult {
     SpawnError(AgentRegistrySpawnError),
     RegistryTimeout(AgentRegistrySpawnRegistryTimeout),
     ValidationError(AgentRegistrySpawnValidationError),
+}
+
+/// A tool group that an agent file can enable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum AgentToolCategoryId {
+    /// Shell execution.
+    #[serde(rename = "shell")]
+    Shell,
+    /// File reads and searches.
+    #[serde(rename = "read")]
+    Read,
+    /// File edits.
+    #[serde(rename = "edit")]
+    Edit,
+    /// Subagent tasks.
+    #[serde(rename = "subagents")]
+    Subagents,
+    /// Skill execution.
+    #[serde(rename = "skills")]
+    Skills,
+    /// Web searches and requests.
+    #[serde(rename = "web")]
+    Web,
+    /// Questions for the user.
+    #[serde(rename = "ask-user")]
+    AskUser,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for AgentToolCategoryId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AgentToolCategoryId",
+            &[
+                "shell",
+                "read",
+                "edit",
+                "subagents",
+                "skills",
+                "web",
+                "ask-user",
+                "Unknown",
+            ],
+            Some(7),
+        )?;
+        Ok(match index {
+            0 => Self::Shell,
+            1 => Self::Read,
+            2 => Self::Edit,
+            3 => Self::Subagents,
+            4 => Self::Skills,
+            5 => Self::Web,
+            6 => Self::AskUser,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// Agent file creation outcome.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum AgentsCreateFileResultSuccessKind {
+    #[serde(rename = "success")]
+    #[default]
+    Success,
+}
+impl<'de> Deserialize<'de> for AgentsCreateFileResultSuccessKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AgentsCreateFileResultSuccessKind",
+            &["success"],
+            None,
+        )?;
+        Ok(Self::Success)
+    }
+}
+
+/// Agent file creation outcome.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum AgentsCreateFileResultErrorKind {
+    #[serde(rename = "error")]
+    #[default]
+    Error,
+}
+impl<'de> Deserialize<'de> for AgentsCreateFileResultErrorKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AgentsCreateFileResultErrorKind",
+            &["error"],
+            None,
+        )?;
+        Ok(Self::Error)
+    }
+}
+
+/// The outcome of agent file creation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AgentsCreateFileResult {
+    Success(AgentsCreateFileResultSuccess),
+    Error(AgentsCreateFileResultError),
 }
 
 /// Outgoing AHP transport discriminator.

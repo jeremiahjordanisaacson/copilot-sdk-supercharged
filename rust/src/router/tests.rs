@@ -772,10 +772,243 @@ fn held_events_stay_within_the_byte_budget() {
     }
 }
 
-/// Events trailing a registration that ended are dropped, not held for a
-/// later registration of the same ID.
+/// After a session detaches, its later events are held for the next
+/// registration of the same ID, since a host can rejoin the session.
 #[test]
-fn events_after_unregistration_are_not_replayed_to_a_new_registration() {
+fn events_after_detaching_reach_a_later_registration() {
+    let router = SessionRouter::new();
+    let sink = router.event_sink();
+    let first = router.register(&session_id());
+    assert!(router.unregister_detached(&session_id(), first.token));
+    sink.route(session_event(session_id().as_str(), "after-rejoin"));
+
+    let mut second = router.register(&session_id());
+    sink.route(session_event(session_id().as_str(), "live"));
+    assert_eq!(
+        drain(&mut second.channels.notifications),
+        ["after-rejoin", "live"]
+    );
+}
+
+/// The dispatcher ends a detached registration where its reply was read.
+/// Events read before that reach it until it is unregistered and are dropped
+/// after, even when the ID registers again first; the runtime cancelled their
+/// requests. Events read after the reply are held for the next registration,
+/// however late the detached session unregisters.
+#[test]
+fn a_detach_divides_events_where_its_reply_was_read() {
+    let router = SessionRouter::new();
+    let (dispatcher, mut inputs) = mpsc::unbounded_channel();
+    router.connect_dispatcher(&dispatcher);
+    let sink = router.event_sink();
+    let mut next_input = || inputs.try_recv().expect("nothing queued");
+    let claim = |input| match input {
+        DispatcherInput::Claim(id, token) => (id, token),
+        _ => panic!("expected a claim"),
+    };
+
+    // The caller unregisters before the dispatcher reaches the reply.
+    let mut first = router.register(&session_id());
+    let (id, token) = claim(next_input());
+    sink.claim(&id, token);
+    sink.route(session_event(session_id().as_str(), "before-reply"));
+    router.detach_replied(Some(first.token))(&session_id());
+    let DispatcherInput::Detached(detached_id, detached_token) = next_input() else {
+        panic!("detach reply queued no mark");
+    };
+    assert!(router.unregister_detached(&session_id(), first.token));
+    let mut second = router.register(&session_id());
+    let (id, token) = claim(next_input());
+    sink.route(typed_event(
+        session_id().as_str(),
+        "cancelled",
+        "external_tool.requested",
+        "t1",
+    ));
+    sink.detached(&detached_id, detached_token);
+    sink.route(session_event(session_id().as_str(), "after-reply"));
+    sink.claim(&id, token);
+    assert_eq!(drain(&mut first.channels.notifications), ["before-reply"]);
+    assert_eq!(drain(&mut second.channels.notifications), ["after-reply"]);
+
+    // The caller unregisters after the dispatcher passed the reply, and after
+    // a request the rejoined session must answer.
+    router.detach_replied(Some(second.token))(&session_id());
+    let DispatcherInput::Detached(detached_id, detached_token) = next_input() else {
+        panic!("detach reply queued no mark");
+    };
+    sink.detached(&detached_id, detached_token);
+    sink.route(typed_event(
+        session_id().as_str(),
+        "after-rejoin",
+        "external_tool.requested",
+        "t2",
+    ));
+    assert!(!router.unregister_detached(&session_id(), second.token));
+    let mut third = router.register(&session_id());
+    let (id, token) = claim(next_input());
+    sink.claim(&id, token);
+    assert!(drain(&mut second.channels.notifications).is_empty());
+    assert_eq!(drain(&mut third.channels.notifications), ["after-rejoin"]);
+}
+
+/// A detach ends only its own registration. A resume that registered the ID
+/// before the detach reply was read keeps its registration and its events,
+/// including those read before the reply.
+#[test]
+fn a_detach_never_ends_a_concurrent_registration() {
+    let router = SessionRouter::new();
+    let (dispatcher, mut inputs) = mpsc::unbounded_channel();
+    router.connect_dispatcher(&dispatcher);
+    let sink = router.event_sink();
+    let detaching = router.register(&session_id());
+    let Ok(DispatcherInput::Claim(id, token)) = inputs.try_recv() else {
+        panic!("registration queued no claim");
+    };
+    sink.claim(&id, token);
+    let mut resumed = router.register(&session_id());
+    let Ok(DispatcherInput::Claim(id, token)) = inputs.try_recv() else {
+        panic!("registration queued no claim");
+    };
+
+    router.detach_replied(Some(detaching.token))(&session_id());
+    let Ok(DispatcherInput::Detached(detached_id, detached_token)) = inputs.try_recv() else {
+        panic!("detach reply queued no mark");
+    };
+    sink.route(session_event(session_id().as_str(), "before-reply"));
+    sink.claim(&id, token);
+    sink.detached(&detached_id, detached_token);
+    assert!(!router.unregister_detached(&session_id(), detaching.token));
+    sink.route(session_event(session_id().as_str(), "live"));
+
+    assert!(router.is_registered_owner(&session_id(), resumed.token));
+    assert_eq!(
+        drain(&mut resumed.channels.notifications),
+        ["before-reply", "live"]
+    );
+}
+
+/// Events already held for an ID when its detach reply is read were read
+/// before it: they are dropped when the dispatcher reaches the mark, and a
+/// registration made after the reply never takes them.
+#[test]
+fn a_detach_drops_events_already_held_before_its_reply() {
+    let router = SessionRouter::new();
+    let (dispatcher, mut inputs) = mpsc::unbounded_channel();
+    router.connect_dispatcher(&dispatcher);
+    let sink = router.event_sink();
+    sink.route(typed_event(
+        session_id().as_str(),
+        "held",
+        "permission.requested",
+        "r1",
+    ));
+
+    router.detach_replied(None)(&session_id());
+    let Ok(DispatcherInput::Detached(detached_id, detached_token)) = inputs.try_recv() else {
+        panic!("detach reply queued no mark");
+    };
+    let mut later = router.register(&session_id());
+    let Ok(DispatcherInput::Claim(id, token)) = inputs.try_recv() else {
+        panic!("registration queued no claim");
+    };
+    sink.detached(&detached_id, detached_token);
+    sink.route(session_event(session_id().as_str(), "after-reply"));
+    sink.claim(&id, token);
+    assert_eq!(drain(&mut later.channels.notifications), ["after-reply"]);
+}
+
+#[test]
+fn a_deleted_lifecycle_supersedes_a_queued_delete_reply() {
+    for register_before_dispatch in [false, true] {
+        let router = SessionRouter::new();
+        let (dispatcher, mut inputs) = mpsc::unbounded_channel();
+        router.connect_dispatcher(&dispatcher);
+        let sink = router.event_sink();
+        sink.route(session_event(session_id().as_str(), "old-conversation"));
+
+        let deleted = router.delete_replied(&session_id());
+        // The reader gets ahead while the dispatcher is held back.
+        for (method, params) in [
+            (
+                "session.lifecycle",
+                json!({"type": "session.deleted", "sessionId": session_id()}),
+            ),
+            (
+                "session.event",
+                session_event(session_id().as_str(), "replacement-before-reply"),
+            ),
+        ] {
+            assert!(
+                dispatcher
+                    .send(DispatcherInput::Notification(
+                        crate::jsonrpc::JsonRpcNotification {
+                            jsonrpc: "2.0".into(),
+                            method: method.into(),
+                            params: Some(params),
+                        },
+                    ))
+                    .is_ok()
+            );
+        }
+        deleted(&session_id());
+        drop(deleted);
+        let mut later = register_before_dispatch.then(|| router.register(&session_id()));
+        while let Ok(input) = inputs.try_recv() {
+            match input {
+                DispatcherInput::Notification(notification)
+                    if notification.method == "session.lifecycle" =>
+                {
+                    sink.deleted(&session_id());
+                }
+                DispatcherInput::Notification(notification) => {
+                    assert_eq!(notification.method, "session.event");
+                    sink.route(notification.params.unwrap());
+                }
+                DispatcherInput::Detached(id, token) => sink.detached(&id, token),
+                DispatcherInput::Claim(id, token) => sink.claim(&id, token),
+            }
+        }
+        if later.is_none() {
+            later = Some(router.register(&session_id()));
+            let Ok(DispatcherInput::Claim(id, token)) = inputs.try_recv() else {
+                panic!("registration queued no claim");
+            };
+            sink.claim(&id, token);
+        }
+        sink.route(session_event(
+            session_id().as_str(),
+            "replacement-after-reply",
+        ));
+        assert_eq!(
+            drain(&mut later.unwrap().channels.notifications),
+            ["replacement-before-reply", "replacement-after-reply"],
+            "registered before dispatch: {register_before_dispatch}"
+        );
+    }
+}
+
+#[test]
+fn a_detach_releases_the_held_byte_budget() {
+    let router = SessionRouter::new();
+    let sink = router.event_sink();
+    sink.route(sized_event("detaching", "obsolete", 15 * 1024 * 1024));
+    sink.route(session_event("other", "kept"));
+
+    router.detach_replied(None)(&SessionId::new("detaching"));
+    sink.route(sized_event("rejoined", "new", 2 * 1024 * 1024));
+
+    let mut other = router.register(&SessionId::new("other"));
+    let mut rejoined = router.register(&SessionId::new("rejoined"));
+    assert_eq!(drain(&mut other.channels.notifications), ["kept"]);
+    assert_eq!(drain(&mut rejoined.channels.notifications), ["new"]);
+}
+
+/// A registration that ended without detaching leaves the runtime streaming
+/// its events; they are dropped so they cannot crowd out other held events,
+/// and a later registration of the ID receives live events again.
+#[test]
+fn events_after_ending_without_detaching_are_dropped() {
     let router = SessionRouter::new();
     let sink = router.event_sink();
     let first = router.register(&session_id());

@@ -164,6 +164,10 @@ pub const SESSION_METHOD_PATHS: &[(&str, &[&str])] = &[
         &["remote", "sendWithAdmission"],
     ),
     ("session.remote.publishState", &["remote", "publishState"]),
+    (
+        "session.remote.attachMissionControl",
+        &["remote", "attachMissionControl"],
+    ),
     ("session.remote.enable", &["remote", "enable"]),
     ("session.remote.disable", &["remote", "disable"]),
     (
@@ -1945,6 +1949,115 @@ pub struct ClientRpcAgents<'a> {
 }
 
 impl<'a> ClientRpcAgents<'a> {
+    /// Checks whether an agent name produces a usable filename, without filesystem access.
+    ///
+    /// Wire method: `agents.validateName`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A proposed agent name.
+    ///
+    /// # Returns
+    ///
+    /// Whether the name produces a nonempty filename.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn validate_name(
+        &self,
+        params: AgentsValidateNameRequest,
+    ) -> Result<AgentsValidateNameResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AGENTS_VALIDATENAME, Some(wire_params))
+            .await
+    }
+
+    /// Lists the closed agent tool groups in canonical display order for agent-file authoring.
+    ///
+    /// Wire method: `agents.listToolCategories`.
+    ///
+    /// # Returns
+    ///
+    /// The canonical tool groups in display order.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn list_tool_categories(&self) -> Result<AgentsListToolCategoriesResult, Error> {
+        let wire_params = serde_json::json!({});
+        self.client
+            .call_typed(rpc_methods::AGENTS_LISTTOOLCATEGORIES, Some(wire_params))
+            .await
+    }
+
+    /// Renders agent Markdown without writing a file. Omitted tools allow all tools; an empty list allows none.
+    ///
+    /// Wire method: `agents.generateFileContent`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Agent content to render without file access.
+    ///
+    /// # Returns
+    ///
+    /// Rendered agent Markdown.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn generate_file_content(
+        &self,
+        params: AgentsGenerateFileContentRequest,
+    ) -> Result<AgentsGenerateFileContentResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AGENTS_GENERATEFILECONTENT, Some(wire_params))
+            .await
+    }
+
+    /// Creates an agent file in the project or user agent directory without replacing an existing file. Returns validation and filesystem errors as author-visible outcomes.
+    ///
+    /// Wire method: `agents.createFile`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - An agent file to create without replacing an existing file.
+    ///
+    /// # Returns
+    ///
+    /// The outcome of agent file creation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn create_file(
+        &self,
+        params: AgentsCreateFileRequest,
+    ) -> Result<AgentsCreateFileResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::AGENTS_CREATEFILE, Some(wire_params))
+            .await
+    }
+
     /// Discovers custom agents across user, project, plugin, and remote sources.
     ///
     /// Wire method: `agents.discover`.
@@ -3343,7 +3456,7 @@ impl<'a> ClientRpcCloudTasks<'a> {
             .await
     }
 
-    /// Deletes one cloud coding-agent task, the remote run `cloudTasks.create` started. The deletion is a soft one: the service withdraws the task from its listings rather than destroying the record, so a host removing a run from its own UI is the intended caller. Answered above any session for the same reason as `cloudTasks.get` -- the task is remote and has no local counterpart. Hosts other than the CLI want this: a GitHub App or an SDK consumer that manages cloud agent runs withdraws the same record under the same credential, and resolving it here keeps one credential-resolution and endpoint path. The runtime resolves each token from `authInfo` or `authContextId`. A host may preserve an explicit `baseUrl`; omission derives the endpoint from `authInfo`. The result is the HTTP outcome rather than a bare success flag: the call returns no body, so `ok` alone describes a success, while a failure is reported through `statusCode`, `errorMessage` and `errorPayloadJson` instead of being raised as an error.
+    /// Deletes one cloud coding-agent task, the remote run `cloudTasks.create` started. The deletion is a soft one: the service withdraws the task from its listings rather than destroying the record, so a host removing a run from its own UI is the intended caller. Answered above any session for the same reason as `cloudTasks.get` -- the task is remote and has no local counterpart. Hosts other than the CLI want this: a GitHub App or an SDK consumer that manages cloud agent runs withdraws the same record under the same credential, and resolving it here keeps one credential-resolution and endpoint path. The runtime resolves each token from `authInfo` or `authContextId`. A host may preserve an explicit `baseUrl`; omission derives the endpoint from `authInfo`. Set `requireCredential` to stop before HTTP when no nonempty GitHub credential resolves; `credentialResolved` then distinguishes that case from an HTTP failure. Omission preserves the existing request and result behavior. HTTP failures retain `statusCode`, `errorMessage` and `errorPayloadJson` instead of being raised as errors.
     ///
     /// Wire method: `cloudTasks.delete`.
     ///
@@ -3353,7 +3466,7 @@ impl<'a> ClientRpcCloudTasks<'a> {
     ///
     /// # Returns
     ///
-    /// The HTTP outcome of deleting a cloud task. The deletion returns no body, so a successful call carries nothing beyond `ok`; a failed one is described by the remaining fields rather than raised as an error, so a caller can surface the service's own explanation.
+    /// The HTTP outcome of deleting a cloud task. When `requireCredential` is true, `credentialResolved` distinguishes missing credentials from an HTTP outcome. HTTP failures retain the service's explanation instead of being raised as errors.
     ///
     /// <div class="warning">
     ///
@@ -3398,6 +3511,35 @@ impl<'a> ClientRpcCloudTasks<'a> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::CLOUDTASKS_GET, Some(wire_params))
+            .await
+    }
+
+    /// Reads a Mission Control session to resolve its environment and connection target. SDK hosts and ACP clients use this before attaching to a cloud session. The runtime resolves the credential and endpoint for each request; HTTP failures remain structured results.
+    ///
+    /// Wire method: `cloudTasks.getSession`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies a Mission Control session and the identity that reads its connection target.
+    ///
+    /// # Returns
+    ///
+    /// The HTTP outcome of reading a cloud task, rather than the task alone. A 404 arrives here as a non-ok result with `statusCode` 404, not as an error, so a caller can tell an absent task apart from a failed call.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn get_session(
+        &self,
+        params: CloudTasksGetSessionParams,
+    ) -> Result<CloudTasksGetResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::CLOUDTASKS_GETSESSION, Some(wire_params))
             .await
     }
 
@@ -23713,6 +23855,40 @@ impl<'a> SessionRpcRemote<'a> {
             .call_typed(rpc_methods::SESSION_REMOTE_PUBLISHSTATE, Some(wire_params))
             .await?;
         Ok(())
+    }
+
+    /// Attaches runtime-owned Mission Control polling and steering to a retained session facade. SDK hosts and ACP clients can follow a cloud task without receiving a bearer token.
+    ///
+    /// Wire method: `session.remote.attachMissionControl`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Attaches Mission Control polling and steering to this locally retained remote-session facade. Credentials remain with the runtime owner and resolve for each request.
+    ///
+    /// # Returns
+    ///
+    /// Reports whether this call created the attachment. An existing attachment remains unchanged.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn attach_mission_control(
+        &self,
+        params: RemoteAttachMissionControlRequest,
+    ) -> Result<RemoteAttachMissionControlResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_REMOTE_ATTACHMISSIONCONTROL,
+                Some(wire_params),
+            )
+            .await
     }
 
     /// Enables remote session export or steering.

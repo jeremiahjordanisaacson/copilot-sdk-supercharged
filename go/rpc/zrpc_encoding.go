@@ -357,6 +357,69 @@ func (r AgentRegistrySpawnValidationError) MarshalJSON() ([]byte, error) {
 	})
 }
 
+func unmarshalAgentsCreateFileResult(data []byte) (AgentsCreateFileResult, error) {
+	if string(data) == "null" {
+		return nil, nil
+	}
+	type rawUnion struct {
+		Kind AgentsCreateFileResultKind `json:"kind"`
+	}
+	var raw rawUnion
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	switch raw.Kind {
+	case AgentsCreateFileResultKindError:
+		var d AgentsCreateFileResultError
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case AgentsCreateFileResultKindSuccess:
+		var d AgentsCreateFileResultSuccess
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	default:
+		return &RawAgentsCreateFileResultData{Discriminator: raw.Kind, Raw: data}, nil
+	}
+}
+
+func (r RawAgentsCreateFileResultData) MarshalJSON() ([]byte, error) {
+	if r.Raw != nil {
+		return r.Raw, nil
+	}
+	return json.Marshal(struct {
+		Kind AgentsCreateFileResultKind `json:"kind"`
+	}{
+		Kind: r.Discriminator,
+	})
+}
+
+func (r AgentsCreateFileResultError) MarshalJSON() ([]byte, error) {
+	type alias AgentsCreateFileResultError
+	return json.Marshal(struct {
+		Kind AgentsCreateFileResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r AgentsCreateFileResultSuccess) MarshalJSON() ([]byte, error) {
+	type alias AgentsCreateFileResultSuccess
+	return json.Marshal(struct {
+		Kind AgentsCreateFileResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
 func unmarshalAhpConnectionTransport(data []byte) (AhpConnectionTransport, error) {
 	if string(data) == "null" {
 		return nil, nil
@@ -11524,6 +11587,7 @@ func (r *SendMessageItem) UnmarshalJSON(data []byte) error {
 
 func (r *SendRequest) UnmarshalJSON(data []byte) error {
 	type rawSendRequest struct {
+		AgentAuthored  *bool             `json:"agentAuthored,omitempty"`
 		AgentMode      *SendAgentMode    `json:"agentMode,omitempty"`
 		Attachments    []json.RawMessage `json:"attachments,omitzero"`
 		Billable       *bool             `json:"billable,omitempty"`
@@ -11544,6 +11608,7 @@ func (r *SendRequest) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	r.AgentAuthored = raw.AgentAuthored
 	r.AgentMode = raw.AgentMode
 	if raw.Attachments != nil {
 		r.Attachments = make([]Attachment, 0, len(raw.Attachments))

@@ -53,6 +53,17 @@ impl SendRequest {
         self.source = Some(source.to_string());
         self
     }
+
+    /// Mark a message an agent wrote that the host delivers in the user role,
+    /// such as the kickoff of a session another agent created.
+    ///
+    /// Only automatic permission decisions read the mark: they treat the text
+    /// as another agent's message, never as the user's own words. Passing
+    /// `false` omits the field, as when this is not called.
+    pub fn with_agent_authored(mut self, agent_authored: bool) -> Self {
+        self.agent_authored = agent_authored.then_some(true);
+        self
+    }
 }
 
 #[cfg(test)]

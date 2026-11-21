@@ -157,6 +157,18 @@ export type AgentDiscoveryPathScope =
   /** A project's repository agent directory. */
   | "project";
 /**
+ * The owner directory for an authored agent.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentFileLocation".
+ */
+/** @experimental */
+export type AgentFileLocation =
+  /** The project's .github/agents directory. */
+  | "project"
+  /** The user's configuration agents directory. */
+  | "user";
+/**
  * Where the agent definition was loaded from
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -331,6 +343,56 @@ export type AgentRegistrySpawnValidationErrorField =
   | "model"
   /** The permissionMode parameter */
   | "permissionMode";
+/**
+ * A tool group that an agent file can enable.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentToolCategoryId".
+ */
+/** @experimental */
+export type AgentToolCategoryId =
+  /** Shell execution. */
+  | "shell"
+  /** File reads and searches. */
+  | "read"
+  /** File edits. */
+  | "edit"
+  /** Subagent tasks. */
+  | "subagents"
+  /** Skill execution. */
+  | "skills"
+  /** Web searches and requests. */
+  | "web"
+  /** Questions for the user. */
+  | "ask-user";
+/**
+ * The outcome of agent file creation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentsCreateFileResult".
+ */
+/** @experimental */
+export type AgentsCreateFileResult =
+  | {
+      /**
+       * The created file path.
+       */
+      filePath: string;
+      /**
+       * Agent file creation outcome.
+       */
+      kind: "success";
+    }
+  | {
+      /**
+       * The error message to show to the author.
+       */
+      message: string;
+      /**
+       * Agent file creation outcome.
+       */
+      kind: "error";
+    };
 /**
  * Transport selected for an outgoing connection.
  *
@@ -11539,6 +11601,43 @@ export interface AgentReloadResult {
   agents: AgentInfo[];
 }
 /**
+ * An agent file to create without replacing an existing file.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentsCreateFileRequest".
+ */
+/** @experimental */
+export interface AgentsCreateFileRequest {
+  /**
+   * The display name used to derive the filename.
+   */
+  name: string;
+  /**
+   * The agent description.
+   */
+  description: string;
+  /**
+   * The agent instructions.
+   */
+  instructions: string;
+  /**
+   * Enabled groups. Omit for all tools; an empty list enables no tools.
+   */
+  enabledCategories?: AgentToolCategoryId[];
+  /**
+   * The directory owner.
+   */
+  location: AgentFileLocation;
+  /**
+   * The project root.
+   */
+  projectPath: string;
+  /**
+   * The user configuration root.
+   */
+  userConfigDir: string;
+}
+/**
  * The models a custom agent asks for, and the models actually available.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -11641,6 +11740,44 @@ export interface AgentSetPromptRequest {
    * Replacement authored prompt. Empty text is valid.
    */
   prompt: string;
+}
+/**
+ * Agent content to render without file access.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentsGenerateFileContentRequest".
+ */
+/** @experimental */
+export interface AgentsGenerateFileContentRequest {
+  /**
+   * The display name.
+   */
+  name: string;
+  /**
+   * The agent description.
+   */
+  description: string;
+  /**
+   * Tool names to emit. Omit for all tools; an empty list enables no tools.
+   */
+  tools?: string[];
+  /**
+   * The agent instructions.
+   */
+  instructions: string;
+}
+/**
+ * Rendered agent Markdown.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentsGenerateFileContentResult".
+ */
+/** @experimental */
+export interface AgentsGenerateFileContentResult {
+  /**
+   * The complete agent file content.
+   */
+  content: string;
 }
 /**
  * The feature flags to evaluate shipped agents against.
@@ -11798,6 +11935,66 @@ export interface AgentsGetDiscoveryPathsRequest {
    * When true, omit the host's user-level agent directory, leaving only project directories. For multitenant deployments (mirrors `discover`'s `excludeHostAgents`).
    */
   excludeHostAgents?: boolean;
+}
+/**
+ * The canonical tool groups in display order.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentsListToolCategoriesResult".
+ */
+/** @experimental */
+export interface AgentsListToolCategoriesResult {
+  /**
+   * The selectable tool groups.
+   */
+  categories: AgentToolCategory[];
+}
+/**
+ * A selectable agent tool group.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentToolCategory".
+ */
+/** @experimental */
+export interface AgentToolCategory {
+  /**
+   * The stable, closed category identifier.
+   */
+  id: AgentToolCategoryId;
+  /**
+   * The display label.
+   */
+  label: string;
+  /**
+   * Tool names in their canonical order.
+   */
+  tools: string[];
+}
+/**
+ * A proposed agent name.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentsValidateNameRequest".
+ */
+/** @experimental */
+export interface AgentsValidateNameRequest {
+  /**
+   * The name to check for a usable filename.
+   */
+  name: string;
+}
+/**
+ * Whether the name produces a nonempty filename.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentsValidateNameResult".
+ */
+/** @experimental */
+export interface AgentsValidateNameResult {
+  /**
+   * True when the name contains an ASCII letter or digit.
+   */
+  valid: boolean;
 }
 /**
  * Authenticates pending protected resources with the connection's renewable credential source.
@@ -16612,6 +16809,10 @@ export interface CloudTasksDeleteParams {
    */
   authContextId?: string;
   /**
+   * When true, stop without an HTTP request if the identity has no nonempty GitHub credential. Omission preserves the existing request behavior, including the Mission Control access-token override.
+   */
+  requireCredential?: boolean;
+  /**
    * Name of the embedding client, reported to Mission Control so the service can attribute the request.
    */
   integrationId: string;
@@ -16621,7 +16822,7 @@ export interface CloudTasksDeleteParams {
   taskId: string;
 }
 /**
- * The HTTP outcome of deleting a cloud task. The deletion returns no body, so a successful call carries nothing beyond `ok`; a failed one is described by the remaining fields rather than raised as an error, so a caller can surface the service's own explanation.
+ * The HTTP outcome of deleting a cloud task. When `requireCredential` is true, `credentialResolved` distinguishes missing credentials from an HTTP outcome. HTTP failures retain the service's explanation instead of being raised as errors.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "CloudTasksDeleteResult".
@@ -16633,6 +16834,10 @@ export interface CloudTasksDeleteResult {
    * Whether the service accepted the deletion.
    */
   ok: boolean;
+  /**
+   * Present when requireCredential is true. False means no credential was resolved and no HTTP request was made.
+   */
+  credentialResolved?: boolean;
   /**
    * HTTP status code of the response, when one was received.
    */
@@ -16773,6 +16978,37 @@ export interface CloudTasksGetSessionLogsResult {
    * The error body the API returned, preserved verbatim so a host can surface the service's own message.
    */
   errorPayloadJson?: string;
+}
+/**
+ * Identifies a Mission Control session and the identity that reads its connection target.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CloudTasksGetSessionParams".
+ */
+/** @experimental */
+/** @internal */
+export interface CloudTasksGetSessionParams {
+  /**
+   * Identity whose credential and Copilot endpoint the runtime resolves for this request.
+   */
+  authInfo: AuthIdentity;
+  /**
+   * Registered credential owner, when the host uses one.
+   */
+  authContextId?: string;
+  /**
+   * Live session owned by this SDK server whose retained credential authenticates the lookup.
+   * The identity must match that session. Cannot be combined with authContextId.
+   */
+  credentialSessionId?: string;
+  /**
+   * Integration identifier sent to Mission Control.
+   */
+  integrationId: string;
+  /**
+   * Remote Mission Control session identifier.
+   */
+  sessionId: string;
 }
 /**
  * Identifies one cloud coding-agent task whose recorded session is to be replayed, and the credential to read it under.
@@ -38377,6 +38613,82 @@ export interface ReleaseEventInterestParams {
   handle: string;
 }
 /**
+ * Attaches Mission Control polling and steering to this locally retained remote-session facade. Credentials remain with the runtime owner and resolve for each request.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RemoteAttachMissionControlRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface RemoteAttachMissionControlRequest {
+  /**
+   * Public facade identifier used for the host's frontend URL registration.
+   */
+  publicSessionId: string;
+  /**
+   * Explicit Mission Control endpoint; omission derives it from the identity.
+   */
+  baseUrl?: string;
+  /**
+   * Explicit frontend origin; omission derives it from the identity.
+   */
+  frontendBaseUrl?: string;
+  /**
+   * Identity whose credential and endpoints the runtime resolves.
+   */
+  authInfo: AuthIdentity;
+  /**
+   * Registered credential owner, when the host uses one.
+   */
+  authContextId?: string;
+  /**
+   * Integration identifier sent to Mission Control.
+   */
+  integrationId: string;
+  /**
+   * Cloud task whose events and commands this session follows.
+   */
+  taskId: string;
+  /**
+   * Repository owner associated with the remote task.
+   */
+  repositoryOwner?: string;
+  /**
+   * Repository name associated with the remote task.
+   */
+  repositoryName?: string;
+  /**
+   * Previously observed events, including events excluded from replay.
+   */
+  observedEventsJson: string;
+  /**
+   * Whether this facade permits steering.
+   */
+  remoteSteerable: boolean;
+  /**
+   * Poll interval in milliseconds; omission uses the runtime default.
+   */
+  pollIntervalMs?: number;
+  /**
+   * Whether the attachment provides remote JSON-RPC commands.
+   */
+  rpcEnabled: boolean;
+}
+/**
+ * Reports whether this call created the attachment. An existing attachment remains unchanged.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RemoteAttachMissionControlResult".
+ */
+/** @experimental */
+/** @internal */
+export interface RemoteAttachMissionControlResult {
+  /**
+   * True when this call starts polling; false when the session already has an attachment.
+   */
+  started: boolean;
+}
+/**
  * Configuration for the runtime-managed remote-control singleton.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -40772,6 +41084,10 @@ export interface SendRequest {
    * @internal
    */
   source?: string;
+  /**
+   * Set by the host when an agent wrote this message and the host delivers it in the user role, such as the kickoff of a session another agent created. Copied to the resulting user.message event. Only automatic permission decisions read it: they treat the text as another agent's message, never as the user's own words or authorization. Delivery, history and the model's view of the message are unchanged. It can only withhold human authority, never add it. Remote sessions, hosted by Mission Control or over AHP, do not carry it: their transports deliver only the prompt, so there the message is judged as it would be without the mark.
+   */
+  agentAuthored?: boolean;
   /**
    * The UI mode the agent was in when this message was sent. Defaults to the session's current mode.
    */
@@ -56763,6 +57079,40 @@ export function createServerRpc(connection: MessageConnection) {
         /** @experimental */
         agents: {
             /**
+             * Checks whether an agent name produces a usable filename, without filesystem access.
+             *
+             * @param params A proposed agent name.
+             *
+             * @returns Whether the name produces a nonempty filename.
+             */
+            validateName: async (params: AgentsValidateNameRequest): Promise<AgentsValidateNameResult> =>
+                connection.sendRequest("agents.validateName", params),
+            /**
+             * Lists the closed agent tool groups in canonical display order for agent-file authoring.
+             *
+             * @returns The canonical tool groups in display order.
+             */
+            listToolCategories: async (): Promise<AgentsListToolCategoriesResult> =>
+                connection.sendRequest("agents.listToolCategories", {}),
+            /**
+             * Renders agent Markdown without writing a file. Omitted tools allow all tools; an empty list allows none.
+             *
+             * @param params Agent content to render without file access.
+             *
+             * @returns Rendered agent Markdown.
+             */
+            generateFileContent: async (params: AgentsGenerateFileContentRequest): Promise<AgentsGenerateFileContentResult> =>
+                connection.sendRequest("agents.generateFileContent", params),
+            /**
+             * Creates an agent file in the project or user agent directory without replacing an existing file. Returns validation and filesystem errors as author-visible outcomes.
+             *
+             * @param params An agent file to create without replacing an existing file.
+             *
+             * @returns The outcome of agent file creation.
+             */
+            createFile: async (params: AgentsCreateFileRequest): Promise<AgentsCreateFileResult> =>
+                connection.sendRequest("agents.createFile", params),
+            /**
              * Discovers custom agents across user, project, plugin, and remote sources.
              *
              * @param params Optional project paths to include in agent discovery.
@@ -59128,11 +59478,11 @@ export function createInternalServerRpc(connection: MessageConnection) {
             create: async (params: CloudTasksCreateParams): Promise<CloudTasksCreateResult> =>
                 connection.sendRequest("cloudTasks.create", params),
             /**
-             * Deletes one cloud coding-agent task, the remote run `cloudTasks.create` started. The deletion is a soft one: the service withdraws the task from its listings rather than destroying the record, so a host removing a run from its own UI is the intended caller. Answered above any session for the same reason as `cloudTasks.get` -- the task is remote and has no local counterpart. Hosts other than the CLI want this: a GitHub App or an SDK consumer that manages cloud agent runs withdraws the same record under the same credential, and resolving it here keeps one credential-resolution and endpoint path. The runtime resolves each token from `authInfo` or `authContextId`. A host may preserve an explicit `baseUrl`; omission derives the endpoint from `authInfo`. The result is the HTTP outcome rather than a bare success flag: the call returns no body, so `ok` alone describes a success, while a failure is reported through `statusCode`, `errorMessage` and `errorPayloadJson` instead of being raised as an error.
+             * Deletes one cloud coding-agent task, the remote run `cloudTasks.create` started. The deletion is a soft one: the service withdraws the task from its listings rather than destroying the record, so a host removing a run from its own UI is the intended caller. Answered above any session for the same reason as `cloudTasks.get` -- the task is remote and has no local counterpart. Hosts other than the CLI want this: a GitHub App or an SDK consumer that manages cloud agent runs withdraws the same record under the same credential, and resolving it here keeps one credential-resolution and endpoint path. The runtime resolves each token from `authInfo` or `authContextId`. A host may preserve an explicit `baseUrl`; omission derives the endpoint from `authInfo`. Set `requireCredential` to stop before HTTP when no nonempty GitHub credential resolves; `credentialResolved` then distinguishes that case from an HTTP failure. Omission preserves the existing request and result behavior. HTTP failures retain `statusCode`, `errorMessage` and `errorPayloadJson` instead of being raised as errors.
              *
              * @param params Identifies one cloud coding-agent task to delete, and the credential to delete it under.
              *
-             * @returns The HTTP outcome of deleting a cloud task. The deletion returns no body, so a successful call carries nothing beyond `ok`; a failed one is described by the remaining fields rather than raised as an error, so a caller can surface the service's own explanation.
+             * @returns The HTTP outcome of deleting a cloud task. When `requireCredential` is true, `credentialResolved` distinguishes missing credentials from an HTTP outcome. HTTP failures retain the service's explanation instead of being raised as errors.
              */
             delete: async (params: CloudTasksDeleteParams): Promise<CloudTasksDeleteResult> =>
                 connection.sendRequest("cloudTasks.delete", params),
@@ -59145,6 +59495,15 @@ export function createInternalServerRpc(connection: MessageConnection) {
              */
             get: async (params: CloudTasksGetParams): Promise<CloudTasksGetResult> =>
                 connection.sendRequest("cloudTasks.get", params),
+            /**
+             * Reads a Mission Control session to resolve its environment and connection target. SDK hosts and ACP clients use this before attaching to a cloud session. The runtime resolves the credential and endpoint for each request; HTTP failures remain structured results.
+             *
+             * @param params Identifies a Mission Control session and the identity that reads its connection target.
+             *
+             * @returns The HTTP outcome of reading a cloud task, rather than the task alone. A 404 arrives here as a non-ok result with `statusCode` 404, not as an error, so a caller can tell an absent task apart from a failed call.
+             */
+            getSession: async (params: CloudTasksGetSessionParams): Promise<CloudTasksGetResult> =>
+                connection.sendRequest("cloudTasks.getSession", params),
             /**
              * Reads the logs a cloud coding-agent session produced, from the Copilot API. Answered above any session, for the same reason as `cloudTasks.get`: the session being asked about runs remotely and has no local counterpart. Read `resolved` first. It is false when no Copilot API URL could be resolved for the credential, which is a different outcome from a request that was made and failed, and a caller that treats the two alike will report a transport error for an account that simply has no API endpoint. When `resolved` is true, `debugMessages` carries the diagnostics the fetch produced and should be logged whatever the outcome, `errorString` reports a retrieval fault, and only then do `ok` and `statusCode` describe the HTTP result.
              *
@@ -62411,6 +62770,15 @@ export function createInternalSessionRpc(connection: MessageConnection, sessionI
              */
             publishState: async (params: SessionRemotePublishStateRequest): Promise<void> =>
                 connection.sendRequest("session.remote.publishState", { ...params, sessionId }),
+            /**
+             * Attaches runtime-owned Mission Control polling and steering to a retained session facade. SDK hosts and ACP clients can follow a cloud task without receiving a bearer token.
+             *
+             * @param params Attaches Mission Control polling and steering to this locally retained remote-session facade. Credentials remain with the runtime owner and resolve for each request.
+             *
+             * @returns Reports whether this call created the attachment. An existing attachment remains unchanged.
+             */
+            attachMissionControl: async (params: RemoteAttachMissionControlRequest): Promise<RemoteAttachMissionControlResult> =>
+                connection.sendRequest("session.remote.attachMissionControl", { ...params, sessionId }),
         },
         /**
          * Submits one message through normal admission and waits for its request-owned completion. Returns the exact root assistant event, or an explicit aborted/no-response outcome. Cancelling or timing out the wait does not abort agent work. Unsupported execution hosts reject the method before admitting the message.

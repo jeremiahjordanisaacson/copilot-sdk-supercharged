@@ -31,6 +31,8 @@ record CloudTasksDeleteParams(
     @JsonProperty("authInfo") Object authInfo,
     /** Selects which stored credential to resolve when the host holds more than one. Omit it to resolve the default for the supplied `authInfo`. */
     @JsonProperty("authContextId") String authContextId,
+    /** When true, stop without an HTTP request if the identity has no nonempty GitHub credential. Omission preserves the existing request behavior, including the Mission Control access-token override. */
+    @JsonProperty("requireCredential") Boolean requireCredential,
     /** Name of the embedding client, reported to Mission Control so the service can attribute the request. */
     @JsonProperty("integrationId") String integrationId,
     /** Identifier of the cloud task to delete. */
@@ -62,6 +64,7 @@ record CloudTasksDeleteParams(
         private Object authInfo;
         private boolean $presence1;
         private String authContextId;
+        private Boolean requireCredential;
         private String integrationId;
         private String taskId;
 
@@ -103,6 +106,18 @@ record CloudTasksDeleteParams(
         }
 
         /**
+         * Sets the {@code requireCredential} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder requireCredential(Boolean value) {
+            this.requireCredential = value;
+            return this;
+        }
+
+        /**
          * Sets the {@code integrationId} property.
          * @param value the property value
          * @return this builder
@@ -136,7 +151,7 @@ record CloudTasksDeleteParams(
             if (!$presence1) throw new IllegalStateException("Missing required property: authInfo");
             if (integrationId == null) throw new IllegalStateException("Missing required property: integrationId");
             if (taskId == null) throw new IllegalStateException("Missing required property: taskId");
-            return new CloudTasksDeleteParams(baseUrl, authInfo, authContextId, integrationId, taskId);
+            return new CloudTasksDeleteParams(baseUrl, authInfo, authContextId, requireCredential, integrationId, taskId);
         }
     }
 }

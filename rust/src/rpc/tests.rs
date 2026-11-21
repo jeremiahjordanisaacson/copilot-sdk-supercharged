@@ -69,3 +69,19 @@ fn saved_provider_conversion_rejects_unknown_provider_type() {
             .contains("unknown discovered provider type")
     );
 }
+
+#[test]
+fn send_request_carries_the_agent_authored_mark_only_when_set() {
+    let request = SendRequest {
+        prompt: "Run the kickoff.".to_owned(),
+        ..Default::default()
+    };
+
+    let marked = serde_json::to_value(request.clone().with_agent_authored(true)).unwrap();
+    assert_eq!(marked["agentAuthored"], json!(true));
+
+    for unmarked in [request.clone(), request.with_agent_authored(false)] {
+        let value = serde_json::to_value(unmarked).unwrap();
+        assert!(value.get("agentAuthored").is_none(), "{value}");
+    }
+}

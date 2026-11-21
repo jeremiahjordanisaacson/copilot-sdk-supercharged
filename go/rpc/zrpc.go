@@ -736,6 +736,66 @@ type AgentReloadResult struct {
 	Agents []AgentInfo `json:"agents"`
 }
 
+// An agent file to create without replacing an existing file.
+// Experimental: AgentsCreateFileRequest is part of an experimental API and may change or be
+// removed.
+type AgentsCreateFileRequest struct {
+	// The agent description.
+	Description string `json:"description"`
+	// Enabled groups. Omit for all tools; an empty list enables no tools.
+	EnabledCategories []AgentToolCategoryID `json:"enabledCategories,omitzero"`
+	// The agent instructions.
+	Instructions string `json:"instructions"`
+	// The directory owner.
+	Location AgentFileLocation `json:"location"`
+	// The display name used to derive the filename.
+	Name string `json:"name"`
+	// The project root.
+	ProjectPath string `json:"projectPath"`
+	// The user configuration root.
+	UserConfigDir string `json:"userConfigDir"`
+}
+
+// The outcome of agent file creation.
+// Experimental: AgentsCreateFileResult is part of an experimental API and may change or be
+// removed.
+type AgentsCreateFileResult interface {
+	agentsCreateFileResult()
+	Kind() AgentsCreateFileResultKind
+}
+
+type RawAgentsCreateFileResultData struct {
+	Discriminator AgentsCreateFileResultKind
+	Raw           json.RawMessage
+}
+
+func (RawAgentsCreateFileResultData) agentsCreateFileResult() {}
+func (r RawAgentsCreateFileResultData) Kind() AgentsCreateFileResultKind {
+	return r.Discriminator
+}
+
+// Creation failed without replacing an existing agent.
+type AgentsCreateFileResultError struct {
+	// The error message to show to the author.
+	Message string `json:"message"`
+}
+
+func (AgentsCreateFileResultError) agentsCreateFileResult() {}
+func (AgentsCreateFileResultError) Kind() AgentsCreateFileResultKind {
+	return AgentsCreateFileResultKindError
+}
+
+// The new file exists.
+type AgentsCreateFileResultSuccess struct {
+	// The created file path.
+	FilePath string `json:"filePath"`
+}
+
+func (AgentsCreateFileResultSuccess) agentsCreateFileResult() {}
+func (AgentsCreateFileResultSuccess) Kind() AgentsCreateFileResultKind {
+	return AgentsCreateFileResultKindSuccess
+}
+
 // The models a custom agent asks for, and the models actually available.
 // Experimental: AgentsCustomAgentInitialModelDecisionParams is part of an experimental API
 // and may change or be removed.
@@ -809,6 +869,28 @@ type AgentSetPromptRequest struct {
 	ID string `json:"id"`
 	// Replacement authored prompt. Empty text is valid.
 	Prompt string `json:"prompt"`
+}
+
+// Agent content to render without file access.
+// Experimental: AgentsGenerateFileContentRequest is part of an experimental API and may
+// change or be removed.
+type AgentsGenerateFileContentRequest struct {
+	// The agent description.
+	Description string `json:"description"`
+	// The agent instructions.
+	Instructions string `json:"instructions"`
+	// The display name.
+	Name string `json:"name"`
+	// Tool names to emit. Omit for all tools; an empty list enables no tools.
+	Tools []string `json:"tools,omitzero"`
+}
+
+// Rendered agent Markdown.
+// Experimental: AgentsGenerateFileContentResult is part of an experimental API and may
+// change or be removed.
+type AgentsGenerateFileContentResult struct {
+	// The complete agent file content.
+	Content string `json:"content"`
 }
 
 // The feature flags to evaluate shipped agents against.
@@ -921,6 +1003,42 @@ type AgentsGetDiscoveryPathsRequest struct {
 	// Optional list of project directory paths. When omitted or empty, only the user-level
 	// directory is returned.
 	ProjectPaths []string `json:"projectPaths,omitzero"`
+}
+
+// The canonical tool groups in display order.
+// Experimental: AgentsListToolCategoriesResult is part of an experimental API and may
+// change or be removed.
+type AgentsListToolCategoriesResult struct {
+	// The selectable tool groups.
+	Categories []AgentToolCategory `json:"categories"`
+}
+
+// A proposed agent name.
+// Experimental: AgentsValidateNameRequest is part of an experimental API and may change or
+// be removed.
+type AgentsValidateNameRequest struct {
+	// The name to check for a usable filename.
+	Name string `json:"name"`
+}
+
+// Whether the name produces a nonempty filename.
+// Experimental: AgentsValidateNameResult is part of an experimental API and may change or
+// be removed.
+type AgentsValidateNameResult struct {
+	// True when the name contains an ASCII letter or digit.
+	Valid bool `json:"valid"`
+}
+
+// A selectable agent tool group.
+// Experimental: AgentToolCategory is part of an experimental API and may change or be
+// removed.
+type AgentToolCategory struct {
+	// The stable, closed category identifier.
+	ID AgentToolCategoryID `json:"id"`
+	// The display label.
+	Label string `json:"label"`
+	// Tool names in their canonical order.
+	Tools []string `json:"tools"`
 }
 
 // Authenticates pending protected resources with the connection's renewable credential
@@ -5172,18 +5290,25 @@ type CloudTasksDeleteParams struct {
 	// Name of the embedding client, reported to Mission Control so the service can attribute
 	// the request.
 	IntegrationID string `json:"integrationId"`
+	// When true, stop without an HTTP request if the identity has no nonempty GitHub
+	// credential. Omission preserves the existing request behavior, including the Mission
+	// Control access-token override.
+	RequireCredential *bool `json:"requireCredential,omitempty"`
 	// Identifier of the cloud task to delete.
 	TaskID string `json:"taskId"`
 }
 
-// The HTTP outcome of deleting a cloud task. The deletion returns no body, so a successful
-// call carries nothing beyond `ok`; a failed one is described by the remaining fields
-// rather than raised as an error, so a caller can surface the service's own explanation.
+// The HTTP outcome of deleting a cloud task. When `requireCredential` is true,
+// `credentialResolved` distinguishes missing credentials from an HTTP outcome. HTTP
+// failures retain the service's explanation instead of being raised as errors.
 // Experimental: CloudTasksDeleteResult is part of an experimental API and may change or be
 // removed.
 // Internal: CloudTasksDeleteResult is an internal SDK API and is not part of the public
 // surface.
 type CloudTasksDeleteResult struct {
+	// Present when requireCredential is true. False means no credential was resolved and no
+	// HTTP request was made.
+	CredentialResolved *bool `json:"credentialResolved,omitempty"`
 	// Human-readable failure explanation, when the call failed.
 	ErrorMessage *string `json:"errorMessage,omitempty"`
 	// The error body the service returned, preserved verbatim so a host can surface the
@@ -5287,6 +5412,25 @@ type CloudTasksGetSessionLogsResult struct {
 	Resolved bool `json:"resolved"`
 	// HTTP status code of the response, when one was received.
 	StatusCode *int32 `json:"statusCode,omitempty"`
+}
+
+// Identifies a Mission Control session and the identity that reads its connection target.
+// Experimental: CloudTasksGetSessionParams is part of an experimental API and may change or
+// be removed.
+// Internal: CloudTasksGetSessionParams is an internal SDK API and is not part of the public
+// surface.
+type CloudTasksGetSessionParams struct {
+	// Registered credential owner, when the host uses one.
+	AuthContextID *string `json:"authContextId,omitempty"`
+	// Identity whose credential and Copilot endpoint the runtime resolves for this request.
+	AuthInfo AuthIdentity `json:"authInfo"`
+	// Live session owned by this SDK server whose retained credential authenticates the lookup.
+	// The identity must match that session. Cannot be combined with authContextId.
+	CredentialSessionID *string `json:"credentialSessionId,omitempty"`
+	// Integration identifier sent to Mission Control.
+	IntegrationID string `json:"integrationId"`
+	// Remote Mission Control session identifier.
+	SessionID string `json:"sessionId"`
 }
 
 // Identifies one cloud coding-agent task whose recorded session is to be replayed, and the
@@ -23969,6 +24113,52 @@ type ReleaseEventInterestParams struct {
 	Handle string `json:"handle"`
 }
 
+// Attaches Mission Control polling and steering to this locally retained remote-session
+// facade. Credentials remain with the runtime owner and resolve for each request.
+// Experimental: RemoteAttachMissionControlRequest is part of an experimental API and may
+// change or be removed.
+// Internal: RemoteAttachMissionControlRequest is an internal SDK API and is not part of the
+// public surface.
+type RemoteAttachMissionControlRequest struct {
+	// Registered credential owner, when the host uses one.
+	AuthContextID *string `json:"authContextId,omitempty"`
+	// Identity whose credential and endpoints the runtime resolves.
+	AuthInfo AuthIdentity `json:"authInfo"`
+	// Explicit Mission Control endpoint; omission derives it from the identity.
+	BaseURL *string `json:"baseUrl,omitempty"`
+	// Explicit frontend origin; omission derives it from the identity.
+	FrontendBaseURL *string `json:"frontendBaseUrl,omitempty"`
+	// Integration identifier sent to Mission Control.
+	IntegrationID string `json:"integrationId"`
+	// Previously observed events, including events excluded from replay.
+	ObservedEventsJSON string `json:"observedEventsJson"`
+	// Poll interval in milliseconds; omission uses the runtime default.
+	PollIntervalMs *int64 `json:"pollIntervalMs,omitempty"`
+	// Public facade identifier used for the host's frontend URL registration.
+	PublicSessionID string `json:"publicSessionId"`
+	// Whether this facade permits steering.
+	RemoteSteerable bool `json:"remoteSteerable"`
+	// Repository name associated with the remote task.
+	RepositoryName *string `json:"repositoryName,omitempty"`
+	// Repository owner associated with the remote task.
+	RepositoryOwner *string `json:"repositoryOwner,omitempty"`
+	// Whether the attachment provides remote JSON-RPC commands.
+	RPCEnabled bool `json:"rpcEnabled"`
+	// Cloud task whose events and commands this session follows.
+	TaskID string `json:"taskId"`
+}
+
+// Reports whether this call created the attachment. An existing attachment remains
+// unchanged.
+// Experimental: RemoteAttachMissionControlResult is part of an experimental API and may
+// change or be removed.
+// Internal: RemoteAttachMissionControlResult is an internal SDK API and is not part of the
+// public surface.
+type RemoteAttachMissionControlResult struct {
+	// True when this call starts polling; false when the session already has an attachment.
+	Started bool `json:"started"`
+}
+
 // One request-owned admission decision, sent only to its originating SDK connection.
 // Experimental: RemoteCheckSendAdmissionRequest is part of an experimental API and may
 // change or be removed.
@@ -25948,6 +26138,15 @@ type SendMessagesResult struct {
 // Parameters for sending a user message to the session
 // Experimental: SendRequest is part of an experimental API and may change or be removed.
 type SendRequest struct {
+	// Set by the host when an agent wrote this message and the host delivers it in the user
+	// role, such as the kickoff of a session another agent created. Copied to the resulting
+	// user.message event. Only automatic permission decisions read it: they treat the text as
+	// another agent's message, never as the user's own words or authorization. Delivery,
+	// history and the model's view of the message are unchanged. It can only withhold human
+	// authority, never add it. Remote sessions, hosted by Mission Control or over AHP, do not
+	// carry it: their transports deliver only the prompt, so there the message is judged as it
+	// would be without the mark.
+	AgentAuthored *bool `json:"agentAuthored,omitempty"`
 	// The UI mode the agent was in when this message was sent. Defaults to the session's
 	// current mode.
 	AgentMode *SendAgentMode `json:"agentMode,omitempty"`
@@ -36601,6 +36800,18 @@ const (
 	AgentDiscoveryPathScopeUser AgentDiscoveryPathScope = "user"
 )
 
+// The owner directory for an authored agent.
+// Experimental: AgentFileLocation is part of an experimental API and may change or be
+// removed.
+type AgentFileLocation string
+
+const (
+	// The project's .github/agents directory.
+	AgentFileLocationProject AgentFileLocation = "project"
+	// The user's configuration agents directory.
+	AgentFileLocationUser AgentFileLocation = "user"
+)
+
 // Where the agent definition was loaded from
 // Experimental: AgentInfoSource is part of an experimental API and may change or be removed.
 type AgentInfoSource string
@@ -36767,6 +36978,36 @@ const (
 	// Caller asked for permissionMode='yolo' but the controller is not currently in allow-all
 	// mode
 	AgentRegistrySpawnValidationErrorReasonYoloNotAllowed AgentRegistrySpawnValidationErrorReason = "yolo-not-allowed"
+)
+
+// Kind discriminator for AgentsCreateFileResult.
+type AgentsCreateFileResultKind string
+
+const (
+	AgentsCreateFileResultKindError   AgentsCreateFileResultKind = "error"
+	AgentsCreateFileResultKindSuccess AgentsCreateFileResultKind = "success"
+)
+
+// A tool group that an agent file can enable.
+// Experimental: AgentToolCategoryID is part of an experimental API and may change or be
+// removed.
+type AgentToolCategoryID string
+
+const (
+	// Questions for the user.
+	AgentToolCategoryIDAskUser AgentToolCategoryID = "ask-user"
+	// File edits.
+	AgentToolCategoryIDEdit AgentToolCategoryID = "edit"
+	// File reads and searches.
+	AgentToolCategoryIDRead AgentToolCategoryID = "read"
+	// Shell execution.
+	AgentToolCategoryIDShell AgentToolCategoryID = "shell"
+	// Skill execution.
+	AgentToolCategoryIDSkills AgentToolCategoryID = "skills"
+	// Subagent tasks.
+	AgentToolCategoryIDSubagents AgentToolCategoryID = "subagents"
+	// Web searches and requests.
+	AgentToolCategoryIDWeb AgentToolCategoryID = "web"
 )
 
 // Kind discriminator for AhpConnectionEvent.
@@ -44002,6 +44243,26 @@ func (a *ServerAgentRegistryAPI) Spawn(ctx context.Context, params *AgentRegistr
 // Experimental: ServerAgentsAPI contains experimental APIs that may change or be removed.
 type ServerAgentsAPI serverAPI
 
+// CreateFile creates an agent file in the project or user agent directory without replacing
+// an existing file. Returns validation and filesystem errors as author-visible outcomes.
+//
+// RPC method: agents.createFile.
+//
+// Parameters: An agent file to create without replacing an existing file.
+//
+// Returns: The outcome of agent file creation.
+func (a *ServerAgentsAPI) CreateFile(ctx context.Context, params *AgentsCreateFileRequest) (AgentsCreateFileResult, error) {
+	raw, err := a.client.Request(ctx, "agents.createFile", params)
+	if err != nil {
+		return nil, err
+	}
+	result, err := unmarshalAgentsCreateFileResult(raw)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // Discovers custom agents across user, project, plugin, and remote sources.
 //
 // RPC method: agents.discover.
@@ -44019,6 +44280,26 @@ func (a *ServerAgentsAPI) Discover(ctx context.Context, params *AgentsDiscoverRe
 		return nil, err
 	}
 	var result ServerAgentList
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GenerateFileContent renders agent Markdown without writing a file. Omitted tools allow
+// all tools; an empty list allows none.
+//
+// RPC method: agents.generateFileContent.
+//
+// Parameters: Agent content to render without file access.
+//
+// Returns: Rendered agent Markdown.
+func (a *ServerAgentsAPI) GenerateFileContent(ctx context.Context, params *AgentsGenerateFileContentRequest) (*AgentsGenerateFileContentResult, error) {
+	raw, err := a.client.Request(ctx, "agents.generateFileContent", params)
+	if err != nil {
+		return nil, err
+	}
+	var result AgentsGenerateFileContentResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
@@ -44046,6 +44327,44 @@ func (a *ServerAgentsAPI) GetDiscoveryPaths(ctx context.Context, params *AgentsG
 		return nil, err
 	}
 	var result AgentDiscoveryPathList
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ListToolCategories lists the closed agent tool groups in canonical display order for
+// agent-file authoring.
+//
+// RPC method: agents.listToolCategories.
+//
+// Returns: The canonical tool groups in display order.
+func (a *ServerAgentsAPI) ListToolCategories(ctx context.Context) (*AgentsListToolCategoriesResult, error) {
+	raw, err := a.client.Request(ctx, "agents.listToolCategories", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result AgentsListToolCategoriesResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ValidateName checks whether an agent name produces a usable filename, without filesystem
+// access.
+//
+// RPC method: agents.validateName.
+//
+// Parameters: A proposed agent name.
+//
+// Returns: Whether the name produces a nonempty filename.
+func (a *ServerAgentsAPI) ValidateName(ctx context.Context, params *AgentsValidateNameRequest) (*AgentsValidateNameResult, error) {
+	raw, err := a.client.Request(ctx, "agents.validateName", params)
+	if err != nil {
+		return nil, err
+	}
+	var result AgentsValidateNameResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
@@ -49705,20 +50024,20 @@ func (a *InternalServerCloudTasksAPI) Create(ctx context.Context, params *CloudT
 // consumer that manages cloud agent runs withdraws the same record under the same
 // credential, and resolving it here keeps one credential-resolution and endpoint path. The
 // runtime resolves each token from `authInfo` or `authContextId`. A host may preserve an
-// explicit `baseUrl`; omission derives the endpoint from `authInfo`. The result is the HTTP
-// outcome rather than a bare success flag: the call returns no body, so `ok` alone
-// describes a success, while a failure is reported through `statusCode`, `errorMessage` and
-// `errorPayloadJson` instead of being raised as an error.
+// explicit `baseUrl`; omission derives the endpoint from `authInfo`. Set
+// `requireCredential` to stop before HTTP when no nonempty GitHub credential resolves;
+// `credentialResolved` then distinguishes that case from an HTTP failure. Omission
+// preserves the existing request and result behavior. HTTP failures retain `statusCode`,
+// `errorMessage` and `errorPayloadJson` instead of being raised as errors.
 //
 // RPC method: cloudTasks.delete.
 //
 // Parameters: Identifies one cloud coding-agent task to delete, and the credential to
 // delete it under.
 //
-// Returns: The HTTP outcome of deleting a cloud task. The deletion returns no body, so a
-// successful call carries nothing beyond `ok`; a failed one is described by the remaining
-// fields rather than raised as an error, so a caller can surface the service's own
-// explanation.
+// Returns: The HTTP outcome of deleting a cloud task. When `requireCredential` is true,
+// `credentialResolved` distinguishes missing credentials from an HTTP outcome. HTTP
+// failures retain the service's explanation instead of being raised as errors.
 // Internal: Delete is part of the SDK's internal handshake/plumbing; external callers
 // should not use it.
 func (a *InternalServerCloudTasksAPI) Delete(ctx context.Context, params *CloudTasksDeleteParams) (*CloudTasksDeleteResult, error) {
@@ -49754,6 +50073,33 @@ func (a *InternalServerCloudTasksAPI) Delete(ctx context.Context, params *CloudT
 // not use it.
 func (a *InternalServerCloudTasksAPI) Get(ctx context.Context, params *CloudTasksGetParams) (*CloudTasksGetResult, error) {
 	raw, err := a.client.Request(ctx, "cloudTasks.get", params)
+	if err != nil {
+		return nil, err
+	}
+	var result CloudTasksGetResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetSession reads a Mission Control session to resolve its environment and connection
+// target. SDK hosts and ACP clients use this before attaching to a cloud session. The
+// runtime resolves the credential and endpoint for each request; HTTP failures remain
+// structured results.
+//
+// RPC method: cloudTasks.getSession.
+//
+// Parameters: Identifies a Mission Control session and the identity that reads its
+// connection target.
+//
+// Returns: The HTTP outcome of reading a cloud task, rather than the task alone. A 404
+// arrives here as a non-ok result with `statusCode` 404, not as an error, so a caller can
+// tell an absent task apart from a failed call.
+// Internal: GetSession is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerCloudTasksAPI) GetSession(ctx context.Context, params *CloudTasksGetSessionParams) (*CloudTasksGetResult, error) {
+	raw, err := a.client.Request(ctx, "cloudTasks.getSession", params)
 	if err != nil {
 		return nil, err
 	}
@@ -63715,6 +64061,9 @@ func (a *SessionRPC) Log(ctx context.Context, params *LogRequest) (*LogResult, e
 func (a *SessionRPC) Send(ctx context.Context, params *SendRequest) (*SendResult, error) {
 	req := map[string]any{"sessionId": a.common.sessionID}
 	if params != nil {
+		if params.AgentAuthored != nil {
+			req["agentAuthored"] = *params.AgentAuthored
+		}
 		if params.AgentMode != nil {
 			req["agentMode"] = *params.AgentMode
 		}
@@ -65354,6 +65703,60 @@ func (a *InternalQueueAPI) Snapshot(ctx context.Context) (*QueueSnapshotResult, 
 // Experimental: InternalRemoteAPI contains experimental APIs that may change or be removed.
 type InternalRemoteAPI internalSessionAPI
 
+// AttachMissionControl attaches runtime-owned Mission Control polling and steering to a
+// retained session facade. SDK hosts and ACP clients can follow a cloud task without
+// receiving a bearer token.
+//
+// RPC method: session.remote.attachMissionControl.
+//
+// Parameters: Attaches Mission Control polling and steering to this locally retained
+// remote-session facade. Credentials remain with the runtime owner and resolve for each
+// request.
+//
+// Returns: Reports whether this call created the attachment. An existing attachment remains
+// unchanged.
+// Internal: AttachMissionControl is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalRemoteAPI) AttachMissionControl(ctx context.Context, params *RemoteAttachMissionControlRequest) (*RemoteAttachMissionControlResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		if params.AuthContextID != nil {
+			req["authContextId"] = *params.AuthContextID
+		}
+		req["authInfo"] = params.AuthInfo
+		if params.BaseURL != nil {
+			req["baseUrl"] = *params.BaseURL
+		}
+		if params.FrontendBaseURL != nil {
+			req["frontendBaseUrl"] = *params.FrontendBaseURL
+		}
+		req["integrationId"] = params.IntegrationID
+		req["observedEventsJson"] = params.ObservedEventsJSON
+		if params.PollIntervalMs != nil {
+			req["pollIntervalMs"] = *params.PollIntervalMs
+		}
+		req["publicSessionId"] = params.PublicSessionID
+		req["remoteSteerable"] = params.RemoteSteerable
+		if params.RepositoryName != nil {
+			req["repositoryName"] = *params.RepositoryName
+		}
+		if params.RepositoryOwner != nil {
+			req["repositoryOwner"] = *params.RepositoryOwner
+		}
+		req["rpcEnabled"] = params.RPCEnabled
+		req["taskId"] = params.TaskID
+	}
+	raw, err := a.client.Request(ctx, "session.remote.attachMissionControl", req)
+	if err != nil {
+		return nil, err
+	}
+	var result RemoteAttachMissionControlResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // PublishState publishes composer or view state through an owned AHP session. The runtime
 // coalesces updates and owns retries.
 //
@@ -66064,6 +66467,9 @@ type InternalSessionRPC struct {
 func (a *InternalSessionRPC) SendAndWait(ctx context.Context, params *SendRequest) (*SendAndWaitResult, error) {
 	req := map[string]any{"sessionId": a.common.sessionID}
 	if params != nil {
+		if params.AgentAuthored != nil {
+			req["agentAuthored"] = *params.AgentAuthored
+		}
 		if params.AgentMode != nil {
 			req["agentMode"] = *params.AgentMode
 		}

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -67,6 +67,36 @@ pub(crate) enum DispatcherInput {
     /// The token keeps a superseded registration's claim from releasing the
     /// current one early.
     Claim(SessionId, RegistrationToken),
+    /// The read loop read a successful detach or deletion reply here for the
+    /// registration with this token, if the caller named one. Events queued
+    /// ahead of this were read before the reply; see
+    /// [`DetachMark`]. Here the dispatcher ends that registration, if it is
+    /// still current, so later events (the runtime sends them only after a
+    /// rejoin) are held for the next one.
+    Detached(SessionId, Option<RegistrationToken>),
+}
+
+/// Where a successful detach or deletion reply was read, until the dispatcher
+/// reaches its [`DispatcherInput::Detached`].
+///
+/// Events for the ID read before it belong to an attachment that existed when
+/// the reply was read: the one that detached, whose requests the runtime
+/// cancelled, or one that registered concurrently. They may reach only a
+/// registration made before the reply was read (token below `boundary`), and
+/// are never held for a later one.
+#[derive(Clone, Debug)]
+struct DetachMark {
+    boundary: u64,
+    reason: &'static str,
+    lifecycle_seen: Option<Arc<AtomicBool>>,
+}
+
+impl DetachMark {
+    fn deletion_observed(&self) -> bool {
+        self.lifecycle_seen
+            .as_ref()
+            .is_some_and(|seen| seen.load(Ordering::Relaxed))
+    }
 }
 
 /// One `session.event` on its way to its session's event loop.
@@ -177,15 +207,18 @@ impl Drop for SessionInitializationEntry {
     }
 }
 
-/// Most events held for session IDs that are not registered yet.
+/// Most events held for session IDs that are not registered.
 ///
 /// Every session this client creates or resumes registers before its RPC is
 /// sent, or on the read loop as its response arrives. Events for an ID that
-/// never registers (a session joined with the raw `sessions.connect` RPC, or
-/// a misbehaving peer) are held only up to this bound; past it, every event
-/// held for the ID seen first is dropped with a warning naming the requests
-/// among them. A request dropped this way is never answered by this client,
-/// even if its session registers later. Registered sessions never wait on it.
+/// is not registered are held, including after the session was detached: a
+/// host may rejoin it with a raw `sessions.connect` and resume it later, and a
+/// request that arrives in between is still open. Events for an ID that never
+/// registers again (or a misbehaving peer) are held only up to this bound;
+/// past it, every event held for the ID seen first is dropped with a warning
+/// naming the requests among them. A request dropped this way is never
+/// answered by this client, even if its session registers later. Registered
+/// sessions never wait on it.
 const MAX_UNCLAIMED_EVENTS: usize = 8192;
 
 /// Most bytes, by estimate, held for session IDs that are not registered yet.
@@ -197,9 +230,16 @@ const MAX_UNCLAIMED_EVENTS: usize = 8192;
 /// alone exceeds the budget.
 const MAX_UNCLAIMED_BYTES: usize = 16 * 1024 * 1024;
 
-/// Most ended registrations remembered so their trailing events are dropped.
-/// Past it, the oldest are forgotten and their late events count against
-/// [`MAX_UNCLAIMED_EVENTS`] and [`MAX_UNCLAIMED_BYTES`] instead.
+/// Most registrations remembered that ended without detaching.
+///
+/// A [`Session`](crate::session::Session) dropped without
+/// [`disconnect`](crate::session::Session::disconnect), or a startup that
+/// failed, leaves the runtime still sending this connection the session's
+/// events. Those trailing events are dropped rather than held, so a session
+/// that keeps running cannot fill [`MAX_UNCLAIMED_EVENTS`] or
+/// [`MAX_UNCLAIMED_BYTES`] and evict events a rejoining session needs.
+/// Registering the ID again clears the mark. Past this bound the oldest
+/// marks are forgotten and their events are held.
 const MAX_RETIRED_SESSIONS: usize = 4096;
 
 /// Routing table shared by the router and the client's notification dispatcher.
@@ -212,12 +252,34 @@ struct RouterState {
     unclaimed: IndexMap<SessionId, HeldEvents>,
     unclaimed_events: usize,
     unclaimed_bytes: usize,
-    /// IDs whose registration ended, oldest first. Their trailing events are
-    /// dropped rather than held for a registration that will not come.
+    /// IDs whose registration ended without detaching, oldest first. Their
+    /// trailing events are dropped rather than held.
     retired: IndexSet<SessionId>,
+    /// Detach replies read for each ID that the dispatcher has not reached
+    /// yet, oldest first. The oldest applies to the next event routed.
+    detaching: HashMap<SessionId, VecDeque<DetachMark>>,
     /// Registered IDs whose [`DispatcherInput::Claim`] the dispatcher has not
     /// reached yet, with their events so far in arrival order.
     claiming: HashMap<SessionId, Vec<SessionEventNotification>>,
+    pending_deletions: HashMap<SessionId, Vec<Arc<AtomicBool>>>,
+}
+
+struct PendingDeletion {
+    state: Arc<Mutex<RouterState>>,
+    session_id: SessionId,
+    lifecycle_seen: Arc<AtomicBool>,
+}
+
+impl Drop for PendingDeletion {
+    fn drop(&mut self) {
+        let mut state = self.state.lock();
+        if let Some(pending) = state.pending_deletions.get_mut(self.session_id.as_str()) {
+            pending.retain(|seen| !Arc::ptr_eq(seen, &self.lifecycle_seen));
+            if pending.is_empty() {
+                state.pending_deletions.remove(self.session_id.as_str());
+            }
+        }
+    }
 }
 
 /// Events held for one unregistered ID, with their estimated size.
@@ -298,7 +360,10 @@ impl RouterState {
         }
     }
 
-    fn remove(&mut self, session_id: &SessionId) {
+    /// End the registration for `session_id`, dropping events it had not
+    /// received yet, and return its token. Unless it detached, the runtime
+    /// keeps streaming its events and they are dropped too.
+    fn remove(&mut self, session_id: &SessionId, detached: bool) -> Option<RegistrationToken> {
         for event in self
             .claiming
             .remove(session_id.as_str())
@@ -306,16 +371,85 @@ impl RouterState {
         {
             log_dropped(&event, "session is no longer registered");
         }
-        if self.sessions.remove(session_id.as_str()).is_some() {
+        let token = self.sessions.remove(session_id.as_str())?.token;
+        if !detached {
             self.retired.insert(session_id.clone());
             if self.retired.len() > MAX_RETIRED_SESSIONS {
                 self.retired.shift_remove_index(0);
             }
         }
+        Some(token)
+    }
+
+    /// The dispatcher reached the point where the detach of `token`'s
+    /// registration was read: end that registration if it is still current,
+    /// so later events are held for a rejoin. Never another registration.
+    fn detached(&mut self, session_id: &SessionId, token: Option<RegistrationToken>) {
+        let Some(marks) = self.detaching.get_mut(session_id.as_str()) else {
+            return;
+        };
+        let mark = marks.pop_front();
+        if marks.is_empty() {
+            self.detaching.remove(session_id.as_str());
+        }
+        if let Some(mark) = mark {
+            self.end_detach(session_id, token, mark);
+        }
+    }
+
+    /// Every event for `session_id` routed so far was read before the detach
+    /// reply `mark`. Drop those still waiting for a registration made after
+    /// it, which the runtime never sent them to, and end the detaching
+    /// registration if it is still current.
+    fn end_detach(
+        &mut self,
+        session_id: &SessionId,
+        token: Option<RegistrationToken>,
+        mark: DetachMark,
+    ) {
+        if mark.deletion_observed() {
+            return;
+        }
+        if let Some(events) = self.unclaimed.shift_remove(session_id.as_str()) {
+            self.unclaimed_events -= events.events.len();
+            self.unclaimed_bytes -= events.estimated_bytes;
+            for event in &events.events {
+                log_dropped(event, mark.reason);
+            }
+        }
+        if self
+            .token(session_id)
+            .is_some_and(|current| current.0 >= mark.boundary)
+            && let Some(events) = self.claiming.get_mut(session_id.as_str())
+        {
+            for event in events.drain(..) {
+                log_dropped(&event, mark.reason);
+            }
+        }
+        if token.is_some() && self.token(session_id) == token {
+            self.remove(session_id, true);
+        }
+    }
+
+    fn token(&self, session_id: &SessionId) -> Option<RegistrationToken> {
+        self.sessions
+            .get(session_id.as_str())
+            .map(|senders| senders.token)
     }
 
     fn route(&mut self, notification: SessionEventNotification) {
-        if let Some(events) = self.claiming.get_mut(notification.session_id.as_str()) {
+        // Read before a detach reply: only a registration that existed then
+        // may see it.
+        if let Some(mark) = self
+            .detaching
+            .get(notification.session_id.as_str())
+            .and_then(|marks| marks.iter().find(|mark| !mark.deletion_observed()))
+            && self
+                .token(&notification.session_id)
+                .is_none_or(|token| token.0 >= mark.boundary)
+        {
+            log_dropped(&notification, mark.reason);
+        } else if let Some(events) = self.claiming.get_mut(notification.session_id.as_str()) {
             events.push(notification);
         } else if let Some(senders) = self.sessions.get(notification.session_id.as_str()) {
             if let Err(error) = senders.notifications.send(RoutedEvent {
@@ -427,6 +561,41 @@ impl SessionEventSink {
         self.0.lock().claim(session_id, token);
     }
 
+    /// The dispatcher reached a [`DispatcherInput::Detached`]: every event
+    /// read before that session detached has been routed.
+    pub(crate) fn detached(&self, session_id: &SessionId, token: Option<RegistrationToken>) {
+        self.0.lock().detached(session_id, token);
+    }
+
+    pub(crate) fn deleted(&self, session_id: &SessionId) {
+        let mut state = self.0.lock();
+        if let Some(pending) = state.pending_deletions.get(session_id.as_str()) {
+            for seen in pending {
+                seen.store(true, Ordering::Relaxed);
+            }
+        }
+        // The reader may already have consumed the callback and queued its
+        // fallback after this notification and replacement traffic.
+        if let Some(marks) = state.detaching.get(session_id.as_str()) {
+            for mark in marks {
+                if let Some(seen) = &mark.lifecycle_seen {
+                    seen.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+        // Clear every pre-deletion claim before a lifecycle subscriber can
+        // create the ID again, even when the RPC reply has not arrived.
+        state.end_detach(
+            session_id,
+            None,
+            DetachMark {
+                boundary: 0,
+                reason: "read before the session was deleted",
+                lifecycle_seen: None,
+            },
+        );
+    }
+
     /// Route one `session.event` notification's params to its session.
     ///
     /// Never waits: per-session channels are unbounded, so one slow session
@@ -470,7 +639,8 @@ pub(crate) struct SessionRouter {
     /// A true value fences the ID after failed cleanup on this connection.
     initializations: SessionInitializations,
     active_rpc_callbacks: Arc<Mutex<HashMap<SessionId, usize>>>,
-    next_token: AtomicU64,
+    /// Shared with detach marks, which compare tokens to registration order.
+    next_token: Arc<AtomicU64>,
     started: Mutex<bool>,
 }
 
@@ -481,7 +651,7 @@ impl SessionRouter {
             dispatcher: std::sync::OnceLock::new(),
             initializations: Arc::default(),
             active_rpc_callbacks: Arc::default(),
-            next_token: AtomicU64::new(0),
+            next_token: Arc::default(),
             started: Mutex::new(false),
         }
     }
@@ -546,10 +716,12 @@ impl SessionRouter {
     ) -> (SessionRegistration, Option<ReplacedRegistration>) {
         let (notif_tx, notif_rx) = mpsc::unbounded_channel();
         let (req_tx, req_rx) = mpsc::unbounded_channel();
-        let token = RegistrationToken(self.next_token.fetch_add(1, Ordering::Relaxed));
         let registration_state = Arc::new(RegistrationState::default());
         let dispatcher = self.dispatcher();
-        let replaced = self.state.lock().insert(
+        let mut state = self.state.lock();
+        // Issued under the lock so detach marks see registration order.
+        let token = RegistrationToken(self.next_token.fetch_add(1, Ordering::Relaxed));
+        let replaced = state.insert(
             session_id,
             SessionSenders {
                 notifications: notif_tx,
@@ -576,8 +748,93 @@ impl SessionRouter {
     /// ID. Only for client-wide teardown, where every session is going away
     /// regardless of owner. Owners of a specific registration must use
     /// [`unregister_owned`](Self::unregister_owned).
+    ///
+    /// The session detached, so later events are held for a rejoin, as with
+    /// [`unregister_detached`](Self::unregister_detached).
     pub(crate) fn unregister(&self, session_id: &SessionId) {
-        self.state.lock().remove(session_id);
+        self.state.lock().remove(session_id, true);
+    }
+
+    /// Mark where a successful `session.detach` reply for `session_id` was
+    /// read, for the registration `detached` (the caller's own, if it has
+    /// one). Runs on the read loop as the reply is parsed, so the mark
+    /// follows exactly the notifications read before it; see
+    /// [`DispatcherInput::Detached`] and [`DetachMark`].
+    pub(crate) fn detach_replied(
+        &self,
+        detached: Option<RegistrationToken>,
+    ) -> impl Fn(&SessionId) + Send + Sync + 'static {
+        self.discard_held_replied(detached, "read before the session detached", None)
+    }
+
+    pub(crate) fn delete_replied(
+        &self,
+        session_id: &SessionId,
+    ) -> impl Fn(&SessionId) + Send + Sync + 'static {
+        let lifecycle_seen = Arc::new(AtomicBool::new(false));
+        self.state
+            .lock()
+            .pending_deletions
+            .entry(session_id.clone())
+            .or_default()
+            .push(lifecycle_seen.clone());
+        self.discard_held_replied(
+            None,
+            "read before the session was deleted",
+            Some(PendingDeletion {
+                state: self.state.clone(),
+                session_id: session_id.clone(),
+                lifecycle_seen,
+            }),
+        )
+    }
+
+    fn discard_held_replied(
+        &self,
+        detached: Option<RegistrationToken>,
+        reason: &'static str,
+        deletion: Option<PendingDeletion>,
+    ) -> impl Fn(&SessionId) + Send + Sync + 'static {
+        let state = self.state.clone();
+        let dispatcher = self.dispatcher.get().cloned();
+        let next_token = self.next_token.clone();
+        move |session_id| {
+            let mut state = state.lock();
+            // A lifecycle boundary already retired this conversation. Applying
+            // its later reply again could discard a replacement's held events.
+            if deletion
+                .as_ref()
+                .is_some_and(|pending| pending.lifecycle_seen.load(Ordering::Relaxed))
+            {
+                return;
+            }
+            // Tokens are issued under this lock, so every registration made
+            // before this reply was read has a lower token.
+            let boundary = next_token.load(Ordering::Relaxed);
+            let queued = dispatcher
+                .as_ref()
+                .and_then(mpsc::WeakUnboundedSender::upgrade)
+                .is_some_and(|tx| {
+                    tx.send(DispatcherInput::Detached(session_id.clone(), detached))
+                        .is_ok()
+                });
+            let mark = DetachMark {
+                boundary,
+                reason,
+                lifecycle_seen: deletion
+                    .as_ref()
+                    .map(|pending| pending.lifecycle_seen.clone()),
+            };
+            if queued {
+                state
+                    .detaching
+                    .entry(session_id.clone())
+                    .or_default()
+                    .push_back(mark);
+            } else {
+                state.end_detach(session_id, detached, mark);
+            }
+        }
     }
 
     pub(crate) fn is_registered_owner(
@@ -598,12 +855,38 @@ impl SessionRouter {
     /// Returns `true` when the entry was removed. A `false` result means
     /// the registration had already been replaced by a newer one, which the
     /// caller does not own and must leave alone.
+    ///
+    /// The session did not detach, so the runtime keeps sending its events;
+    /// they are dropped until the ID registers again.
     pub(crate) fn unregister_owned(
         &self,
         session_id: &SessionId,
         token: RegistrationToken,
     ) -> bool {
         self.restore_owned(session_id, token, None)
+    }
+
+    /// Like [`unregister_owned`](Self::unregister_owned), after the session
+    /// detached: events that arrive for it after the detach, for example once
+    /// a host rejoins with a raw `sessions.connect`, are held for its next
+    /// registration. Events read before the detach are still dropped once it
+    /// is unregistered. The dispatcher may already have ended it where the
+    /// detach reply was read.
+    pub(crate) fn unregister_detached(
+        &self,
+        session_id: &SessionId,
+        token: RegistrationToken,
+    ) -> bool {
+        let mut state = self.state.lock();
+        if !state
+            .sessions
+            .get(session_id.as_str())
+            .is_some_and(|senders| senders.token == token)
+        {
+            return false;
+        }
+        state.remove(session_id, true);
+        true
     }
 
     /// Unregister the registration identified by `token`, handing the ID
@@ -631,7 +914,9 @@ impl SessionRouter {
             Some(ReplacedRegistration(senders)) => {
                 state.insert(session_id, senders, self.dispatcher().as_ref());
             }
-            None => state.remove(session_id),
+            None => {
+                state.remove(session_id, false);
+            }
         }
         true
     }

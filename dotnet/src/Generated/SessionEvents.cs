@@ -4996,6 +4996,12 @@ public sealed partial class SessionPermissionRecoveryData
 /// <summary>Payload of `user.message` with displayed and model-transformed content, attachments, source/delivery metadata, mode, and telemetry IDs.</summary>
 public sealed partial class UserMessageData
 {
+    /// <summary>True when the host marked this message as written by an agent and delivered in the user role, such as the kickoff of a session another agent created. Only automatic permission decisions read it; absent in other messages and in older events.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("agentAuthored")]
+    internal bool? AgentAuthored { get; set; }
+
     /// <summary>The agent mode that was active when this message was sent.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("agentMode")]

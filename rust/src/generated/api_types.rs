@@ -638,6 +638,14 @@ pub mod rpc_methods {
     pub const CATALOG_SELECT: &str = "catalog.select";
     /// `catalog.planInstallFromReference`
     pub const CATALOG_PLANINSTALLFROMREFERENCE: &str = "catalog.planInstallFromReference";
+    /// `agents.validateName`
+    pub const AGENTS_VALIDATENAME: &str = "agents.validateName";
+    /// `agents.listToolCategories`
+    pub const AGENTS_LISTTOOLCATEGORIES: &str = "agents.listToolCategories";
+    /// `agents.generateFileContent`
+    pub const AGENTS_GENERATEFILECONTENT: &str = "agents.generateFileContent";
+    /// `agents.createFile`
+    pub const AGENTS_CREATEFILE: &str = "agents.createFile";
     /// `agents.discover`
     pub const AGENTS_DISCOVER: &str = "agents.discover";
     /// `agents.getDiscoveryPaths`
@@ -836,6 +844,8 @@ pub mod rpc_methods {
     pub(crate) const CLOUDTASKS_DELETE: &str = "cloudTasks.delete";
     /// `cloudTasks.get`
     pub(crate) const CLOUDTASKS_GET: &str = "cloudTasks.get";
+    /// `cloudTasks.getSession`
+    pub(crate) const CLOUDTASKS_GETSESSION: &str = "cloudTasks.getSession";
     /// `cloudTasks.getSessionLogs`
     pub(crate) const CLOUDTASKS_GETSESSIONLOGS: &str = "cloudTasks.getSessionLogs";
     /// `cloudTasks.getSessionReplay`
@@ -988,6 +998,9 @@ pub mod rpc_methods {
     pub(crate) const SESSION_REMOTE_SENDWITHADMISSION: &str = "session.remote.sendWithAdmission";
     /// `session.remote.publishState`
     pub(crate) const SESSION_REMOTE_PUBLISHSTATE: &str = "session.remote.publishState";
+    /// `session.remote.attachMissionControl`
+    pub(crate) const SESSION_REMOTE_ATTACHMISSIONCONTROL: &str =
+        "session.remote.attachMissionControl";
     /// `session.remote.enable`
     pub const SESSION_REMOTE_ENABLE: &str = "session.remote.enable";
     /// `session.remote.disable`
@@ -2422,9 +2435,9 @@ pub(crate) use sdk_api_session::{
     SessionMcpOauthSaveStaticClientSecretParams, SessionMcpOauthStoreKeyParams,
     SessionMcpOauthTestConnectionParams, SessionMcpOauthTryRefreshTokensParams,
     SessionModelClearStartupSeedParams, SessionModelClearStartupSeedResult,
-    SessionRemoteSendWithAdmissionParams, SessionSandboxInvokeOwnedParams,
-    SessionSandboxInvokeOwnedResult, SessionUsageSetCodeChangesParams,
-    SessionsListRemotePageRequest, SessionsListRemotePageResult,
+    SessionRemoteAttachMissionControlResult, SessionRemoteSendWithAdmissionParams,
+    SessionSandboxInvokeOwnedParams, SessionSandboxInvokeOwnedResult,
+    SessionUsageSetCodeChangesParams, SessionsListRemotePageRequest, SessionsListRemotePageResult,
 };
 
 #[path = "api_domain_configuration.rs"]
@@ -2798,7 +2811,8 @@ pub(crate) use sdk_api_host::{
     GitHubRepositoryAtPathRequest, GitHubRepositoryAtPathResult, GitHubRepositoryByIdRequest,
     GitHubRepositoryByIdResult, GitHubRepositoryGetByIdResult,
     GitHubRepositoryLookupBranchPullRequestResult, GitHubRepositoryOwnerName, GitRemoteRepository,
-    GitReposFromRemotesRequest, GitReposFromRemotesResult, RemoteCheckSendAdmissionParams,
+    GitReposFromRemotesRequest, GitReposFromRemotesResult, RemoteAttachMissionControlRequest,
+    RemoteAttachMissionControlResult, RemoteCheckSendAdmissionParams,
     RemoteCheckSendAdmissionResult,
 };
 
@@ -2865,8 +2879,8 @@ pub(crate) use sdk_api_workflow::{
 mod sdk_api_services;
 pub use sdk_api_services::{
     AbortRequest, AbortResult, AcceptedEnqueueCommandResult, AgentDiscoveryPath,
-    AgentDiscoveryPathList, AgentDiscoveryPathScope, AgentGetCurrentResult, AgentList,
-    AgentListRequest, AgentRegistryEnsureDirResult, AgentRegistryError,
+    AgentDiscoveryPathList, AgentDiscoveryPathScope, AgentFileLocation, AgentGetCurrentResult,
+    AgentList, AgentListRequest, AgentRegistryEnsureDirResult, AgentRegistryError,
     AgentRegistryListEntriesRequest, AgentRegistryListEntriesResult, AgentRegistryLiveTargetEntry,
     AgentRegistryLiveTargetEntryAttentionKind, AgentRegistryLiveTargetEntryKind,
     AgentRegistryLiveTargetEntryLastTerminalEvent, AgentRegistryLiveTargetEntryStatus,
@@ -2878,18 +2892,22 @@ pub use sdk_api_services::{
     AgentRegistrySpawnSpawnedKind, AgentRegistrySpawnValidationError,
     AgentRegistrySpawnValidationErrorField, AgentRegistrySpawnValidationErrorKind,
     AgentRegistrySpawnValidationErrorReason, AgentReloadResult, AgentSelectRequest,
-    AgentSelectResult, AgentSetPromptRequest, AgentsDiscoverRequest, AgentsDiscoverResult,
-    AgentsGetDiscoveryPathsRequest, AgentsGetDiscoveryPathsResult,
-    AhpConnectionAuthenticateRequest, AhpConnectionCreateRequest,
-    AhpConnectionCreateSessionRequest, AhpConnectionCreateSessionResult,
-    AhpConnectionDisposeSessionRequest, AhpConnectionEvent, AhpConnectionEventProjected,
-    AhpConnectionEventProjectedKind, AhpConnectionEventState, AhpConnectionEventStateKind,
-    AhpConnectionLogOpenRequest, AhpConnectionLogRequest, AhpConnectionLogWriteRequest,
-    AhpConnectionLogsOpenResult, AhpConnectionModelSelection, AhpConnectionProjectOptions,
-    AhpConnectionReadEventsResult, AhpConnectionRequest, AhpConnectionResourceAuthResult,
-    AhpConnectionSelectSessionRequest, AhpConnectionSelectSessionResult,
-    AhpConnectionSessionOptions, AhpConnectionStateResult, AhpConnectionTransport,
-    AhpConnectionTransportDirect, AhpConnectionTransportDirectKind,
+    AgentSelectResult, AgentSetPromptRequest, AgentToolCategory, AgentToolCategoryId,
+    AgentsCreateFileRequest, AgentsCreateFileResult, AgentsCreateFileResultError,
+    AgentsCreateFileResultErrorKind, AgentsCreateFileResultSuccess,
+    AgentsCreateFileResultSuccessKind, AgentsDiscoverRequest, AgentsDiscoverResult,
+    AgentsGenerateFileContentRequest, AgentsGenerateFileContentResult,
+    AgentsGetDiscoveryPathsRequest, AgentsGetDiscoveryPathsResult, AgentsListToolCategoriesResult,
+    AgentsValidateNameRequest, AgentsValidateNameResult, AhpConnectionAuthenticateRequest,
+    AhpConnectionCreateRequest, AhpConnectionCreateSessionRequest,
+    AhpConnectionCreateSessionResult, AhpConnectionDisposeSessionRequest, AhpConnectionEvent,
+    AhpConnectionEventProjected, AhpConnectionEventProjectedKind, AhpConnectionEventState,
+    AhpConnectionEventStateKind, AhpConnectionLogOpenRequest, AhpConnectionLogRequest,
+    AhpConnectionLogWriteRequest, AhpConnectionLogsOpenResult, AhpConnectionModelSelection,
+    AhpConnectionProjectOptions, AhpConnectionReadEventsResult, AhpConnectionRequest,
+    AhpConnectionResourceAuthResult, AhpConnectionSelectSessionRequest,
+    AhpConnectionSelectSessionResult, AhpConnectionSessionOptions, AhpConnectionStateResult,
+    AhpConnectionTransport, AhpConnectionTransportDirect, AhpConnectionTransportDirectKind,
     AhpConnectionTransportMissionControl, AhpConnectionTransportMissionControlKind,
     AhpConnectionsAttachSessionResult, AhpConnectionsAuthenticateResult,
     AhpConnectionsConnectResult, AhpConnectionsCreateResult, AhpConnectionsCreateSessionResult,
@@ -3208,8 +3226,8 @@ pub(crate) use sdk_api_services::{
     CafeMetricsStartRequest, CafeMetricsStartResult, CloudTasksCreateParams,
     CloudTasksCreateResult, CloudTasksDeleteParams, CloudTasksDeleteResult, CloudTasksGetParams,
     CloudTasksGetResult, CloudTasksGetSessionLogsParams, CloudTasksGetSessionLogsResult,
-    CloudTasksGetSessionReplayParams, CloudTasksGetSessionReplayResult,
-    CloudTasksGetSharingStatusParams, CloudTasksGetSharingStatusResult,
+    CloudTasksGetSessionParams, CloudTasksGetSessionReplayParams, CloudTasksGetSessionReplayResult,
+    CloudTasksGetSessionResult, CloudTasksGetSharingStatusParams, CloudTasksGetSharingStatusResult,
     CloudTasksResolveTaskIdParams, CloudTasksResolveTaskIdResult, CloudTasksSetSharingStatusParams,
     CloudTasksSetSharingStatusResult, CloudTasksSharingStatusResult, ConnectClientInfo,
     ConnectRequest, ConnectResult, FeedbackUploadCancelResult, FeedbackUploadOperationRequest,

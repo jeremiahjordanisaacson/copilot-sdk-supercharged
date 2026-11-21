@@ -41,7 +41,7 @@ class ClientTurnIdCompatibilityTest {
     @Test
     void userMessageConstructorWithClientTurnIdKeepsArgumentMeaning() {
         var data = new UserMessageEventData(null, "hi", null, "message-1", "host-turn-1", null, null, null, null, null,
-                "user", UserMessageDelivery.STEERING, null, null, null, "turn-1", null);
+                "user", null, UserMessageDelivery.STEERING, null, null, null, "turn-1", null);
 
         assertEquals("message-1", data.messageId());
         assertEquals("host-turn-1", data.clientTurnId());
@@ -49,6 +49,8 @@ class ClientTurnIdCompatibilityTest {
         assertEquals("turn-1", data.turnId());
         assertNull(data.hasSubmittedTask());
         assertFalse(MAPPER.valueToTree(data).has("hasSubmittedTask"));
+        assertNull(data.agentAuthored());
+        assertFalse(MAPPER.valueToTree(data).has("agentAuthored"));
     }
 
     @Test

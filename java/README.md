@@ -63,28 +63,6 @@ runtimeOnly 'com.microsoft:copilot-sdk-runtime:1.0.28:linux-x64'
 
 Java previews are published three times per weekday, at 10:00, 13:00, and 15:00 Pacific, through the matched SDK release pipeline. Previews with the same base SDK version update one rolling Maven coordinate: SDK `1.0.15-preview.1`, `1.0.15-preview.2`, and later `1.0.15` previews all publish Java `1.0.15-SNAPSHOT`.
 
-The publisher best-effort retains pre-upload metadata and deployed JAR checksums.
-After publishing and Java documentation dispatch complete, the independent
-`sdk-starter-post-publish.yml` verifies Sonatype's checksum sidecars and dispatches
-starter tests with the immutable Java snapshot, exact C# package version and Python
-wheel version. Unverified snapshots never become test inputs; receivers await packages.
-`PER_LANGUAGE_SYSTEM_TESTS_REF` selects the receiver ref for preview releases
-(including SDK-only previews), defaulting to `main`; stable releases do not dispatch tests.
-Supplemental evidence/dispatch failures produce warnings without failing publication
-or gating documentation. Receiver results cannot change the completed publisher.
-For existing-artifact tests without publication, use `sdk-starter-system-tests.yml`.
-
-For an isolated end-to-end trial, manually dispatch
-`sdk-java-preview-system-tests.yml` with a completed successful `publish.yml` run ID
-and the receiver branch. It verifies and reuses that public preview's retained source,
-runtime inputs and existing Java source tag, then publishes **only Java** to a new
-timestamped snapshot. It does not publish CLI, Node.js, Python, Go, .NET or Rust
-releases or create new source tags. Push events only register the preview workflow;
-publication requires an explicit manual dispatch. All remote dispatches reuse
-`JAVA_RELEASE_GITHUB_TOKEN`, the existing Java documentation credential, which must
-allow Actions write access to both receiver repositories. The release App is not
-installed on `copilot-sdk-starters`; no default Actions token or new credential is used.
-
 To use snapshots, add the snapshot repository and depend on the rolling version:
 
 #### Maven

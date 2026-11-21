@@ -3675,6 +3675,9 @@ crate::record_serde::wire_record!(SessionPermissionRecoveryData { attempts: "att
 /// Session event "user.message". Payload of `user.message` with displayed and model-transformed content, attachments, source/delivery metadata, mode, and telemetry IDs.
 #[derive(Debug, Clone, Default)]
 pub struct UserMessageData {
+    /// True when the host marked this message as written by an agent and delivered in the user role, such as the kickoff of a session another agent created. Only automatic permission decisions read it; absent in other messages and in older events.
+    #[doc(hidden)]
+    pub agent_authored: Option<bool>,
     /// The agent mode that was active when this message was sent
     pub agent_mode: Option<UserMessageAgentMode>,
     /// Files, selections, or GitHub references attached to the message
@@ -3710,7 +3713,7 @@ pub struct UserMessageData {
     /// The agent-loop turn ID that consumed this message; absent when no agent-loop turn consumed it
     pub turn_id: Option<String>,
 }
-crate::record_serde::wire_record!(UserMessageData { agent_mode: "agentMode" if is_none, attachments: "attachments" if is_none, causal_dependencies: "causalDependencies" if is_none, client_turn_id: "clientTurnId" if is_none, content: "content", delivery: "delivery" if is_none, has_submitted_task: "hasSubmittedTask" if is_none, interaction_id: "interactionId" if is_none, is_autopilot_continuation: "isAutopilotContinuation" if is_none, message_id: "messageId" if is_none, native_document_path_fallback_paths: "nativeDocumentPathFallbackPaths" if is_none, parent_agent_task_id: "parentAgentTaskId" if is_none, responses_reasoning: "responsesReasoning" if is_none, source: "source" if is_none, supported_native_document_mime_types: "supportedNativeDocumentMimeTypes" if is_none, transformed_content: "transformedContent" if is_none, turn_id: "turnId" if is_none });
+crate::record_serde::wire_record!(UserMessageData { agent_authored: "agentAuthored" if is_none, agent_mode: "agentMode" if is_none, attachments: "attachments" if is_none, causal_dependencies: "causalDependencies" if is_none, client_turn_id: "clientTurnId" if is_none, content: "content", delivery: "delivery" if is_none, has_submitted_task: "hasSubmittedTask" if is_none, interaction_id: "interactionId" if is_none, is_autopilot_continuation: "isAutopilotContinuation" if is_none, message_id: "messageId" if is_none, native_document_path_fallback_paths: "nativeDocumentPathFallbackPaths" if is_none, parent_agent_task_id: "parentAgentTaskId" if is_none, responses_reasoning: "responsesReasoning" if is_none, source: "source" if is_none, supported_native_document_mime_types: "supportedNativeDocumentMimeTypes" if is_none, transformed_content: "transformedContent" if is_none, turn_id: "turnId" if is_none });
 
 /// Session event "pending_messages.modified". Empty payload; the event signals that the pending message queue has changed
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

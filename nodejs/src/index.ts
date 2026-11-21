@@ -57,6 +57,18 @@ export type {
     SessionAccountsLogoutResult,
 } from "./generated/rpc.js";
 export type {
+    AgentFileLocation,
+    AgentToolCategory,
+    AgentToolCategoryId,
+    AgentsCreateFileRequest,
+    AgentsCreateFileResult,
+    AgentsGenerateFileContentRequest,
+    AgentsGenerateFileContentResult,
+    AgentsListToolCategoriesResult,
+    AgentsValidateNameRequest,
+    AgentsValidateNameResult,
+} from "./generated/rpc.js";
+export type {
     DecisionAnswer,
     DecisionContext,
     DecisionErrorData,

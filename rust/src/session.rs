@@ -721,7 +721,7 @@ impl PendingSessionRegistration {
         match tokio::spawn(async move {
             let detached = match tokio::time::timeout(
                 Duration::from_secs(10),
-                self.client.detach_session(&id),
+                self.client.detach_session(&id, Some(token)),
             )
             .await
             {
@@ -2240,12 +2240,14 @@ impl Session {
     /// [`Client::delete_session`]: crate::Client::delete_session
     /// [`send_and_wait`]: Self::send_and_wait
     pub async fn disconnect(&self) -> Result<(), Error> {
-        self.client.detach_session(&self.id).await?;
+        self.client
+            .detach_session(&self.id, Some(self.registration_token))
+            .await?;
         self.external_tools_shutdown.cancel();
         self.stop_event_loop().await;
         self.github_token_registration.lock().take();
         self.client
-            .unregister_session_owned(&self.id, self.registration_token);
+            .unregister_session_detached(&self.id, self.registration_token);
         Ok(())
     }
 

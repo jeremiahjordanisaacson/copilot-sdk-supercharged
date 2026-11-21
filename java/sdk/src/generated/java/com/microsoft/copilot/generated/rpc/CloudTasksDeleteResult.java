@@ -14,7 +14,7 @@ import com.microsoft.copilot.CopilotExperimental;
 import javax.annotation.processing.Generated;
 
 /**
- * The HTTP outcome of deleting a cloud task. The deletion returns no body, so a successful call carries nothing beyond `ok`; a failed one is described by the remaining fields rather than raised as an error, so a caller can surface the service's own explanation.
+ * The HTTP outcome of deleting a cloud task. When `requireCredential` is true, `credentialResolved` distinguishes missing credentials from an HTTP outcome. HTTP failures retain the service's explanation instead of being raised as errors.
  *
  * @apiNote This type is experimental and may change in a future version.
  *
@@ -27,6 +27,8 @@ import javax.annotation.processing.Generated;
 record CloudTasksDeleteResult(
     /** Whether the service accepted the deletion. */
     @JsonProperty("ok") Boolean ok,
+    /** Present when requireCredential is true. False means no credential was resolved and no HTTP request was made. */
+    @JsonProperty("credentialResolved") Boolean credentialResolved,
     /** HTTP status code of the response, when one was received. */
     @JsonProperty("statusCode") Long statusCode,
     /** Human-readable failure explanation, when the call failed. */
@@ -57,6 +59,7 @@ record CloudTasksDeleteResult(
     public static final class Builder {
         private Builder() {}
         private Boolean ok;
+        private Boolean credentialResolved;
         private Long statusCode;
         private String errorMessage;
         private String errorPayloadJson;
@@ -70,6 +73,18 @@ record CloudTasksDeleteResult(
         @com.microsoft.copilot.CopilotExperimental
         public Builder ok(Boolean value) {
             this.ok = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code credentialResolved} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder credentialResolved(Boolean value) {
+            this.credentialResolved = value;
             return this;
         }
 
@@ -117,7 +132,7 @@ record CloudTasksDeleteResult(
          */
         public CloudTasksDeleteResult build() {
             if (ok == null) throw new IllegalStateException("Missing required property: ok");
-            return new CloudTasksDeleteResult(ok, statusCode, errorMessage, errorPayloadJson);
+            return new CloudTasksDeleteResult(ok, credentialResolved, statusCode, errorMessage, errorPayloadJson);
         }
     }
 }

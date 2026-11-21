@@ -27,6 +27,50 @@ public final class ServerAgentsApi {
     }
 
     /**
+     * Checks whether an agent name produces a usable filename, without filesystem access.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<AgentsValidateNameResult> validateName(AgentsValidateNameParams params) {
+        return caller.invoke("agents.validateName", params, AgentsValidateNameResult.class);
+    }
+
+    /**
+     * Lists the closed agent tool groups in canonical display order for agent-file authoring.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<AgentsListToolCategoriesResult> listToolCategories() {
+        return caller.invoke("agents.listToolCategories", java.util.Map.of(), AgentsListToolCategoriesResult.class);
+    }
+
+    /**
+     * Renders agent Markdown without writing a file. Omitted tools allow all tools; an empty list allows none.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<AgentsGenerateFileContentResult> generateFileContent(AgentsGenerateFileContentParams params) {
+        return caller.invoke("agents.generateFileContent", params, AgentsGenerateFileContentResult.class);
+    }
+
+    /**
+     * Creates an agent file in the project or user agent directory without replacing an existing file. Returns validation and filesystem errors as author-visible outcomes.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<AgentsCreateFileResult> createFile(AgentsCreateFileParams params) {
+        return caller.invoke("agents.createFile", params, AgentsCreateFileResult.class);
+    }
+
+    /**
      * Discovers custom agents across user, project, plugin, and remote sources.
      *
      * @apiNote This method is experimental and may change in a future version.

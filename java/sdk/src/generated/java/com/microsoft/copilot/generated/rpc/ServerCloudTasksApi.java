@@ -38,7 +38,7 @@ final class ServerCloudTasksApi {
     }
 
     /**
-     * Deletes one cloud coding-agent task, the remote run `cloudTasks.create` started. The deletion is a soft one: the service withdraws the task from its listings rather than destroying the record, so a host removing a run from its own UI is the intended caller. Answered above any session for the same reason as `cloudTasks.get` -- the task is remote and has no local counterpart. Hosts other than the CLI want this: a GitHub App or an SDK consumer that manages cloud agent runs withdraws the same record under the same credential, and resolving it here keeps one credential-resolution and endpoint path. The runtime resolves each token from `authInfo` or `authContextId`. A host may preserve an explicit `baseUrl`; omission derives the endpoint from `authInfo`. The result is the HTTP outcome rather than a bare success flag: the call returns no body, so `ok` alone describes a success, while a failure is reported through `statusCode`, `errorMessage` and `errorPayloadJson` instead of being raised as an error.
+     * Deletes one cloud coding-agent task, the remote run `cloudTasks.create` started. The deletion is a soft one: the service withdraws the task from its listings rather than destroying the record, so a host removing a run from its own UI is the intended caller. Answered above any session for the same reason as `cloudTasks.get` -- the task is remote and has no local counterpart. Hosts other than the CLI want this: a GitHub App or an SDK consumer that manages cloud agent runs withdraws the same record under the same credential, and resolving it here keeps one credential-resolution and endpoint path. The runtime resolves each token from `authInfo` or `authContextId`. A host may preserve an explicit `baseUrl`; omission derives the endpoint from `authInfo`. Set `requireCredential` to stop before HTTP when no nonempty GitHub credential resolves; `credentialResolved` then distinguishes that case from an HTTP failure. Omission preserves the existing request and result behavior. HTTP failures retain `statusCode`, `errorMessage` and `errorPayloadJson` instead of being raised as errors.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0
@@ -57,6 +57,17 @@ final class ServerCloudTasksApi {
     @CopilotExperimental
     CompletableFuture<CloudTasksGetResult> get(CloudTasksGetParams params) {
         return caller.invoke("cloudTasks.get", params, CloudTasksGetResult.class);
+    }
+
+    /**
+     * Reads a Mission Control session to resolve its environment and connection target. SDK hosts and ACP clients use this before attaching to a cloud session. The runtime resolves the credential and endpoint for each request; HTTP failures remain structured results.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<CloudTasksGetResult> getSession(CloudTasksGetSessionParams params) {
+        return caller.invoke("cloudTasks.getSession", params, CloudTasksGetResult.class);
     }
 
     /**

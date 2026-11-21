@@ -44,6 +44,8 @@ record SessionSendAndWaitParams(
     @JsonProperty("requiredTool") String requiredTool,
     /** Optional provenance tag copied to the resulting user.message event. Must be `user`, `system`, `command-&lt;command-id>` for command-originated messages, `schedule-&lt;numeric-id>` for scheduled prompts, `agent-&lt;agent-id>` for prompts sent by another agent, or `automation-&lt;automation-id>` for turns a host sends on behalf of an automation the user configured. An automation turn defines the session's task like a user message but carries no human authority. */
     @JsonProperty("source") String source,
+    /** Set by the host when an agent wrote this message and the host delivers it in the user role, such as the kickoff of a session another agent created. Copied to the resulting user.message event. Only automatic permission decisions read it: they treat the text as another agent's message, never as the user's own words or authorization. Delivery, history and the model's view of the message are unchanged. It can only withhold human authority, never add it. Remote sessions, hosted by Mission Control or over AHP, do not carry it: their transports deliver only the prompt, so there the message is judged as it would be without the mark. */
+    @JsonProperty("agentAuthored") Boolean agentAuthored,
     /** The UI mode the agent was in when this message was sent. Defaults to the session's current mode. */
     @JsonProperty("agentMode") SendAgentMode agentMode,
     /** Custom HTTP headers to include in outbound model requests for this turn. Merged with session-level provider headers; per-turn headers augment and overwrite session-level headers with the same key. */
@@ -157,6 +159,7 @@ record SessionSendAndWaitParams(
         private Boolean billable;
         private String requiredTool;
         private String source;
+        private Boolean agentAuthored;
         private SendAgentMode agentMode;
         private Map<String, String> requestHeaders;
         private SessionSendAndWaitParamsResponseFormat responseFormat;
@@ -274,6 +277,18 @@ record SessionSendAndWaitParams(
         }
 
         /**
+         * Sets the {@code agentAuthored} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder agentAuthored(Boolean value) {
+            this.agentAuthored = value;
+            return this;
+        }
+
+        /**
          * Sets the {@code agentMode} property.
          * @param value the property value
          * @return this builder
@@ -365,7 +380,7 @@ record SessionSendAndWaitParams(
          */
         public SessionSendAndWaitParams build() {
             if (prompt == null) throw new IllegalStateException("Missing required property: prompt");
-            return new SessionSendAndWaitParams(sessionId, prompt, displayPrompt, attachments, mode, prepend, billable, requiredTool, source, agentMode, requestHeaders, responseFormat, traceparent, tracestate, clientTurnId, wait_);
+            return new SessionSendAndWaitParams(sessionId, prompt, displayPrompt, attachments, mode, prepend, billable, requiredTool, source, agentAuthored, agentMode, requestHeaders, responseFormat, traceparent, tracestate, clientTurnId, wait_);
         }
     }
 }

@@ -57,6 +57,8 @@ public final class UserMessageEvent extends SessionEvent {
         @JsonProperty("nativeDocumentPathFallbackPaths") List<String> nativeDocumentPathFallbackPaths,
         /** Origin of this message, used for timeline filtering and attribution (e.g., `skill-pdf` for hidden skill injection or `agent-&lt;agent-id>` for an inter-agent prompt) */
         @JsonProperty("source") String source,
+        /** True when the host marked this message as written by an agent and delivered in the user role, such as the kickoff of a session another agent created. Only automatic permission decisions read it; absent in other messages and in older events. */
+        @JsonProperty("agentAuthored") Boolean agentAuthored,
         /** How this message was delivered to the agentic loop relative to loop state (idle-start vs. steering/queued while busy). The timing axis; combine with `source` (origin) for the full picture. Used for telemetry attribution. */
         @JsonProperty("delivery") UserMessageDelivery delivery,
         /** The agent mode that was active when this message was sent */
@@ -101,6 +103,7 @@ public final class UserMessageEvent extends SessionEvent {
             private List<String> supportedNativeDocumentMimeTypes;
             private List<String> nativeDocumentPathFallbackPaths;
             private String source;
+            private Boolean agentAuthored;
             private UserMessageDelivery delivery;
             private UserMessageAgentMode agentMode;
             private Boolean isAutopilotContinuation;
@@ -230,6 +233,17 @@ public final class UserMessageEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code agentAuthored} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder agentAuthored(Boolean value) {
+                this.agentAuthored = value;
+                return this;
+            }
+
+            /**
              * Sets the {@code delivery} property.
              * @param value the property value
              * @return this builder
@@ -303,7 +317,7 @@ public final class UserMessageEvent extends SessionEvent {
              */
             public UserMessageEventData build() {
                 if (content == null) throw new IllegalStateException("Missing required property: content");
-                return new UserMessageEventData(causalDependencies, content, responsesReasoning, messageId, clientTurnId, transformedContent, hasSubmittedTask, attachments, supportedNativeDocumentMimeTypes, nativeDocumentPathFallbackPaths, source, delivery, agentMode, isAutopilotContinuation, interactionId, turnId, parentAgentTaskId);
+                return new UserMessageEventData(causalDependencies, content, responsesReasoning, messageId, clientTurnId, transformedContent, hasSubmittedTask, attachments, supportedNativeDocumentMimeTypes, nativeDocumentPathFallbackPaths, source, agentAuthored, delivery, agentMode, isAutopilotContinuation, interactionId, turnId, parentAgentTaskId);
             }
         }
     }

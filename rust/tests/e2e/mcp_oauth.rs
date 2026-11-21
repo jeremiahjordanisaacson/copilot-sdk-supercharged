@@ -28,7 +28,7 @@ const CIMD_URL: &str = "https://github.com/copilot/cli/client-metadata.json";
 async fn should_use_cimd_url_instead_of_dynamic_registration() {
     with_e2e_context_no_snapshot(|ctx| {
         Box::pin(async move {
-            let oauth_server = OAuthMcpServer::start_with_cimd(
+            let server = OAuthMcpServer::start_with_cimd(
                 ctx.repo_root()
                     .join("test/harness/test-mcp-oauth-server.mjs"),
             )
@@ -45,7 +45,7 @@ async fn should_use_cimd_url_instead_of_dynamic_registration() {
                                 McpServerConfig::Http(McpHttpServerConfig {
                                     tools: Some(vec!["*".to_string()]),
                                     timeout: None,
-                                    url: format!("{}/mcp", oauth_server.url),
+                                    url: format!("{}/mcp", server.url),
                                     headers: HashMap::new(),
                                 }),
                             )]))
@@ -73,7 +73,7 @@ async fn should_use_cimd_url_instead_of_dynamic_registration() {
                     .map(|(_, value)| value.into_owned()),
                 Some(CIMD_URL.to_string())
             );
-            let requests = oauth_server.requests().await;
+            let requests = read_fixture_requests(server.port).await;
             assert!(requests.iter().all(|request| request.path != "/register"));
         })
     })
@@ -85,7 +85,7 @@ async fn should_satisfy_mcp_oauth_using_host_provided_token() {
     with_e2e_context_no_snapshot(|ctx| {
         Box::pin(async move {
             ctx.set_default_copilot_user();
-            let mut oauth_server = OAuthMcpServer::start(
+            let mut server = OAuthMcpServer::start(
                 ctx.repo_root()
                     .join("test/harness/test-mcp-oauth-server.mjs"),
             )
@@ -103,7 +103,7 @@ async fn should_satisfy_mcp_oauth_using_host_provided_token() {
                                 McpServerConfig::Http(McpHttpServerConfig {
                                     tools: Some(vec!["*".to_string()]),
                                     timeout: None,
-                                    url: format!("{}/mcp", oauth_server.url),
+                                    url: format!("{}/mcp", server.url),
                                     headers: HashMap::new(),
                                 }),
                             )]))
@@ -135,7 +135,7 @@ async fn should_satisfy_mcp_oauth_using_host_provided_token() {
                 .clone()
                 .expect("MCP auth handler should be invoked");
             assert_eq!(request.server_name, server_name);
-            assert_eq!(request.server_url, format!("{}/mcp", oauth_server.url));
+            assert_eq!(request.server_url, format!("{}/mcp", server.url));
             assert_eq!(request.reason, McpOauthRequestReason::Initial);
             let www_authenticate = request
                 .www_authenticate_params
@@ -144,7 +144,7 @@ async fn should_satisfy_mcp_oauth_using_host_provided_token() {
                 www_authenticate.resource_metadata_url,
                 Some(format!(
                     "{}/.well-known/oauth-protected-resource",
-                    oauth_server.url
+                    server.url
                 ))
             );
             assert_eq!(www_authenticate.scope.as_deref(), Some("mcp.read"));
@@ -156,9 +156,9 @@ async fn should_satisfy_mcp_oauth_using_host_provided_token() {
                     .expect("resource metadata"),
             )
             .expect("parse resource metadata");
-            assert_eq!(metadata["resource"], format!("{}/mcp", oauth_server.url));
+            assert_eq!(metadata["resource"], format!("{}/mcp", server.url));
 
-            let requests = oauth_server.requests().await;
+            let requests = read_fixture_requests(server.port).await;
             assert!(
                 requests
                     .iter()
@@ -170,7 +170,7 @@ async fn should_satisfy_mcp_oauth_using_host_provided_token() {
 
             session.disconnect().await.expect("disconnect session");
             client.stop().await.expect("stop client");
-            oauth_server.stop().await;
+            server.stop().await;
         })
     })
     .await;
@@ -181,7 +181,7 @@ async fn should_request_replacement_tokens_across_mcp_oauth_lifecycle() {
     with_e2e_context_no_snapshot(|ctx| {
         Box::pin(async move {
             ctx.set_default_copilot_user();
-            let mut oauth_server = OAuthMcpServer::start(
+            let mut server = OAuthMcpServer::start(
                 ctx.repo_root()
                     .join("test/harness/test-mcp-oauth-server.mjs"),
             )
@@ -200,7 +200,7 @@ async fn should_request_replacement_tokens_across_mcp_oauth_lifecycle() {
                                 McpServerConfig::Http(McpHttpServerConfig {
                                     tools: Some(vec!["*".to_string()]),
                                     timeout: None,
-                                    url: format!("{}/mcp", oauth_server.url),
+                                    url: format!("{}/mcp", server.url),
                                     headers: HashMap::new(),
                                 }),
                             )]))
@@ -237,7 +237,7 @@ async fn should_request_replacement_tokens_across_mcp_oauth_lifecycle() {
                 ]
             );
 
-            let requests = oauth_server.requests().await;
+            let requests = read_fixture_requests(server.port).await;
             assert!(requests.iter().any(|request| {
                 request.authorization.as_deref() == Some(&format!("Bearer {REFRESH_TOKEN}"))
             }));
@@ -250,7 +250,7 @@ async fn should_request_replacement_tokens_across_mcp_oauth_lifecycle() {
 
             session.disconnect().await.expect("disconnect session");
             client.stop().await.expect("stop client");
-            oauth_server.stop().await;
+            server.stop().await;
         })
     })
     .await;
@@ -474,39 +474,43 @@ impl OAuthMcpServer {
         Self { child, url, port }
     }
 
-    async fn requests(&self) -> Vec<OAuthMcpRequest> {
-        let client = reqwest::Client::builder();
-        // macOS reqwest has no default rustls provider; this plain-HTTP client never handshakes.
-        #[cfg(target_os = "macos")]
-        let client = client.tls_backend_preconfigured(
-            rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
-                rustls::crypto::aws_lc_rs::default_provider(),
-            ))
-            .with_safe_default_protocol_versions()
-            .expect("OAuth MCP request TLS versions")
-            .with_root_certificates(rustls::RootCertStore::empty())
-            .with_no_client_auth(),
-        );
-        // This test-only server binds to 127.0.0.1 and never sends request logs off-host.
-        let text = client
-            .build()
-            .expect("build OAuth MCP request client")
-            .get(format!("http://127.0.0.1:{}/__requests", self.port)) // codeql[rust/cleartext-transmission]
-            .send()
-            .await
-            .expect("fetch OAuth MCP requests")
-            .error_for_status()
-            .expect("OAuth MCP request status")
-            .text()
-            .await
-            .expect("read OAuth MCP requests");
-        serde_json::from_str(&text).expect("decode OAuth MCP requests")
-    }
-
     async fn stop(&mut self) {
         let _ = self.child.kill().await;
         let _ = self.child.wait().await;
     }
+}
+
+async fn read_fixture_requests(port: u16) -> Vec<OAuthMcpRequest> {
+    let mut url = Url::parse("http://127.0.0.1/__requests").expect("valid loopback URL");
+    url.set_port(Some(port)).expect("set fixture listener port");
+    // Keep the request log on loopback, even if the test host configures a proxy.
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none());
+    // macOS reqwest has no default rustls provider; this plain-HTTP client never handshakes.
+    #[cfg(target_os = "macos")]
+    let client = client.tls_backend_preconfigured(
+        rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .expect("OAuth MCP request TLS versions")
+        .with_root_certificates(rustls::RootCertStore::empty())
+        .with_no_client_auth(),
+    );
+    let text = client
+        .build()
+        .expect("build OAuth MCP request client")
+        .get(url)
+        .send()
+        .await
+        .expect("fetch OAuth MCP requests")
+        .error_for_status()
+        .expect("OAuth MCP request status")
+        .text()
+        .await
+        .expect("read OAuth MCP requests");
+    serde_json::from_str(&text).expect("decode OAuth MCP requests")
 }
 
 async fn wait_for_mcp_server_status(

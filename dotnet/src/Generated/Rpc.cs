@@ -17593,6 +17593,159 @@ internal sealed class CatalogPlanInstallFromReferenceRequest
     public CatalogMaterializationReference Reference { get => field ??= new(); set; }
 }
 
+/// <summary>Whether the name produces a nonempty filename.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class AgentsValidateNameResult
+{
+    /// <summary>True when the name contains an ASCII letter or digit.</summary>
+    [JsonPropertyName("valid")]
+    public bool Valid { get; set; }
+}
+
+/// <summary>A proposed agent name.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class AgentsValidateNameRequest
+{
+    /// <summary>The name to check for a usable filename.</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>A selectable agent tool group.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class AgentToolCategory
+{
+    /// <summary>The stable, closed category identifier.</summary>
+    [JsonPropertyName("id")]
+    public AgentToolCategoryId Id { get; set; }
+
+    /// <summary>The display label.</summary>
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>Tool names in their canonical order.</summary>
+    [JsonPropertyName("tools")]
+    public IList<string> Tools { get => field ??= []; set; }
+}
+
+/// <summary>The canonical tool groups in display order.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class AgentsListToolCategoriesResult
+{
+    /// <summary>The selectable tool groups.</summary>
+    [JsonPropertyName("categories")]
+    public IList<AgentToolCategory> Categories { get => field ??= []; set; }
+}
+
+/// <summary>Rendered agent Markdown.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class AgentsGenerateFileContentResult
+{
+    /// <summary>The complete agent file content.</summary>
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = string.Empty;
+}
+
+/// <summary>Agent content to render without file access.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class AgentsGenerateFileContentRequest
+{
+    /// <summary>The agent description.</summary>
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>The agent instructions.</summary>
+    [JsonPropertyName("instructions")]
+    public string Instructions { get; set; } = string.Empty;
+
+    /// <summary>The display name.</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Tool names to emit. Omit for all tools; an empty list enables no tools.</summary>
+    [JsonPropertyName("tools")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? Tools { get; set; }
+}
+
+/// <summary>The outcome of agent file creation.</summary>
+/// <remarks>Polymorphic base type discriminated by <c>kind</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonPolymorphic(
+    TypeDiscriminatorPropertyName = "kind",
+    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
+[JsonDerivedType(typeof(AgentsCreateFileResultSuccess), "success")]
+[JsonDerivedType(typeof(AgentsCreateFileResultError), "error")]
+public partial class AgentsCreateFileResult
+{
+    /// <summary>The type discriminator.</summary>
+    [JsonPropertyName("kind")]
+    public virtual string Kind { get; set; } = string.Empty;
+}
+
+
+/// <summary>The new file exists.</summary>
+/// <remarks>The <c>success</c> variant of <see cref="AgentsCreateFileResult"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class AgentsCreateFileResultSuccess : AgentsCreateFileResult
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Kind => "success";
+
+    /// <summary>The created file path.</summary>
+    [JsonPropertyName("filePath")]
+    public required string FilePath { get; set; }
+}
+
+/// <summary>Creation failed without replacing an existing agent.</summary>
+/// <remarks>The <c>error</c> variant of <see cref="AgentsCreateFileResult"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class AgentsCreateFileResultError : AgentsCreateFileResult
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Kind => "error";
+
+    /// <summary>The error message to show to the author.</summary>
+    [JsonPropertyName("message")]
+    public required string Message { get; set; }
+}
+
+/// <summary>An agent file to create without replacing an existing file.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class AgentsCreateFileRequest
+{
+    /// <summary>The agent description.</summary>
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>Enabled groups. Omit for all tools; an empty list enables no tools.</summary>
+    [JsonPropertyName("enabledCategories")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<AgentToolCategoryId>? EnabledCategories { get; set; }
+
+    /// <summary>The agent instructions.</summary>
+    [JsonPropertyName("instructions")]
+    public string Instructions { get; set; } = string.Empty;
+
+    /// <summary>The directory owner.</summary>
+    [JsonPropertyName("location")]
+    public AgentFileLocation Location { get; set; }
+
+    /// <summary>The display name used to derive the filename.</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>The project root.</summary>
+    [JsonPropertyName("projectPath")]
+    public string ProjectPath { get; set; } = string.Empty;
+
+    /// <summary>The user configuration root.</summary>
+    [JsonPropertyName("userConfigDir")]
+    public string UserConfigDir { get; set; } = string.Empty;
+}
+
 /// <summary>Agent metadata, including identifiers, display details, source, tools, model, models, reasoning effort, MCP servers, skills, and file path.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class AgentInfo
@@ -23646,10 +23799,15 @@ internal sealed class CloudTasksCreateParams
     public string? RepositoryOwner { get; set; }
 }
 
-/// <summary>The HTTP outcome of deleting a cloud task. The deletion returns no body, so a successful call carries nothing beyond `ok`; a failed one is described by the remaining fields rather than raised as an error, so a caller can surface the service's own explanation.</summary>
+/// <summary>The HTTP outcome of deleting a cloud task. When `requireCredential` is true, `credentialResolved` distinguishes missing credentials from an HTTP outcome. HTTP failures retain the service's explanation instead of being raised as errors.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed class CloudTasksDeleteResult
 {
+    /// <summary>Present when requireCredential is true. False means no credential was resolved and no HTTP request was made.</summary>
+    [JsonPropertyName("credentialResolved")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CredentialResolved { get; set; }
+
     /// <summary>Human-readable failure explanation, when the call failed.</summary>
     [JsonPropertyName("errorMessage")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -23691,6 +23849,11 @@ internal sealed class CloudTasksDeleteParams
     /// <summary>Name of the embedding client, reported to Mission Control so the service can attribute the request.</summary>
     [JsonPropertyName("integrationId")]
     public string IntegrationId { get; set; } = string.Empty;
+
+    /// <summary>When true, stop without an HTTP request if the identity has no nonempty GitHub credential. Omission preserves the existing request behavior, including the Mission Control access-token override.</summary>
+    [JsonPropertyName("requireCredential")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RequireCredential { get; set; }
 
     /// <summary>Identifier of the cloud task to delete.</summary>
     [JsonPropertyName("taskId")]
@@ -23751,6 +23914,36 @@ internal sealed class CloudTasksGetParams
     /// <summary>Identifier of the cloud task to read.</summary>
     [JsonPropertyName("taskId")]
     public string TaskId { get; set; } = string.Empty;
+}
+
+/// <summary>Identifies a Mission Control session and the identity that reads its connection target.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class CloudTasksGetSessionParams
+{
+    /// <summary>Registered credential owner, when the host uses one.</summary>
+    [JsonPropertyName("authContextId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AuthContextId { get; set; }
+
+    /// <summary>Identity whose credential and Copilot endpoint the runtime resolves for this request.</summary>
+    [JsonPropertyName("authInfo")]
+    public AuthIdentity AuthInfo { get => field ??= new(); set; }
+
+    /// <summary>
+    /// Live session owned by this SDK server whose retained credential authenticates the lookup.
+    /// The identity must match that session. Cannot be combined with authContextId.
+    /// </summary>
+    [JsonPropertyName("credentialSessionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CredentialSessionId { get; set; }
+
+    /// <summary>Integration identifier sent to Mission Control.</summary>
+    [JsonPropertyName("integrationId")]
+    public string IntegrationId { get; set; } = string.Empty;
+
+    /// <summary>Remote Mission Control session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
 }
 
 /// <summary>The outcome of reading a cloud session's logs. `resolved` distinguishes "this credential has no Copilot API endpoint" from "the request was made and failed"; every other field describes a request that was actually attempted.</summary>
@@ -24299,6 +24492,11 @@ public partial class ResponseFormatJsonSchema : ResponseFormat
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed class SendRequest
 {
+    /// <summary>Set by the host when an agent wrote this message and the host delivers it in the user role, such as the kickoff of a session another agent created. Copied to the resulting user.message event. Only automatic permission decisions read it: they treat the text as another agent's message, never as the user's own words or authorization. Delivery, history and the model's view of the message are unchanged. It can only withhold human authority, never add it. Remote sessions, hosted by Mission Control or over AHP, do not carry it: their transports deliver only the prompt, so there the message is judged as it would be without the mark.</summary>
+    [JsonPropertyName("agentAuthored")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AgentAuthored { get; set; }
+
     /// <summary>The UI mode the agent was in when this message was sent. Defaults to the session's current mode.</summary>
     [JsonPropertyName("agentMode")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -27935,6 +28133,82 @@ internal sealed class SessionRemotePublishStateRequest
     [JsonPropertyName("viewJson")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ViewJson { get; set; }
+}
+
+/// <summary>Reports whether this call created the attachment. An existing attachment remains unchanged.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteAttachMissionControlResult
+{
+    /// <summary>True when this call starts polling; false when the session already has an attachment.</summary>
+    [JsonPropertyName("started")]
+    public bool Started { get; set; }
+}
+
+/// <summary>Attaches Mission Control polling and steering to this locally retained remote-session facade. Credentials remain with the runtime owner and resolve for each request.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteAttachMissionControlRequest
+{
+    /// <summary>Registered credential owner, when the host uses one.</summary>
+    [JsonPropertyName("authContextId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AuthContextId { get; set; }
+
+    /// <summary>Identity whose credential and endpoints the runtime resolves.</summary>
+    [JsonPropertyName("authInfo")]
+    public AuthIdentity AuthInfo { get => field ??= new(); set; }
+
+    /// <summary>Explicit Mission Control endpoint; omission derives it from the identity.</summary>
+    [JsonPropertyName("baseUrl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BaseUrl { get; set; }
+
+    /// <summary>Explicit frontend origin; omission derives it from the identity.</summary>
+    [JsonPropertyName("frontendBaseUrl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FrontendBaseUrl { get; set; }
+
+    /// <summary>Integration identifier sent to Mission Control.</summary>
+    [JsonPropertyName("integrationId")]
+    public string IntegrationId { get; set; } = string.Empty;
+
+    /// <summary>Previously observed events, including events excluded from replay.</summary>
+    [JsonPropertyName("observedEventsJson")]
+    public string ObservedEventsJson { get; set; } = string.Empty;
+
+    /// <summary>Poll interval in milliseconds; omission uses the runtime default.</summary>
+    [JsonPropertyName("pollIntervalMs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? PollIntervalMs { get; set; }
+
+    /// <summary>Public facade identifier used for the host's frontend URL registration.</summary>
+    [JsonPropertyName("publicSessionId")]
+    public string PublicSessionId { get; set; } = string.Empty;
+
+    /// <summary>Whether this facade permits steering.</summary>
+    [JsonPropertyName("remoteSteerable")]
+    public bool RemoteSteerable { get; set; }
+
+    /// <summary>Repository name associated with the remote task.</summary>
+    [JsonPropertyName("repositoryName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RepositoryName { get; set; }
+
+    /// <summary>Repository owner associated with the remote task.</summary>
+    [JsonPropertyName("repositoryOwner")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RepositoryOwner { get; set; }
+
+    /// <summary>Whether the attachment provides remote JSON-RPC commands.</summary>
+    [JsonPropertyName("rpcEnabled")]
+    public bool RpcEnabled { get; set; }
+
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>Cloud task whose events and commands this session follows.</summary>
+    [JsonPropertyName("taskId")]
+    public string TaskId { get; set; } = string.Empty;
 }
 
 /// <summary>GitHub URL and remote export and steering state, with an optional warning when cloud session storage policy refuses export.</summary>
@@ -56182,6 +56456,147 @@ public readonly struct CatalogReferenceInstallationFailureReason : IEquatable<Ca
 }
 
 
+/// <summary>A tool group that an agent file can enable.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct AgentToolCategoryId : IEquatable<AgentToolCategoryId>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="AgentToolCategoryId"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="AgentToolCategoryId"/>.</param>
+    [JsonConstructor]
+    public AgentToolCategoryId(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="AgentToolCategoryId"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Shell execution.</summary>
+    public static AgentToolCategoryId Shell { get; } = new("shell");
+
+    /// <summary>File reads and searches.</summary>
+    public static AgentToolCategoryId Read { get; } = new("read");
+
+    /// <summary>File edits.</summary>
+    public static AgentToolCategoryId Edit { get; } = new("edit");
+
+    /// <summary>Subagent tasks.</summary>
+    public static AgentToolCategoryId Subagents { get; } = new("subagents");
+
+    /// <summary>Skill execution.</summary>
+    public static AgentToolCategoryId Skills { get; } = new("skills");
+
+    /// <summary>Web searches and requests.</summary>
+    public static AgentToolCategoryId Web { get; } = new("web");
+
+    /// <summary>Questions for the user.</summary>
+    public static AgentToolCategoryId AskUser { get; } = new("ask-user");
+
+    /// <summary>Returns a value indicating whether two <see cref="AgentToolCategoryId"/> instances are equivalent.</summary>
+    public static bool operator ==(AgentToolCategoryId left, AgentToolCategoryId right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="AgentToolCategoryId"/> instances are not equivalent.</summary>
+    public static bool operator !=(AgentToolCategoryId left, AgentToolCategoryId right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is AgentToolCategoryId other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(AgentToolCategoryId other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{AgentToolCategoryId}"/> for serializing <see cref="AgentToolCategoryId"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<AgentToolCategoryId>
+    {
+        /// <inheritdoc />
+        public override AgentToolCategoryId Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, AgentToolCategoryId value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(AgentToolCategoryId));
+        }
+    }
+}
+
+
+/// <summary>The owner directory for an authored agent.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct AgentFileLocation : IEquatable<AgentFileLocation>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="AgentFileLocation"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="AgentFileLocation"/>.</param>
+    [JsonConstructor]
+    public AgentFileLocation(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="AgentFileLocation"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>The project's .github/agents directory.</summary>
+    public static AgentFileLocation Project { get; } = new("project");
+
+    /// <summary>The user's configuration agents directory.</summary>
+    public static AgentFileLocation User { get; } = new("user");
+
+    /// <summary>Returns a value indicating whether two <see cref="AgentFileLocation"/> instances are equivalent.</summary>
+    public static bool operator ==(AgentFileLocation left, AgentFileLocation right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="AgentFileLocation"/> instances are not equivalent.</summary>
+    public static bool operator !=(AgentFileLocation left, AgentFileLocation right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is AgentFileLocation other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(AgentFileLocation other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{AgentFileLocation}"/> for serializing <see cref="AgentFileLocation"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<AgentFileLocation>
+    {
+        /// <inheritdoc />
+        public override AgentFileLocation Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, AgentFileLocation value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(AgentFileLocation));
+        }
+    }
+}
+
+
 /// <summary>Where the agent definition was loaded from.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
@@ -73714,6 +74129,65 @@ public sealed class ServerAgentsApi
         _rpc = rpc;
     }
 
+    /// <summary>Checks whether an agent name produces a usable filename, without filesystem access.</summary>
+    /// <param name="name">The name to check for a usable filename.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Whether the name produces a nonempty filename.</returns>
+    public async Task<AgentsValidateNameResult> ValidateNameAsync(string name, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        var request = new AgentsValidateNameRequest { Name = name };
+        return await CopilotClient.InvokeRpcAsync<AgentsValidateNameResult>(_rpc, "agents.validateName", [request], cancellationToken);
+    }
+
+    /// <summary>Lists the closed agent tool groups in canonical display order for agent-file authoring.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The canonical tool groups in display order.</returns>
+    public async Task<AgentsListToolCategoriesResult> ListToolCategoriesAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<AgentsListToolCategoriesResult>(_rpc, "agents.listToolCategories", [], cancellationToken);
+    }
+
+    /// <summary>Renders agent Markdown without writing a file. Omitted tools allow all tools; an empty list allows none.</summary>
+    /// <param name="name">The display name.</param>
+    /// <param name="description">The agent description.</param>
+    /// <param name="instructions">The agent instructions.</param>
+    /// <param name="tools">Tool names to emit. Omit for all tools; an empty list enables no tools.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Rendered agent Markdown.</returns>
+    public async Task<AgentsGenerateFileContentResult> GenerateFileContentAsync(string name, string description, string instructions, IList<string>? tools = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(description);
+        ArgumentNullException.ThrowIfNull(instructions);
+
+        var request = new AgentsGenerateFileContentRequest { Name = name, Description = description, Instructions = instructions, Tools = tools };
+        return await CopilotClient.InvokeRpcAsync<AgentsGenerateFileContentResult>(_rpc, "agents.generateFileContent", [request], cancellationToken);
+    }
+
+    /// <summary>Creates an agent file in the project or user agent directory without replacing an existing file. Returns validation and filesystem errors as author-visible outcomes.</summary>
+    /// <param name="name">The display name used to derive the filename.</param>
+    /// <param name="description">The agent description.</param>
+    /// <param name="instructions">The agent instructions.</param>
+    /// <param name="location">The directory owner.</param>
+    /// <param name="projectPath">The project root.</param>
+    /// <param name="userConfigDir">The user configuration root.</param>
+    /// <param name="enabledCategories">Enabled groups. Omit for all tools; an empty list enables no tools.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The outcome of agent file creation.</returns>
+    public async Task<AgentsCreateFileResult> CreateFileAsync(string name, string description, string instructions, AgentFileLocation location, string projectPath, string userConfigDir, IList<AgentToolCategoryId>? enabledCategories = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(description);
+        ArgumentNullException.ThrowIfNull(instructions);
+        ArgumentNullException.ThrowIfNull(projectPath);
+        ArgumentNullException.ThrowIfNull(userConfigDir);
+
+        var request = new AgentsCreateFileRequest { Name = name, Description = description, Instructions = instructions, Location = location, ProjectPath = projectPath, UserConfigDir = userConfigDir, EnabledCategories = enabledCategories };
+        return await CopilotClient.InvokeRpcAsync<AgentsCreateFileResult>(_rpc, "agents.createFile", [request], cancellationToken);
+    }
+
     /// <summary>Discovers custom agents across user, project, plugin, and remote sources.</summary>
     /// <param name="agentDirectories">Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without ambient discovery, subject to managed/source disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.</param>
     /// <param name="projectPaths">Optional list of project directory paths to scan for project-scoped agents. When omitted or empty, no project is scanned: user-level and globally enabled plugin agents are still returned, but agents of a plugin enabled only in a repository's settings are not.</param>
@@ -75192,20 +75666,21 @@ public sealed class ServerCloudTasksApi
         return await CopilotClient.InvokeRpcAsync<CloudTasksCreateResult>(_rpc, "cloudTasks.create", [request], cancellationToken);
     }
 
-    /// <summary>Deletes one cloud coding-agent task, the remote run `cloudTasks.create` started. The deletion is a soft one: the service withdraws the task from its listings rather than destroying the record, so a host removing a run from its own UI is the intended caller. Answered above any session for the same reason as `cloudTasks.get` -- the task is remote and has no local counterpart. Hosts other than the CLI want this: a GitHub App or an SDK consumer that manages cloud agent runs withdraws the same record under the same credential, and resolving it here keeps one credential-resolution and endpoint path. The runtime resolves each token from `authInfo` or `authContextId`. A host may preserve an explicit `baseUrl`; omission derives the endpoint from `authInfo`. The result is the HTTP outcome rather than a bare success flag: the call returns no body, so `ok` alone describes a success, while a failure is reported through `statusCode`, `errorMessage` and `errorPayloadJson` instead of being raised as an error.</summary>
+    /// <summary>Deletes one cloud coding-agent task, the remote run `cloudTasks.create` started. The deletion is a soft one: the service withdraws the task from its listings rather than destroying the record, so a host removing a run from its own UI is the intended caller. Answered above any session for the same reason as `cloudTasks.get` -- the task is remote and has no local counterpart. Hosts other than the CLI want this: a GitHub App or an SDK consumer that manages cloud agent runs withdraws the same record under the same credential, and resolving it here keeps one credential-resolution and endpoint path. The runtime resolves each token from `authInfo` or `authContextId`. A host may preserve an explicit `baseUrl`; omission derives the endpoint from `authInfo`. Set `requireCredential` to stop before HTTP when no nonempty GitHub credential resolves; `credentialResolved` then distinguishes that case from an HTTP failure. Omission preserves the existing request and result behavior. HTTP failures retain `statusCode`, `errorMessage` and `errorPayloadJson` instead of being raised as errors.</summary>
     /// <param name="authInfo">The credential the deletion is performed under, carried opaquely because its shape is the host's own and the runtime only resolves a token and an API endpoint from it. Required: the task endpoint is per-account, so there is no unauthenticated form of this call.</param>
     /// <param name="integrationId">Name of the embedding client, reported to Mission Control so the service can attribute the request.</param>
     /// <param name="taskId">Identifier of the cloud task to delete.</param>
     /// <param name="baseUrl">Explicit Mission Control endpoint selected by the host. Omission derives it from the identity.</param>
     /// <param name="authContextId">Selects which stored credential to resolve when the host holds more than one. Omit it to resolve the default for the supplied `authInfo`.</param>
+    /// <param name="requireCredential">When true, stop without an HTTP request if the identity has no nonempty GitHub credential. Omission preserves the existing request behavior, including the Mission Control access-token override.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>The HTTP outcome of deleting a cloud task. The deletion returns no body, so a successful call carries nothing beyond `ok`; a failed one is described by the remaining fields rather than raised as an error, so a caller can surface the service's own explanation.</returns>
-    internal async Task<CloudTasksDeleteResult> DeleteAsync(object? authInfo, string integrationId, string taskId, string? baseUrl = null, string? authContextId = null, CancellationToken cancellationToken = default)
+    /// <returns>The HTTP outcome of deleting a cloud task. When `requireCredential` is true, `credentialResolved` distinguishes missing credentials from an HTTP outcome. HTTP failures retain the service's explanation instead of being raised as errors.</returns>
+    internal async Task<CloudTasksDeleteResult> DeleteAsync(object? authInfo, string integrationId, string taskId, string? baseUrl = null, string? authContextId = null, bool? requireCredential = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(integrationId);
         ArgumentNullException.ThrowIfNull(taskId);
 
-        var request = new CloudTasksDeleteParams { AuthInfo = CopilotClient.ToJsonElementForWire(authInfo) ?? JsonElement.Parse("null"), IntegrationId = integrationId, TaskId = taskId, BaseUrl = baseUrl, AuthContextId = authContextId };
+        var request = new CloudTasksDeleteParams { AuthInfo = CopilotClient.ToJsonElementForWire(authInfo) ?? JsonElement.Parse("null"), IntegrationId = integrationId, TaskId = taskId, BaseUrl = baseUrl, AuthContextId = authContextId, RequireCredential = requireCredential };
         return await CopilotClient.InvokeRpcAsync<CloudTasksDeleteResult>(_rpc, "cloudTasks.delete", [request], cancellationToken);
     }
 
@@ -75223,6 +75698,27 @@ public sealed class ServerCloudTasksApi
 
         var request = new CloudTasksGetParams { AuthInfo = CopilotClient.ToJsonElementForWire(authInfo) ?? JsonElement.Parse("null"), IntegrationId = integrationId, TaskId = taskId, AuthContextId = authContextId };
         return await CopilotClient.InvokeRpcAsync<CloudTasksGetResult>(_rpc, "cloudTasks.get", [request], cancellationToken);
+    }
+
+    /// <summary>Reads a Mission Control session to resolve its environment and connection target. SDK hosts and ACP clients use this before attaching to a cloud session. The runtime resolves the credential and endpoint for each request; HTTP failures remain structured results.</summary>
+    /// <param name="authInfo">Identity whose credential and Copilot endpoint the runtime resolves for this request.</param>
+    /// <param name="integrationId">Integration identifier sent to Mission Control.</param>
+    /// <param name="sessionId">Remote Mission Control session identifier.</param>
+    /// <param name="authContextId">Registered credential owner, when the host uses one.</param>
+    /// <param name="credentialSessionId">
+    /// Live session owned by this SDK server whose retained credential authenticates the lookup.
+    /// The identity must match that session. Cannot be combined with authContextId.
+    /// </param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The HTTP outcome of reading a cloud task, rather than the task alone. A 404 arrives here as a non-ok result with `statusCode` 404, not as an error, so a caller can tell an absent task apart from a failed call.</returns>
+    internal async Task<CloudTasksGetResult> GetSessionAsync(AuthIdentity authInfo, string integrationId, string sessionId, string? authContextId = null, string? credentialSessionId = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(authInfo);
+        ArgumentNullException.ThrowIfNull(integrationId);
+        ArgumentNullException.ThrowIfNull(sessionId);
+
+        var request = new CloudTasksGetSessionParams { AuthInfo = authInfo, IntegrationId = integrationId, SessionId = sessionId, AuthContextId = authContextId, CredentialSessionId = credentialSessionId };
+        return await CopilotClient.InvokeRpcAsync<CloudTasksGetResult>(_rpc, "cloudTasks.getSession", [request], cancellationToken);
     }
 
     /// <summary>Reads the logs a cloud coding-agent session produced, from the Copilot API. Answered above any session, for the same reason as `cloudTasks.get`: the session being asked about runs remotely and has no local counterpart. Read `resolved` first. It is false when no Copilot API URL could be resolved for the credential, which is a different outcome from a request that was made and failed, and a caller that treats the two alike will report a transport error for an account that simply has no API endpoint. When `resolved` is true, `debugMessages` carries the diagnostics the fetch produced and should be logged whatever the outcome, `errorString` reports a retrieval fault, and only then do `ok` and `statusCode` describe the HTTP result.</summary>
@@ -75748,6 +76244,7 @@ public sealed class SessionRpc
     /// <param name="billable">If false, this message will not trigger a Premium Request Unit charge. User messages default to billable.</param>
     /// <param name="requiredTool">If set, the request will fail if the named tool is not available when this message is among the user messages at the start of the current exchange.</param>
     /// <param name="source">Optional provenance tag copied to the resulting user.message event. Must be `user`, `system`, `command-&lt;command-id&gt;` for command-originated messages, `schedule-&lt;numeric-id&gt;` for scheduled prompts, `agent-&lt;agent-id&gt;` for prompts sent by another agent, or `automation-&lt;automation-id&gt;` for turns a host sends on behalf of an automation the user configured. An automation turn defines the session's task like a user message but carries no human authority.</param>
+    /// <param name="agentAuthored">Set by the host when an agent wrote this message and the host delivers it in the user role, such as the kickoff of a session another agent created. Copied to the resulting user.message event. Only automatic permission decisions read it: they treat the text as another agent's message, never as the user's own words or authorization. Delivery, history and the model's view of the message are unchanged. It can only withhold human authority, never add it. Remote sessions, hosted by Mission Control or over AHP, do not carry it: their transports deliver only the prompt, so there the message is judged as it would be without the mark.</param>
     /// <param name="agentMode">The UI mode the agent was in when this message was sent. Defaults to the session's current mode.</param>
     /// <param name="requestHeaders">Custom HTTP headers to include in outbound model requests for this turn. Merged with session-level provider headers; per-turn headers augment and overwrite session-level headers with the same key.</param>
     /// <param name="responseFormat">Provider-native output format for this turn, including all tool-call iterations. Not inherited by later turns or subagents. Ordinary steering inherits the active format; specifying responseFormat with mode: immediate is an error, even while idle. Returned assistant content remains text; the runtime does not parse or validate it. Unsupported models or schemas produce provider errors.</param>
@@ -75758,12 +76255,12 @@ public sealed class SessionRpc
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Result of sending a user message.</returns>
     [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-    public async Task<SendResult> SendAsync(string prompt, string? displayPrompt = null, IList<Attachment>? attachments = null, SendMode? mode = null, bool? prepend = null, bool? billable = null, string? requiredTool = null, string? source = null, SendAgentMode? agentMode = null, IDictionary<string, string>? requestHeaders = null, ResponseFormat? responseFormat = null, string? traceparent = null, string? tracestate = null, string? clientTurnId = null, bool? wait = null, CancellationToken cancellationToken = default)
+    public async Task<SendResult> SendAsync(string prompt, string? displayPrompt = null, IList<Attachment>? attachments = null, SendMode? mode = null, bool? prepend = null, bool? billable = null, string? requiredTool = null, string? source = null, bool? agentAuthored = null, SendAgentMode? agentMode = null, IDictionary<string, string>? requestHeaders = null, ResponseFormat? responseFormat = null, string? traceparent = null, string? tracestate = null, string? clientTurnId = null, bool? wait = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(prompt);
         _session.ThrowIfDisposed();
 
-        var request = new SendRequest { SessionId = _session.SessionId, Prompt = prompt, DisplayPrompt = displayPrompt, Attachments = attachments, Mode = mode, Prepend = prepend, Billable = billable, RequiredTool = requiredTool, Source = source, AgentMode = agentMode, RequestHeaders = requestHeaders, ResponseFormat = responseFormat, Traceparent = traceparent, Tracestate = tracestate, ClientTurnId = clientTurnId, Wait = wait };
+        var request = new SendRequest { SessionId = _session.SessionId, Prompt = prompt, DisplayPrompt = displayPrompt, Attachments = attachments, Mode = mode, Prepend = prepend, Billable = billable, RequiredTool = requiredTool, Source = source, AgentAuthored = agentAuthored, AgentMode = agentMode, RequestHeaders = requestHeaders, ResponseFormat = responseFormat, Traceparent = traceparent, Tracestate = tracestate, ClientTurnId = clientTurnId, Wait = wait };
         return await CopilotClient.InvokeRpcAsync<SendResult>(_session.Rpc, "session.send", [request], cancellationToken);
     }
 
@@ -75776,6 +76273,7 @@ public sealed class SessionRpc
     /// <param name="billable">If false, this message will not trigger a Premium Request Unit charge. User messages default to billable.</param>
     /// <param name="requiredTool">If set, the request will fail if the named tool is not available when this message is among the user messages at the start of the current exchange.</param>
     /// <param name="source">Optional provenance tag copied to the resulting user.message event. Must be `user`, `system`, `command-&lt;command-id&gt;` for command-originated messages, `schedule-&lt;numeric-id&gt;` for scheduled prompts, `agent-&lt;agent-id&gt;` for prompts sent by another agent, or `automation-&lt;automation-id&gt;` for turns a host sends on behalf of an automation the user configured. An automation turn defines the session's task like a user message but carries no human authority.</param>
+    /// <param name="agentAuthored">Set by the host when an agent wrote this message and the host delivers it in the user role, such as the kickoff of a session another agent created. Copied to the resulting user.message event. Only automatic permission decisions read it: they treat the text as another agent's message, never as the user's own words or authorization. Delivery, history and the model's view of the message are unchanged. It can only withhold human authority, never add it. Remote sessions, hosted by Mission Control or over AHP, do not carry it: their transports deliver only the prompt, so there the message is judged as it would be without the mark.</param>
     /// <param name="agentMode">The UI mode the agent was in when this message was sent. Defaults to the session's current mode.</param>
     /// <param name="requestHeaders">Custom HTTP headers to include in outbound model requests for this turn. Merged with session-level provider headers; per-turn headers augment and overwrite session-level headers with the same key.</param>
     /// <param name="responseFormat">Provider-native output format for this turn, including all tool-call iterations. Not inherited by later turns or subagents. Ordinary steering inherits the active format; specifying responseFormat with mode: immediate is an error, even while idle. Returned assistant content remains text; the runtime does not parse or validate it. Unsupported models or schemas produce provider errors.</param>
@@ -75786,12 +76284,12 @@ public sealed class SessionRpc
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Internal request-correlated completion of one submitted message.</returns>
     [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-    internal async Task<SendAndWaitResult> SendAndWaitAsync(string prompt, string? displayPrompt = null, IList<Attachment>? attachments = null, SendMode? mode = null, bool? prepend = null, bool? billable = null, string? requiredTool = null, string? source = null, SendAgentMode? agentMode = null, IDictionary<string, string>? requestHeaders = null, ResponseFormat? responseFormat = null, string? traceparent = null, string? tracestate = null, string? clientTurnId = null, bool? wait = null, CancellationToken cancellationToken = default)
+    internal async Task<SendAndWaitResult> SendAndWaitAsync(string prompt, string? displayPrompt = null, IList<Attachment>? attachments = null, SendMode? mode = null, bool? prepend = null, bool? billable = null, string? requiredTool = null, string? source = null, bool? agentAuthored = null, SendAgentMode? agentMode = null, IDictionary<string, string>? requestHeaders = null, ResponseFormat? responseFormat = null, string? traceparent = null, string? tracestate = null, string? clientTurnId = null, bool? wait = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(prompt);
         _session.ThrowIfDisposed();
 
-        var request = new SendRequest { SessionId = _session.SessionId, Prompt = prompt, DisplayPrompt = displayPrompt, Attachments = attachments, Mode = mode, Prepend = prepend, Billable = billable, RequiredTool = requiredTool, Source = source, AgentMode = agentMode, RequestHeaders = requestHeaders, ResponseFormat = responseFormat, Traceparent = traceparent, Tracestate = tracestate, ClientTurnId = clientTurnId, Wait = wait };
+        var request = new SendRequest { SessionId = _session.SessionId, Prompt = prompt, DisplayPrompt = displayPrompt, Attachments = attachments, Mode = mode, Prepend = prepend, Billable = billable, RequiredTool = requiredTool, Source = source, AgentAuthored = agentAuthored, AgentMode = agentMode, RequestHeaders = requestHeaders, ResponseFormat = responseFormat, Traceparent = traceparent, Tracestate = tracestate, ClientTurnId = clientTurnId, Wait = wait };
         return await CopilotClient.InvokeRpcAsync<SendAndWaitResult>(_session.Rpc, "session.sendAndWait", [request], cancellationToken);
     }
 
@@ -76945,6 +77443,35 @@ public sealed class RemoteApi
 
         var request = new SessionRemotePublishStateRequest { SessionId = _session.SessionId, DraftText = draftText, ViewJson = viewJson };
         await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.remote.publishState", [request], cancellationToken);
+    }
+
+    /// <summary>Attaches runtime-owned Mission Control polling and steering to a retained session facade. SDK hosts and ACP clients can follow a cloud task without receiving a bearer token.</summary>
+    /// <param name="publicSessionId">Public facade identifier used for the host's frontend URL registration.</param>
+    /// <param name="authInfo">Identity whose credential and endpoints the runtime resolves.</param>
+    /// <param name="integrationId">Integration identifier sent to Mission Control.</param>
+    /// <param name="taskId">Cloud task whose events and commands this session follows.</param>
+    /// <param name="observedEventsJson">Previously observed events, including events excluded from replay.</param>
+    /// <param name="remoteSteerable">Whether this facade permits steering.</param>
+    /// <param name="rpcEnabled">Whether the attachment provides remote JSON-RPC commands.</param>
+    /// <param name="baseUrl">Explicit Mission Control endpoint; omission derives it from the identity.</param>
+    /// <param name="frontendBaseUrl">Explicit frontend origin; omission derives it from the identity.</param>
+    /// <param name="authContextId">Registered credential owner, when the host uses one.</param>
+    /// <param name="repositoryOwner">Repository owner associated with the remote task.</param>
+    /// <param name="repositoryName">Repository name associated with the remote task.</param>
+    /// <param name="pollIntervalMs">Poll interval in milliseconds; omission uses the runtime default.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Reports whether this call created the attachment. An existing attachment remains unchanged.</returns>
+    internal async Task<RemoteAttachMissionControlResult> AttachMissionControlAsync(string publicSessionId, AuthIdentity authInfo, string integrationId, string taskId, string observedEventsJson, bool remoteSteerable, bool rpcEnabled, string? baseUrl = null, string? frontendBaseUrl = null, string? authContextId = null, string? repositoryOwner = null, string? repositoryName = null, long? pollIntervalMs = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(publicSessionId);
+        ArgumentNullException.ThrowIfNull(authInfo);
+        ArgumentNullException.ThrowIfNull(integrationId);
+        ArgumentNullException.ThrowIfNull(taskId);
+        ArgumentNullException.ThrowIfNull(observedEventsJson);
+        _session.ThrowIfDisposed();
+
+        var request = new RemoteAttachMissionControlRequest { SessionId = _session.SessionId, PublicSessionId = publicSessionId, AuthInfo = authInfo, IntegrationId = integrationId, TaskId = taskId, ObservedEventsJson = observedEventsJson, RemoteSteerable = remoteSteerable, RpcEnabled = rpcEnabled, BaseUrl = baseUrl, FrontendBaseUrl = frontendBaseUrl, AuthContextId = authContextId, RepositoryOwner = repositoryOwner, RepositoryName = repositoryName, PollIntervalMs = pollIntervalMs };
+        return await CopilotClient.InvokeRpcAsync<RemoteAttachMissionControlResult>(_session.Rpc, "session.remote.attachMissionControl", [request], cancellationToken);
     }
 
     /// <summary>Enables remote session export or steering.</summary>
@@ -83395,9 +83922,14 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(AgentSelectRequest))]
 [JsonSerializable(typeof(AgentSelectResult))]
 [JsonSerializable(typeof(AgentSetPromptRequest))]
+[JsonSerializable(typeof(AgentToolCategory))]
+[JsonSerializable(typeof(AgentsCreateFileRequest))]
+[JsonSerializable(typeof(AgentsCreateFileResult))]
 [JsonSerializable(typeof(AgentsCustomAgentInitialModelDecisionParams))]
 [JsonSerializable(typeof(AgentsCustomAgentInitialModelDecisionResult))]
 [JsonSerializable(typeof(AgentsDiscoverRequest))]
+[JsonSerializable(typeof(AgentsGenerateFileContentRequest))]
+[JsonSerializable(typeof(AgentsGenerateFileContentResult))]
 [JsonSerializable(typeof(AgentsGetAvailableBuiltinsRequest))]
 [JsonSerializable(typeof(AgentsGetAvailableBuiltinsResult))]
 [JsonSerializable(typeof(AgentsGetBuiltinDefinitionRequest))]
@@ -83406,6 +83938,9 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(AgentsGetBuiltinListingDefinitionResult))]
 [JsonSerializable(typeof(AgentsGetBuiltinsResult))]
 [JsonSerializable(typeof(AgentsGetDiscoveryPathsRequest))]
+[JsonSerializable(typeof(AgentsListToolCategoriesResult))]
+[JsonSerializable(typeof(AgentsValidateNameRequest))]
+[JsonSerializable(typeof(AgentsValidateNameResult))]
 [JsonSerializable(typeof(AhpConnectionEvent))]
 [JsonSerializable(typeof(AhpConnectionLogsCloseRequest))]
 [JsonSerializable(typeof(AhpConnectionLogsFlushRequest))]
@@ -83565,6 +84100,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(CloudTasksGetResult))]
 [JsonSerializable(typeof(CloudTasksGetSessionLogsParams))]
 [JsonSerializable(typeof(CloudTasksGetSessionLogsResult))]
+[JsonSerializable(typeof(CloudTasksGetSessionParams))]
 [JsonSerializable(typeof(CloudTasksGetSessionReplayParams))]
 [JsonSerializable(typeof(CloudTasksGetSessionReplayResult))]
 [JsonSerializable(typeof(CloudTasksGetSharingStatusParams))]
@@ -84486,6 +85022,8 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(RegisterEventInterestParams))]
 [JsonSerializable(typeof(RegisterEventInterestResult))]
 [JsonSerializable(typeof(ReleaseEventInterestParams))]
+[JsonSerializable(typeof(RemoteAttachMissionControlRequest))]
+[JsonSerializable(typeof(RemoteAttachMissionControlResult))]
 [JsonSerializable(typeof(RemoteControlConfig))]
 [JsonSerializable(typeof(RemoteControlConfigExistingMcSession))]
 [JsonSerializable(typeof(RemoteControlStatus))]

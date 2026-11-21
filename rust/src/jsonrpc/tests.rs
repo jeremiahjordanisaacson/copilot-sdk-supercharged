@@ -502,6 +502,60 @@ async fn request_after_the_read_loop_ended_leaves_no_pending_entry() {
 }
 
 #[tokio::test]
+async fn unwritten_deletes_release_their_callbacks_when_the_writer_fails() {
+    for abandon_wait in [false, true] {
+        let pending = Arc::new(RwLock::new(HashMap::new()));
+        let closed = CancellationToken::new();
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let sender = FrameSender::Stream(sender);
+        let first = JsonRpcClient::begin_owned_request(
+            pending.clone(),
+            &sender,
+            closed.clone(),
+            JsonRpcRequest::new(1, "ping", None),
+            ResponseMode::Parsed(None),
+        )
+        .unwrap();
+        let capture = Arc::new(());
+        let released = Arc::downgrade(&capture);
+        let delete = JsonRpcClient::begin_owned_request(
+            pending.clone(),
+            &sender,
+            closed.clone(),
+            JsonRpcRequest::new(2, "session.delete", None),
+            ResponseMode::Parsed(Some(Box::new(move |_| {
+                let _ = &capture;
+                Ok(())
+            }))),
+        )
+        .unwrap();
+        let delete = if abandon_wait {
+            drop(delete);
+            None
+        } else {
+            Some(delete)
+        };
+        let (writer, peer) = tokio::io::duplex(1);
+        drop(peer);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            JsonRpcClient::write_loop(writer, receiver, closed.clone()),
+        )
+        .await
+        .expect("the failed writer did not stop");
+        assert!(first.await.is_err());
+        if let Some(delete) = delete {
+            assert!(delete.await.is_err());
+        }
+        assert!(!closed.is_cancelled(), "the read side must remain open");
+        assert!(
+            released.upgrade().is_none(),
+            "an unwritten delete retained its callback (abandoned wait: {abandon_wait})"
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_frame_body_is_reserved_as_it_arrives_not_as_declared() {
     let (client_write, _server_read) = tokio::io::duplex(4096);
     // Completing this write requires the read loop to consume body bytes after

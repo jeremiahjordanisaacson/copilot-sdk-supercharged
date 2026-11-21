@@ -2745,6 +2745,10 @@ impl Client {
                         sessions.claim(&session_id, token);
                         continue;
                     }
+                    router::DispatcherInput::Detached(session_id, token) => {
+                        sessions.detached(&session_id, token);
+                        continue;
+                    }
                 };
                 let Some(params) = notification.params else {
                     continue;
@@ -2754,6 +2758,9 @@ impl Client {
                     "session.lifecycle" => match SessionLifecycleEvent::deserialize(&params) {
                         // `send` only errors when there are no subscribers.
                         Ok(event) => {
+                            if event.event_type == SessionLifecycleEventType::Deleted {
+                                sessions.deleted(&event.session_id);
+                            }
                             let _ = lifecycle_tx.send(event);
                         }
                         Err(e) => {
@@ -3177,13 +3184,37 @@ impl Client {
         Ok(async move { Self::call_result(request.await?, session_id, is_repo_settings_write) })
     }
 
-    pub(crate) async fn detach_session(&self, session_id: &str) -> Result<()> {
-        let response: SessionDetachResponse = self
-            .call_typed(
+    /// Detach `session_id`. `registration` is the caller's own registration
+    /// for it, which the detach ends; client-wide teardown passes `None`.
+    pub(crate) async fn detach_session(
+        &self,
+        session_id: &str,
+        registration: Option<crate::router::RegistrationToken>,
+    ) -> Result<()> {
+        // Mark where the reply was read, so events after it are held for a
+        // rejoin however late the caller unregisters the session.
+        let detach_replied = self.inner.router.detach_replied(registration);
+        let detached_id = SessionId::from(session_id);
+        let mark: crate::jsonrpc::InlineResponseCallback = Box::new(move |response| {
+            if response
+                .result
+                .as_ref()
+                .and_then(|result| result.get("success"))
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            {
+                detach_replied(&detached_id);
+            }
+            Ok(())
+        });
+        let response: SessionDetachResponse = serde_json::from_value(
+            self.call_with_inline_callback(
                 "session.detach",
                 Some(serde_json::json!({ "sessionId": session_id })),
+                Some(mark),
             )
-            .await?;
+            .await?,
+        )?;
         if response.success {
             return Ok(());
         }
@@ -3350,6 +3381,16 @@ impl Client {
         token: crate::router::RegistrationToken,
     ) {
         self.inner.router.unregister_owned(session_id, token);
+    }
+
+    /// [`unregister_session_owned`](Self::unregister_session_owned) for a
+    /// session that detached, whose later events are held for a rejoin.
+    pub(crate) fn unregister_session_detached(
+        &self,
+        session_id: &SessionId,
+        token: crate::router::RegistrationToken,
+    ) {
+        self.inner.router.unregister_detached(session_id, token);
     }
 
     /// Snapshot the session IDs currently registered on the router.
@@ -3602,23 +3643,18 @@ impl Client {
     }
 
     /// Delete a persisted session by ID.
+    ///
+    /// Use the full session ID. The server may accept a UUID prefix, but its
+    /// reply supplies no canonical ID, so clearing held events is not guaranteed.
     pub async fn delete_session(&self, session_id: &SessionId) -> Result<()> {
-        self.call(
-            "session.delete",
-            Some(serde_json::json!({ "sessionId": session_id })),
-        )
-        .await?;
+        self.delete_session_request(session_id).await?;
         self.retire_github_token_provider(session_id);
         Ok(())
     }
 
     pub(crate) async fn delete_session_checked(&self, session_id: &SessionId) -> Result<()> {
-        let response: SessionDeleteResponse = self
-            .call_typed(
-                "session.delete",
-                Some(serde_json::json!({ "sessionId": session_id })),
-            )
-            .await?;
+        let response: SessionDeleteResponse =
+            serde_json::from_value(self.delete_session_request(session_id).await?)?;
         if response.success == Some(false) {
             return Err(Error::with_message(
                 ErrorKind::Session(SessionErrorKind::DeleteFailed),
@@ -3629,6 +3665,25 @@ impl Client {
         }
         self.retire_github_token_provider(session_id);
         Ok(())
+    }
+
+    async fn delete_session_request(&self, session_id: &SessionId) -> Result<serde_json::Value> {
+        let deleted = self.inner.router.delete_replied(session_id);
+        // Queues use exact IDs; the reply does not return an ID resolved from a prefix.
+        let deleted_id = session_id.clone();
+        self.call_with_inline_callback(
+            "session.delete",
+            Some(serde_json::json!({ "sessionId": session_id })),
+            Some(Box::new(move |response| {
+                if response.result.as_ref().is_some_and(|result| {
+                    result.get("success").and_then(serde_json::Value::as_bool) != Some(false)
+                }) {
+                    deleted(&deleted_id);
+                }
+                Ok(())
+            })),
+        )
+        .await
     }
 
     /// Start this client's notification and request router on the current runtime.
@@ -3665,7 +3720,7 @@ impl Client {
         let mut first_error = None;
 
         for session_id in self.inner.router.session_ids() {
-            if let Err(error) = self.detach_session(&session_id).await
+            if let Err(error) = self.detach_session(&session_id, None).await
                 && first_error.is_none()
             {
                 first_error = Some(error);
@@ -3878,7 +3933,7 @@ impl Client {
         let detach_deadline = tokio::time::Instant::now() + RUNTIME_SHUTDOWN_TIMEOUT;
         for session_id in self.inner.router.session_ids() {
             let detached =
-                tokio::time::timeout_at(detach_deadline, self.detach_session(&session_id))
+                tokio::time::timeout_at(detach_deadline, self.detach_session(&session_id, None))
                     .await
                     .unwrap_or_else(|_| {
                         Err(std::io::Error::new(

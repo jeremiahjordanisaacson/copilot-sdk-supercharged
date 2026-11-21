@@ -17,12 +17,27 @@ export async function inspectGitRepository(client: CopilotClient, cwd: string) {
     return { root: root.gitRoot, context, status };
 }
 
-/** Create a checkout for an editor task without changing the source checkout. */
-export async function createTaskWorktree(client: CopilotClient, cwd: string, branch: string) {
-    return client["internalRpc"].git.createWorktreeFromBase({
+/** Create a task checkout and try to inherit the main repository's persisted trust. */
+export async function createTaskWorktree(
+    client: CopilotClient,
+    cwd: string,
+    branch: string,
+    configDir: string | null = null
+) {
+    const worktree = await client["internalRpc"].git.createWorktreeFromBase({
         gitRoot: cwd,
         branch,
         baseRef: "HEAD",
         allowSuffix: true,
     });
+    try {
+        await client["internalRpc"].git.inheritWorktreeTrust({
+            source: cwd,
+            destination: worktree.path,
+            configDir,
+        });
+    } catch (error) {
+        console.warn("Could not inherit trust for the created worktree:", worktree.path, error);
+    }
+    return worktree;
 }

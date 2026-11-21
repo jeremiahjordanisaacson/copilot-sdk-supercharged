@@ -78,7 +78,7 @@ public final class GeneratedConstructorMigrationGuard {
                             "com.microsoft.copilot.generated.UserMessageEvent$UserMessageEventData",
                             "(Ljava/util/List;Ljava/lang/String;Lcom/microsoft/copilot/generated/ResponsesReasoning;"
                                     + "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;"
-                                    + "Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/lang/String;"
+                                    + "Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/Boolean;"
                                     + "Lcom/microsoft/copilot/generated/UserMessageDelivery;"
                                     + "Lcom/microsoft/copilot/generated/UserMessageAgentMode;Ljava/lang/Boolean;"
                                     + "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",

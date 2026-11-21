@@ -7192,6 +7192,12 @@ export interface UserMessageEvent {
  */
 export interface UserMessageData {
   /**
+   * True when the host marked this message as written by an agent and delivered in the user role, such as the kickoff of a session another agent created. Only automatic permission decisions read it; absent in other messages and in older events.
+   *
+   * @internal
+   */
+  agentAuthored?: boolean;
+  /**
    * The agent mode that was active when this message was sent
    */
   agentMode?: UserMessageAgentMode;

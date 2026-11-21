@@ -9,7 +9,7 @@ use copilot_sdk::rpc::{
     SavedProviderConfigurationReadResult, SessionsOpenCreate, SessionsOpenCreateKind,
     SessionsOpenResume, SessionsOpenResumeKind, UnsupportedEnqueueCommandResult,
 };
-use copilot_sdk::session_events::RecommendedAutoTier;
+use copilot_sdk::session_events::{RecommendedAutoTier, UserMessageData};
 
 #[test]
 fn mcp_discovery_debug_redacts_configuration_without_changing_wire() {
@@ -357,6 +357,18 @@ fn classify_trajectory_request_accepts_recorded_session_events() {
             "type": "user.message",
             "data": { "content": "Fix the build" }
         }])
+    );
+}
+
+#[test]
+fn user_message_data_preserves_external_struct_literals() {
+    let data = UserMessageData {
+        content: "Fix the build".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        serde_json::to_value(data).unwrap(),
+        serde_json::json!({"content": "Fix the build"})
     );
 }
 

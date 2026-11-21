@@ -8010,6 +8010,456 @@ async fn broadcasts_this_client_must_not_answer_are_not_responded_to() {
     }
 }
 
+/// A host can disconnect a session and later rejoin it with a raw
+/// `sessions.connect`, which subscribes the connection before `resume_session`
+/// registers the session again. A request that arrives in between is still
+/// open, so it must reach the resumed session's handler.
+#[tokio::test]
+async fn request_after_rejoining_a_disconnected_session_reaches_its_handler() {
+    rejoined_request_reaches_its_handler(false).await;
+}
+
+/// The runtime can send a rejoined session's request right after the detach
+/// reply, while `disconnect` is still stopping the session. It was read after
+/// the detach, so it is still open and must reach the resumed handler.
+#[tokio::test]
+async fn request_read_right_after_the_detach_reply_reaches_the_resumed_handler() {
+    rejoined_request_reaches_its_handler(true).await;
+}
+
+async fn rejoined_request_reaches_its_handler(before_disconnect_returns: bool) {
+    struct RecordingHandler(tokio::sync::mpsc::UnboundedSender<String>);
+    #[async_trait]
+    impl PermissionHandler for RecordingHandler {
+        async fn handle(
+            &self,
+            _session_id: SessionId,
+            request_id: RequestId,
+            _data: copilot_sdk::PermissionRequestData,
+        ) -> PermissionResult {
+            let _ = self.0.send(request_id.to_string());
+            PermissionResult::approve_once()
+        }
+    }
+
+    let (client, server_read, server_write) = make_client();
+    let mut server = FakeServer {
+        read: server_read,
+        write: server_write,
+        session_id: "rejoined".to_string(),
+    };
+    let create = tokio::spawn({
+        let client = client.clone();
+        async move {
+            client
+                .create_session(CreateSessionOptions::default().with_session_id("rejoined"))
+                .await
+                .unwrap()
+        }
+    });
+    let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(request["method"], "session.create");
+    server
+        .respond(
+            &request,
+            serde_json::json!({ "sessionId": "rejoined", "workspacePath": "/tmp/workspace" }),
+        )
+        .await;
+    let first = timeout(TIMEOUT, create).await.unwrap().unwrap();
+
+    let disconnect = tokio::spawn(async move { first.disconnect().await });
+    let detach = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(detach["method"], "session.detach");
+    server
+        .respond(&detach, serde_json::json!({ "success": true }))
+        .await;
+    let request = serde_json::json!({ "requestId": "after-rejoin", "permissionRequest": { "kind": "shell" } });
+    if before_disconnect_returns {
+        server
+            .send_event("permission.requested", request.clone())
+            .await;
+    }
+    timeout(TIMEOUT, disconnect)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    let mut lifecycle = client.subscribe_lifecycle();
+    if !before_disconnect_returns {
+        server.send_event("permission.requested", request).await;
+    }
+    // The client delivers notifications in order, so once this arrives the
+    // request above has been routed.
+    server
+        .send_notification(
+            "session.lifecycle",
+            serde_json::json!({ "type": "session.updated", "sessionId": "fence" }),
+        )
+        .await;
+    timeout(TIMEOUT, lifecycle.recv()).await.unwrap().unwrap();
+
+    let (handled_tx, mut handled) = tokio::sync::mpsc::unbounded_channel();
+    let resume = tokio::spawn({
+        let client = client.clone();
+        async move {
+            client
+                .resume_session(
+                    copilot_sdk::ResumeSessionOptions::new(SessionId::new("rejoined"))
+                        .with_permissions(|group| {
+                            group.with_on_request(Arc::new(RecordingHandler(handled_tx)))
+                        }),
+                )
+                .await
+                .unwrap()
+        }
+    });
+    let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(request["method"], "session.resume");
+    server
+        .respond(&request, serde_json::json!({ "sessionId": "rejoined" }))
+        .await;
+    // The held request is answered as soon as the session registers, which
+    // can be before or after the resume's own follow-up reload.
+    let mut answered = false;
+    for _ in 0..2 {
+        let request = timeout(TIMEOUT, server.read_request())
+            .await
+            .expect("the request that arrived before resume was never answered");
+        match request["method"].as_str() {
+            Some("session.skills.reload") => {
+                server.respond(&request, serde_json::json!({})).await;
+            }
+            Some("session.permissions.handlePendingPermissionRequest") => {
+                assert_eq!(request["params"]["requestId"], "after-rejoin");
+                server.respond(&request, serde_json::json!({})).await;
+                answered = true;
+            }
+            other => panic!("unexpected request {other:?}"),
+        }
+    }
+    assert!(answered);
+    let _session = timeout(TIMEOUT, resume).await.unwrap().unwrap();
+    assert_eq!(handled.try_recv().as_deref(), Ok("after-rejoin"));
+}
+
+#[tokio::test]
+async fn deleting_a_disconnected_session_discards_its_held_requests() {
+    for (deleted, abandon_wait, lifecycle_first) in [
+        (true, false, false),
+        (false, false, false),
+        (true, true, false),
+        (true, false, true),
+        (true, true, true),
+    ] {
+        let (first, mut server) = create_session_pair().await;
+        let client = first.client().clone();
+        let session_id = first.id().clone();
+        let disconnect = tokio::spawn(async move { first.disconnect().await.unwrap() });
+        let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+        assert_eq!(request["method"], "session.detach");
+        server
+            .respond(&request, serde_json::json!({ "success": true }))
+            .await;
+        timeout(TIMEOUT, disconnect).await.unwrap().unwrap();
+
+        server
+            .send_event(
+                "permission.requested",
+                serde_json::json!({
+                    "requestId": "old-conversation",
+                    "permissionRequest": { "kind": "shell" }
+                }),
+            )
+            .await;
+        let mut lifecycle = client.subscribe_lifecycle();
+        server
+            .send_notification(
+                "session.lifecycle",
+                serde_json::json!({ "type": "session.updated", "sessionId": "fence" }),
+            )
+            .await;
+        timeout(TIMEOUT, lifecycle.recv()).await.unwrap().unwrap();
+
+        let mut delete = tokio::spawn({
+            let client = client.clone();
+            let session_id = session_id.clone();
+            async move { client.delete_session(&session_id).await.unwrap() }
+        });
+        let delete_request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+        assert_eq!(delete_request["method"], "session.delete");
+        assert_eq!(delete_request["params"]["sessionId"], session_id.as_str());
+        if abandon_wait {
+            delete.abort();
+            assert!(
+                timeout(TIMEOUT, &mut delete)
+                    .await
+                    .unwrap()
+                    .unwrap_err()
+                    .is_cancelled()
+            );
+        }
+        if lifecycle_first {
+            server
+                .send_notification(
+                    "session.lifecycle",
+                    serde_json::json!({ "type": "session.deleted", "sessionId": session_id }),
+                )
+                .await;
+        } else {
+            server
+                .respond(&delete_request, serde_json::json!({ "success": deleted }))
+                .await;
+            if !abandon_wait {
+                timeout(TIMEOUT, &mut delete).await.unwrap().unwrap();
+            }
+            server
+                .send_notification(
+                    "session.lifecycle",
+                    serde_json::json!({ "type": "session.updated", "sessionId": "fence" }),
+                )
+                .await;
+        }
+        let boundary = timeout(TIMEOUT, lifecycle.recv()).await.unwrap().unwrap();
+        if lifecycle_first {
+            assert_eq!(
+                boundary.event_type,
+                copilot_sdk::SessionLifecycleEventType::Deleted
+            );
+            assert_eq!(boundary.session_id, session_id);
+        }
+
+        let create = tokio::spawn({
+            let client = client.clone();
+            let session_id = session_id.clone();
+            async move {
+                client
+                    .create_session(
+                        CreateSessionOptions::default()
+                            .with_session_id(session_id)
+                            .with_permissions(|group| {
+                                group.with_on_request(Arc::new(ApproveAllHandler))
+                            }),
+                    )
+                    .await
+                    .unwrap()
+            }
+        });
+        let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+        assert_eq!(request["method"], "session.create");
+        server
+            .respond(&request, serde_json::json!({ "sessionId": session_id }))
+            .await;
+        let session = timeout(TIMEOUT, create).await.unwrap().unwrap();
+        server
+            .send_event(
+                "permission.requested",
+                serde_json::json!({
+                    "requestId": "new-conversation",
+                    "permissionRequest": { "kind": "shell" }
+                }),
+            )
+            .await;
+
+        let expected = if deleted {
+            &["new-conversation"][..]
+        } else {
+            &["old-conversation", "new-conversation"][..]
+        };
+        for expected in expected {
+            let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+            assert_eq!(request["method"], PERMISSION_CONFIRMATION_METHOD);
+            assert_eq!(
+                request["params"]["requestId"], *expected,
+                "delete success: {deleted}, abandoned wait: {abandon_wait}, lifecycle first: {lifecycle_first}"
+            );
+            server.respond(&request, serde_json::json!({})).await;
+        }
+        if lifecycle_first {
+            let disconnect = tokio::spawn(async move { session.disconnect().await.unwrap() });
+            let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+            assert_eq!(request["method"], "session.detach");
+            server
+                .respond(&request, serde_json::json!({ "success": true }))
+                .await;
+            timeout(TIMEOUT, disconnect).await.unwrap().unwrap();
+            server
+                .send_event(
+                    "permission.requested",
+                    serde_json::json!({
+                        "requestId": "after-new-disconnect",
+                        "permissionRequest": { "kind": "shell" }
+                    }),
+                )
+                .await;
+            server
+                .send_notification(
+                    "session.lifecycle",
+                    serde_json::json!({ "type": "session.updated", "sessionId": "fence" }),
+                )
+                .await;
+            timeout(TIMEOUT, lifecycle.recv()).await.unwrap().unwrap();
+            // The old reply must not retire the replacement's rejoined requests.
+            server
+                .respond(&delete_request, serde_json::json!({ "success": true }))
+                .await;
+            if !abandon_wait {
+                timeout(TIMEOUT, &mut delete).await.unwrap().unwrap();
+            }
+            server
+                .send_notification(
+                    "session.lifecycle",
+                    serde_json::json!({ "type": "session.updated", "sessionId": "fence" }),
+                )
+                .await;
+            timeout(TIMEOUT, lifecycle.recv()).await.unwrap().unwrap();
+
+            let resume = tokio::spawn({
+                let client = client.clone();
+                async move {
+                    client
+                        .resume_session(
+                            copilot_sdk::ResumeSessionOptions::new(session_id).with_permissions(
+                                |group| group.with_on_request(Arc::new(ApproveAllHandler)),
+                            ),
+                        )
+                        .await
+                        .unwrap()
+                }
+            });
+            let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+            assert_eq!(request["method"], "session.resume");
+            server
+                .respond(
+                    &request,
+                    serde_json::json!({ "sessionId": server.session_id }),
+                )
+                .await;
+            let mut answered = false;
+            for _ in 0..2 {
+                let request = timeout(TIMEOUT, server.read_request()).await.expect(
+                    "the old deletion reply discarded a replacement conversation's request",
+                );
+                match request["method"].as_str() {
+                    Some("session.skills.reload") => {}
+                    Some(PERMISSION_CONFIRMATION_METHOD) => {
+                        assert_eq!(request["params"]["requestId"], "after-new-disconnect");
+                        answered = true;
+                    }
+                    other => panic!("unexpected request {other:?}"),
+                }
+                server.respond(&request, serde_json::json!({})).await;
+            }
+            assert!(answered);
+            let _session = timeout(TIMEOUT, resume).await.unwrap().unwrap();
+        }
+        client.force_stop();
+    }
+}
+
+/// A resume that registers a session while an earlier attachment of it is
+/// still disconnecting keeps its registration when the detach reply arrives:
+/// the detach ends only its own attachment, so the resumed session's later
+/// requests still reach its handler.
+#[tokio::test]
+async fn resume_during_a_disconnect_keeps_its_registration() {
+    struct RecordingHandler(tokio::sync::mpsc::UnboundedSender<String>);
+    #[async_trait]
+    impl PermissionHandler for RecordingHandler {
+        async fn handle(
+            &self,
+            _session_id: SessionId,
+            request_id: RequestId,
+            _data: copilot_sdk::PermissionRequestData,
+        ) -> PermissionResult {
+            let _ = self.0.send(request_id.to_string());
+            PermissionResult::approve_once()
+        }
+    }
+
+    let (client, server_read, server_write) = make_client();
+    let mut server = FakeServer {
+        read: server_read,
+        write: server_write,
+        session_id: "shared".to_string(),
+    };
+    let create = tokio::spawn({
+        let client = client.clone();
+        async move {
+            client
+                .create_session(CreateSessionOptions::default().with_session_id("shared"))
+                .await
+                .unwrap()
+        }
+    });
+    let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    server
+        .respond(
+            &request,
+            serde_json::json!({ "sessionId": "shared", "workspacePath": "/tmp/workspace" }),
+        )
+        .await;
+    let first = timeout(TIMEOUT, create).await.unwrap().unwrap();
+
+    let disconnect = tokio::spawn(async move { first.disconnect().await });
+    let detach = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(detach["method"], "session.detach");
+
+    let (handled_tx, mut handled) = tokio::sync::mpsc::unbounded_channel();
+    let resume = tokio::spawn({
+        let client = client.clone();
+        async move {
+            client
+                .resume_session(
+                    copilot_sdk::ResumeSessionOptions::new(SessionId::new("shared"))
+                        .with_permissions(|group| {
+                            group.with_on_request(Arc::new(RecordingHandler(handled_tx)))
+                        }),
+                )
+                .await
+        }
+    });
+    // The resume registers the session before sending its RPC.
+    let request = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(request["method"], "session.resume");
+    server
+        .respond(&detach, serde_json::json!({ "success": true }))
+        .await;
+    timeout(TIMEOUT, disconnect)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    server
+        .respond(&request, serde_json::json!({ "sessionId": "shared" }))
+        .await;
+    let reload = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(reload["method"], "session.skills.reload");
+    server.respond(&reload, serde_json::json!({})).await;
+    let _session = timeout(TIMEOUT, resume)
+        .await
+        .unwrap()
+        .unwrap()
+        .expect("the resumed session lost its registration to the detach");
+
+    server
+        .send_event(
+            "permission.requested",
+            serde_json::json!({ "requestId": "after-resume", "permissionRequest": { "kind": "shell" } }),
+        )
+        .await;
+    let answer = timeout(TIMEOUT, server.read_request())
+        .await
+        .expect("the resumed session's request was never answered");
+    assert_eq!(
+        answer["method"],
+        "session.permissions.handlePendingPermissionRequest"
+    );
+    assert_eq!(answer["params"]["requestId"], "after-resume");
+    server.respond(&answer, serde_json::json!({})).await;
+    assert_eq!(handled.try_recv().as_deref(), Ok("after-resume"));
+}
+
 /// A connection can receive a session's events before this client registers
 /// it, for example after a raw `sessions.connect`. A request another client
 /// answered in that window reaches observers when the session registers, but

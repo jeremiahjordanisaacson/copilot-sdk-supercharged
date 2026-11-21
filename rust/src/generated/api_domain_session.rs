@@ -10124,6 +10124,21 @@ pub struct SessionRemotePublishStateParams {
 }
 crate::record_serde::wire_record!(SessionRemotePublishStateParams { draft_text: "draftText" if is_none, view_json: "viewJson" if is_none });
 
+/// Reports whether this call created the attachment. An existing attachment remains unchanged.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionRemoteAttachMissionControlResult {
+    /// True when this call starts polling; false when the session already has an attachment.
+    pub started: bool,
+}
+crate::record_serde::wire_record!(SessionRemoteAttachMissionControlResult { started: "started" });
+
 /// GitHub URL and remote export and steering state, with an optional warning when cloud session storage policy refuses export.
 ///
 /// <div class="warning">

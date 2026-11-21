@@ -16240,6 +16240,8 @@ class UserInputRequestedData:
 class UserMessageData:
     "Payload of `user.message` with displayed and model-transformed content, attachments, source/delivery metadata, mode, and telemetry IDs."
     content: str
+    # Internal: this field is an internal SDK API and is not part of the public surface.
+    _agent_authored: bool | None = None
     agent_mode: UserMessageAgentMode | None = None
     attachments: list[Attachment] | None = None
     causal_dependencies: list[str] | None = None
@@ -16261,6 +16263,7 @@ class UserMessageData:
     def from_dict(obj: Any) -> "UserMessageData":
         assert isinstance(obj, dict)
         content = from_str(obj.get("content"))
+        _agent_authored = from_union([from_none, from_bool], obj.get("agentAuthored"))
         agent_mode = from_union([from_none, lambda x: parse_enum(UserMessageAgentMode, x)], obj.get("agentMode"))
         attachments = from_union([from_none, lambda x: from_list(_load_Attachment, x)], obj.get("attachments"))
         causal_dependencies = from_union([from_none, lambda x: from_list(from_str, x)], obj.get("causalDependencies"))
@@ -16279,6 +16282,7 @@ class UserMessageData:
         turn_id = from_union([from_none, from_str], obj.get("turnId"))
         return UserMessageData(
             content=content,
+            _agent_authored=_agent_authored,
             agent_mode=agent_mode,
             attachments=attachments,
             causal_dependencies=causal_dependencies,
@@ -16300,6 +16304,8 @@ class UserMessageData:
     def to_dict(self) -> dict:
         result: dict = {}
         result["content"] = from_str(self.content)
+        if self._agent_authored is not None:
+            result["agentAuthored"] = from_union([from_none, from_bool], self._agent_authored)
         if self.agent_mode is not None:
             result["agentMode"] = from_union([from_none, lambda x: to_enum(UserMessageAgentMode, x)], self.agent_mode)
         if self.attachments is not None:
