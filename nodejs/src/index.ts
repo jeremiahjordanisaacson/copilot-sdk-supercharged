@@ -98,6 +98,16 @@ export type {
     SecretsRemoveFilterValuesResult,
 } from "./generated/rpc.js";
 export type {
+    ImportDiagnostic,
+    MemoryImportCounts,
+    MemoryImportItemResult,
+    MemoryImportRequest,
+    MemoryImportResult,
+    SessionImportCounts,
+    SessionImportRequest,
+    SessionImportResult,
+} from "./generated/rpc.js";
+export type {
     SkillInstallSourceKind,
     SkillInstallSourceScope,
     SkillRemoveSourceEntry,

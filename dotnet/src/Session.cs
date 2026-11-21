@@ -1897,8 +1897,12 @@ public sealed partial class CopilotSession : IAsyncDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !pending.IsCancellationRequested)
         {
-            // The exception's message could contain the answer, so only its type is logged.
-            LogShellAuthenticationHandlerFailed(ex.GetType().FullName ?? ex.GetType().Name, SessionId, request.RequestId);
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                // The exception's message could contain the answer, so only its type is logged.
+                var exceptionType = ex.GetType().FullName ?? ex.GetType().Name;
+                LogShellAuthenticationHandlerFailed(exceptionType, SessionId, request.RequestId);
+            }
             return ShellAuthenticationResponse.Cancel();
         }
         catch (OperationCanceledException)

@@ -3349,6 +3349,27 @@ crate::record_serde::wire_record!(HistorySkippedFileRestore {
     reason: "reason"
 });
 
+/// One diagnostic in physical input order.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ImportDiagnostic {
+    /// Stable diagnostic code.
+    pub code: String,
+    /// External record identifier, when available.
+    pub external_id: Option<String>,
+    /// Physical JSONL line number, starting at one.
+    pub line: i64,
+    /// Description of the input problem.
+    pub message: String,
+}
+crate::record_serde::wire_record!(ImportDiagnostic { code: "code", external_id: "externalId" if is_none, line: "line", message: "message" });
+
 /// An optional plugin default from managed settings. Explicit user choices override this default.
 ///
 /// <div class="warning">

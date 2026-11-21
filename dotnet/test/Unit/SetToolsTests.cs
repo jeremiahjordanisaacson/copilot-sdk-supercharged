@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 #pragma warning disable MCPSDK001 // Live tool replacement is intentionally experimental.
 
 using Microsoft.Extensions.AI;

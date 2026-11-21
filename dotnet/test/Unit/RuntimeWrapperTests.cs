@@ -19,7 +19,7 @@ public sealed class RuntimeWrapperIsolationCollection
 [Collection(RuntimeWrapperIsolationCollection.Name)]
 public sealed class RuntimeWrapperTests
 {
-#if !NETFRAMEWORK
+#if NET
     [Fact]
     public async Task Managed_Launch_Fails_When_Bundled_Runtime_Pair_Is_Missing()
     {
@@ -130,7 +130,7 @@ public sealed class RuntimeWrapperTests
         }
     }
 
-#if !NETFRAMEWORK
+#if NET
     [Fact]
     public async Task ForceStop_Terminates_Descendants_Without_Pgrep()
     {
@@ -396,7 +396,7 @@ public sealed class RuntimeWrapperTests
 
     private static bool IsMusl()
     {
-#if NETFRAMEWORK
+#if !NET
         return false;
 #else
         return System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier.StartsWith(

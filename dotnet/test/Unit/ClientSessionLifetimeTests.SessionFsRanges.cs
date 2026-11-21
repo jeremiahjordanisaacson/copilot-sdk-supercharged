@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 
-#if NET8_0_OR_GREATER
+#if NET
 using System.Text;
+using System.Text.Json;
 using Microsoft.Copilot.Rpc;
 using Xunit;
 
@@ -9,6 +10,128 @@ namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SessionFs_Returns_Standard_Base64_On_The_Wire(bool range)
+    {
+        byte[] bytes = [0, 255, 254, 1];
+        byte[] file = [9, .. bytes, 10];
+        SessionFsProvider provider = range
+            ? new RangeOnlySessionFsProvider((_, offset, length, _) => Task.FromResult(new SessionFsByteRange
+            {
+                Content = file.AsMemory((int)Math.Min(offset, file.Length), (int)(length ?? 0)),
+                ByteLength = file.Length,
+            }))
+            : new BinarySessionFsProvider(_ => Task.FromResult(bytes));
+
+        await using var server = await StartSessionFsServerAsync();
+        await using var client = CreateSessionFsClient(server);
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        {
+            State = new SessionStateOptions { CreateSessionFsProvider = _ => provider },
+        });
+
+        var result = await ReadSessionFsAsync(server, session.SessionId, range, offset: 1, length: 4);
+        var content = result.GetProperty("content");
+        Assert.Equal("AP/+AQ==", content.GetString());
+        Assert.Equal(bytes, content.GetBytesFromBase64());
+        Assert.False(result.TryGetProperty("error", out _));
+        if (range)
+        {
+            Assert.Equal(file.Length, result.GetProperty("byteLength").GetInt64());
+            var eof = await ReadSessionFsAsync(server, session.SessionId, range, offset: 100, length: 0);
+            Assert.Equal(string.Empty, eof.GetProperty("content").GetString());
+            Assert.Equal(file.Length, eof.GetProperty("byteLength").GetInt64());
+            var invalid = await ReadSessionFsAsync(server, session.SessionId, range, offset: -1, length: 4);
+            Assert.Equal(string.Empty, invalid.GetProperty("content").GetString());
+            Assert.Equal(0L, invalid.GetProperty("byteLength").GetInt64());
+            Assert.Contains("safe integers", invalid.GetProperty("error").GetProperty("message").GetString());
+        }
+        else
+        {
+            Assert.False(result.TryGetProperty("byteLength", out _));
+        }
+    }
+
+    [Fact]
+    public async Task SessionFs_Leaves_Range_Result_Validation_To_The_Runtime()
+    {
+        var provider = new RangeOnlySessionFsProvider((_, _, _, _) =>
+            Task.FromResult(new SessionFsByteRange { Content = new byte[] { 0xff }, ByteLength = 5 }));
+        await using var server = await StartSessionFsServerAsync();
+        await using var client = CreateSessionFsClient(server);
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        {
+            State = new SessionStateOptions { CreateSessionFsProvider = _ => provider },
+        });
+
+        var result = await ReadSessionFsAsync(server, session.SessionId, range: true, offset: 1, length: 2);
+        Assert.False(result.TryGetProperty("error", out _));
+        Assert.Equal("/w==", result.GetProperty("content").GetString());
+        Assert.Equal(5L, result.GetProperty("byteLength").GetInt64());
+    }
+
+    [Fact]
+    public async Task SessionFs_Preserves_Reimplemented_Handler_Interfaces_On_The_Wire()
+    {
+        await using var server = await StartSessionFsServerAsync();
+        await using var client = CreateSessionFsClient(server);
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        {
+            State = new SessionStateOptions { CreateSessionFsProvider = _ => new CustomByteReadHandler() },
+        });
+
+        var binary = await ReadSessionFsAsync(server, session.SessionId, range: false);
+        Assert.Equal("AA==", binary.GetProperty("content").GetString());
+        var range = await ReadSessionFsAsync(server, session.SessionId, range: true, offset: 0, length: 1);
+        Assert.Equal("/w==", range.GetProperty("content").GetString());
+        Assert.Equal(17L, range.GetProperty("byteLength").GetInt64());
+    }
+
+    private static async Task<FakeCopilotServer> StartSessionFsServerAsync()
+    {
+        var server = await FakeCopilotServer.StartAsync();
+        server.ResponseFactory = request => request.Method == "sessionFs.setProvider"
+            ? new Dictionary<string, object?> { ["success"] = true }
+            : throw new InvalidOperationException($"Unexpected RPC method '{request.Method}'.");
+        return server;
+    }
+
+    private static CopilotClient CreateSessionFsClient(FakeCopilotServer server) => new(new CopilotClientOptions
+    {
+        Mode = CopilotClientMode.CodingAgent,
+        Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+        SessionFs = new SessionFsConfig
+        {
+            InitialWorkingDirectory = "/",
+            SessionStatePath = "/session-state",
+            Conventions = SessionFsSetProviderConventions.Posix,
+        },
+    });
+
+    private static Task<JsonElement> ReadSessionFsAsync(
+        FakeCopilotServer server, string sessionId, bool range, long offset = 0, long? length = null)
+    {
+        var parameters = new Dictionary<string, object?> { ["sessionId"] = sessionId, ["path"] = "/file" };
+        if (range)
+        {
+            parameters["offset"] = offset;
+            parameters["length"] = length;
+        }
+        return server.SendRequestAsync(range ? "sessionFs.readFileRange" : "sessionFs.readFileBytes", parameters)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private sealed class CustomByteReadHandler : TextOnlySessionFsProvider, ISessionFsHandler, ISessionFsReadFileRangeHandler
+    {
+        Task<SessionFsReadFileBytesResult> ISessionFsHandler.ReadFileBytesAsync(SessionFsReadFileBytesRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(new SessionFsReadFileBytesResult { Content = "AA==" });
+
+        Task<SessionFsReadFileRangeResult> ISessionFsReadFileRangeHandler.ReadFileRangeAsync(SessionFsReadFileRangeRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(new SessionFsReadFileRangeResult { Content = "/w==", ByteLength = 17 });
+    }
+
     [Theory]
     [InlineData(2L, 2L)]
     [InlineData(4L, null)]

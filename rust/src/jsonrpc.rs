@@ -39,9 +39,10 @@ pub(crate) type RequestHandler = Arc<
 type RequestHandlers = Arc<RwLock<HashMap<String, RequestHandler>>>;
 
 fn remote_error_log_message<'a>(method: &str, message: &'a str) -> &'a str {
-    // Listener negotiation carries a token that a remote error may echo.
+    // Remote errors can echo listener tokens or imported content.
     match method {
         "host.getConfiguration" | "host.ready" => "listener negotiation request rejected",
+        "sessions.import" | "memories.import" => "import request rejected",
         _ => message,
     }
 }
@@ -859,6 +860,31 @@ impl JsonRpcClient {
         self.connection_closed.child_token()
     }
 
+    /// Ends the connection as the end of the CLI's output does, after the
+    /// CLI process exited while another process still holds that output open.
+    ///
+    /// Every pending request fails with [`ProtocolErrorKind::RequestCancelled`]
+    /// carrying `message`, where the end of output would drop it without one.
+    /// The read loop then stops and cleans up as it does at the end of output,
+    /// and later requests fail at once because the connection is closed.
+    pub(crate) fn close_after_exit(&self, message: &str) {
+        let senders: Vec<oneshot::Sender<Result<Response, Error>>> = self
+            .pending_requests
+            .write()
+            .drain()
+            .filter_map(|(_, request)| request.sender)
+            .collect();
+        self.connection_closed.cancel();
+        for sender in senders {
+            let error = Error::with_message(
+                ErrorKind::Protocol(ProtocolErrorKind::RequestCancelled),
+                message.to_owned(),
+            );
+            let _ = sender.send(Err(error));
+        }
+        self.close_writer();
+    }
+
     pub(crate) fn register_request_handler(
         &self,
         method: &str,
@@ -1592,7 +1618,32 @@ impl JsonRpcClient {
 
         Ok(async move {
             let mut guard = guard;
-            if let Err(error) = Self::await_write(ack_rx).await {
+            let mut rx = rx;
+            let mut ack_rx = ack_rx;
+            // A descendant can retain stdin without reading it after the CLI
+            // exits, so the write may never finish. Closure must release even a
+            // request awaiting its write ack; the closure then fails it.
+            let mut delivered = None;
+            let written = tokio::select! {
+                biased;
+                result = &mut ack_rx => match Self::write_outcome(result) {
+                    Ok(()) => Ok(()),
+                    // A writer abandoned at a closure that names its cause (the
+                    // runtime exited) leaves that cause here, so report it
+                    // instead of the abandoned write. A response the reader
+                    // already delivered still completes the request.
+                    Err(error) => match rx.try_recv() {
+                        Ok(Err(cause)) => Err(cause),
+                        Ok(Ok(response)) => {
+                            delivered = Some(response);
+                            Ok(())
+                        }
+                        _ => Err(error),
+                    },
+                },
+                _ = connection_closed.cancelled() => Ok(()),
+            };
+            if let Err(error) = written {
                 warn!(
                     elapsed_ms = request_start.elapsed().as_millis(),
                     method = %method,
@@ -1603,7 +1654,11 @@ impl JsonRpcClient {
                 );
                 return Err(error);
             }
-            let response = match rx.await {
+            let outcome = match delivered {
+                Some(response) => Ok(Ok(response)),
+                None => rx.await,
+            };
+            let response = match outcome {
                 Ok(Ok(response)) => response,
                 Ok(Err(error)) => {
                     warn!(
@@ -1693,7 +1748,13 @@ impl JsonRpcClient {
     async fn await_write(
         ack_rx: oneshot::Receiver<Result<(), std::io::Error>>,
     ) -> Result<(), Error> {
-        match ack_rx.await {
+        Self::write_outcome(ack_rx.await)
+    }
+
+    fn write_outcome(
+        ack: Result<Result<(), std::io::Error>, oneshot::error::RecvError>,
+    ) -> Result<(), Error> {
+        match ack {
             Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => Err(Error::from(e)),
             Err(_) => Err(Error::from(std::io::Error::new(

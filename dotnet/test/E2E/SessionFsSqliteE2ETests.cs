@@ -25,7 +25,7 @@ public class SessionFsSqliteE2ETests(E2ETestFixture fixture, ITestOutputHelper o
 
     private readonly List<SqliteCall> _sqliteCalls = [];
 
-#if NETFRAMEWORK
+#if !NET
     [Fact(Skip = "Microsoft.Data.Sqlite native library loading is not supported on .NET Framework")]
 #else
     [Fact]
@@ -55,7 +55,7 @@ public class SessionFsSqliteE2ETests(E2ETestFixture fixture, ITestOutputHelper o
         await session.DisposeAsync();
     }
 
-#if NETFRAMEWORK
+#if !NET
     [Fact(Skip = "Microsoft.Data.Sqlite native library loading is not supported on .NET Framework")]
 #else
     [Fact]

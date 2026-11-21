@@ -341,7 +341,7 @@ internal sealed class ScenarioProviderRequestHandler(string? failingHost = null)
     {
         var body = request.Content is null
             ? string.Empty
-#if NET8_0_OR_GREATER
+#if NET
             : await request.Content.ReadAsStringAsync(ctx.CancellationToken).ConfigureAwait(false);
 #else
             : await request.Content.ReadAsStringAsync().ConfigureAwait(false);

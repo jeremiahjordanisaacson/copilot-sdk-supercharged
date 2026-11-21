@@ -276,7 +276,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         {
             return false;
         }
-#if NETSTANDARD2_0
+#if !NET
         if (Path.DirectorySeparatorChar != '\\')
         {
             return true;
@@ -3092,7 +3092,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         }
         if (!OperatingSystem.IsWindows())
         {
-#if NET8_0_OR_GREATER
+#if NET
             var mode = File.GetUnixFileMode(wrapper);
             const UnixFileMode executeBits =
                 UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
@@ -3297,11 +3297,14 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             rpc.SetLocalRpcMethod("skillProvider.list", handler.OnSkillProviderList, singleObjectParam: true);
             rpc.SetLocalRpcMethod("skillProvider.read", handler.OnSkillProviderRead, singleObjectParam: true);
             rpc.SetLocalRpcMethod("memoryStore.store", handler.OnMemoryStore, singleObjectParam: true);
-            ClientSessionApiRegistration.RegisterClientSessionApiHandlers(rpc, sessionId =>
+            ClientSessionApiHandlers GetSessionHandlers(string sessionId)
             {
                 var session = GetSession(sessionId) ?? throw new ArgumentException($"Unknown session {sessionId}");
                 return session.ClientSessionApis;
-            });
+            }
+            Func<string, ClientSessionApiHandlers> getSessionHandlers = GetSessionHandlers;
+            ClientSessionApiRegistration.RegisterClientSessionApiHandlers(rpc, getSessionHandlers);
+            SessionFsProvider.RegisterByteReadHandlers(rpc, getSessionHandlers);
             if (_clientGlobalApis is not null)
             {
                 if (_clientGlobalApis.EntraToken is EntraTokenAdapter entraTokenAdapter)
@@ -4340,6 +4343,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     [JsonSerializable(typeof(SessionLimitsConfig))]
     [JsonSerializable(typeof(ResumeSessionRequest))]
     [JsonSerializable(typeof(ResumeSessionResponse))]
+    [JsonSerializable(typeof(SessionFsProvider.ByteReadResponse))]
     [JsonSerializable(typeof(SessionCapabilities))]
     [JsonSerializable(typeof(SessionUiCapabilities))]
     [JsonSerializable(typeof(SessionMetadata))]
@@ -4359,7 +4363,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     [JsonSerializable(typeof(UserInputResponse))]
     internal partial class ClientJsonContext : JsonSerializerContext;
 
-#if NET8_0_OR_GREATER
+#if NET
     [GeneratedRegex(@"listening on port ([0-9]+)", RegexOptions.IgnoreCase)]
     private static partial Regex ListeningOnPortRegex();
 #else

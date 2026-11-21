@@ -19,6 +19,18 @@ fn listener_negotiation_logs_do_not_echo_remote_errors() {
 }
 
 #[test]
+fn import_logs_do_not_echo_remote_errors() {
+    let message = "Unsupported session record type 'private-import-content'.";
+    for method in ["sessions.import", "memories.import"] {
+        assert_eq!(
+            remote_error_log_message(method, message),
+            "import request rejected"
+        );
+    }
+    assert_eq!(remote_error_log_message("ping", message), message);
+}
+
+#[test]
 fn deserialize_notification() {
     let json = r#"{"jsonrpc":"2.0","method":"session.event","params":{"id":"e1"}}"#;
     let msg: JsonRpcMessage = serde_json::from_str(json).unwrap();
@@ -499,6 +511,88 @@ async fn request_after_the_read_loop_ended_leaves_no_pending_entry() {
             "the refused request left its entry (eager: {eager})"
         );
     }
+}
+
+/// Takes every byte but never finishes a flush, as a pipe a descendant holds does.
+struct StalledFlush(tokio::io::DuplexStream);
+
+impl AsyncWrite for StalledFlush {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bytes: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.0).poll_write(cx, bytes)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Pending
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.0).poll_shutdown(cx)
+    }
+}
+
+#[tokio::test]
+async fn a_response_delivered_before_the_writer_is_abandoned_completes_the_request() {
+    let (client_write, mut server_read) = tokio::io::duplex(4096);
+    let (mut server_write, client_read) = tokio::io::duplex(4096);
+    let (notification_tx, _) = mpsc::unbounded_channel();
+    let (request_tx, _request_rx) = mpsc::unbounded_channel();
+    let client = JsonRpcClient::new(
+        StalledFlush(client_write),
+        client_read,
+        notification_tx,
+        request_tx,
+    );
+    let request = client.send_request("ping", None);
+    tokio::pin!(request);
+    assert!(futures_util::poll!(&mut request).is_pending());
+
+    // The writer forwarded the frame and waits for a flush that never ends.
+    let mut frame = [0; 64];
+    let read = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        server_read.read(&mut frame),
+    )
+    .await
+    .expect("the request was not written")
+    .unwrap();
+    assert!(read > 0);
+
+    // The reader delivers the response while the write is still unacknowledged.
+    let body = br#"{"jsonrpc":"2.0","id":1,"result":{"ok":true}}"#;
+    server_write
+        .write_all(format!("Content-Length: {}\r\n\r\n", body.len()).as_bytes())
+        .await
+        .unwrap();
+    server_write.write_all(body).await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !client.pending_requests.read().is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the response was not delivered");
+
+    // Closing aborts the writer, which drops its acknowledgement unanswered.
+    client.force_close();
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    let response = tokio::time::timeout(std::time::Duration::from_secs(5), request)
+        .await
+        .expect("the request did not finish")
+        .expect("the delivered response was replaced by the abandoned write");
+    assert_eq!(response.id, 1);
+    assert!(!response.is_error());
 }
 
 #[tokio::test]

@@ -5591,7 +5591,7 @@ public sealed partial class AssistantMessageData
 
     /// <summary>No longer emitted. For OpenAI Responses, read encrypted_content from the reasoning items in reasoningBlocks.blocks instead. Older events may still contain this field.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-#if NET5_0_OR_GREATER
+#if NET
     [Obsolete("This member is deprecated and will be removed in a future version.", DiagnosticId = "MCPSDK001")]
 #else
     [Obsolete("This member is deprecated and will be removed in a future version.")]
@@ -10364,6 +10364,11 @@ public sealed partial class FusionAttribution
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("hasUserSteering")]
     public bool? HasUserSteering { get; set; }
+
+    /// <summary>ISO 8601 time the event happened, when HydraFusion held it back and published it later. The envelope `timestamp` is when it was published.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("occurredAt")]
+    public string? OccurredAt { get; set; }
 
     /// <summary>HydraFusion orchestration pattern selected for the turn.</summary>
     [JsonPropertyName("pattern")]

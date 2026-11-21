@@ -4,6 +4,7 @@
 
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -23,6 +24,41 @@ namespace Microsoft.Copilot.Test.Unit;
 /// </summary>
 public class JsonRpcTests
 {
+    [Theory]
+    [InlineData("sessions.import")]
+    [InlineData("memories.import")]
+    [InlineData("ping")]
+    public async Task JsonRpc_Import_Error_Logs_Preserve_Caller_Error_Without_Payload(string method)
+    {
+        const string message = "Unsupported session record type 'private-import-content'.";
+        var logger = new DeliveryLogger();
+        using var sendStream = new MemoryStream();
+        using var receiveStream = new MemoryStream(CreateFrame(
+            """{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Unsupported session record type 'private-import-content'.","data":{"externalId":"private-import-id"}}}"""));
+        using var rpc = new JsonRpcReflection(sendStream, receiveStream, logger);
+        var pending = rpc.InvokeAsync<string>(method, args: null);
+        rpc.StartListening();
+
+        var error = await Assert.ThrowsAsync<RemoteRpcException>(() => pending.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(-32000, error.ErrorCode);
+        Assert.Equal(message, error.Message);
+        Assert.Equal("private-import-id", error.ErrorData!.Value.GetProperty("externalId").GetString());
+        var warning = Assert.Single(logger.Warnings, entry =>
+            entry.Message.StartsWith("JsonRpc.InvokeAsync", StringComparison.Ordinal));
+        Assert.Contains(warning.Properties, property => property.Key == "Method" && Equals(property.Value, method));
+        Assert.Contains(warning.Properties, property => property.Key == "Status" && Equals(property.Value, "Failed"));
+        Assert.Contains(warning.Properties, property => property.Key == "RequestId" && Equals(property.Value, 1L));
+        if (method == "ping")
+        {
+            Assert.Same(error, warning.Exception);
+        }
+        else
+        {
+            Assert.Null(warning.Exception);
+            Assert.DoesNotContain("private-import", warning.ToString(), StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task JsonRpc_Handles_Positional_Named_And_Single_Object_Params()
     {
@@ -54,6 +90,73 @@ public class JsonRpcTests
 
         static ValueTask<SingleObjectResponse> HandleSingleObject(SingleObjectRequest request, CancellationToken cancellationToken) =>
             ValueTask.FromResult(new SingleObjectResponse { Value = request.Value.ToUpperInvariant() });
+    }
+
+    [Fact]
+    public async Task JsonRpc_Streams_Declared_Polymorphic_Result_And_Explicit_Null()
+    {
+        using var sendStream = new MemoryStream();
+        using var receiveStream = new MemoryStream(CombineFrames([
+            CreateFrame("""{"jsonrpc":"2.0","id":"response-id","method":"reply","params":[]}"""),
+            CreateRequestFrame(42, "void", "[]"),
+        ]));
+        using var rpc = new JsonRpcReflection(sendStream, receiveStream);
+        rpc.SetLocalRpcMethod("reply", (Func<PolymorphicResult>)(() => new ConcreteResult { Value = "\u00e9" }));
+        rpc.SetLocalRpcMethod("void", (Action)(() => { }));
+
+        rpc.StartListening();
+        await rpc.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+
+        ReadOnlyMemory<byte> remaining = sendStream.ToArray();
+        using var first = ReadResponseFrame(ref remaining);
+        using var second = ReadResponseFrame(ref remaining);
+        Assert.True(remaining.IsEmpty, $"Unexpected trailing response bytes: {remaining.Length}");
+
+        JsonElement[] responses = [first.RootElement, second.RootElement];
+        var reply = Assert.Single(responses, response => response.GetProperty("id").ValueKind == JsonValueKind.String);
+        Assert.Equal("2.0", reply.GetProperty("jsonrpc").GetString());
+        Assert.Equal("response-id", reply.GetProperty("id").GetString());
+        var result = reply.GetProperty("result");
+        Assert.Equal("concrete", result.GetProperty("kind").GetString());
+        Assert.Equal("\u00e9", result.GetProperty("value").GetString());
+
+        var empty = Assert.Single(responses, response => response.GetProperty("id").ValueKind == JsonValueKind.Number);
+        Assert.Equal("2.0", empty.GetProperty("jsonrpc").GetString());
+        Assert.Equal(42L, empty.GetProperty("id").GetInt64());
+        Assert.Equal(JsonValueKind.Null, empty.GetProperty("result").ValueKind);
+    }
+
+    [Fact]
+    public async Task JsonRpc_Response_Serialization_Failure_Leaves_No_Partial_Frame()
+    {
+        using var pair = JsonRpcReflectionPair.Create();
+        pair.Server.SetLocalRpcMethod("broken", (Func<SingleObjectRequest, RawSendPayload>)(_ =>
+            new RawSendPayload("\"" + new string('x', 100_000) + "\"", Fail: true)),
+            singleObjectParam: true);
+        pair.Server.SetLocalRpcMethod("healthy", (Func<SingleObjectRequest, string>)(_ => "ok"), singleObjectParam: true);
+        pair.StartListening();
+        var timeout = TimeSpan.FromSeconds(5);
+
+        var error = await Assert.ThrowsAsync<RemoteRpcException>(
+            () => pair.Client.InvokeAsync<JsonElement>("broken", [new SingleObjectRequest()]).WaitAsync(timeout));
+        Assert.Equal(-32603, error.ErrorCode);
+        Assert.Equal("Serialization failed", error.Message);
+        Assert.Equal("ok", await pair.Client.InvokeAsync<string>("healthy", [new SingleObjectRequest()]).WaitAsync(timeout));
+    }
+
+    [Fact]
+    public async Task JsonRpc_Response_Depth_Limit_Includes_Envelope()
+    {
+        using var pair = JsonRpcReflectionPair.Create();
+        pair.Server.SetLocalRpcMethod("depth", (Func<int, JsonElement>)(levels => JsonElement.Parse(NestedJson(levels))));
+        pair.StartListening();
+        var timeout = TimeSpan.FromSeconds(5);
+
+        var result = await pair.Client.InvokeAsync<JsonElement>("depth", [new { levels = 63 }]).WaitAsync(timeout);
+        Assert.Equal(NestedJson(63), result.GetRawText());
+        var error = await Assert.ThrowsAsync<RemoteRpcException>(
+            () => pair.Client.InvokeAsync<JsonElement>("depth", [new { levels = 64 }]).WaitAsync(timeout));
+        Assert.Equal(-32603, error.ErrorCode);
     }
 
     [Fact]
@@ -779,6 +882,21 @@ public class JsonRpcTests
         return frame;
     }
 
+    private static JsonDocument ReadResponseFrame(ref ReadOnlyMemory<byte> remaining)
+    {
+        const string contentLengthHeader = "Content-Length:";
+        int headerEnd = remaining.Span.IndexOf("\r\n\r\n"u8);
+        Assert.True(headerEnd >= 0, "Expected a complete JSON-RPC response header.");
+        var headers = Encoding.ASCII.GetString(remaining.Slice(0, headerEnd).ToArray());
+        var contentLength = Assert.Single(headers.Split(["\r\n"], StringSplitOptions.None),
+            header => header.StartsWith(contentLengthHeader, StringComparison.OrdinalIgnoreCase));
+        int length = int.Parse(contentLength.Split([':'], 2)[1], CultureInfo.InvariantCulture);
+        int bodyStart = headerEnd + 4;
+        var document = JsonDocument.Parse(remaining.Slice(bodyStart, length));
+        remaining = remaining.Slice(bodyStart + length);
+        return document;
+    }
+
     private static string NestedJson(int levels) =>
         string.Concat(Enumerable.Repeat("""{"n":""", levels)) + "42" + new string('}', levels);
 
@@ -836,6 +954,15 @@ public class JsonRpcTests
     private sealed class SingleObjectResponse
     {
         public string Value { get; set; } = string.Empty;
+    }
+
+    [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+    [JsonDerivedType(typeof(ConcreteResult), "concrete")]
+    private abstract class PolymorphicResult;
+
+    private sealed class ConcreteResult : PolymorphicResult
+    {
+        public required string Value { get; init; }
     }
 
     [JsonConverter(typeof(RawSendPayloadConverter))]
@@ -1045,7 +1172,7 @@ public class JsonRpcTests
         public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
             WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
-#if NET8_0_OR_GREATER
+#if NET
         public override
 #else
         internal
@@ -1078,7 +1205,7 @@ public class JsonRpcTests
         public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
             WriteCoreAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
-#if NET8_0_OR_GREATER
+#if NET
         public override
 #else
         internal
@@ -1121,7 +1248,7 @@ public class JsonRpcTests
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
             base.ReadAsync(buffer, offset, Math.Min(count, chunkSize), cancellationToken);
 
-#if NET8_0_OR_GREATER
+#if NET
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
             base.ReadAsync(buffer.Slice(0, Math.Min(buffer.Length, chunkSize)), cancellationToken);
 #endif
@@ -1162,7 +1289,7 @@ public class JsonRpcTests
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
             ReadCoreAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
-#if NET8_0_OR_GREATER
+#if NET
         public override
 #else
         internal
@@ -1242,7 +1369,7 @@ public class JsonRpcTests
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
             ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
-#if NET8_0_OR_GREATER
+#if NET
         public override
 #else
         internal
@@ -1281,7 +1408,7 @@ public class JsonRpcTests
         public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
             WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
-#if NET8_0_OR_GREATER
+#if NET
         public override
 #else
         internal

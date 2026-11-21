@@ -1647,6 +1647,245 @@ async fn spawned_child_is_killed_when_dropped() {
     assert_test_child_killed(exited).await;
 }
 
+/// A stdio runtime stand-in for the exit tests. It answers `connect`, `ping`
+/// and `runtime.shutdown` and exits when its stdin ends. A `ping` whose
+/// message is `exit:<mode>` makes it exit without answering, and
+/// `reply:<mode>` makes it exit right after answering. Before exiting it starts
+/// a process that keeps its stdio (`held`), one that does not (`released`), or
+/// none (`none`). That process lives until the `KEEP` file is removed.
+#[cfg(any(unix, windows))]
+const EXITING_RUNTIME: &str = r#"
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+const holder = `const fs = require("node:fs");
+setInterval(() => fs.existsSync(process.env.KEEP) || process.exit(0), 50);
+setTimeout(() => process.exit(0), 60000);`;
+function exit(mode) {
+    if (mode !== "none") {
+        spawn(process.execPath, ["-e", holder], {
+            stdio: mode === "held" ? "inherit" : "ignore",
+            // On Windows, Node ends the processes it started when it exits
+            // unless they are detached.
+            detached: process.platform === "win32",
+            windowsHide: true,
+        });
+    }
+    process.exit(0);
+}
+function reply(id, result, then) {
+    const body = JSON.stringify({ jsonrpc: "2.0", id, result });
+    process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`, then);
+}
+let input = Buffer.alloc(0);
+process.stdin.on("end", () => process.exit(0));
+process.stdin.on("data", (chunk) => {
+    input = Buffer.concat([input, chunk]);
+    for (;;) {
+        const end = input.indexOf("\r\n\r\n");
+        if (end < 0) return;
+        const length = Number(/Content-Length: *(\d+)/i.exec(input.subarray(0, end).toString())[1]);
+        if (input.length < end + 4 + length) return;
+        const request = JSON.parse(input.subarray(end + 4, end + 4 + length).toString());
+        input = input.subarray(end + 4 + length);
+        const message = String(request.params?.message ?? "");
+        const [action, mode] = message.split(":");
+        if (request.method === "connect") {
+            reply(request.id, { ok: true, protocolVersion: 4, version: "test" });
+        } else if (request.method === "ping" && action === "exit") {
+            exit(mode);
+        } else if (request.method === "ping" && action === "reply") {
+            reply(request.id, { message: "replied", timestamp: "0" }, () => exit(mode));
+        } else if (request.method === "ping") {
+            reply(request.id, { message, timestamp: "0" });
+        } else {
+            reply(request.id, {});
+        }
+    }
+});
+"#;
+
+/// Starts [`EXITING_RUNTIME`] as an owned stdio runtime through `Client::start`.
+#[cfg(any(unix, windows))]
+async fn start_exiting_runtime(temp: &Path) -> Client {
+    let keep = temp.join("keep");
+    std::fs::write(&keep, "").unwrap();
+    Client::start(
+        ClientOptions::new(crate::ClientMode::CodingAgent).with_runtime(
+            RuntimeConnection::for_spawned_stdio(
+                SpawnedProcessOptions::new()
+                    .with_program(CliProgram::Path("node".into()))
+                    .with_args(["-e", EXITING_RUNTIME, "--"])
+                    .with_working_directory(temp)
+                    .with_env(std::env::vars_os().chain([("KEEP".into(), keep.into_os_string())])),
+            ),
+        ),
+    )
+    .await
+    .expect("start the stand-in runtime")
+}
+
+/// Requests on an owned stdio client end when the runtime exits, also while a
+/// process it started holds its stdout open. Prints one line per row.
+#[cfg(any(unix, windows))]
+#[tokio::test]
+async fn requests_end_when_the_owned_stdio_runtime_exits() {
+    const DEADLINE: Duration = Duration::from_secs(5);
+    // (row, ping that makes the runtime exit, whether it answers that ping first)
+    let rows = [
+        ("no started process", "exit:none", false),
+        ("started process released stdio", "exit:released", false),
+        ("started process holds stdio", "exit:held", false),
+        ("answered; process holds stdio", "reply:held", true),
+    ];
+    let mut failures = Vec::new();
+    for (row, trigger, answered) in rows {
+        let temp = tempfile::tempdir().unwrap();
+        let client = start_exiting_runtime(temp.path()).await;
+        assert_eq!(
+            client.ping(Some("hello")).await.unwrap().message,
+            "hello",
+            "{row}"
+        );
+
+        let started = Instant::now();
+        let in_flight = tokio::time::timeout(DEADLINE, client.ping(Some(trigger))).await;
+        let in_flight_ms = started.elapsed().as_millis();
+        let in_flight_ok = match &in_flight {
+            Ok(Ok(response)) => answered && response.message == "replied",
+            Ok(Err(error)) => {
+                !answered
+                    && *error.kind() == ErrorKind::Protocol(ProtocolErrorKind::RequestCancelled)
+                    && (!trigger.ends_with(":held")
+                        || error.to_string().contains("the CLI process exited"))
+            }
+            Err(_) => false,
+        };
+
+        let started = Instant::now();
+        let next = tokio::time::timeout(DEADLINE, client.ping(Some("again"))).await;
+        let next_ms = started.elapsed().as_millis();
+        let next_ok = matches!(&next, Ok(Err(error)) if error.is_transport_failure());
+
+        let started = Instant::now();
+        let stopped = tokio::time::timeout(DEADLINE, client.stop()).await;
+        let stop_ms = started.elapsed().as_millis();
+        let stop_ok = stopped.is_ok();
+
+        client.force_stop();
+        println!(
+            "ROW {row}: in-flight {in_flight:?} after {in_flight_ms} ms; \
+             next {next:?} after {next_ms} ms; stop finished {stop_ok} after {stop_ms} ms"
+        );
+        if !(in_flight_ok && next_ok && stop_ok) {
+            failures.push(row);
+        }
+    }
+    assert!(failures.is_empty(), "rows failed: {failures:?}");
+}
+
+#[cfg(all(unix, feature = "runtime"))]
+#[tokio::test]
+async fn externally_reaped_stdio_child_still_bounds_pending_requests() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut command = Command::new("/bin/sh");
+    command.args(["-c", "exit 0"]).current_dir(temp.path());
+    let (child, tree) = process_tree::spawn(&mut command).unwrap();
+    let pid = child.id().unwrap();
+    let mut process = process_tree::OwnedProcess::new(child, tree);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !process.has_exited().unwrap() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("child must exit before the foreign reaper runs");
+    // Reap only this exited child, before starting the watcher, so it must
+    // observe ECHILD rather than winning a race to observe the zombie.
+    let mut status = 0;
+    assert_eq!(
+        unsafe { libc::waitpid(pid as i32, &mut status, libc::WNOHANG) },
+        pid as i32
+    );
+
+    let (client_write, _server_read) = tokio::io::duplex(8192);
+    // Retaining the peer models a descendant keeping runtime stdout open.
+    let (_server_write, client_read) = tokio::io::duplex(8192);
+    let client = Client::from_streams(
+        crate::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        temp.path().to_owned(),
+    )
+    .unwrap();
+    *client.inner.child.lock() = Some(process);
+    client.spawn_child_exit_watcher();
+
+    let pending = tokio::time::timeout(Duration::from_secs(3), client.ping(None)).await;
+    let later = tokio::time::timeout(Duration::from_millis(250), client.ping(None)).await;
+    // The foreign reaper released this PID. Drop the non-kill-on-drop handle
+    // without asking force_stop to signal a potentially recycled PID.
+    drop(client.inner.child.lock().take());
+    client.force_stop();
+
+    assert!(
+        matches!(&pending, Ok(Err(error))
+            if *error.kind() == ErrorKind::Protocol(ProtocolErrorKind::RequestCancelled)
+                && error.to_string().contains("the CLI process exited")),
+        "externally reaped child left a request pending: {pending:?}"
+    );
+    assert!(
+        matches!(&later, Ok(Err(error)) if error.is_transport_failure()),
+        "later request did not fail immediately: {later:?}"
+    );
+}
+
+/// Stopping a running owned stdio runtime closes its stdin and returns once it
+/// exits, without waiting out the shutdown timeout, also while the client
+/// watches the runtime for an exit of its own.
+#[cfg(any(unix, windows))]
+#[tokio::test]
+async fn stop_returns_once_the_owned_stdio_runtime_exits() {
+    let temp = tempfile::tempdir().unwrap();
+    let client = start_exiting_runtime(temp.path()).await;
+    assert_eq!(client.ping(Some("hello")).await.unwrap().message, "hello");
+    assert!(client.pid().is_some());
+
+    let started = Instant::now();
+    let stopped = tokio::time::timeout(Duration::from_secs(5), client.stop()).await;
+
+    assert!(
+        matches!(stopped, Ok(Ok(()))),
+        "stop: {stopped:?} after {} ms",
+        started.elapsed().as_millis()
+    );
+    assert_eq!(client.pid(), None);
+}
+
+/// Once an owned stdio runtime has exited, the client does not reap it, so
+/// `pid()` keeps naming the process that stop or force stop still has to
+/// contain. Stop then reaps it and `pid()` becomes `None`.
+#[cfg(any(unix, windows))]
+#[tokio::test]
+async fn pid_stays_until_stop_once_the_owned_stdio_runtime_exits() {
+    for trigger in ["exit:none", "exit:held"] {
+        let temp = tempfile::tempdir().unwrap();
+        let client = start_exiting_runtime(temp.path()).await;
+        let pid = client.pid().expect("owned runtime PID");
+
+        let _ = tokio::time::timeout(Duration::from_secs(5), client.ping(Some(trigger))).await;
+        // The exit watcher polls every 20 ms; give it time to act on the exit.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Windows has no zombie to pin, so only Unix keeps the exited ID.
+        #[cfg(unix)]
+        assert_eq!(client.pid(), Some(pid), "{trigger}: pid() dropped early");
+        #[cfg(not(unix))]
+        let _ = pid;
+
+        let _ = tokio::time::timeout(Duration::from_secs(5), client.stop()).await;
+        assert_eq!(client.pid(), None, "{trigger}: stop left the runtime");
+    }
+}
+
 /// A child that reports readiness, then idles for a minute without writing to
 /// its piped stdout, so EOF on that pipe means the process exited.
 #[cfg(any(unix, windows))]
@@ -1711,9 +1950,10 @@ fn client_with_list_models_handler(handler: Arc<dyn ListModelsHandler>) -> Clien
         inner: Arc::new(ClientInner {
             ahp_host_callbacks: Arc::new(ahp_host::ExitCallbacks::default()),
             ahp_host_sessions: std::sync::Weak::<ahp_host::HostSessions>::new(),
-            child: parking_lot::Mutex::new(None),
+            child: Arc::new(parking_lot::Mutex::new(None)),
             owns_stdio: false,
             force_stop_requested: tokio_util::sync::CancellationToken::new(),
+            stop_child_watch: tokio_util::sync::CancellationToken::new(),
             #[cfg(feature = "in-process")]
             ffi_host: parking_lot::Mutex::new(None),
             rpc: {

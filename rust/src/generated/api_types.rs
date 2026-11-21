@@ -138,6 +138,8 @@ pub mod rpc_methods {
     pub(crate) const SESSIONS_VALIDATENAME: &str = "sessions.validateName";
     /// `sessions.importSemantic`
     pub(crate) const SESSIONS_IMPORTSEMANTIC: &str = "sessions.importSemantic";
+    /// `sessions.import`
+    pub const SESSIONS_IMPORT: &str = "sessions.import";
     /// `sessions.open`
     pub const SESSIONS_OPEN: &str = "sessions.open";
     /// `sessions.fork`
@@ -223,6 +225,8 @@ pub mod rpc_methods {
     pub(crate) const SESSIONS_FORGEPROPOSALS_FAILSTALE: &str = "sessions.forgeProposals.failStale";
     /// `memories.importSemantic`
     pub(crate) const MEMORIES_IMPORTSEMANTIC: &str = "memories.importSemantic";
+    /// `memories.import`
+    pub const MEMORIES_IMPORT: &str = "memories.import";
     /// `secrets.filterForHost`
     pub(crate) const SECRETS_FILTERFORHOST: &str = "secrets.filterForHost";
     /// `secrets.addFilterValues`
@@ -1962,12 +1966,13 @@ pub use sdk_api_shared::{
     HMACAuthInfo, HMACAuthInfoHost, HMACAuthInfoType, HistoryCompactContextWindow,
     HistoryFileRestoreSkipReason, HistoryRewindChangeType, HistoryRewindFilePreview,
     HistoryRewindOutcome, HistoryRewindPoint, HistoryRewindUnavailableReason,
-    HistorySkippedFileRestore, InstallationCatalogueIdentity, InstalledPlugin, InstalledPluginInfo,
-    InstalledPluginVerifiedSource, InstructionSource, InstructionSourceLocation,
-    InstructionSourceType, LoginProviderKind, LspConfigurationProblem, LspProbeExitStatus,
-    LspServerSummary, LspWarmupError, ManagedPluginAssignment, ManagedSettingsResolvedData,
-    MarketplaceInfo, MarketplaceMigrationStatus, MarketplacePluginInfo, MarketplaceRefreshEntry,
-    McpAllowedServer, McpAppsDiagnoseCapability, McpAppsDiagnoseServer, McpAppsHostContextDetails,
+    HistorySkippedFileRestore, ImportDiagnostic, InstallationCatalogueIdentity, InstalledPlugin,
+    InstalledPluginInfo, InstalledPluginVerifiedSource, InstructionSource,
+    InstructionSourceLocation, InstructionSourceType, LoginProviderKind, LspConfigurationProblem,
+    LspProbeExitStatus, LspServerSummary, LspWarmupError, ManagedPluginAssignment,
+    ManagedSettingsResolvedData, MarketplaceInfo, MarketplaceMigrationStatus,
+    MarketplacePluginInfo, MarketplaceRefreshEntry, McpAllowedServer, McpAppsDiagnoseCapability,
+    McpAppsDiagnoseServer, McpAppsHostContextDetails,
     McpAppsHostContextDetailsAvailableDisplayMode, McpAppsHostContextDetailsDisplayMode,
     McpAppsHostContextDetailsPlatform, McpAppsHostContextDetailsTheme, McpAppsResourceContent,
     McpConfiguredServer, McpConfiguredServerState, McpDiagnosticDetails, McpDiagnosticDirection,
@@ -2245,7 +2250,8 @@ pub use sdk_api_session::{
     SessionHistoryCompactResult, SessionHistoryListRewindPointsParams,
     SessionHistoryListRewindPointsResult, SessionHistoryPreviewRewindResult,
     SessionHistoryRewindResult, SessionHistorySummarizeForHandoffParams,
-    SessionHistorySummarizeForHandoffResult, SessionHistoryTruncateResult, SessionInstalledPlugin,
+    SessionHistorySummarizeForHandoffResult, SessionHistoryTruncateResult, SessionImportCounts,
+    SessionImportRequest, SessionImportResult, SessionInstalledPlugin,
     SessionInstalledPluginSourceGitHub, SessionInstalledPluginSourceGitHubSource,
     SessionInstalledPluginSourceLocal, SessionInstalledPluginSourceLocalSource,
     SessionInstalledPluginSourceUrl, SessionInstalledPluginSourceUrlSource,
@@ -2474,12 +2480,13 @@ pub use sdk_api_session::{
     SessionsGetLastForContextResult, SessionsGetMetadataRequest, SessionsGetMetadataResult,
     SessionsGetPersistedRemoteSteerableRequest, SessionsGetPersistedRemoteSteerableResult,
     SessionsGetRemoteControlStatusResult, SessionsGetSizesResult, SessionsHasEventsRequest,
-    SessionsHasEventsResult, SessionsImportSemanticRequest, SessionsImportSemanticResult,
-    SessionsListNonEmptySessionIdsRequest, SessionsListNonEmptySessionIdsResult,
-    SessionsListRequest, SessionsListResult, SessionsLoadDeferredRepoHooksRequest,
-    SessionsLoadDeferredRepoHooksResult, SessionsLoadWorkspaceRequest, SessionsLoadWorkspaceResult,
-    SessionsOpenAttach, SessionsOpenAttachKind, SessionsOpenCloud, SessionsOpenCloudKind,
-    SessionsOpenCreate, SessionsOpenCreateKind, SessionsOpenHandoff, SessionsOpenHandoffKind,
+    SessionsHasEventsResult, SessionsImportResult, SessionsImportSemanticRequest,
+    SessionsImportSemanticResult, SessionsListNonEmptySessionIdsRequest,
+    SessionsListNonEmptySessionIdsResult, SessionsListRequest, SessionsListResult,
+    SessionsLoadDeferredRepoHooksRequest, SessionsLoadDeferredRepoHooksResult,
+    SessionsLoadWorkspaceRequest, SessionsLoadWorkspaceResult, SessionsOpenAttach,
+    SessionsOpenAttachKind, SessionsOpenCloud, SessionsOpenCloudKind, SessionsOpenCreate,
+    SessionsOpenCreateKind, SessionsOpenHandoff, SessionsOpenHandoffKind,
     SessionsOpenHandoffTaskType, SessionsOpenProgress, SessionsOpenProgressStatus,
     SessionsOpenProgressStep, SessionsOpenRemote, SessionsOpenRemoteKind, SessionsOpenResult,
     SessionsOpenResume, SessionsOpenResumeKind, SessionsOpenResumeLast, SessionsOpenResumeLastKind,
@@ -3270,8 +3277,10 @@ pub use sdk_api_services::{
     LspProbeRequest, LspProbeResult, LspSetEnabledRequest, LspWarmupResult, MarketplaceAddResult,
     MarketplaceBrowseResult, MarketplaceListResult, MarketplaceMigrationResult,
     MarketplaceRefreshResult, MarketplaceRemoveResult, McpElicitationFormMode, McpTaskMetadata,
-    MemoriesImportSemanticRequest, MemoriesImportSemanticResult, MemoryStoreRequest,
-    MetadataContextAttributionResult, MetadataContextAttributionResultContextAttribution,
+    MemoriesImportResult, MemoriesImportSemanticRequest, MemoriesImportSemanticResult,
+    MemoryImportCounts, MemoryImportItemResult, MemoryImportRequest, MemoryImportResult,
+    MemoryStoreRequest, MetadataContextAttributionResult,
+    MetadataContextAttributionResultContextAttribution,
     MetadataContextAttributionResultContextAttributionCategories,
     MetadataContextAttributionResultContextAttributionCompactions,
     MetadataContextAttributionResultContextAttributionEntriesItem,

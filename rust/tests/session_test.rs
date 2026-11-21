@@ -10732,13 +10732,20 @@ async fn session_fs_dispatches_write_file_with_mode() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[tokio::test]
 async fn validate_session_fs_config_rejects_empty_initial_cwd() {
+    use copilot_sdk::{ClientMode, ClientOptions, RuntimeConnection, SpawnedProcessOptions};
+
     let cfg =
         copilot_sdk::session_fs::SessionFsConfig::new("", "/state", SessionFsConventions::Posix);
-    let opts =
-        copilot_sdk::ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_session_fs(cfg);
-    let err = copilot_sdk::Client::start(opts).await.err();
+    let temp = tempfile::tempdir().unwrap();
+    let opts = ClientOptions::new(ClientMode::CodingAgent)
+        .with_runtime(RuntimeConnection::for_spawned_stdio(
+            SpawnedProcessOptions::new().with_program(temp.path().join("missing-runtime")),
+        ))
+        .with_session_fs(cfg);
+    let err = Client::start(opts).await.err();
     let err_string = format!("{err:?}");
     assert!(
         err_string.contains("initial_cwd") || err_string.contains("InvalidSessionFsConfig"),

@@ -484,7 +484,7 @@ public class MSBuildTargetsTests
 
     private static bool IsMusl()
     {
-#if NETFRAMEWORK
+#if !NET
         return false;
 #else
         return System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier.StartsWith(
@@ -495,7 +495,7 @@ public class MSBuildTargetsTests
 
     private static string ComputeSha256(byte[] contents)
     {
-#if NETFRAMEWORK
+#if !NET
         using var sha256 = SHA256.Create();
         return BitConverter.ToString(sha256.ComputeHash(contents)).Replace("-", "").ToLowerInvariant();
 #else
@@ -948,7 +948,7 @@ public class MSBuildTargetsTests
 
         private static Task WriteBytesAsync(Stream stream, byte[] contents)
         {
-#if NETFRAMEWORK
+#if !NET
             return stream.WriteAsync(contents, 0, contents.Length);
 #else
             return stream.WriteAsync(contents).AsTask();

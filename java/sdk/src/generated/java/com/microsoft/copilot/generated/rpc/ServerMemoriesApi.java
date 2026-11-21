@@ -17,7 +17,7 @@ import javax.annotation.processing.Generated;
  * @since 1.0.0
  */
 @javax.annotation.processing.Generated("copilot-sdk-codegen")
-final class ServerMemoriesApi {
+public final class ServerMemoriesApi {
 
     private final RpcCaller caller;
 
@@ -35,6 +35,17 @@ final class ServerMemoriesApi {
     @CopilotExperimental
     CompletableFuture<MemoriesImportSemanticResult> importSemantic(MemoriesImportSemanticParams params) {
         return caller.invoke("memories.importSemantic", params, MemoriesImportSemanticResult.class);
+    }
+
+    /**
+     * Validates semantic memory JSONL and stores records under the server's account and repository policy. Dry runs submit no records.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<MemoriesImportResult> import_(MemoriesImportParams params) {
+        return caller.invoke("memories.import", params, MemoriesImportResult.class);
     }
 
 }

@@ -557,7 +557,7 @@ public class CopilotRequestHandler
 
             if (!message.Headers.TryAddWithoutValidation(name, values))
             {
-#if NETSTANDARD2_0
+#if !NET
                 // .NET Framework rejects content on GET/HEAD, even when it is empty.
                 if (!hasBody && RuntimeInformation.FrameworkDescription.StartsWith(".NET Framework", StringComparison.Ordinal))
                 {

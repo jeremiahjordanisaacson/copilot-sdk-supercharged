@@ -6187,6 +6187,10 @@ export interface FusionAttribution {
    */
   hasUserSteering?: boolean;
   /**
+   * ISO 8601 time the event happened, when HydraFusion held it back and published it later. The envelope `timestamp` is when it was published.
+   */
+  occurredAt?: string;
+  /**
    * HydraFusion orchestration pattern selected for the turn.
    */
   pattern: string;

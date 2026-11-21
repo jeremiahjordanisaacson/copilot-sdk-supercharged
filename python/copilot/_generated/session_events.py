@@ -1313,6 +1313,7 @@ class FusionAttribution:
     commit_id: str | None = None
     conversation_scope: str | None = None
     has_user_steering: bool | None = None
+    occurred_at: str | None = None
     phase_id: str | None = None
     phase_kind: str | None = None
     role: str | None = None
@@ -1329,6 +1330,7 @@ class FusionAttribution:
         commit_id = from_union([from_none, from_str], obj.get("commitId"))
         conversation_scope = from_union([from_none, from_str], obj.get("conversationScope"))
         has_user_steering = from_union([from_none, from_bool], obj.get("hasUserSteering"))
+        occurred_at = from_union([from_none, from_str], obj.get("occurredAt"))
         phase_id = from_union([from_none, from_str], obj.get("phaseId"))
         phase_kind = from_union([from_none, from_str], obj.get("phaseKind"))
         role = from_union([from_none, from_str], obj.get("role"))
@@ -1342,6 +1344,7 @@ class FusionAttribution:
             commit_id=commit_id,
             conversation_scope=conversation_scope,
             has_user_steering=has_user_steering,
+            occurred_at=occurred_at,
             phase_id=phase_id,
             phase_kind=phase_kind,
             role=role,
@@ -1361,6 +1364,8 @@ class FusionAttribution:
             result["conversationScope"] = from_union([from_none, from_str], self.conversation_scope)
         if self.has_user_steering is not None:
             result["hasUserSteering"] = from_union([from_none, from_bool], self.has_user_steering)
+        if self.occurred_at is not None:
+            result["occurredAt"] = from_union([from_none, from_str], self.occurred_at)
         if self.phase_id is not None:
             result["phaseId"] = from_union([from_none, from_str], self.phase_id)
         if self.phase_kind is not None:

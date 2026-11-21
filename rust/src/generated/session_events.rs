@@ -2932,6 +2932,8 @@ pub struct FusionAttribution {
     pub fusion_id: String,
     /// Whether this model request consumed a user steering message rather than only internal Fusion work.
     pub has_user_steering: Option<bool>,
+    /// ISO 8601 time the event happened, when HydraFusion held it back and published it later. The envelope `timestamp` is when it was published.
+    pub occurred_at: Option<String>,
     /// HydraFusion orchestration pattern selected for the turn.
     pub pattern: String,
     /// Identifier of the concrete phase that produced the event.
@@ -2949,7 +2951,7 @@ pub struct FusionAttribution {
     /// Synthetic HydraFusion model selected for the session.
     pub synthetic_model: String,
 }
-crate::record_serde::wire_record!(FusionAttribution { commit_id: "commitId" if is_none, conversation_scope: "conversationScope" if is_none, fusion_id: "fusionId", has_user_steering: "hasUserSteering" if is_none, pattern: "pattern", phase_id: "phaseId" if is_none, phase_kind: "phaseKind" if is_none, policy: "policy", role: "role" if is_none, source_model: "sourceModel" if is_none, source_phase_id: "sourcePhaseId" if is_none, synthetic_model: "syntheticModel" });
+crate::record_serde::wire_record!(FusionAttribution { commit_id: "commitId" if is_none, conversation_scope: "conversationScope" if is_none, fusion_id: "fusionId", has_user_steering: "hasUserSteering" if is_none, occurred_at: "occurredAt" if is_none, pattern: "pattern", phase_id: "phaseId" if is_none, phase_kind: "phaseKind" if is_none, policy: "policy", role: "role" if is_none, source_model: "sourceModel" if is_none, source_phase_id: "sourcePhaseId" if is_none, synthetic_model: "syntheticModel" });
 
 /// How far the compaction's summarizer model calls had progressed when the compaction's outcome was decided. Stream statistics describe the latest model request; durationMs and attemptCount cover every request.
 #[derive(Debug, Clone, Default)]

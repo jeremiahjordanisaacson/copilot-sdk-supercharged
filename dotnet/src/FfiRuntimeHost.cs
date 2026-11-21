@@ -729,7 +729,7 @@ internal sealed partial class FfiRuntimeHost : IDisposable
 
         public void Complete() => _channel.Writer.TryComplete();
 
-#if !NETSTANDARD2_0
+#if NET
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             return await ReadCoreAsync(buffer, cancellationToken).ConfigureAwait(false);
@@ -795,7 +795,7 @@ internal sealed partial class FfiRuntimeHost : IDisposable
 
         public override void Write(byte[] buffer, int offset, int count) => WriteFrame(buffer.AsSpan(offset, count));
 
-#if !NETSTANDARD2_0
+#if NET
         public override void Write(ReadOnlySpan<byte> buffer) => WriteFrame(buffer);
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)

@@ -7,7 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-#if !NETSTANDARD2_0
+#if NET
 using System.Text.Unicode;
 #endif
 
@@ -19,20 +19,20 @@ internal sealed partial class SessionEventJsonConverter
 
     internal static SessionEvent Deserialize(string json)
     {
-#if !NETSTANDARD2_0
+#if NET
         const int StackallocThreshold = 512;
 #endif
         ArgumentNullException.ThrowIfNull(json);
 
         byte[]? rented = null;
         Span<byte> buffer =
-#if !NETSTANDARD2_0
+#if NET
             json.Length <= StackallocThreshold / 3 ? stackalloc byte[StackallocThreshold] :
 #endif
             rented = ArrayPool<byte>.Shared.Rent(GetUtf8ByteCount(json));
         try
         {
-#if NETSTANDARD2_0
+#if !NET
             int byteCount = StrictUtf8.GetBytes(json, 0, json.Length, rented, 0);
 #else
             var status = Utf8.FromUtf16(json.AsSpan(), buffer, out _, out int byteCount, replaceInvalidSequences: false);

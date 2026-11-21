@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -16,6 +17,12 @@ import (
 )
 
 var (
+	_ interface {
+		Import(context.Context, *MemoryImportRequest) (*MemoryImportResult, error)
+	} = (*ServerMemoriesAPI)(nil)
+	_ interface {
+		Import(context.Context, *SessionImportRequest) (*SessionImportResult, error)
+	} = (*ServerSessionsAPI)(nil)
 	_ ExternalToolResult      = ExternalToolStringResult("")
 	_ ExternalToolResult      = (*ExternalToolTextResultForLlm)(nil)
 	_ FilterMapping           = FilterMappingEnumMap{}

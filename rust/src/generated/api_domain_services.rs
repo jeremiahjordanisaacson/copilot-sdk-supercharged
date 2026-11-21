@@ -10334,6 +10334,111 @@ crate::record_serde::wire_record!(MemoriesImportSemanticResult {
     records: "records"
 });
 
+/// Counts of memory batch outcomes.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct MemoryImportCounts {
+    /// Number of failed records.
+    pub failed: i64,
+    /// Number of records stored.
+    pub imported: i64,
+    /// Number of conflicts skipped.
+    pub skipped: i64,
+    /// Number of validated input records.
+    pub total: i64,
+}
+crate::record_serde::wire_record!(MemoryImportCounts {
+    failed: "failed",
+    imported: "imported",
+    skipped: "skipped",
+    total: "total"
+});
+
+/// Outcome for one memory record.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct MemoryImportItemResult {
+    /// Stable record result code.
+    pub code: String,
+    /// External memory identifier.
+    pub external_id: Option<String>,
+    /// Physical input line number.
+    pub line: i64,
+    /// Description of the record outcome.
+    pub message: String,
+    /// Record outcome: imported, skipped, failed, or validated.
+    pub status: String,
+}
+crate::record_serde::wire_record!(MemoryImportItemResult { code: "code", external_id: "externalId" if is_none, line: "line", message: "message", status: "status" });
+
+/// Input for a semantic memory import.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct MemoryImportRequest {
+    /// Validate without submitting records.
+    pub dry_run: Option<bool>,
+    /// Complete semantic JSONL input.
+    pub jsonl: String,
+    /// Conflict policy, either skip or error.
+    pub on_conflict: Option<String>,
+    /// Directory used by the memory service.
+    pub working_directory: String,
+}
+crate::record_serde::wire_record!(MemoryImportRequest { dry_run: "dryRun" if is_none, jsonl: "jsonl", on_conflict: "onConflict" if is_none, working_directory: "workingDirectory" });
+
+/// Result of a semantic memory import.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct MemoryImportResult {
+    /// Stable batch result code.
+    pub code: String,
+    /// Input validation diagnostics.
+    pub diagnostics: Vec<ImportDiagnostic>,
+    /// Whether validation ran without submission.
+    pub dry_run: bool,
+    /// Batch outcome counts.
+    pub imported: MemoryImportCounts,
+    /// Description of the batch outcome.
+    pub message: String,
+    /// Whether every record succeeded or was skipped.
+    pub ok: bool,
+    /// Individual outcomes in input order.
+    pub records: Vec<MemoryImportItemResult>,
+}
+crate::record_serde::wire_record!(MemoryImportResult {
+    code: "code",
+    diagnostics: "diagnostics",
+    dry_run: "dryRun",
+    imported: "imported",
+    message: "message",
+    ok: "ok",
+    records: "records"
+});
+
 /// A memory the agent stored after validation, secret filtering and approval.
 ///
 /// <div class="warning">
@@ -14574,6 +14679,41 @@ pub struct VisibilitySetResult {
     pub synced: bool,
 }
 crate::record_serde::wire_record!(VisibilitySetResult { share_url: "shareUrl" if is_none, status: "status" if is_none, synced: "synced" });
+
+/// Result of a semantic memory import.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct MemoriesImportResult {
+    /// Stable batch result code.
+    pub code: String,
+    /// Input validation diagnostics.
+    pub diagnostics: Vec<ImportDiagnostic>,
+    /// Whether validation ran without submission.
+    pub dry_run: bool,
+    /// Batch outcome counts.
+    pub imported: MemoryImportCounts,
+    /// Description of the batch outcome.
+    pub message: String,
+    /// Whether every record succeeded or was skipped.
+    pub ok: bool,
+    /// Individual outcomes in input order.
+    pub records: Vec<MemoryImportItemResult>,
+}
+crate::record_serde::wire_record!(MemoriesImportResult {
+    code: "code",
+    diagnostics: "diagnostics",
+    dry_run: "dryRun",
+    imported: "imported",
+    message: "message",
+    ok: "ok",
+    records: "records"
+});
 
 /// Content after runtime-owned redaction.
 ///

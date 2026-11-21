@@ -34,7 +34,7 @@ public final class ServerRpc {
     /** API methods for the {@code sessions} namespace. */
     public final ServerSessionsApi sessions;
     /** API methods for the {@code memories} namespace. */
-    final ServerMemoriesApi memories;
+    public final ServerMemoriesApi memories;
     /** API methods for the {@code secrets} namespace. */
     public final ServerSecretsApi secrets;
     /** API methods for the {@code git} namespace. */

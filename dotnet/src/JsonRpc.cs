@@ -31,6 +31,7 @@ internal sealed partial class JsonRpc : IDisposable
     private const int ErrorCodeMethodNotFound = -32601;
     private const int ErrorCodeRequestCancelled = -32800;
     private const int ErrorCodeInternalError = -32603;
+    private const int MaxOutgoingMessageDepth = 64;
     private const int InitialReadBufferSize = 256;
     private const int MaximumRetainedReadBufferSize = 1024 * 1024;
 
@@ -160,9 +161,7 @@ internal sealed partial class JsonRpc : IDisposable
                 Id = id,
                 Method = method,
                 Params = CreateRequestParameters(args),
-            }, method is "session.create" or "session.resume"
-                ? GroupedSessionWireContext.JsonRpcRequest
-                : JsonRpcWireContext.Default.JsonRpcRequest, cancellationToken).ConfigureAwait(false);
+            }, JsonRpcWireContext.Default.JsonRpcRequest, cancellationToken).ConfigureAwait(false);
 
             var result = await pending.Task.ConfigureAwait(false);
             LogInvokeTiming(LogLevel.Debug, null, method, id, "Succeeded", timingTimestamp);
@@ -291,7 +290,7 @@ internal sealed partial class JsonRpc : IDisposable
         var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
         _logger.Log(
             level,
-            exception,
+            method is "sessions.import" or "memories.import" ? null : exception,
             "JsonRpc.InvokeAsync JSON-RPC request finished. Elapsed={Elapsed}, Method={Method}, RequestId={RequestId}, Status={Status}",
             elapsed,
             method,
@@ -348,10 +347,11 @@ internal sealed partial class JsonRpc : IDisposable
         }
     }
 
-    private static readonly JsonRpcWireContext GroupedSessionWireContext = new(
-        new JsonSerializerOptions(JsonRpcWireContext.Default.Options) { MaxDepth = 65 });
+    private Task SendMessageAsync<T>(T message, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken)
+        => SendFrameAsync((Message: message, TypeInfo: typeInfo), static (writer, state) =>
+            JsonSerializer.Serialize(writer, state.Message, state.TypeInfo), cancellationToken);
 
-    private async Task SendMessageAsync<T>(T message, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken)
+    private async Task SendFrameAsync<T>(T state, Action<Utf8JsonWriter, T> serialize, CancellationToken cancellationToken)
     {
         await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -363,22 +363,11 @@ internal sealed partial class JsonRpc : IDisposable
 
             var frame = _sendBuffer ??= new SendBuffer();
             frame.Reset();
-            var writerOptions = new JsonWriterOptions
-            {
-                Encoder = typeInfo.Options.Encoder,
-                Indented = typeInfo.Options.WriteIndented,
-                MaxDepth = typeInfo.Options.MaxDepth is 0 ? 64 : typeInfo.Options.MaxDepth,
-            };
-            // Reset retains writer options, but grouped session requests need another depth level.
-            if (_sendWriter is null || _sendWriter.Options.MaxDepth != writerOptions.MaxDepth)
-            {
-                _sendWriter?.Dispose();
-                _sendWriter = new Utf8JsonWriter(frame, writerOptions);
-            }
-            var writer = _sendWriter;
+            var writer = _sendWriter ??= new Utf8JsonWriter(frame, new JsonWriterOptions { MaxDepth = MaxOutgoingMessageDepth });
+            writer.Reset(frame);
             try
             {
-                JsonSerializer.Serialize(writer, message, typeInfo);
+                serialize(writer, state);
                 writer.Flush();
             }
             finally
@@ -1131,18 +1120,6 @@ internal sealed partial class JsonRpc : IDisposable
             }
 
             var typeInfo = _serializerOptions.GetTypeInfo(arg.GetType());
-            // Session configuration can contain custom JSON nodes that need root-level depth.
-            if (arg is CopilotClient.CreateSessionRequest or CopilotClient.ResumeSessionRequest)
-            {
-                // Feature groups add one level without reducing the depth available
-                // to caller-supplied JSON compared with the previous wire contract.
-                var sessionOptions = new JsonSerializerOptions(_serializerOptions)
-                {
-                    MaxDepth = (_serializerOptions.MaxDepth == 0 ? 64 : _serializerOptions.MaxDepth) + 1
-                };
-                typeInfo = sessionOptions.GetTypeInfo(arg.GetType());
-                return new RequestParameters(JsonSerializer.SerializeToElement(arg, typeInfo), null);
-            }
             return new RequestParameters(arg, typeInfo);
         }
 
@@ -1150,7 +1127,7 @@ internal sealed partial class JsonRpc : IDisposable
         // so build the JSON array manually, serializing each element with a TypeInfo
         // looked up by its runtime type from the merged resolver.
         var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
+        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { MaxDepth = MaxOutgoingMessageDepth }))
         {
             writer.WriteStartArray();
             foreach (var arg in args)
@@ -1210,18 +1187,9 @@ internal sealed partial class JsonRpc : IDisposable
         {
             // Prefer the handler's declared result type so polymorphic base types emit
             // their discriminator. Fall back to the runtime type for untyped handlers.
-            JsonElement? resultElement = null;
-            if (result is not null)
-            {
-                var typeInfo = _serializerOptions.GetTypeInfo(declaredResultType ?? result.GetType());
-                resultElement = JsonSerializer.SerializeToElement(result, typeInfo);
-            }
-
-            await SendMessageAsync(new JsonRpcResponse
-            {
-                Id = id,
-                Result = resultElement,
-            }, JsonRpcWireContext.Default.JsonRpcResponse, cancellationToken).ConfigureAwait(false);
+            var typeInfo = result is null ? null : _serializerOptions.GetTypeInfo(declaredResultType ?? result.GetType());
+            await SendFrameAsync((Id: id, Result: result, TypeInfo: typeInfo), static (writer, state) =>
+                WriteResultResponse(writer, state.Id, state.Result, state.TypeInfo), cancellationToken).ConfigureAwait(false);
         }
         catch (IOException ex)
         {
@@ -1231,6 +1199,25 @@ internal sealed partial class JsonRpc : IDisposable
         catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException)
         {
         }
+    }
+
+    private static void WriteResultResponse(Utf8JsonWriter writer, JsonElement id, object? result, JsonTypeInfo? typeInfo)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("jsonrpc"u8, "2.0"u8);
+        writer.WritePropertyName("id"u8);
+        id.WriteTo(writer);
+        writer.WritePropertyName("result"u8);
+        if (typeInfo is null)
+        {
+            // JSON-RPC requires a result even when a handler returns no value.
+            writer.WriteNullValue();
+        }
+        else
+        {
+            JsonSerializer.Serialize(writer, result, typeInfo);
+        }
+        writer.WriteEndObject();
     }
 
     private async Task SendErrorResponseAsync(JsonElement id, int code, string message, CancellationToken cancellationToken)
@@ -1386,7 +1373,7 @@ internal sealed partial class JsonRpc : IDisposable
         Debug.Assert(
             specializedType.IsGenericType && specializedType.GetGenericTypeDefinition() == genericMethodDefinition.DeclaringType,
             "Generic member definition doesn't match type.");
-#if NET8_0_OR_GREATER
+#if NET
         return (MethodInfo)specializedType.GetMemberWithSameMetadataDefinitionAs(genericMethodDefinition);
 #else
         const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance;
@@ -1398,7 +1385,6 @@ internal sealed partial class JsonRpc : IDisposable
         JsonSerializerDefaults.Web,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonSerializable(typeof(JsonRpcRequest))]
-    [JsonSerializable(typeof(JsonRpcResponse))]
     [JsonSerializable(typeof(JsonRpcErrorResponse))]
     [JsonSerializable(typeof(JsonRpcNotification))]
     private partial class JsonRpcWireContext : JsonSerializerContext;
@@ -1416,24 +1402,6 @@ internal sealed partial class JsonRpc : IDisposable
 
         [JsonPropertyName("params")]
         public RequestParameters? Params { get; set; }
-    }
-
-    private sealed class JsonRpcResponse
-    {
-        [JsonPropertyName("jsonrpc")]
-        public string Jsonrpc { get; } = "2.0";
-
-        [JsonPropertyName("id")]
-        public JsonElement Id { get; set; }
-
-        // JSON-RPC 2.0 requires every response to carry either `result` or `error`.
-        // vscode-jsonrpc (used by the CLI) rejects responses that have neither with
-        // "The received response has neither a result nor an error property", so we
-        // must emit `result: null` for void-returning handlers — overriding the
-        // context-level WhenWritingNull policy.
-        [JsonPropertyName("result")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-        public JsonElement? Result { get; set; }
     }
 
     private sealed class JsonRpcErrorResponse

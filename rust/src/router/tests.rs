@@ -490,6 +490,43 @@ async fn failed_router_rejection_write_closes_connection_and_wakes_pending_work(
     client.force_stop();
 }
 
+/// Unlike a failed write above, a write abandoned when the runtime exits
+/// reports the exit, even once the closed writer has dropped the frame.
+#[tokio::test]
+async fn runtime_exit_reports_its_cause_to_a_request_whose_write_it_abandoned() {
+    let peer = Peer::new(BlockAt::Write);
+    let pending = peer
+        .client
+        .inner
+        .rpc
+        .send_request_with_inline_callback("ping", None, None);
+    tokio::pin!(pending);
+    assert!(futures_util::poll!(&mut pending).is_pending());
+    timeout(DEADLINE, peer.gate.entered.cancelled())
+        .await
+        .expect("request write did not start");
+    peer.client
+        .inner
+        .rpc
+        .close_after_exit("the CLI process exited (exit status: 0)");
+    timeout(DEADLINE, peer.gate.dropped.cancelled())
+        .await
+        .expect("exit left the blocked writer running");
+    let error = timeout(DEADLINE, pending)
+        .await
+        .expect("pending request did not wake")
+        .expect_err("request succeeded after runtime exit");
+    assert_eq!(
+        error.kind(),
+        &crate::ErrorKind::Protocol(crate::ProtocolErrorKind::RequestCancelled)
+    );
+    assert!(
+        error.to_string().contains("the CLI process exited"),
+        "{error}"
+    );
+    peer.client.force_stop();
+}
+
 #[tokio::test]
 async fn peer_eof_retires_routing_with_a_committed_rejection_pending() {
     let mut peer = Peer::new(BlockAt::Write);

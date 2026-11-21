@@ -48,7 +48,9 @@ public record FusionAttribution(
     /** Conversation scope in which the concrete phase executed. */
     @JsonProperty("conversationScope") String conversationScope,
     /** Phase whose output supplied the authoritative content, when different from the executing phase. */
-    @JsonProperty("sourcePhaseId") String sourcePhaseId
+    @JsonProperty("sourcePhaseId") String sourcePhaseId,
+    /** ISO 8601 time the event happened, when HydraFusion held it back and published it later. The envelope `timestamp` is when it was published. */
+    @JsonProperty("occurredAt") String occurredAt
 ) {
 
     /**
@@ -84,6 +86,7 @@ public record FusionAttribution(
         private String sourceModel;
         private String conversationScope;
         private String sourcePhaseId;
+        private String occurredAt;
 
         /**
          * Sets the {@code hasUserSteering} property.
@@ -230,6 +233,18 @@ public record FusionAttribution(
         }
 
         /**
+         * Sets the {@code occurredAt} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder occurredAt(String value) {
+            this.occurredAt = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
@@ -240,7 +255,7 @@ public record FusionAttribution(
             if (syntheticModel == null) throw new IllegalStateException("Missing required property: syntheticModel");
             if (policy == null) throw new IllegalStateException("Missing required property: policy");
             if (pattern == null) throw new IllegalStateException("Missing required property: pattern");
-            return new FusionAttribution(hasUserSteering, fusionId, commitId, syntheticModel, policy, pattern, phaseId, phaseKind, role, sourceModel, conversationScope, sourcePhaseId);
+            return new FusionAttribution(hasUserSteering, fusionId, commitId, syntheticModel, policy, pattern, phaseId, phaseKind, role, sourceModel, conversationScope, sourcePhaseId, occurredAt);
         }
     }
 }

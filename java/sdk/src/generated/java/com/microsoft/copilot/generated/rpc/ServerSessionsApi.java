@@ -54,6 +54,17 @@ public final class ServerSessionsApi {
     }
 
     /**
+     * Validates semantic session JSONL and imports a new local session. Dry runs create no session.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SessionsImportResult> import_(SessionsImportParams params) {
+        return caller.invoke("sessions.import", params, SessionsImportResult.class);
+    }
+
+    /**
      * Creates or resumes a local session and returns the opened session ID.
      *
      * @apiNote This method is experimental and may change in a future version.

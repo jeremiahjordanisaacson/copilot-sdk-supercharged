@@ -3801,6 +3801,89 @@ pub struct SessionFsWriteFileRequest {
 }
 crate::record_serde::wire_record!(SessionFsWriteFileRequest { session_id: "sessionId", path: "path", content: "content", mode: "mode" if is_none });
 
+/// Counts of prepared or imported session records.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionImportCounts {
+    /// Number of inline attachments.
+    pub attachments: i64,
+    /// Number of message records.
+    pub messages: i64,
+    /// Number of sessions created.
+    pub sessions: i64,
+    /// Number of tool call records.
+    pub tool_calls: i64,
+    /// Number of tool result records.
+    pub tool_results: i64,
+}
+crate::record_serde::wire_record!(SessionImportCounts {
+    attachments: "attachments",
+    messages: "messages",
+    sessions: "sessions",
+    tool_calls: "toolCalls",
+    tool_results: "toolResults"
+});
+
+/// Input for a semantic session import.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionImportRequest {
+    /// Absolute fallback directory supplied by the caller.
+    pub default_working_directory: String,
+    /// Validate without creating a session.
+    pub dry_run: Option<bool>,
+    /// Input file path used to resolve relative attachments.
+    pub input_path: String,
+    /// Complete semantic JSONL input.
+    pub jsonl: String,
+    /// Explicit session name override.
+    pub name: Option<String>,
+    /// Explicit directory override.
+    pub working_directory: Option<String>,
+}
+crate::record_serde::wire_record!(SessionImportRequest { default_working_directory: "defaultWorkingDirectory", dry_run: "dryRun" if is_none, input_path: "inputPath", jsonl: "jsonl", name: "name" if is_none, working_directory: "workingDirectory" if is_none });
+
+/// Result of a semantic session import.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionImportResult {
+    /// Stable operation result code.
+    pub code: String,
+    /// Input validation diagnostics.
+    pub diagnostics: Vec<ImportDiagnostic>,
+    /// Whether validation ran without persistence.
+    pub dry_run: bool,
+    /// External session identifier.
+    pub external_id: Option<String>,
+    /// Prepared or imported record counts.
+    pub imported: SessionImportCounts,
+    /// Description of the operation result.
+    pub message: String,
+    /// Whether the operation succeeded.
+    pub ok: bool,
+    /// Created native session identifier.
+    pub session_id: Option<SessionId>,
+}
+crate::record_serde::wire_record!(SessionImportResult { code: "code", diagnostics: "diagnostics", dry_run: "dryRun", external_id: "externalId" if is_none, imported: "imported", message: "message", ok: "ok", session_id: "sessionId" if is_none });
+
 /// Installed plugin record for a session, with marketplace, version, install time, enabled state, cache path, and source.
 ///
 /// <div class="warning">
@@ -9032,6 +9115,35 @@ crate::record_serde::wire_record!(ToolsTaskCompleteEventDataRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolsUpdateSubagentSettingsResult {}
+
+/// Result of a semantic session import.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionsImportResult {
+    /// Stable operation result code.
+    pub code: String,
+    /// Input validation diagnostics.
+    pub diagnostics: Vec<ImportDiagnostic>,
+    /// Whether validation ran without persistence.
+    pub dry_run: bool,
+    /// External session identifier.
+    pub external_id: Option<String>,
+    /// Prepared or imported record counts.
+    pub imported: SessionImportCounts,
+    /// Description of the operation result.
+    pub message: String,
+    /// Whether the operation succeeded.
+    pub ok: bool,
+    /// Created native session identifier.
+    pub session_id: Option<SessionId>,
+}
+crate::record_serde::wire_record!(SessionsImportResult { code: "code", diagnostics: "diagnostics", dry_run: "dryRun", external_id: "externalId" if is_none, imported: "imported", message: "message", ok: "ok", session_id: "sessionId" if is_none });
 
 /// Result of opening a session.
 ///

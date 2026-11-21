@@ -8,6 +8,7 @@ of large payloads and short reads from pipes.
 import asyncio
 import io
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -47,6 +48,42 @@ async def test_public_rpc_error_preserves_transport_data(monkeypatch):
     assert caught.value.data == data
     assert str(caught.value) == "JSON-RPC Error -32000: operation failed"
     assert client.pending_requests == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["sessions.import", "memories.import", "ping"])
+async def test_import_error_logs_preserve_caller_error_without_payload(method, monkeypatch, caplog):
+    client = JsonRpcClient(MockProcess())
+    client._loop = asyncio.get_running_loop()
+    message_text = "Unsupported session record type 'private-import-content'."
+    data = {"externalId": "private-import-id"}
+
+    async def respond(message):
+        client._handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": message["id"],
+                "error": {"code": -32000, "message": message_text, "data": data},
+            }
+        )
+
+    monkeypatch.setattr(client, "_send_message", respond)
+    with caplog.at_level(logging.WARNING, logger="copilot._jsonrpc"):
+        with pytest.raises(copilot.JsonRpcError) as caught:
+            await client.request(method)
+
+    assert caught.value.code == -32000
+    assert caught.value.message == message_text
+    assert caught.value.data == data
+    record = next(record for record in caplog.records if record.method == method)
+    assert record.status == "failed"
+    assert record.request_id
+    assert record.elapsed_ms >= 0
+    if method == "ping":
+        assert message_text in caplog.text
+    else:
+        assert not record.exc_info
+        assert "private-import" not in caplog.text
 
 
 class MockProcess:

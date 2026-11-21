@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
@@ -367,11 +367,13 @@ public sealed partial class ClientSessionLifetimeTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task SessionRequests_Preserve_Depth_For_Custom_JsonValues(bool resume, bool toolMetadata)
+    [InlineData(false, false, 59, false)]
+    [InlineData(true, false, 59, false)]
+    [InlineData(false, true, 57, false)]
+    [InlineData(true, true, 57, false)]
+    [InlineData(false, false, 61, true)]
+    public async Task SessionRequests_Apply_The_Outgoing_Depth_Limit_To_Custom_JsonValues(
+        bool resume, bool toolMetadata, int levels, bool exceedsLimit)
     {
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
@@ -380,7 +382,6 @@ public sealed partial class ClientSessionLifetimeTests
         server.ClearRequests();
 
         JsonNode groups = JsonValue.Create<object>(42)!;
-        var levels = toolMetadata ? 59 : 61;
         for (var i = 0; i < levels; i++)
         {
             groups = new JsonObject { ["nested"] = groups };
@@ -390,13 +391,16 @@ public sealed partial class ClientSessionLifetimeTests
             ? [CopilotTool.DefineTool((Func<string>)(() => "unused"),
                 new CopilotToolOptions { Metadata = new Dictionary<string, JsonNode?> { ["depth"] = groups } })]
             : null;
-        await using var session = resume
-            ? await client.ResumeSessionAsync(original.SessionId, new ResumeSessionOptions
-            { Experiments = new SessionExperimentOptions { Assignments = assignments }, Tools = new SessionToolOptions { Definitions = tools }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } })
-            : await client.CreateSessionAsync(new CreateSessionOptions
-            { Experiments = new SessionExperimentOptions { Assignments = assignments }, Tools = new SessionToolOptions { Definitions = tools }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
+        var method = resume ? "session.resume" : "session.create";
+        if (exceedsLimit)
+        {
+            await Assert.ThrowsAsync<JsonException>(OpenSessionAsync);
+            Assert.DoesNotContain(server.Requests, request => request.Method == method);
+            return;
+        }
 
-        var request = Assert.Single(server.Requests, r => r.Method == (resume ? "session.resume" : "session.create"));
+        await using var session = await OpenSessionAsync();
+        var request = Assert.Single(server.Requests, r => r.Method == method);
         var value = toolMetadata
             ? request.Params.GetProperty("tools").GetProperty("definitions")[0].GetProperty("metadata").GetProperty("depth")
             : request.Params.GetProperty("experiments").GetProperty("assignments").GetProperty("ParameterGroups");
@@ -405,6 +409,12 @@ public sealed partial class ClientSessionLifetimeTests
             value = value.GetProperty("nested");
         }
         Assert.Equal(42, value.GetInt32());
+
+        Task<CopilotSession> OpenSessionAsync() => resume
+            ? client.ResumeSessionAsync(original.SessionId, new ResumeSessionOptions
+            { Experiments = new SessionExperimentOptions { Assignments = assignments }, Tools = new SessionToolOptions { Definitions = tools }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } })
+            : client.CreateSessionAsync(new CreateSessionOptions
+            { Experiments = new SessionExperimentOptions { Assignments = assignments }, Tools = new SessionToolOptions { Definitions = tools }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
     }
 
     [Theory]

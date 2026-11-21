@@ -12068,6 +12068,20 @@ type ImageToolModelPricing struct {
 	TextOutputPrice *float64 `json:"textOutputPrice,omitempty"`
 }
 
+// One diagnostic in physical input order.
+// Experimental: ImportDiagnostic is part of an experimental API and may change or be
+// removed.
+type ImportDiagnostic struct {
+	// Stable diagnostic code.
+	Code string `json:"code"`
+	// External record identifier, when available.
+	ExternalID *string `json:"externalId,omitempty"`
+	// Physical JSONL line number, starting at one.
+	Line int64 `json:"line"`
+	// Description of the input problem.
+	Message string `json:"message"`
+}
+
 // Catalogue identity retained from a bound candidate or plan at installation time.
 // Experimental: InstallationCatalogueIdentity is part of an experimental API and may change
 // or be removed.
@@ -19068,6 +19082,70 @@ type MemoryConfiguration struct {
 	// user-prompt includes them in user messages.
 	// Experimental: Mode is part of an experimental API and may change or be removed.
 	Mode *MemoryMode `json:"mode,omitempty"`
+}
+
+// Counts of memory batch outcomes.
+// Experimental: MemoryImportCounts is part of an experimental API and may change or be
+// removed.
+type MemoryImportCounts struct {
+	// Number of failed records.
+	Failed int64 `json:"failed"`
+	// Number of records stored.
+	Imported int64 `json:"imported"`
+	// Number of conflicts skipped.
+	Skipped int64 `json:"skipped"`
+	// Number of validated input records.
+	Total int64 `json:"total"`
+}
+
+// Outcome for one memory record.
+// Experimental: MemoryImportItemResult is part of an experimental API and may change or be
+// removed.
+type MemoryImportItemResult struct {
+	// Stable record result code.
+	Code string `json:"code"`
+	// External memory identifier.
+	ExternalID *string `json:"externalId,omitempty"`
+	// Physical input line number.
+	Line int64 `json:"line"`
+	// Description of the record outcome.
+	Message string `json:"message"`
+	// Record outcome: imported, skipped, failed, or validated.
+	Status string `json:"status"`
+}
+
+// Input for a semantic memory import.
+// Experimental: MemoryImportRequest is part of an experimental API and may change or be
+// removed.
+type MemoryImportRequest struct {
+	// Validate without submitting records.
+	DryRun *bool `json:"dryRun,omitempty"`
+	// Complete semantic JSONL input.
+	Jsonl string `json:"jsonl"`
+	// Conflict policy, either skip or error.
+	OnConflict *string `json:"onConflict,omitempty"`
+	// Directory used by the memory service.
+	WorkingDirectory string `json:"workingDirectory"`
+}
+
+// Result of a semantic memory import.
+// Experimental: MemoryImportResult is part of an experimental API and may change or be
+// removed.
+type MemoryImportResult struct {
+	// Stable batch result code.
+	Code string `json:"code"`
+	// Input validation diagnostics.
+	Diagnostics []ImportDiagnostic `json:"diagnostics"`
+	// Whether validation ran without submission.
+	DryRun bool `json:"dryRun"`
+	// Batch outcome counts.
+	Imported MemoryImportCounts `json:"imported"`
+	// Description of the batch outcome.
+	Message string `json:"message"`
+	// Whether every record succeeded or was skipped.
+	Ok bool `json:"ok"`
+	// Individual outcomes in input order.
+	Records []MemoryImportItemResult `json:"records"`
 }
 
 // A memory the agent stored after validation, secret filtering and approval.
@@ -28492,6 +28570,62 @@ type SessionHistoryCompactRequest struct {
 // Experimental: SessionHistorySetCompactionConfigResult is part of an experimental API and
 // may change or be removed.
 type SessionHistorySetCompactionConfigResult struct {
+}
+
+// Counts of prepared or imported session records.
+// Experimental: SessionImportCounts is part of an experimental API and may change or be
+// removed.
+type SessionImportCounts struct {
+	// Number of inline attachments.
+	Attachments int64 `json:"attachments"`
+	// Number of message records.
+	Messages int64 `json:"messages"`
+	// Number of sessions created.
+	Sessions int64 `json:"sessions"`
+	// Number of tool call records.
+	ToolCalls int64 `json:"toolCalls"`
+	// Number of tool result records.
+	ToolResults int64 `json:"toolResults"`
+}
+
+// Input for a semantic session import.
+// Experimental: SessionImportRequest is part of an experimental API and may change or be
+// removed.
+type SessionImportRequest struct {
+	// Absolute fallback directory supplied by the caller.
+	DefaultWorkingDirectory string `json:"defaultWorkingDirectory"`
+	// Validate without creating a session.
+	DryRun *bool `json:"dryRun,omitempty"`
+	// Input file path used to resolve relative attachments.
+	InputPath string `json:"inputPath"`
+	// Complete semantic JSONL input.
+	Jsonl string `json:"jsonl"`
+	// Explicit session name override.
+	Name *string `json:"name,omitempty"`
+	// Explicit directory override.
+	WorkingDirectory *string `json:"workingDirectory,omitempty"`
+}
+
+// Result of a semantic session import.
+// Experimental: SessionImportResult is part of an experimental API and may change or be
+// removed.
+type SessionImportResult struct {
+	// Stable operation result code.
+	Code string `json:"code"`
+	// Input validation diagnostics.
+	Diagnostics []ImportDiagnostic `json:"diagnostics"`
+	// Whether validation ran without persistence.
+	DryRun bool `json:"dryRun"`
+	// External session identifier.
+	ExternalID *string `json:"externalId,omitempty"`
+	// Prepared or imported record counts.
+	Imported SessionImportCounts `json:"imported"`
+	// Description of the operation result.
+	Message string `json:"message"`
+	// Whether the operation succeeded.
+	Ok bool `json:"ok"`
+	// Created native session identifier.
+	SessionID *string `json:"sessionId,omitempty"`
 }
 
 // Installed plugin record for a session, with marketplace, version, install time, enabled
@@ -48325,6 +48459,29 @@ func (s *ServerMCPAPI) Installations() *ServerMCPInstallationsAPI {
 	return (*ServerMCPInstallationsAPI)(s)
 }
 
+// Experimental: ServerMemoriesAPI contains experimental APIs that may change or be removed.
+type ServerMemoriesAPI serverAPI
+
+// Import validates semantic memory JSONL and stores records under the server's account and
+// repository policy. Dry runs submit no records.
+//
+// RPC method: memories.import.
+//
+// Parameters: Input for a semantic memory import.
+//
+// Returns: Result of a semantic memory import.
+func (a *ServerMemoriesAPI) Import(ctx context.Context, params *MemoryImportRequest) (*MemoryImportResult, error) {
+	raw, err := a.client.Request(ctx, "memories.import", params)
+	if err != nil {
+		return nil, err
+	}
+	var result MemoryImportResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Experimental: ServerModelsAPI contains experimental APIs that may change or be removed.
 type ServerModelsAPI serverAPI
 
@@ -49910,6 +50067,26 @@ func (a *ServerSessionsAPI) HasEvents(ctx context.Context, params *SessionsHasEv
 	return &result, nil
 }
 
+// Import validates semantic session JSONL and imports a new local session. Dry runs create
+// no session.
+//
+// RPC method: sessions.import.
+//
+// Parameters: Input for a semantic session import.
+//
+// Returns: Result of a semantic session import.
+func (a *ServerSessionsAPI) Import(ctx context.Context, params *SessionImportRequest) (*SessionImportResult, error) {
+	raw, err := a.client.Request(ctx, "sessions.import", params)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionImportResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Lists sessions, optionally filtered by source and working-directory context. Returned
 // entries are discriminated by `isRemote`: local entries carry only the lightweight
 // `LocalSessionMetadataValue` shape; remote entries carry the full
@@ -50879,6 +51056,7 @@ type ServerRPC struct {
 	Lsp              *ServerLspAPI
 	ManagedSettings  *ServerManagedSettingsAPI
 	MCP              *ServerMCPAPI
+	Memories         *ServerMemoriesAPI
 	Models           *ServerModelsAPI
 	Network          *ServerNetworkAPI
 	Plugins          *ServerPluginsAPI
@@ -50963,6 +51141,7 @@ func NewServerRPC(client *jsonrpc2.Client) *ServerRPC {
 	r.Lsp = (*ServerLspAPI)(&r.common)
 	r.ManagedSettings = (*ServerManagedSettingsAPI)(&r.common)
 	r.MCP = (*ServerMCPAPI)(&r.common)
+	r.Memories = (*ServerMemoriesAPI)(&r.common)
 	r.Models = (*ServerModelsAPI)(&r.common)
 	r.Network = (*ServerNetworkAPI)(&r.common)
 	r.Plugins = (*ServerPluginsAPI)(&r.common)

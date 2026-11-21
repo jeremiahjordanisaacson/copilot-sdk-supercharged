@@ -7,7 +7,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-#if !NET8_0_OR_GREATER
+#if !NET
 using System.Runtime.Serialization;
 #endif
 using Microsoft.Copilot.Rpc;
@@ -1860,7 +1860,7 @@ public class SerializationTests
 
     private static object CreateInternalRequest(Type type, params (string Name, object? Value)[] properties)
     {
-#if NET8_0_OR_GREATER
+#if NET
         var instance = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(type);
 #else
         var instance = FormatterServices.GetUninitializedObject(type);

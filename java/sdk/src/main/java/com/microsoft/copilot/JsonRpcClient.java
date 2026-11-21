@@ -68,7 +68,11 @@ class JsonRpcClient implements AutoCloseable {
     private final Process process;
     private final boolean ownsStreams;
     private final AtomicLong requestIdCounter = new AtomicLong(0);
-    private record PendingRequest(CompletableFuture<JsonNode> future, boolean secretResultValue) {
+    private enum ResponseLogRedaction {
+        NONE, VALUE, PAYLOAD
+    }
+
+    private record PendingRequest(CompletableFuture<JsonNode> future, ResponseLogRedaction redaction) {
     }
 
     private final Map<Long, PendingRequest> pendingRequests = new ConcurrentHashMap<>();
@@ -199,7 +203,11 @@ class JsonRpcClient implements AutoCloseable {
         long timingNanos = System.nanoTime();
         long id = requestIdCounter.incrementAndGet();
         var future = new CompletableFuture<JsonNode>();
-        var pending = new PendingRequest(future, "secrets.filter".equals(method));
+        var pending = new PendingRequest(future, switch (method) {
+            case "secrets.filter" -> ResponseLogRedaction.VALUE;
+            case "sessions.import", "memories.import" -> ResponseLogRedaction.PAYLOAD;
+            default -> ResponseLogRedaction.NONE;
+        });
         synchronized (closeHandlerLock) {
             if (closeNotified) {
                 future.completeExceptionally(new IOException("Client closed"));
@@ -245,7 +253,9 @@ class JsonRpcClient implements AutoCloseable {
                 throw new CompletionException(e);
             }
         }).exceptionally(ex -> {
-            LoggingHelpers.logTiming(LOG, Level.WARNING, ex,
+            // Import errors can echo transcript content in their message or data.
+            LoggingHelpers.logTiming(LOG, Level.WARNING,
+                    pending.redaction() == ResponseLogRedaction.PAYLOAD ? null : ex,
                     "JsonRpc.invoke JSON-RPC request finished. Elapsed={Elapsed}, Method=" + method + ", RequestId="
                             + id + ", Status=Failed",
                     timingNanos);
@@ -299,7 +309,7 @@ class JsonRpcClient implements AutoCloseable {
         response.setId(id);
         response.setResult(result == null ? MAPPER.getNodeFactory().nullNode() : result);
         try {
-            sendMessage(response, false);
+            sendMessage(response, ResponseLogRedaction.NONE);
         } finally {
             sessionCallbackRequests.remove(MAPPER.valueToTree(id).toString());
         }
@@ -315,7 +325,7 @@ class JsonRpcClient implements AutoCloseable {
         response.setId(id);
         response.setResult(result == null ? MAPPER.getNodeFactory().nullNode() : result);
         try {
-            sendMessage(response, true);
+            sendMessage(response, ResponseLogRedaction.VALUE);
         } finally {
             sessionCallbackRequests.remove(MAPPER.valueToTree(id).toString());
         }
@@ -348,10 +358,10 @@ class JsonRpcClient implements AutoCloseable {
     }
 
     private void sendMessage(Object message) throws IOException {
-        sendMessage(message, false);
+        sendMessage(message, ResponseLogRedaction.NONE);
     }
 
-    private synchronized void sendMessage(Object message, boolean secretResultValue) throws IOException {
+    private synchronized void sendMessage(Object message, ResponseLogRedaction redaction) throws IOException {
         String json = MAPPER.writeValueAsString(message);
         if (message instanceof JsonRpcRequest request && "user.settings.set".equals(request.getMethod())) {
             validateSettingsIntegers(json);
@@ -364,7 +374,7 @@ class JsonRpcClient implements AutoCloseable {
         outputStream.flush();
 
         if (LOG.isLoggable(Level.FINE)) {
-            LOG.fine("Sent: " + redactForLogging(json, secretResultValue));
+            LOG.fine("Sent: " + redactForLogging(json, redaction));
         }
     }
 
@@ -383,20 +393,29 @@ class JsonRpcClient implements AutoCloseable {
     }
 
     static String redactCredentialsForLogging(String json) {
-        return redactForLogging(json, false);
+        return redactForLogging(json, ResponseLogRedaction.NONE);
     }
 
-    private static String redactForLogging(String json, boolean secretResultValue) {
+    private static String redactForLogging(String json, ResponseLogRedaction redaction) {
         try {
             JsonNode root = MAPPER.readTree(json);
             redactCredentials(root);
             String method = root.path("method").asText();
             if (("secrets.filter".equals(method) || "secrets.removeFilterValues".equals(method)
-                    || "logging.file.open".equals(method) || "logging.file.write".equals(method))
+                    || "logging.file.open".equals(method) || "logging.file.write".equals(method)
+                    || "sessions.import".equals(method) || "memories.import".equals(method))
                     && root instanceof ObjectNode request && request.has("params")) {
                 request.put("params", "<redacted>");
             }
-            if (secretResultValue && root.path("result") instanceof ObjectNode result && result.has("value")) {
+            if (redaction == ResponseLogRedaction.PAYLOAD && root instanceof ObjectNode response) {
+                if (response.has("result")) {
+                    response.put("result", "<redacted>");
+                }
+                if (response.has("error")) {
+                    response.put("error", "<redacted>");
+                }
+            } else if (redaction == ResponseLogRedaction.VALUE && root.path("result") instanceof ObjectNode result
+                    && result.has("value")) {
                 result.put("value", "<redacted>");
             }
             return MAPPER.writeValueAsString(root);
@@ -567,8 +586,10 @@ class JsonRpcClient implements AutoCloseable {
             if (LOG.isLoggable(Level.FINE)) {
                 var pending = response ? pendingRequests.get(node.get("id").asLong()) : null;
                 // Canceled requests can receive late replies after their metadata is gone.
-                boolean secretResultValue = response && (pending == null || pending.secretResultValue());
-                LOG.fine("Received: " + redactForLogging(content, secretResultValue));
+                var redaction = !response
+                        ? ResponseLogRedaction.NONE
+                        : pending == null ? ResponseLogRedaction.PAYLOAD : pending.redaction();
+                LOG.fine("Received: " + redactForLogging(content, redaction));
             }
 
             // Check if this is a response to our request

@@ -281,7 +281,7 @@ public class ClientE2ETests(E2ETestFixture fixture) : IClassFixture<E2ETestFixtu
         var ex = await Assert.ThrowsAsync<IOException>(() => client.StartAsync());
 
         var errorMessage = ex.Message;
-#if NETFRAMEWORK
+#if !NET
         // .NET Framework can surface the stdio pipe failure before redirected stderr is readable.
         if (useStdio)
         {

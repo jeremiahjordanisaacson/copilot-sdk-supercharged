@@ -4693,6 +4693,8 @@ type FusionAttribution struct {
 	FusionID string `json:"fusionId"`
 	// Whether this model request consumed a user steering message rather than only internal Fusion work.
 	HasUserSteering *bool `json:"hasUserSteering,omitempty"`
+	// ISO 8601 time the event happened, when HydraFusion held it back and published it later. The envelope `timestamp` is when it was published.
+	OccurredAt *string `json:"occurredAt,omitempty"`
 	// HydraFusion orchestration pattern selected for the turn.
 	Pattern string `json:"pattern"`
 	// Identifier of the concrete phase that produced the event.

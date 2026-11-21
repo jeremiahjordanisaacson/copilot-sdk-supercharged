@@ -25989,6 +25989,31 @@ export interface ImageToolModelPricing {
   imageOutputPrice?: number;
 }
 /**
+ * One diagnostic in physical input order.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ImportDiagnostic".
+ */
+/** @experimental */
+export interface ImportDiagnostic {
+  /**
+   * Physical JSONL line number, starting at one.
+   */
+  line: number;
+  /**
+   * Stable diagnostic code.
+   */
+  code: string;
+  /**
+   * Description of the input problem.
+   */
+  message: string;
+  /**
+   * External record identifier, when available.
+   */
+  externalId?: string | null;
+}
+/**
  * One connection-owned, expiring request for a trusted host's explicit user decision.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -33410,6 +33435,122 @@ export interface MemoryConfiguration {
    * @experimental
    */
   mode?: MemoryMode;
+}
+/**
+ * Counts of memory batch outcomes.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "MemoryImportCounts".
+ */
+/** @experimental */
+export interface MemoryImportCounts {
+  /**
+   * Number of validated input records.
+   */
+  total: number;
+  /**
+   * Number of records stored.
+   */
+  imported: number;
+  /**
+   * Number of conflicts skipped.
+   */
+  skipped: number;
+  /**
+   * Number of failed records.
+   */
+  failed: number;
+}
+/**
+ * Outcome for one memory record.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "MemoryImportItemResult".
+ */
+/** @experimental */
+export interface MemoryImportItemResult {
+  /**
+   * Physical input line number.
+   */
+  line: number;
+  /**
+   * External memory identifier.
+   */
+  externalId?: string | null;
+  /**
+   * Record outcome: imported, skipped, failed, or validated.
+   */
+  status: string;
+  /**
+   * Stable record result code.
+   */
+  code: string;
+  /**
+   * Description of the record outcome.
+   */
+  message: string;
+}
+/**
+ * Input for a semantic memory import.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "MemoryImportRequest".
+ */
+/** @experimental */
+export interface MemoryImportRequest {
+  /**
+   * Complete semantic JSONL input.
+   */
+  jsonl: string;
+  /**
+   * Directory used by the memory service.
+   */
+  workingDirectory: string;
+  /**
+   * Validate without submitting records.
+   */
+  dryRun?: boolean | null;
+  /**
+   * Conflict policy, either skip or error.
+   */
+  onConflict?: string | null;
+}
+/**
+ * Result of a semantic memory import.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "MemoryImportResult".
+ */
+/** @experimental */
+export interface MemoryImportResult {
+  /**
+   * Whether every record succeeded or was skipped.
+   */
+  ok: boolean;
+  /**
+   * Stable batch result code.
+   */
+  code: string;
+  /**
+   * Description of the batch outcome.
+   */
+  message: string;
+  /**
+   * Whether validation ran without submission.
+   */
+  dryRun: boolean;
+  /**
+   * Batch outcome counts.
+   */
+  imported: MemoryImportCounts;
+  /**
+   * Input validation diagnostics.
+   */
+  diagnostics: ImportDiagnostic[];
+  /**
+   * Individual outcomes in input order.
+   */
+  records: MemoryImportItemResult[];
 }
 /**
  * A memory the agent stored after validation, secret filtering and approval.
@@ -43738,6 +43879,109 @@ export interface SessionFsWriteFileRequest {
    * Optional POSIX-style mode for newly created files
    */
   mode?: number;
+}
+/**
+ * Counts of prepared or imported session records.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionImportCounts".
+ */
+/** @experimental */
+export interface SessionImportCounts {
+  /**
+   * Number of sessions created.
+   */
+  sessions: number;
+  /**
+   * Number of message records.
+   */
+  messages: number;
+  /**
+   * Number of tool call records.
+   */
+  toolCalls: number;
+  /**
+   * Number of tool result records.
+   */
+  toolResults: number;
+  /**
+   * Number of inline attachments.
+   */
+  attachments: number;
+}
+/**
+ * Input for a semantic session import.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionImportRequest".
+ */
+/** @experimental */
+export interface SessionImportRequest {
+  /**
+   * Complete semantic JSONL input.
+   */
+  jsonl: string;
+  /**
+   * Input file path used to resolve relative attachments.
+   */
+  inputPath: string;
+  /**
+   * Absolute fallback directory supplied by the caller.
+   */
+  defaultWorkingDirectory: string;
+  /**
+   * Explicit directory override.
+   */
+  workingDirectory?: string | null;
+  /**
+   * Explicit session name override.
+   */
+  name?: string | null;
+  /**
+   * Validate without creating a session.
+   */
+  dryRun?: boolean | null;
+}
+/**
+ * Result of a semantic session import.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionImportResult".
+ */
+/** @experimental */
+export interface SessionImportResult {
+  /**
+   * Whether the operation succeeded.
+   */
+  ok: boolean;
+  /**
+   * Stable operation result code.
+   */
+  code: string;
+  /**
+   * Description of the operation result.
+   */
+  message: string;
+  /**
+   * External session identifier.
+   */
+  externalId?: string | null;
+  /**
+   * Created native session identifier.
+   */
+  sessionId?: string | null;
+  /**
+   * Whether validation ran without persistence.
+   */
+  dryRun: boolean;
+  /**
+   * Prepared or imported record counts.
+   */
+  imported: SessionImportCounts;
+  /**
+   * Input validation diagnostics.
+   */
+  diagnostics: ImportDiagnostic[];
 }
 /**
  * Installed plugin record for a session, with marketplace, version, install time, enabled state, cache path, and source.
@@ -54359,6 +54603,80 @@ export interface WorkspacesWriteAutopilotObjectiveResult {
   operation: string;
 }
 /**
+ * Result of a semantic session import.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsImportResult".
+ */
+/** @experimental */
+export interface SessionsImportResult {
+  /**
+   * Whether the operation succeeded.
+   */
+  ok: boolean;
+  /**
+   * Stable operation result code.
+   */
+  code: string;
+  /**
+   * Description of the operation result.
+   */
+  message: string;
+  /**
+   * External session identifier.
+   */
+  externalId?: string | null;
+  /**
+   * Created native session identifier.
+   */
+  sessionId?: string | null;
+  /**
+   * Whether validation ran without persistence.
+   */
+  dryRun: boolean;
+  /**
+   * Prepared or imported record counts.
+   */
+  imported: SessionImportCounts;
+  /**
+   * Input validation diagnostics.
+   */
+  diagnostics: ImportDiagnostic[];
+}
+/**
+ * Input for a semantic session import.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsImportRequest".
+ */
+/** @experimental */
+export interface SessionsImportRequest {
+  /**
+   * Complete semantic JSONL input.
+   */
+  jsonl: string;
+  /**
+   * Input file path used to resolve relative attachments.
+   */
+  inputPath: string;
+  /**
+   * Absolute fallback directory supplied by the caller.
+   */
+  defaultWorkingDirectory: string;
+  /**
+   * Explicit directory override.
+   */
+  workingDirectory?: string | null;
+  /**
+   * Explicit session name override.
+   */
+  name?: string | null;
+  /**
+   * Validate without creating a session.
+   */
+  dryRun?: boolean | null;
+}
+/**
  * Stored before-generation capture, or null when no capture exists.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -54467,6 +54785,68 @@ export interface SessionsForgeProposalsFailStaleRequest {
    * Generation age in milliseconds. Defaults to fifteen minutes.
    */
   timeoutMs?: number;
+}
+/**
+ * Result of a semantic memory import.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "MemoriesImportResult".
+ */
+/** @experimental */
+export interface MemoriesImportResult {
+  /**
+   * Whether every record succeeded or was skipped.
+   */
+  ok: boolean;
+  /**
+   * Stable batch result code.
+   */
+  code: string;
+  /**
+   * Description of the batch outcome.
+   */
+  message: string;
+  /**
+   * Whether validation ran without submission.
+   */
+  dryRun: boolean;
+  /**
+   * Batch outcome counts.
+   */
+  imported: MemoryImportCounts;
+  /**
+   * Input validation diagnostics.
+   */
+  diagnostics: ImportDiagnostic[];
+  /**
+   * Individual outcomes in input order.
+   */
+  records: MemoryImportItemResult[];
+}
+/**
+ * Input for a semantic memory import.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "MemoriesImportRequest".
+ */
+/** @experimental */
+export interface MemoriesImportRequest {
+  /**
+   * Complete semantic JSONL input.
+   */
+  jsonl: string;
+  /**
+   * Directory used by the memory service.
+   */
+  workingDirectory: string;
+  /**
+   * Validate without submitting records.
+   */
+  dryRun?: boolean | null;
+  /**
+   * Conflict policy, either skip or error.
+   */
+  onConflict?: string | null;
 }
 /**
  * Content after runtime-owned redaction.
@@ -58655,6 +59035,15 @@ export function createServerRpc(connection: MessageConnection) {
         /** @experimental */
         sessions: {
             /**
+             * Validates semantic session JSONL and imports a new local session. Dry runs create no session.
+             *
+             * @param params Input for a semantic session import.
+             *
+             * @returns Result of a semantic session import.
+             */
+            import: async (params: SessionsImportRequest): Promise<SessionsImportResult> =>
+                connection.sendRequest("sessions.import", params),
+            /**
              * Creates or resumes a local session and returns the opened session ID.
              *
              * @param params Open a session by creating, resuming, attaching, connecting to a remote, or handing off.
@@ -58884,6 +59273,18 @@ export function createServerRpc(connection: MessageConnection) {
              */
             getRemoteControlStatus: async (): Promise<RemoteControlStatusResult> =>
                 connection.sendRequest("sessions.getRemoteControlStatus", {}),
+        },
+        /** @experimental */
+        memories: {
+            /**
+             * Validates semantic memory JSONL and stores records under the server's account and repository policy. Dry runs submit no records.
+             *
+             * @param params Input for a semantic memory import.
+             *
+             * @returns Result of a semantic memory import.
+             */
+            import: async (params: MemoriesImportRequest): Promise<MemoriesImportResult> =>
+                connection.sendRequest("memories.import", params),
         },
         /** @experimental */
         secrets: {

@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Microsoft.Copilot.Test.Unit;
 
-// Not gated on NET8_0_OR_GREATER: the legacy double formatting these cases guard against only exists on .NET Framework.
+// Not gated on NET: the legacy double formatting these cases guard against only exists on .NET Framework.
 public class ToolSchemaDefaultsTests
 {
     private static JsonElement WithoutRoundedDefaults(string schema)

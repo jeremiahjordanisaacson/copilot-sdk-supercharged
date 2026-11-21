@@ -51,7 +51,7 @@ internal sealed class RecordingRequestHandler : CopilotRequestHandler
         var url = request.RequestUri!.ToString();
         var bodyText = request.Content is null
             ? string.Empty
-#if NET8_0_OR_GREATER
+#if NET
             : await request.Content.ReadAsStringAsync(ctx.CancellationToken).ConfigureAwait(false);
 #else
             : await request.Content.ReadAsStringAsync().ConfigureAwait(false);

@@ -192,7 +192,7 @@ public abstract class CanvasHandlerBase : ICanvasHandler
 
     /// <inheritdoc />
     public virtual Task OnCloseAsync(CanvasProviderCloseRequest context, CancellationToken cancellationToken = default)
-#if NET8_0_OR_GREATER
+#if NET
         => Task.CompletedTask;
 #else
         => Task.FromResult<object?>(null);

@@ -194,6 +194,10 @@ pub use subscription::{EventSubscription, LifecycleSubscription};
 /// Minimum protocol version this SDK can communicate with.
 const MIN_PROTOCOL_VERSION: u32 = 4;
 const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long an owned stdio runtime that has exited may keep its output open
+/// before its pending requests fail. A process the runtime started can
+/// inherit that output and hold it open after the runtime exits.
+const RUNTIME_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[cfg(feature = "runtime")]
 fn record_optional_millis(span: &tracing::Span, field: &'static str, value: Option<u64>) {
@@ -1412,9 +1416,14 @@ impl std::error::Error for SpawnError {
 struct ClientInner {
     ahp_host_callbacks: Arc<ahp_host::ExitCallbacks>,
     ahp_host_sessions: std::sync::Weak<dyn ahp_host::HostSessionOwner>,
-    child: parking_lot::Mutex<Option<process_tree::OwnedProcess>>,
+    /// Shared with the exit watcher of an owned stdio child
+    /// (see `Client::spawn_child_exit_watcher`).
+    child: Arc<parking_lot::Mutex<Option<process_tree::OwnedProcess>>>,
     owns_stdio: bool,
     force_stop_requested: tokio_util::sync::CancellationToken,
+    /// Ends the exit watcher: cancelled when stop, force stop or drop takes
+    /// over the child.
+    stop_child_watch: tokio_util::sync::CancellationToken,
     #[cfg(feature = "in-process")]
     /// In-process FFI runtime host, set only for [`Transport::InProcess`].
     /// Closing it tears down the native runtime connection.
@@ -2658,9 +2667,10 @@ impl Client {
             inner: Arc::new(ClientInner {
                 ahp_host_callbacks: Arc::new(ahp_host::ExitCallbacks::default()),
                 ahp_host_sessions: weak_host_sessions,
-                child: parking_lot::Mutex::new(child),
+                child: Arc::new(parking_lot::Mutex::new(child)),
                 owns_stdio,
                 force_stop_requested: tokio_util::sync::CancellationToken::new(),
+                stop_child_watch: tokio_util::sync::CancellationToken::new(),
                 #[cfg(feature = "in-process")]
                 ffi_host: parking_lot::Mutex::new(None),
                 rpc,
@@ -2699,6 +2709,9 @@ impl Client {
         entra_token.set_client(WeakClientInner::downgrade(&client.inner));
         client.spawn_notification_dispatcher(notification_rx);
         client.spawn_ahp_host_dispatcher(host_notification_rx);
+        if owns_stdio && client.inner.child.lock().is_some() {
+            client.spawn_child_exit_watcher();
+        }
         client.register_ahp_session_factory()?;
         if client
             .inner
@@ -2714,6 +2727,78 @@ impl Client {
             "Client::from_transport setup complete"
         );
         Ok(client)
+    }
+
+    /// Spawn the task that watches an owned stdio child for its exit.
+    ///
+    /// The read loop ends only at the end of the child's stdout, and a process
+    /// the child started can inherit that stdout and keep it open after the
+    /// child exits, so pending and later requests would wait for replies that
+    /// never come. Once the child exits, this task gives the read loop
+    /// `RUNTIME_OUTPUT_DRAIN_TIMEOUT` to read what the child wrote and reach
+    /// the end of its output. Past that bound it closes the connection,
+    /// failing the pending requests with a message that names the exit.
+    ///
+    /// On Unix the exit is observed without reaping: an unreaped root keeps its
+    /// process group identity until stop or force stop has contained the
+    /// group, and `pid()` keeps reporting it until then. Stop, force stop and
+    /// drop cancel `stop_child_watch` before taking the child.
+    fn spawn_child_exit_watcher(&self) {
+        let child = Arc::clone(&self.inner.child);
+        let stop_watch = self.inner.stop_child_watch.clone();
+        let connection_closed = self.inner.rpc.connection_closed_token();
+        let inner = Arc::downgrade(&self.inner);
+        tokio::spawn(async move {
+            let exited = async {
+                loop {
+                    {
+                        let mut child = child.lock();
+                        let Some(process) = child.as_mut() else {
+                            return false;
+                        };
+                        match process.has_exited() {
+                            Ok(true) => return true,
+                            Ok(false) => {}
+                            // has_exited disarms Unix containment when another
+                            // reaper releases the PID; output still needs draining.
+                            #[cfg(unix)]
+                            Err(error) if error.raw_os_error() == Some(libc::ECHILD) => {
+                                return true;
+                            }
+                            Err(error) => {
+                                warn!(%error, "failed to observe the CLI process exit");
+                                return false;
+                            }
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            };
+            let exited = tokio::select! {
+                biased;
+                _ = stop_watch.cancelled() => return,
+                exited = exited => exited,
+            };
+            if !exited {
+                return;
+            }
+            tokio::select! {
+                biased;
+                _ = stop_watch.cancelled() => return,
+                _ = connection_closed.cancelled() => return,
+                _ = tokio::time::sleep(RUNTIME_OUTPUT_DRAIN_TIMEOUT) => {}
+            }
+            let Some(inner) = inner.upgrade() else {
+                return;
+            };
+            warn!(
+                timeout = ?RUNTIME_OUTPUT_DRAIN_TIMEOUT,
+                "the CLI process exited but its output is still open; closing the connection"
+            );
+            inner
+                .rpc
+                .close_after_exit("request cancelled: the CLI process exited");
+        });
     }
 
     /// Spawn the task that delivers every notification the read loop hands
@@ -3879,6 +3964,12 @@ impl Client {
     }
 
     /// Return the OS process ID of the CLI child process, if one was spawned.
+    ///
+    /// For an owned stdio child on Unix, the exit watcher observes exit without
+    /// reaping, preserving the process-group identity until [`Self::stop`] or
+    /// [`Self::force_stop`] contains the group and takes the child. The ID
+    /// remains available until then. On other platforms, the watcher reaps the
+    /// exited child with `try_wait()`, after which this returns `None`.
     pub fn pid(&self) -> Option<u32> {
         self.inner.child.lock().as_ref().and_then(|c| c.child.id())
     }
@@ -4042,6 +4133,7 @@ impl Client {
             }
             guard.armed = false;
         }
+        self.inner.stop_child_watch.cancel();
         let process = self.inner.child.lock().take();
         if let Some(mut process) = process {
             // The blocking closure owns the root and group together even if
@@ -4146,6 +4238,7 @@ impl Client {
         self.inner.extension_launch_provider.clear();
         self.inner.installation_confirmation.clear();
         self.inner.shell_authentication_requests.cancel_all();
+        self.inner.stop_child_watch.cancel();
         if let Some(mut process) = self.inner.child.lock().take() {
             if let Err(error) = process.terminate_tree() {
                 error!(pid = ?pid, %error, "failed to terminate CLI process tree");
@@ -4244,6 +4337,7 @@ fn spawn_github_telemetry_dispatcher(
 
 impl Drop for ClientInner {
     fn drop(&mut self) {
+        self.stop_child_watch.cancel();
         self.rpc.force_close();
         let pid = self.child.lock().as_ref().and_then(|c| c.child.id());
         if let Some(mut process) = self.child.lock().take() {

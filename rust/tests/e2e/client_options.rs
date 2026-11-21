@@ -959,6 +959,473 @@ async fn canonical_node_fixture_launches_over_stdio_and_tcp() {
 }
 
 #[tokio::test]
+async fn stdio_exit_unblocks_a_backpressured_request() {
+    let dir = tempfile::tempdir().expect("create exit fixture directory");
+    let script = r#"
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+const path = require("node:path");
+const marker = name => path.join(process.cwd(), name);
+const holder = `
+    const fs = require("node:fs");
+    fs.writeFileSync("holder.pid.tmp", String(process.pid));
+    fs.renameSync("holder.pid.tmp", "holder.pid");
+    setInterval(() => {
+        if (!fs.existsSync("keep")) process.exit(0);
+    }, 10);
+    setTimeout(() => process.exit(1), 60000);
+`;
+function reply(id, result) {
+    const body = JSON.stringify({ jsonrpc: "2.0", id, result });
+    process.stdout.write("Content-Length: " + Buffer.byteLength(body) + "\r\n\r\n" + body);
+}
+let input = Buffer.alloc(0);
+let armed = false;
+process.stdin.on("data", chunk => {
+    if (armed) {
+        process.stdin.pause();
+        fs.writeFileSync(marker("blocked"), "ready");
+        return;
+    }
+    input = Buffer.concat([input, chunk]);
+    for (;;) {
+        const end = input.indexOf("\r\n\r\n");
+        if (end < 0) return;
+        const length = Number(/Content-Length: *(\d+)/i.exec(input.subarray(0, end).toString())[1]);
+        if (input.length < end + 4 + length) return;
+        const request = JSON.parse(input.subarray(end + 4, end + 4 + length));
+        input = input.subarray(end + 4 + length);
+        if (request.method === "connect") {
+            reply(request.id, { ok: true, protocolVersion: 4, version: "test" });
+        } else if (request.params?.message === "arm") {
+            spawn(process.execPath, ["-e", holder], {
+                stdio: "inherit",
+                detached: process.platform === "win32",
+                windowsHide: true,
+            });
+            armed = true;
+            reply(request.id, { message: "armed", timestamp: "0" });
+        }
+    }
+});
+setInterval(() => {
+    if (fs.existsSync(marker("exit"))) process.exit(0);
+}, 10);
+"#;
+    std::fs::write(dir.path().join("keep"), "").expect("keep descendant alive");
+    let client = Client::start(
+        ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_runtime(
+            RuntimeConnection::for_spawned_stdio(
+                SpawnedProcessOptions::new()
+                    .with_program(CliProgram::Path("node".into()))
+                    .with_args(["-e", script, "--"])
+                    .with_working_directory(dir.path()),
+            ),
+        ),
+    )
+    .await
+    .expect("start exit fixture");
+    let pid = client.pid().expect("owned runtime PID");
+    assert_eq!(client.ping(Some("arm")).await.unwrap().message, "armed");
+    let holder_pid = dir.path().join("holder.pid");
+    wait_for_fixture_file(&holder_pid).await;
+    let descendant = std::fs::read_to_string(&holder_pid)
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    // The peer pauses after the first chunk, far short of this frame's length.
+    let message = "x".repeat(8 * 1024 * 1024);
+    let pending = client.ping(Some(&message));
+    tokio::pin!(pending);
+    let blocked = dir.path().join("blocked");
+    tokio::select! {
+        result = &mut pending => panic!("large request completed before runtime exit: {result:?}"),
+        _ = wait_for_fixture_file(&blocked) => {}
+    }
+    let started = std::time::Instant::now();
+    std::fs::write(dir.path().join("exit"), "").expect("release runtime exit");
+    let result = tokio::time::timeout(Duration::from_millis(2500), &mut pending).await;
+    let elapsed = started.elapsed();
+    let later = tokio::time::timeout(Duration::from_millis(250), client.ping(Some("later"))).await;
+    let holder_alive = process_is_alive(descendant).await;
+    let stopped = tokio::time::timeout(Duration::from_millis(500), client.stop()).await;
+    // Stop contains the runtime's whole process tree on every platform.
+    wait_for_process_exit(descendant).await;
+    let holder_alive_after_stop = process_is_alive(descendant).await;
+    let runtime_alive = process_is_alive(pid).await;
+    client.force_stop();
+    std::fs::remove_file(dir.path().join("keep")).expect("release descendant");
+    wait_for_process_exit(descendant).await;
+
+    assert!(
+        matches!(&result, Ok(Err(error))
+            if *error.kind() == copilot_sdk::ErrorKind::Protocol(
+                copilot_sdk::ProtocolErrorKind::RequestCancelled)
+            && error.to_string().contains("the CLI process exited")),
+        "backpressured request: {result:?} after {elapsed:?}"
+    );
+    assert!(elapsed >= Duration::from_millis(900), "{elapsed:?}");
+    assert!(
+        matches!(&later, Ok(Err(error)) if error.is_transport_failure()),
+        "subsequent request: {later:?}"
+    );
+    assert!(stopped.is_ok(), "shutdown: {stopped:?}");
+    assert!(
+        holder_alive,
+        "descendant must not release inherited handles"
+    );
+    assert!(
+        !holder_alive_after_stop,
+        "stop must terminate the descendant with the runtime's process tree"
+    );
+    assert!(!runtime_alive, "runtime must be reaped");
+}
+
+#[tokio::test]
+async fn stdio_exit_watcher_and_graceful_stop_handoffs() {
+    for stop_before_exit in [true, false] {
+        let fake = ExitHandoffCli::new();
+        let client = Client::start(fake.options())
+            .await
+            .expect("start exit fixture");
+        let pid = client.pid().expect("owned runtime PID");
+        let descendant = fake.descendant().await;
+        let pending = client
+            .begin_call("ping", Some(json!({ "message": "pending" })))
+            .expect("submit pending request");
+        wait_for_fixture_file(&fake.path("pending")).await;
+        let stopping = client.stop();
+        tokio::pin!(stopping);
+
+        if stop_before_exit {
+            let eof = fake.path("eof");
+            tokio::select! {
+                result = &mut stopping => panic!("stop completed before gated exit: {result:?}"),
+                _ = wait_for_fixture_file(&eof) => {}
+            }
+            // EOF proves shutdown was acknowledged and stdin was closed.
+            // Poll once more while exit is gated to register the child wait.
+            assert!(futures_util::poll!(&mut stopping).is_pending());
+        }
+        std::fs::write(fake.path("exit"), "exit").expect("release runtime exit");
+        if !stop_before_exit {
+            wait_for_runtime_exit(&client).await;
+        }
+
+        let stopped = tokio::time::timeout(Duration::from_millis(2500), &mut stopping).await;
+        let result = tokio::time::timeout(Duration::from_millis(250), pending).await;
+        let later = tokio::time::timeout(Duration::from_millis(250), client.ping(None)).await;
+        let runtime_alive = process_is_alive(pid).await;
+        client.force_stop();
+        fake.release_descendant(descendant).await;
+
+        assert!(
+            stopped.is_ok(),
+            "stop_before_exit={stop_before_exit}: {stopped:?}"
+        );
+        if stop_before_exit {
+            assert!(matches!(stopped, Ok(Ok(()))), "{stopped:?}");
+        }
+        assert!(
+            matches!(&result, Ok(Err(error)) if error.is_transport_failure()),
+            "stop_before_exit={stop_before_exit}, pending request: {result:?}"
+        );
+        assert!(
+            matches!(&later, Ok(Err(error)) if error.is_transport_failure()),
+            "stop_before_exit={stop_before_exit}, later request: {later:?}"
+        );
+        assert!(!runtime_alive, "runtime must be reaped");
+        assert!(client.pid().is_none());
+    }
+}
+
+#[tokio::test]
+async fn stdio_force_stop_and_last_client_drop_interrupt_exit_drain() {
+    for force in [true, false] {
+        let fake = ExitHandoffCli::new();
+        let client = Client::start(fake.options())
+            .await
+            .expect("start exit fixture");
+        let pid = client.pid().expect("owned runtime PID");
+        let descendant = fake.descendant().await;
+        let pending = client
+            .begin_call("ping", Some(json!({ "message": "pending" })))
+            .expect("submit pending request");
+        tokio::pin!(pending);
+        wait_for_fixture_file(&fake.path("pending")).await;
+        // The probe starts a process, so it cannot sit in the drain window.
+        let holder_alive = process_is_alive(descendant).await;
+        // Anchor before exit: observing it later can miss most of the drain.
+        let started = tokio::time::Instant::now();
+        std::fs::write(fake.path("exit"), "exit").expect("release runtime exit");
+        wait_for_runtime_exit(&client).await;
+        let still_pending = futures_util::poll!(&mut pending).is_pending();
+        let in_drain_window = started.elapsed() < Duration::from_millis(750);
+
+        // Keep the client through a forced stop: dropping it would close the
+        // connection too and hide a force_stop that does nothing.
+        let result = if force {
+            client.force_stop();
+            let result = tokio::time::timeout(Duration::from_millis(250), &mut pending).await;
+            drop(client);
+            result
+        } else {
+            drop(client);
+            tokio::time::timeout(Duration::from_millis(250), &mut pending).await
+        };
+        let runtime_alive = process_is_alive(pid).await;
+        fake.release_descendant(descendant).await;
+
+        assert!(
+            in_drain_window,
+            "must shut down before the one-second drain expires"
+        );
+        assert!(
+            still_pending,
+            "request must be pending when shutdown begins"
+        );
+        assert!(
+            holder_alive,
+            "descendant must retain stdout during shutdown"
+        );
+        // Natural drain expiry cancels with the process-exit message instead.
+        assert!(
+            matches!(&result, Ok(Err(error))
+                if *error.kind() == copilot_sdk::ErrorKind::Protocol(
+                    copilot_sdk::ProtocolErrorKind::RequestCancelled)
+                && error.message().is_none()),
+            "force={force}, pending request: {result:?}"
+        );
+        assert!(!runtime_alive, "runtime must be reaped");
+    }
+}
+
+#[tokio::test]
+async fn stdio_exit_keeps_final_replies_and_bounds_unanswered_requests() {
+    let fake = ExitHandoffCli::new();
+    let client = Client::start(fake.options())
+        .await
+        .expect("start exit fixture");
+    let pid = client.pid().expect("owned runtime PID");
+    let descendant = fake.descendant().await;
+    let unanswered = client
+        .begin_call("ping", Some(json!({ "message": "pending" })))
+        .expect("submit unanswered request");
+    tokio::pin!(unanswered);
+    wait_for_fixture_file(&fake.path("pending")).await;
+
+    // The runtime writes this reply, which is larger than a pipe buffer, and
+    // exits while the descendant keeps its stdout open.
+    // The drain starts when the runtime exits, which is after this request
+    // is sent, so the clock starts first and cannot miss part of the drain.
+    let sent = std::time::Instant::now();
+    let reply = client.ping(Some("final-and-exit")).await;
+    let result = tokio::time::timeout(Duration::from_millis(2500), &mut unanswered).await;
+    let elapsed = sent.elapsed();
+    let later = tokio::time::timeout(Duration::from_millis(250), client.ping(None)).await;
+    let holder_alive = process_is_alive(descendant).await;
+    // The watcher observes the exit without reaping, so the process keeps its
+    // identity until stop or force stop contains it.
+    let pid_retained = client.pid() == Some(pid);
+    client.force_stop();
+    fake.release_descendant(descendant).await;
+
+    assert_eq!(
+        reply
+            .expect("a reply written before the exit is kept")
+            .message
+            .len(),
+        512 * 1024
+    );
+    assert!(
+        matches!(&result, Ok(Err(error))
+            if *error.kind() == copilot_sdk::ErrorKind::Protocol(
+                copilot_sdk::ProtocolErrorKind::RequestCancelled)
+            && error.to_string().contains("the CLI process exited")),
+        "unanswered request: {result:?} after {elapsed:?}"
+    );
+    // The bound is one second after the exit, with room for scheduling.
+    assert!(
+        (Duration::from_millis(800)..Duration::from_millis(2000)).contains(&elapsed),
+        "{elapsed:?}"
+    );
+    assert!(
+        matches!(&later, Ok(Err(error)) if error.is_transport_failure()),
+        "later request: {later:?}"
+    );
+    assert!(holder_alive, "descendant must retain stdout");
+    // Windows has no zombie to pin, so only Unix keeps the exited ID.
+    assert!(
+        pid_retained || cfg!(windows),
+        "pid() must keep the exited runtime until stop"
+    );
+}
+
+async fn wait_for_runtime_exit(client: &Client) {
+    #[cfg(unix)]
+    let pid = client.pid().expect("owned runtime PID");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            #[cfg(unix)]
+            let exited = {
+                // Observe exit without releasing the process-group identity.
+                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                let result = unsafe {
+                    libc::waitid(
+                        libc::P_PID,
+                        pid,
+                        &mut info,
+                        libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                    )
+                };
+                if result != 0 {
+                    let error = std::io::Error::last_os_error();
+                    assert_eq!(
+                        error.kind(),
+                        std::io::ErrorKind::Interrupted,
+                        "observe runtime {pid} exit: {error}"
+                    );
+                    false
+                } else {
+                    info.si_signo == libc::SIGCHLD
+                }
+            };
+            // On Windows the watcher uses try_wait, which clears the child ID.
+            #[cfg(not(unix))]
+            let exited = client.pid().is_none();
+            if exited {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("runtime must exit before testing drain cancellation");
+
+    // On Unix, exit observation does not prove the watcher has seen it yet.
+    // Windows already observed the watcher clearing the PID; its blocked stdout
+    // reader also prevents paused-clock auto-advance.
+    #[cfg(unix)]
+    {
+        tokio::time::pause();
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        tokio::time::resume();
+    }
+}
+
+struct ExitHandoffCli {
+    dir: TempDir,
+}
+
+impl ExitHandoffCli {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().expect("create exit handoff fixture directory");
+        std::fs::write(dir.path().join("keep"), "keep").expect("keep descendant alive");
+        Self { dir }
+    }
+
+    fn path(&self, name: &str) -> PathBuf {
+        self.dir.path().join(name)
+    }
+
+    fn options(&self) -> ClientOptions {
+        let script = r#"
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+const holder = spawn(process.execPath, ["-e", `
+    const fs = require("node:fs");
+    fs.writeFileSync("holder.pid.tmp", String(process.pid));
+    fs.renameSync("holder.pid.tmp", "holder.pid");
+    setInterval(() => {
+        if (!fs.existsSync("keep")) process.exit(0);
+    }, 10);
+    setTimeout(() => process.exit(1), 60000);
+`], {
+    stdio: ["ignore", "inherit", "ignore"],
+    detached: process.platform === "win32",
+    windowsHide: true,
+});
+holder.on("error", error => { throw error; });
+function reply(id, result) {
+    const body = JSON.stringify({ jsonrpc: "2.0", id, result });
+    process.stdout.write("Content-Length: " + Buffer.byteLength(body) + "\r\n\r\n" + body);
+}
+let input = Buffer.alloc(0);
+process.stdin.on("data", chunk => {
+    input = Buffer.concat([input, chunk]);
+    for (;;) {
+        const end = input.indexOf("\r\n\r\n");
+        if (end < 0) return;
+        const length = Number(/Content-Length: *(\d+)/i.exec(input.subarray(0, end).toString())[1]);
+        if (input.length < end + 4 + length) return;
+        const request = JSON.parse(input.subarray(end + 4, end + 4 + length));
+        input = input.subarray(end + 4 + length);
+        if (request.method === "connect") {
+            reply(request.id, { ok: true, protocolVersion: 4, version: "test" });
+        } else if (request.method === "runtime.shutdown") {
+            reply(request.id, {});
+        } else if (request.params?.message === "pending") {
+            fs.writeFileSync("pending", "accepted");
+        } else if (request.params?.message === "final-and-exit") {
+            // A reply larger than a pipe buffer, written just before the exit.
+            const body = JSON.stringify({
+                jsonrpc: "2.0",
+                id: request.id,
+                result: { message: "y".repeat(512 * 1024), timestamp: "0" },
+            });
+            process.stdout.write(
+                "Content-Length: " + Buffer.byteLength(body) + "\r\n\r\n" + body,
+                () => process.exit(0),
+            );
+        }
+    }
+});
+process.stdin.on("end", () => fs.writeFileSync("eof", "closed"));
+setInterval(() => {
+    if (fs.existsSync("exit")) process.exit(0);
+}, 10);
+setTimeout(() => process.exit(1), 60000);
+"#;
+        ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_runtime(
+            RuntimeConnection::for_spawned_stdio(
+                SpawnedProcessOptions::new()
+                    .with_program(CliProgram::Path("node".into()))
+                    .with_args(["-e", script, "--"])
+                    .with_working_directory(self.dir.path()),
+            ),
+        )
+    }
+
+    async fn descendant(&self) -> u32 {
+        let path = self.path("holder.pid");
+        wait_for_fixture_file(&path).await;
+        std::fs::read_to_string(path).unwrap().parse().unwrap()
+    }
+
+    async fn release_descendant(&self, pid: u32) {
+        std::fs::remove_file(self.path("keep")).expect("release descendant");
+        wait_for_process_exit(pid).await;
+    }
+}
+
+async fn wait_for_fixture_file(path: &std::path::Path) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match std::fs::read_to_string(path) {
+                Ok(content) if !content.is_empty() => return,
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => panic!("read fixture marker {path:?}: {error}"),
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("subprocess must publish its checkpoint");
+}
+
+#[tokio::test]
 async fn stdio_stop_waits_for_eof_cleanup() {
     let fake = ShutdownCli::new("stop");
     let client = Client::start(fake.options()).await.expect("start fake CLI");

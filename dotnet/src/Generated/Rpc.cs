@@ -5177,6 +5177,124 @@ internal sealed class SessionsImportSemanticRequest
     public string? WorkingDirectory { get; set; }
 }
 
+/// <summary>One diagnostic in physical input order.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ImportDiagnostic
+{
+    /// <summary>Stable diagnostic code.</summary>
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>External record identifier, when available.</summary>
+    [JsonPropertyName("externalId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExternalId { get; set; }
+
+    /// <summary>Physical JSONL line number, starting at one.</summary>
+    [JsonPropertyName("line")]
+    public long Line { get; set; }
+
+    /// <summary>Description of the input problem.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>Counts of prepared or imported session records.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class SessionImportCounts
+{
+    /// <summary>Number of inline attachments.</summary>
+    [JsonPropertyName("attachments")]
+    public long Attachments { get; set; }
+
+    /// <summary>Number of message records.</summary>
+    [JsonPropertyName("messages")]
+    public long Messages { get; set; }
+
+    /// <summary>Number of sessions created.</summary>
+    [JsonPropertyName("sessions")]
+    public long Sessions { get; set; }
+
+    /// <summary>Number of tool call records.</summary>
+    [JsonPropertyName("toolCalls")]
+    public long ToolCalls { get; set; }
+
+    /// <summary>Number of tool result records.</summary>
+    [JsonPropertyName("toolResults")]
+    public long ToolResults { get; set; }
+}
+
+/// <summary>Result of a semantic session import.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class SessionsImportResult
+{
+    /// <summary>Stable operation result code.</summary>
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>Input validation diagnostics.</summary>
+    [JsonPropertyName("diagnostics")]
+    public IList<ImportDiagnostic> Diagnostics { get => field ??= []; set; }
+
+    /// <summary>Whether validation ran without persistence.</summary>
+    [JsonPropertyName("dryRun")]
+    public bool DryRun { get; set; }
+
+    /// <summary>External session identifier.</summary>
+    [JsonPropertyName("externalId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExternalId { get; set; }
+
+    /// <summary>Prepared or imported record counts.</summary>
+    [JsonPropertyName("imported")]
+    public SessionImportCounts Imported { get => field ??= new(); set; }
+
+    /// <summary>Description of the operation result.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Whether the operation succeeded.</summary>
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+
+    /// <summary>Created native session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionId { get; set; }
+}
+
+/// <summary>Input for a semantic session import.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionsImportRequest
+{
+    /// <summary>Absolute fallback directory supplied by the caller.</summary>
+    [JsonPropertyName("defaultWorkingDirectory")]
+    public string DefaultWorkingDirectory { get; set; } = string.Empty;
+
+    /// <summary>Validate without creating a session.</summary>
+    [JsonPropertyName("dryRun")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? DryRun { get; set; }
+
+    /// <summary>Input file path used to resolve relative attachments.</summary>
+    [JsonPropertyName("inputPath")]
+    public string InputPath { get; set; } = string.Empty;
+
+    /// <summary>Complete semantic JSONL input.</summary>
+    [JsonPropertyName("jsonl")]
+    public string Jsonl { get; set; } = string.Empty;
+
+    /// <summary>Explicit session name override.</summary>
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    /// <summary>Explicit directory override.</summary>
+    [JsonPropertyName("workingDirectory")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WorkingDirectory { get; set; }
+}
+
 /// <summary>Pre-resolved working-directory context for session startup.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class SessionContext
@@ -9077,6 +9195,109 @@ internal sealed class MemoriesImportSemanticRequest
     public JsonElement? Settings { get; set; }
 
     /// <summary>Working directory for temporary, scoped memory sessions.</summary>
+    [JsonPropertyName("workingDirectory")]
+    public string WorkingDirectory { get; set; } = string.Empty;
+}
+
+/// <summary>Counts of memory batch outcomes.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class MemoryImportCounts
+{
+    /// <summary>Number of failed records.</summary>
+    [JsonPropertyName("failed")]
+    public long Failed { get; set; }
+
+    /// <summary>Number of records stored.</summary>
+    [JsonPropertyName("imported")]
+    public long Imported { get; set; }
+
+    /// <summary>Number of conflicts skipped.</summary>
+    [JsonPropertyName("skipped")]
+    public long Skipped { get; set; }
+
+    /// <summary>Number of validated input records.</summary>
+    [JsonPropertyName("total")]
+    public long Total { get; set; }
+}
+
+/// <summary>Outcome for one memory record.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class MemoryImportItemResult
+{
+    /// <summary>Stable record result code.</summary>
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>External memory identifier.</summary>
+    [JsonPropertyName("externalId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExternalId { get; set; }
+
+    /// <summary>Physical input line number.</summary>
+    [JsonPropertyName("line")]
+    public long Line { get; set; }
+
+    /// <summary>Description of the record outcome.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Record outcome: imported, skipped, failed, or validated.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+}
+
+/// <summary>Result of a semantic memory import.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class MemoriesImportResult
+{
+    /// <summary>Stable batch result code.</summary>
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>Input validation diagnostics.</summary>
+    [JsonPropertyName("diagnostics")]
+    public IList<ImportDiagnostic> Diagnostics { get => field ??= []; set; }
+
+    /// <summary>Whether validation ran without submission.</summary>
+    [JsonPropertyName("dryRun")]
+    public bool DryRun { get; set; }
+
+    /// <summary>Batch outcome counts.</summary>
+    [JsonPropertyName("imported")]
+    public MemoryImportCounts Imported { get => field ??= new(); set; }
+
+    /// <summary>Description of the batch outcome.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Whether every record succeeded or was skipped.</summary>
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+
+    /// <summary>Individual outcomes in input order.</summary>
+    [JsonPropertyName("records")]
+    public IList<MemoryImportItemResult> Records { get => field ??= []; set; }
+}
+
+/// <summary>Input for a semantic memory import.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class MemoriesImportRequest
+{
+    /// <summary>Validate without submitting records.</summary>
+    [JsonPropertyName("dryRun")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? DryRun { get; set; }
+
+    /// <summary>Complete semantic JSONL input.</summary>
+    [JsonPropertyName("jsonl")]
+    public string Jsonl { get; set; } = string.Empty;
+
+    /// <summary>Conflict policy, either skip or error.</summary>
+    [JsonPropertyName("onConflict")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OnConflict { get; set; }
+
+    /// <summary>Directory used by the memory service.</summary>
     [JsonPropertyName("workingDirectory")]
     public string WorkingDirectory { get; set; } = string.Empty;
 }
@@ -73129,6 +73350,25 @@ public sealed class ServerSessionsApi
         return await CopilotClient.InvokeRpcAsync<SessionsImportSemanticResult>(_rpc, "sessions.importSemantic", [request], cancellationToken);
     }
 
+    /// <summary>Validates semantic session JSONL and imports a new local session. Dry runs create no session.</summary>
+    /// <param name="jsonl">Complete semantic JSONL input.</param>
+    /// <param name="inputPath">Input file path used to resolve relative attachments.</param>
+    /// <param name="defaultWorkingDirectory">Absolute fallback directory supplied by the caller.</param>
+    /// <param name="workingDirectory">Explicit directory override.</param>
+    /// <param name="name">Explicit session name override.</param>
+    /// <param name="dryRun">Validate without creating a session.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Result of a semantic session import.</returns>
+    public async Task<SessionsImportResult> ImportAsync(string jsonl, string inputPath, string defaultWorkingDirectory, string? workingDirectory = null, string? name = null, bool? dryRun = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(jsonl);
+        ArgumentNullException.ThrowIfNull(inputPath);
+        ArgumentNullException.ThrowIfNull(defaultWorkingDirectory);
+
+        var request = new SessionsImportRequest { Jsonl = jsonl, InputPath = inputPath, DefaultWorkingDirectory = defaultWorkingDirectory, WorkingDirectory = workingDirectory, Name = name, DryRun = dryRun };
+        return await CopilotClient.InvokeRpcAsync<SessionsImportResult>(_rpc, "sessions.import", [request], cancellationToken);
+    }
+
     /// <summary>Creates or resumes a local session and returns the opened session ID.</summary>
     /// <param name="request">Open a session by creating, resuming, attaching, connecting to a remote, or handing off.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
@@ -73687,6 +73927,22 @@ public sealed class ServerMemoriesApi
 
         var request = new MemoriesImportSemanticRequest { Jsonl = jsonl, WorkingDirectory = workingDirectory, Settings = CopilotClient.ToJsonElementForWire(settings), DryRun = dryRun, OnConflict = onConflict };
         return await CopilotClient.InvokeRpcAsync<MemoriesImportSemanticResult>(_rpc, "memories.importSemantic", [request], cancellationToken);
+    }
+
+    /// <summary>Validates semantic memory JSONL and stores records under the server's account and repository policy. Dry runs submit no records.</summary>
+    /// <param name="jsonl">Complete semantic JSONL input.</param>
+    /// <param name="workingDirectory">Directory used by the memory service.</param>
+    /// <param name="dryRun">Validate without submitting records.</param>
+    /// <param name="onConflict">Conflict policy, either skip or error.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Result of a semantic memory import.</returns>
+    public async Task<MemoriesImportResult> ImportAsync(string jsonl, string workingDirectory, bool? dryRun = null, string? onConflict = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(jsonl);
+        ArgumentNullException.ThrowIfNull(workingDirectory);
+
+        var request = new MemoriesImportRequest { Jsonl = jsonl, WorkingDirectory = workingDirectory, DryRun = dryRun, OnConflict = onConflict };
+        return await CopilotClient.InvokeRpcAsync<MemoriesImportResult>(_rpc, "memories.import", [request], cancellationToken);
     }
 }
 
@@ -87938,6 +88194,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(IList<SessionsClientMetadataEntry>))]
 [JsonSerializable(typeof(ImageToolModel))]
 [JsonSerializable(typeof(ImageToolModelPricing))]
+[JsonSerializable(typeof(ImportDiagnostic))]
 [JsonSerializable(typeof(InstallationCatalogueIdentity))]
 [JsonSerializable(typeof(InstallationReview))]
 [JsonSerializable(typeof(InstallationsConfirmRequest))]
@@ -88238,9 +88495,13 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(McpTools))]
 [JsonSerializable(typeof(McpUninstallPlan))]
 [JsonSerializable(typeof(McpUnregisterExternalClientRequest))]
+[JsonSerializable(typeof(MemoriesImportRequest))]
+[JsonSerializable(typeof(MemoriesImportResult))]
 [JsonSerializable(typeof(MemoriesImportSemanticRequest))]
 [JsonSerializable(typeof(MemoriesImportSemanticResult))]
 [JsonSerializable(typeof(MemoryConfiguration))]
+[JsonSerializable(typeof(MemoryImportCounts))]
+[JsonSerializable(typeof(MemoryImportItemResult))]
 [JsonSerializable(typeof(MetadataContextAttributionResult))]
 [JsonSerializable(typeof(MetadataContextAttributionResultContextAttribution))]
 [JsonSerializable(typeof(MetadataContextAttributionResultContextAttributionCategories))]
@@ -88780,6 +89041,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(SessionHistoryCompactRequestWithSession))]
 [JsonSerializable(typeof(SessionHistoryListRewindPointsRequest))]
 [JsonSerializable(typeof(SessionHistorySummarizeForHandoffRequest))]
+[JsonSerializable(typeof(SessionImportCounts))]
 [JsonSerializable(typeof(SessionInstalledPlugin))]
 [JsonSerializable(typeof(SessionInstructionsGetSourcesRequest))]
 [JsonSerializable(typeof(SessionInstructionsReloadRequest))]
@@ -89074,6 +89336,8 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(SessionsGetPersistedRemoteSteerableResult))]
 [JsonSerializable(typeof(SessionsHasEventsRequest))]
 [JsonSerializable(typeof(SessionsHasEventsResult))]
+[JsonSerializable(typeof(SessionsImportRequest))]
+[JsonSerializable(typeof(SessionsImportResult))]
 [JsonSerializable(typeof(SessionsImportSemanticRequest))]
 [JsonSerializable(typeof(SessionsImportSemanticResult))]
 [JsonSerializable(typeof(SessionsListNonEmptySessionIdsRequest))]

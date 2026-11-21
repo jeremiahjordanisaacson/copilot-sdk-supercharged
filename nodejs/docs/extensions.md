@@ -37,8 +37,8 @@ Extensions add custom tools, hooks, and behaviors to the Copilot CLI. They run a
 
 In Protected Mode, local sessions that opt into extensions add filesystem access for the
 configured user extensions directory, validated project `.github/extensions/`, and their own
-session's `extensions/` directory. Agent file tools and newly launched shell
-commands use these additions; extension provider processes do not.
+session's `extensions/` directory. Agent file tools, newly launched shell
+commands, and extension provider processes share these additions.
 
 These are additive permissions, not visibility restrictions. Independent workspace
 or user grants remain effective. Loading and management modes control extension

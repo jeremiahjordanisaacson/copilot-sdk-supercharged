@@ -331,7 +331,7 @@ class JsonRpcClient:
                 method,
                 request_id,
                 "failed",
-                exc_info=True,
+                exc_info=method not in ("sessions.import", "memories.import"),
             )
             raise
         else:

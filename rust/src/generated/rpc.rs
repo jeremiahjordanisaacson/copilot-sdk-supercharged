@@ -1339,7 +1339,7 @@ impl<'a> ClientRpc<'a> {
     }
 
     /// `memories.*` sub-namespace.
-    pub(crate) fn memories(&self) -> ClientRpcMemories<'a> {
+    pub fn memories(&self) -> ClientRpcMemories<'a> {
         ClientRpcMemories {
             client: self.client,
         }
@@ -8817,7 +8817,7 @@ impl<'a> ClientRpcMcpRegistry<'a> {
 
 /// `memories.*` RPCs.
 #[derive(Clone, Copy)]
-pub(crate) struct ClientRpcMemories<'a> {
+pub struct ClientRpcMemories<'a> {
     pub(crate) client: &'a Client,
 }
 
@@ -8848,6 +8848,32 @@ impl<'a> ClientRpcMemories<'a> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::MEMORIES_IMPORTSEMANTIC, Some(wire_params))
+            .await
+    }
+
+    /// Validates semantic memory JSONL and stores records under the server's account and repository policy. Dry runs submit no records.
+    ///
+    /// Wire method: `memories.import`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Input for a semantic memory import.
+    ///
+    /// # Returns
+    ///
+    /// Result of a semantic memory import.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn import(&self, params: MemoryImportRequest) -> Result<MemoryImportResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::MEMORIES_IMPORT, Some(wire_params))
             .await
     }
 }
@@ -11868,6 +11894,32 @@ impl<'a> ClientRpcSessions<'a> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::SESSIONS_IMPORTSEMANTIC, Some(wire_params))
+            .await
+    }
+
+    /// Validates semantic session JSONL and imports a new local session. Dry runs create no session.
+    ///
+    /// Wire method: `sessions.import`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Input for a semantic session import.
+    ///
+    /// # Returns
+    ///
+    /// Result of a semantic session import.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn import(&self, params: SessionImportRequest) -> Result<SessionImportResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SESSIONS_IMPORT, Some(wire_params))
             .await
     }
 

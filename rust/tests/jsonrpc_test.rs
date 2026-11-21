@@ -219,59 +219,32 @@ async fn server_request_forwarding() {
 
 #[tokio::test]
 async fn error_response_round_trip() {
-    let (client_write, mut server_read) = duplex(4096);
-    let (mut server_write, client_read) = duplex(4096);
+    for method in ["bad.method", "sessions.import", "memories.import"] {
+        let (client_write, mut server_read) = duplex(4096);
+        let (mut server_write, client_read) = duplex(4096);
+        let (notification_tx, _) = mpsc::unbounded_channel();
+        let (request_tx, _) = mpsc::unbounded_channel();
+        let client = JsonRpcClient::new(client_write, client_read, notification_tx, request_tx);
+        let message = "Unsupported session record type 'private-import-content'.";
+        let data = serde_json::json!({"externalId": "private-import-id"});
 
-    let (notification_tx, _) = mpsc::unbounded_channel();
-    let (request_tx, _) = mpsc::unbounded_channel();
-
-    let client = JsonRpcClient::new(client_write, client_read, notification_tx, request_tx);
-
-    let server_handle = tokio::spawn(async move {
-        // Read request
-        let mut header = String::new();
-        loop {
-            let mut byte = [0u8; 1];
-            tokio::io::AsyncReadExt::read_exact(&mut server_read, &mut byte)
-                .await
-                .unwrap();
-            header.push(byte[0] as char);
-            if header.ends_with("\r\n\r\n") {
-                break;
-            }
-        }
-        let length: usize = header
-            .trim()
-            .strip_prefix("Content-Length: ")
-            .unwrap()
-            .parse()
-            .unwrap();
-        let mut buf = vec![0u8; length];
-        tokio::io::AsyncReadExt::read_exact(&mut server_read, &mut buf)
-            .await
-            .unwrap();
-        let request: JsonRpcRequest = serde_json::from_slice(&buf).unwrap();
-
-        // Send error response
-        let error_response = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": request.id,
-            "error": { "code": -32600, "message": "Invalid Request" }
-        });
-        write_framed(
-            &mut server_write,
-            &serde_json::to_vec(&error_response).unwrap(),
-        )
-        .await;
-    });
-
-    let response = client.send_request("bad.method", None).await.unwrap();
-    server_handle.await.unwrap();
-
-    assert!(response.is_error());
-    let error = response.error.unwrap();
-    assert_eq!(error.code, -32600);
-    assert_eq!(error.message, "Invalid Request");
+        let peer = async {
+            let request: JsonRpcRequest =
+                serde_json::from_slice(&read_framed(&mut server_read).await).unwrap();
+            assert_eq!(request.method, method);
+            let response = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "error": { "code": -32600, "message": message, "data": data }
+            });
+            write_framed(&mut server_write, &serde_json::to_vec(&response).unwrap()).await;
+        };
+        let (response, ()) = tokio::join!(client.send_request(method, None), peer);
+        let error = response.unwrap().error.unwrap();
+        assert_eq!(error.code, -32600);
+        assert_eq!(error.message, message);
+        assert_eq!(error.data, Some(data));
+    }
 }
 
 /// Cancel-safety regression: dropping a `write()` future after the actor has

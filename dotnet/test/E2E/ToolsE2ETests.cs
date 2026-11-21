@@ -607,7 +607,7 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
             var requestBody = request.Content is null
                 ? string.Empty
-#if NET8_0_OR_GREATER
+#if NET
                 : await request.Content.ReadAsStringAsync(ctx.CancellationToken).ConfigureAwait(false);
 #else
                 : await request.Content.ReadAsStringAsync().ConfigureAwait(false);

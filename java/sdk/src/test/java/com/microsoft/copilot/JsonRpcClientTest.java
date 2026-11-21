@@ -31,6 +31,7 @@ import java.util.logging.Logger;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -604,6 +605,8 @@ class JsonRpcClientTest {
         requests.put("logging.file.write",
                 Map.of("logId", "fixture-log", "operation", "log", "message", "opaque-sensitive-write"));
         requests.put("logging.file.open", Map.of("secretValues", List.of("opaque-sensitive-open")));
+        requests.put("sessions.import", Map.of("jsonl", "{\"token\":\"opaque-sensitive-session-import\"}\n"));
+        requests.put("memories.import", Map.of("jsonl", "{\"token\":\"opaque-sensitive-memory-import\"}\n"));
         var sent = new LinkedHashMap<String, CompletableFuture<String>>();
         requests.keySet().forEach(method -> sent.put(method, new CompletableFuture<>()));
         Thread sender = Thread.currentThread();
@@ -707,14 +710,95 @@ class JsonRpcClientTest {
             assertFalse(diagnostic.contains(sensitive), "Filter responses must not disclose unchanged input");
             JsonNode rendered = MAPPER.readTree(diagnostic);
             assertEquals(filterRequest.path("id"), rendered.path("id"));
-            assertEquals("<redacted>", rendered.at("/result/value").asText());
-            assertFalse(rendered.at("/result/changed").asBoolean());
             if (cancelBeforeReply) {
+                assertEquals("<redacted>", rendered.path("result").asText());
                 assertTrue(filtered.isCancelled());
             } else {
+                assertEquals("<redacted>", rendered.at("/result/value").asText());
+                assertFalse(rendered.at("/result/changed").asBoolean());
                 JsonNode result = filtered.get(5, TimeUnit.SECONDS);
                 assertEquals(sensitive, result.path("value").asText());
                 assertFalse(result.path("changed").asBoolean());
+            }
+        } finally {
+            logger.removeHandler(handler);
+            logger.setLevel(previousLevel);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"sessions.import,false,false", "sessions.import,false,true", "sessions.import,true,false",
+            "sessions.import,true,true", "memories.import,false,false", "memories.import,false,true",
+            "memories.import,true,false", "memories.import,true,true"})
+    void testImportResponsesAreRedactedWithoutChangingWireValues(String method, boolean cancelBeforeReply,
+            boolean errorResponse) throws Exception {
+        String sensitive = "opaque-sensitive-import-response";
+        var received = new LinkedBlockingQueue<String>();
+        var diagnostics = new LinkedBlockingQueue<LogRecord>();
+        Logger logger = Logger.getLogger(JsonRpcClient.class.getName());
+        Level previousLevel = logger.getLevel();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                diagnostics.add(record);
+                String message = record.getMessage();
+                if (message != null && message.startsWith("Received: ")) {
+                    received.add(message.substring("Received: ".length()));
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        handler.setLevel(Level.ALL);
+        logger.addHandler(handler);
+        logger.setLevel(Level.FINE);
+        try (var pair = createSocketPair()) {
+            pair.serverSide.setSoTimeout(5_000);
+            var imported = pair.client.invoke(method, Map.of("jsonl", "{}\n"), JsonNode.class);
+            JsonNode request = MAPPER.readTree(readRpcMessage(pair.serverSide.getInputStream()));
+            var ordinary = pair.client.invoke("fixture.echo", Map.of(), JsonNode.class);
+            JsonNode ordinaryRequest = MAPPER.readTree(readRpcMessage(pair.serverSide.getInputStream()));
+            writeRpcMessage(pair.serverSide.getOutputStream(), "{\"jsonrpc\":\"2.0\",\"id\":"
+                    + ordinaryRequest.path("id") + ",\"result\":{\"value\":\"visible-response\"}}");
+            assertEquals("visible-response", ordinary.get(5, TimeUnit.SECONDS).path("value").asText());
+            String ordinaryDiagnostic = received.poll(5, TimeUnit.SECONDS);
+            assertNotNull(ordinaryDiagnostic);
+            assertEquals("visible-response", MAPPER.readTree(ordinaryDiagnostic).at("/result/value").asText());
+            if (cancelBeforeReply) {
+                assertTrue(imported.cancel(false));
+            }
+            String payloadKey = errorResponse ? "error" : "result";
+            var payload = errorResponse
+                    ? Map.of("code", -32602, "message", sensitive, "data", Map.of("externalId", sensitive))
+                    : Map.of("diagnostics", List.of(Map.of("message", sensitive)), "externalId", sensitive);
+            writeRpcMessage(pair.serverSide.getOutputStream(),
+                    MAPPER.writeValueAsString(Map.of("jsonrpc", "2.0", "id", request.path("id"), payloadKey, payload)));
+            String diagnostic = received.poll(5, TimeUnit.SECONDS);
+            assertNotNull(diagnostic);
+            assertFalse(diagnostic.contains(sensitive), "Import replies must not disclose input or external IDs");
+            JsonNode rendered = MAPPER.readTree(diagnostic);
+            assertEquals(request.path("id"), rendered.path("id"));
+            assertEquals("<redacted>", rendered.path(payloadKey).asText());
+            if (cancelBeforeReply) {
+                assertTrue(imported.isCancelled());
+            } else if (errorResponse) {
+                var error = assertThrows(ExecutionException.class, () -> imported.get(5, TimeUnit.SECONDS));
+                assertTrue(error.getCause().getMessage().contains(sensitive));
+            } else {
+                assertEquals(MAPPER.valueToTree(payload), imported.get(5, TimeUnit.SECONDS));
+            }
+            for (LogRecord record : diagnostics) {
+                assertFalse(record.getMessage().contains(sensitive), "Import payloads must not appear in logs");
+                if (record.getThrown() != null) {
+                    assertFalse(record.getThrown().toString().contains(sensitive),
+                            "Import errors must not expose payloads through logged exceptions");
+                }
             }
         } finally {
             logger.removeHandler(handler);

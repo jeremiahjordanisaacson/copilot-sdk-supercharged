@@ -361,10 +361,10 @@ static int member_info(int pid, int flavor, uint64_t arg, void *buffer, int size
         } else if (passes > 0 && pid == exited_member) {
             errno = ESRCH;
             return 0;
-        } else if (passes > 0 && waits == 0 &&
-                   info->pbi_pgid == (uint32_t)owned_group) {
-            // Hold the pre-exit observation until the SDK enters its event wait.
-            info->pbi_status = SRUN;
+        } else if (passes > 0 && info->pbi_pgid == (uint32_t)owned_group) {
+            // Stay live before the wait; after consuming every real NOTE_EXIT,
+            // model the SZOMB visibility that may lag behind the notification.
+            info->pbi_status = waits == 0 ? SRUN : SZOMB;
         }
     }
     return result;
