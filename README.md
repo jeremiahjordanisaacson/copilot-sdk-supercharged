@@ -79,41 +79,25 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
-## What's New in v2.5.3
+## What's New in v3.0.0
 
-Tracks upstream `github/copilot-sdk` and ports every feature to all 40 SDKs. Highlights since v2.3.0 (see the [CHANGELOG](./CHANGELOG.md) for the full history):
+**Major release: SDK protocol 4 and the Microsoft Copilot SDK 2.0 sync.** Copilot CLI 1.0.113 and newer speak SDK protocol 4, which groups session options (`inference`, `tools`, `permissions`, `events`, and more) and rejects the flat payloads that v2.x SDKs send, so every v2.x SDK fails to start against a current CLI. v3.0.0 moves all 40 SDKs to protocol 4. See the [CHANGELOG](./CHANGELOG.md) for the full list.
 
-**Latest release (v2.5.3)**
+- **Protocol 4 in all 40 SDKs**: requires Copilot CLI (or runtime) 1.0.113 or newer; older runtimes are rejected at startup with a clear protocol version error.
+- **Core SDKs track upstream Microsoft Copilot SDK 2.0** (Node.js, Python, Go, .NET): explicit client mode (`coding-agent` or `empty`), runtime connections with in-process hosting by default, grouped client and session options, and named BYOK providers. These are breaking changes; follow the [v2 breaking changes guide](./docs/v2-breaking-changes.md). Registry package names do not change (`copilot-sdk-supercharged`, `CopilotSDK.Supercharged`); the .NET namespace is now `Microsoft.Copilot` and the Go module path is `github.com/microsoft/copilot-sdk/go/v2`.
+- **The 36 additional SDKs stay source compatible**: existing options keep working, and each SDK translates them into the protocol 4 grouped payload internally.
+- **New in every SDK**: named BYOK providers and model definitions, idempotent tools, client turn IDs, explicit client mode, `tool.shell_output` events, shell authentication prompts, a memory store callback, network proxy and authentication callbacks, Policy Helper failure details and recheck, and the permission-mode refusal reason.
+- **Also new in the additional SDKs** (the v2.6 feature wave): client info handshake, Auto routing tier, ask-user variant, session-scoped GitHub token provider, sandbox bypass, feature flag overrides, session detach, message source, managed settings cache clear, model allowlist, OAuth client metadata URL, max output tokens override, structured output, agent and hook directories, working directory trust, transcript recovery, image generation config, autopilot options, subagent lifecycle hooks, and the BYOK API key command.
+- **Security and CI**: refreshed test harness dependencies (0 `npm audit` findings), a new core SDK test workflow, and E2E harnesses that use the Copilot CLI 1.0.113 npm loader.
 
-- **PyPI package name fixed** – The Python SDK now publishes under `copilot-sdk-supercharged` (matching every other registry) instead of an unowned project name
-- **Security** – Resolved a High-severity ReDoS (super-linear backtracking) in the Python code generator's class-block regex
-- **Publishing hardened** – npm/PyPI/pub.dev workflows use OIDC trusted publishing with `workflow_dispatch` + a manifest-version fallback so releases can be safely re-run
-- **Docs** – Backfilled a source-grounded "Recent Features (v2.4–v2.5)" section into all 40 SDK READMEs
+Coverage is enforced by `scripts/verify-sdk-coverage.mjs`, which now also checks that every additional SDK declares SDK protocol 4.
 
-**v2.5.2**
+### Previous releases
 
-- **`user_setting` permission source** – Permission decisions originating from a user's saved setting are now distinguishable across the core SDKs (Node, Python, Go, .NET)
-- **Optional login on `AccountLoginRequest`** – Omit `login` to resolve the authenticated user from the token
-- **Security (Java)** – Jackson bumped 2.17.0 → 2.18.10, resolving 10 Dependabot advisories (CVE-2026-54512/54513/54514/54515/59888)
-- **Runtime pin** – `@github/copilot` pinned to `^1.0.80` (latest on public npm); newer upstream type refinements are still included
-
-**Sessions & transport (v2.5.0)**
-
-- **Session rewind** – Restore a session to an earlier point from its file-change captures
-- **In-process (FFI) transport** – Run the runtime in-process across Node, Python, Go, and Rust
-- **Additional session directories** – Expose extra working directories to a session
-- **Disabled MCP servers & GitHub MCP tool config** – Fine-grained per-session MCP control
-- **Canvas provider** – Register a session-level canvas provider
-- **`reasoningEffort: max` & tool search** – Highest reasoning tier, with tool-search scaling for large tool sets
-- **Agent Factories `argsSchema`** – Declare a factory's arguments; repository content-exclusion rules respected
-
-**Auth, BYOK & telemetry (v2.4.0)**
-
-- **MCP OAuth host token handlers** – Answer `401 WWW-Authenticate` challenges from MCP servers
-- **BYOK bearer-token provider** – Per-session token resolution for Managed-Identity-style auth
-- **Session memory, WebSocket transport & citations** – Plus per-session AI-credit budgets (`sessionLimits`)
-
-All additional-SDK features are enforced by `scripts/verify-sdk-coverage.mjs` (36/36 coverage).
+- **v2.5.3**: PyPI package name fixed (`copilot-sdk-supercharged`), a High-severity ReDoS fix in the Python code generator, OIDC trusted publishing for npm, PyPI, and pub.dev, and "Recent Features (v2.4 to v2.5)" sections in all 40 SDK READMEs.
+- **v2.5.2**: `user_setting` permission source, optional `login` on `AccountLoginRequest`, and Jackson 2.18.10 for the Java SDK.
+- **v2.5.0**: session rewind, in-process (FFI) transport, additional session directories, disabled MCP servers and GitHub MCP tool config, canvas provider, `reasoningEffort: max` with tool search, and Agent Factories `argsSchema`.
+- **v2.4.0**: MCP OAuth host token handlers, BYOK bearer-token provider, session memory, WebSocket transport, citations, and per-session AI-credit budgets (`sessionLimits`).
 
 ## Getting Started
 
@@ -123,8 +107,7 @@ Quick steps:
 
 1. **(Optional) Install the Copilot CLI**
 
-For Node.js, Python, and .NET SDKs, the Copilot CLI is bundled automatically and no separate installation is required.
-For the Go SDK, [install the CLI manually](https://github.com/features/copilot/cli) or ensure `copilot` is available in your PATH.
+The Node.js SDK installs its runtime through an optional `@microsoft/copilot-sdk-<platform>` package, and the .NET SDK downloads the CLI at build time, so no separate installation is required for them. For Python, Go, and the 36 additional SDKs, [install the Copilot CLI](https://github.com/features/copilot/cli) 1.0.113 or newer (or point `COPILOT_CLI_PATH` at it); published Python packages can also download a pinned runtime with `python -m copilot download-runtime --in-process`.
 
 2. **Install your preferred SDK** using the commands above.
 
@@ -132,7 +115,7 @@ For the Go SDK, [install the CLI manually](https://github.com/features/copilot/c
 
 ## Architecture
 
-All SDKs drive the Copilot agent runtime over JSON-RPC. By default the runtime is hosted by the Copilot CLI running as a child process in server mode:
+All SDKs drive the Copilot agent runtime over JSON-RPC. The 36 additional SDKs host the runtime in the Copilot CLI, started as a child process in server mode (or attach to an external CLI server):
 
 ```
 Your Application
@@ -144,7 +127,7 @@ Your Application
 
 The SDK manages the CLI process lifecycle automatically. You can also connect to an external CLI server. See the [Getting Started Guide](./docs/getting-started.md#connecting-to-an-external-cli-server) for details on running the CLI in server mode.
 
-Every SDK also offers an experimental in-process transport. It loads the native Copilot runtime into your application through a C ABI and carries the same JSON-RPC messages over an in-memory connection, so no CLI process is started:
+The four core SDKs (Node.js, Python, Go, .NET) follow Microsoft Copilot SDK 2.0 and load the native Copilot runtime into your application by default. They carry the same JSON-RPC messages over an in-memory connection through a C ABI, so no CLI process is started:
 
 ```
 Your Application
@@ -216,11 +199,9 @@ See the **[Authentication documentation](./docs/auth/README.md)** for details on
 
 ### Do I need to install the Copilot CLI separately?
 
-No. The default needs a compatible native runtime, not a separately running CLI. Node.js, .NET, Python, and Rust provide acquisition or bundling; Go needs application-level bundling or an explicit runtime package, and Java needs the platform classifier dependency.
+It depends on the SDK. The core SDKs need a compatible native runtime rather than a separately running CLI: the Node.js SDK installs it through an optional platform package, the .NET SDK downloads it at build time, published Python packages download a pinned runtime on demand, and Go needs application-level bundling (see the Go README) or an explicit runtime path. The 36 additional SDKs start the Copilot CLI as a child process, so install the [Copilot CLI](https://github.com/features/copilot/cli) 1.0.113 or newer, or set `COPILOT_CLI_PATH`.
 
-For Go SDK, you may still need to install the CLI manually.
-
-Advanced: You can override the bundled CLI using `cliPath` or `cliUrl` if you want to use a custom CLI binary or connect to an external server.
+Advanced: every SDK can attach to an external runtime or CLI server over TCP instead (for example `RuntimeConnection.forTcp(host, port)` in the core TypeScript SDK; see each SDK's README for its option).
 
 ### What tools are enabled by default?
 
