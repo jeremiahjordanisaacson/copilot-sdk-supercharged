@@ -15,8 +15,8 @@ import (
 	"testing"
 
 	"github.com/coder/websocket"
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 const (
@@ -122,6 +122,7 @@ func (rt *rewritingRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 }
 
 func TestCopilotRequestHandler(t *testing.T) {
+	t.Parallel()
 	testharness.SkipIfInProcess(t, "an LLM inference provider is process-global in-process")
 	ctx := testharness.NewTestContext(t)
 	counters := &handlerCounters{}
@@ -162,16 +163,14 @@ func TestCopilotRequestHandler(t *testing.T) {
 		},
 	}
 
-	client := newCopilotRequestClient(ctx, handler, "COPILOT_EXP_COPILOT_CLI_WEBSOCKET_RESPONSES=true")
+	client := newCopilotRequestClient(ctx, handler)
 	t.Cleanup(func() { client.ForceStop() })
 
 	if err := client.Start(t.Context()); err != nil {
 		t.Fatalf("Failed to start client: %v", err)
 	}
 
-	session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	})
+	session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{EnableWebSocketResponses: copilot.Bool(true)}}})
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}

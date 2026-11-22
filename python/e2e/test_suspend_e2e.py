@@ -31,17 +31,17 @@ def _make_subprocess_client(ctx: E2ETestContext, *, use_stdio: bool = True) -> C
         "fake-token-for-e2e-tests" if os.environ.get("GITHUB_ACTIONS") == "true" else None
     )
     if use_stdio:
-        connection = RuntimeConnection.for_stdio(path=ctx.cli_path)
-    else:
-        connection = RuntimeConnection.for_tcp(
-            path=ctx.cli_path, connection_token="py-tcp-shared-test-token"
+        connection = RuntimeConnection.for_spawned_stdio(
+            path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
         )
-    return CopilotClient(
-        connection=connection,
-        working_directory=ctx.work_dir,
-        env=ctx.get_env(),
-        github_token=github_token,
-    )
+    else:
+        connection = RuntimeConnection.for_spawned_tcp(
+            path=ctx.cli_path,
+            connection_token="py-tcp-shared-test-token",
+            working_directory=ctx.work_dir,
+            env=ctx.get_env(),
+        )
+    return CopilotClient(mode="coding-agent", runtime=connection, github={"token": github_token})
 
 
 def _make_tool(name: str, handler) -> Tool:
@@ -87,7 +87,7 @@ async def _safe_disconnect(session: Any) -> None:
 class TestSuspend:
     async def test_should_suspend_idle_session_without_throwing(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         try:
             await session.send_and_wait("Reply with: SUSPEND_IDLE_OK")
@@ -101,17 +101,19 @@ class TestSuspend:
         server = _make_subprocess_client(ctx, use_stdio=False)
         await server.start()
         try:
-            cli_url = f"localhost:{server.runtime_port}"
+            actual_port = server.runtime_port
+            assert actual_port is not None, "Server should have a port after starting"
             session_id: str
 
             first_client = CopilotClient(
-                connection=RuntimeConnection.for_uri(
-                    cli_url, connection_token="py-tcp-shared-test-token"
-                )
+                mode="coding-agent",
+                runtime=RuntimeConnection.for_tcp(
+                    "localhost", actual_port, connection_token="py-tcp-shared-test-token"
+                ),
             )
             try:
                 session1 = await first_client.create_session(
-                    on_permission_request=PermissionHandler.approve_all
+                    permissions={"on_request": PermissionHandler.approve_all}
                 )
                 session_id = session1.session_id
 
@@ -124,14 +126,14 @@ class TestSuspend:
                 await _safe_force_stop(first_client)
 
             resumed_client = CopilotClient(
-                connection=RuntimeConnection.for_uri(
-                    cli_url, connection_token="py-tcp-shared-test-token"
-                )
+                mode="coding-agent",
+                runtime=RuntimeConnection.for_tcp(
+                    "localhost", actual_port, connection_token="py-tcp-shared-test-token"
+                ),
             )
             try:
                 session2 = await resumed_client.resume_session(
-                    session_id,
-                    on_permission_request=PermissionHandler.approve_all,
+                    session_id, permissions={"on_request": PermissionHandler.approve_all}
                 )
                 try:
                     follow_up = await session2.send_and_wait(
@@ -164,8 +166,8 @@ class TestSuspend:
             return f"SHOULD_NOT_RUN_{args.get('value', '')}"
 
         session = await ctx.client.create_session(
-            on_permission_request=hold_permission,
-            tools=[_make_tool("suspend_cancel_permission_tool", tool_handler)],
+            permissions={"on_request": hold_permission},
+            tools={"definitions": [_make_tool("suspend_cancel_permission_tool", tool_handler)]},
         )
         try:
             await session.send(
@@ -193,8 +195,8 @@ class TestSuspend:
             return await release_tool
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[_make_tool("suspend_reject_external_tool", blocking_tool)],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [_make_tool("suspend_reject_external_tool", blocking_tool)]},
         )
         unsubscribe = session.on(
             lambda event: (

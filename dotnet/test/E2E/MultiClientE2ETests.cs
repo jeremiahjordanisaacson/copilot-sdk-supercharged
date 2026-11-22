@@ -2,15 +2,15 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 /// <summary>
 /// Custom fixture for multi-client tests that uses TCP mode so a second client can connect.
@@ -27,7 +27,8 @@ public class MultiClientTestFixture : IAsyncLifetime
         Ctx = await E2ETestContext.CreateAsync();
         Client1 = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForTcp(connectionToken: SharedToken),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedTcp(connectionToken: SharedToken)
         }, persistent: true);
     }
 
@@ -61,10 +62,8 @@ public class MultiClientE2ETests : IClassFixture<MultiClientTestFixture>, IAsync
         await Ctx.ConfigureForTestAsync("multi_client", _testName);
 
         // Trigger connection so we can read the port
-        var initSession = await Ctx.CreateSessionAsync(Client1, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var initSession = await Ctx.CreateSessionAsync(Client1, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         await initSession.DisposeAsync();
 
         var port = Client1.RuntimePort
@@ -72,7 +71,8 @@ public class MultiClientE2ETests : IClassFixture<MultiClientTestFixture>, IAsync
 
         _client2 = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri($"localhost:{port}", connectionToken: MultiClientTestFixture.SharedToken),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp("localhost", port, connectionToken: MultiClientTestFixture.SharedToken)
         });
     }
 
@@ -99,16 +99,11 @@ public class MultiClientE2ETests : IClassFixture<MultiClientTestFixture>, IAsync
     {
         var tool = AIFunctionFactory.Create(MagicNumber, "magic_number");
 
-        var session1 = await Ctx.CreateSessionAsync(Client1, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Tools = [tool],
-        });
+        var session1 = await Ctx.CreateSessionAsync(Client1, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Tools = new SessionToolOptions { Definitions = [tool] } });
 
-        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         // Set up event waiters BEFORE sending the prompt to avoid race conditions
         var client1Requested = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -151,20 +146,21 @@ public class MultiClientE2ETests : IClassFixture<MultiClientTestFixture>, IAsync
     {
         var client1PermissionRequests = new List<PermissionRequest>();
 
-        var session1 = await Ctx.CreateSessionAsync(Client1, new SessionConfig
+        var session1 = await Ctx.CreateSessionAsync(Client1, new CreateSessionOptions
         {
-            OnPermissionRequest = (request, _) =>
+            Permissions = new SessionPermissionOptions
             {
-                client1PermissionRequests.Add(request);
-                return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
-            },
+                OnRequest = (request, _) =>
+        {
+            client1PermissionRequests.Add(request);
+            return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
+        }
+            }
         });
 
         // Client 2 resumes — its handler never completes, so only client 1's approval takes effect
-        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = (_, _) => new TaskCompletionSource<PermissionDecision>().Task,
-        });
+        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = (_, _) => new TaskCompletionSource<PermissionDecision>().Task } });
 
         var client1Events = new ConcurrentBag<SessionEvent>();
         var client2Events = new ConcurrentBag<SessionEvent>();
@@ -203,16 +199,12 @@ public class MultiClientE2ETests : IClassFixture<MultiClientTestFixture>, IAsync
     [Fact]
     public async Task One_Client_Rejects_Permission_And_Both_See_The_Result()
     {
-        var session1 = await Ctx.CreateSessionAsync(Client1, new SessionConfig
-        {
-            OnPermissionRequest = (_, _) => Task.FromResult<PermissionDecision>(PermissionDecision.Reject()),
-        });
+        var session1 = await Ctx.CreateSessionAsync(Client1, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = (_, _) => Task.FromResult<PermissionDecision>(PermissionDecision.Reject()) } });
 
         // Client 2 resumes — its handler never completes
-        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = (_, _) => new TaskCompletionSource<PermissionDecision>().Task,
-        });
+        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = (_, _) => new TaskCompletionSource<PermissionDecision>().Task } });
 
         var client1Events = new ConcurrentBag<SessionEvent>();
         var client2Events = new ConcurrentBag<SessionEvent>();
@@ -255,17 +247,11 @@ public class MultiClientE2ETests : IClassFixture<MultiClientTestFixture>, IAsync
         var toolA = AIFunctionFactory.Create(CityLookup, "city_lookup");
         var toolB = AIFunctionFactory.Create(CurrencyLookup, "currency_lookup");
 
-        var session1 = await Ctx.CreateSessionAsync(Client1, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Tools = [toolA],
-        });
+        var session1 = await Ctx.CreateSessionAsync(Client1, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Tools = new SessionToolOptions { Definitions = [toolA] } });
 
-        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Tools = [toolB],
-        });
+        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Tools = new SessionToolOptions { Definitions = [toolB] } });
 
         // Send prompts sequentially to avoid nondeterministic tool_call ordering
         var response1 = await session1.SendAndWaitAsync(new MessageOptions
@@ -297,17 +283,11 @@ public class MultiClientE2ETests : IClassFixture<MultiClientTestFixture>, IAsync
         var toolA = AIFunctionFactory.Create(StableTool, "stable_tool");
         var toolB = AIFunctionFactory.Create(EphemeralTool, "ephemeral_tool");
 
-        var session1 = await Ctx.CreateSessionAsync(Client1, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Tools = [toolA],
-        });
+        var session1 = await Ctx.CreateSessionAsync(Client1, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Tools = new SessionToolOptions { Definitions = [toolA] } });
 
-        await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Tools = [toolB],
-        });
+        await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Tools = new SessionToolOptions { Definitions = [toolB] } });
 
         // Verify both tools work before disconnect (sequential to avoid nondeterministic tool_call ordering)
         var stableResponse = await session1.SendAndWaitAsync(new MessageOptions
@@ -324,17 +304,18 @@ public class MultiClientE2ETests : IClassFixture<MultiClientTestFixture>, IAsync
         Assert.NotNull(ephemeralResponse);
         Assert.Contains("EPHEMERAL_test2", ephemeralResponse!.Data.Content ?? string.Empty);
 
-        // Disconnect client 2
+        // Metadata retains the previous request's tools, so observe removal
+        // before sending the next turn.
+        using var toolsChanged = TestHelper.ObserveEvent<SessionToolsUpdatedEvent>(session1);
         await Client2.ForceStopAsync();
-
-        // Give the server time to process the connection close and remove tools.
-        await Task.Delay(500);
+        await toolsChanged.Task.WaitAsync(TimeSpan.FromSeconds(120));
 
         // Recreate client2 for cleanup
         var port = Client1.RuntimePort!.Value;
         _client2 = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri($"localhost:{port}", connectionToken: MultiClientTestFixture.SharedToken),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp("localhost", port, connectionToken: MultiClientTestFixture.SharedToken)
         });
 
         // Now only stable_tool should be available
@@ -345,6 +326,12 @@ public class MultiClientE2ETests : IClassFixture<MultiClientTestFixture>, IAsync
         Assert.NotNull(afterResponse);
         Assert.Contains("STABLE_still_here", afterResponse!.Data.Content ?? string.Empty);
         Assert.DoesNotContain("EPHEMERAL_", afterResponse!.Data.Content ?? string.Empty);
+
+        // This completed turn replaces the pre-disconnect request's tool metadata.
+        var metadata = await session1.Rpc.Tools.GetCurrentMetadataAsync();
+        Assert.NotNull(metadata.Tools);
+        Assert.Contains(metadata.Tools, tool => tool.Name == "stable_tool");
+        Assert.DoesNotContain(metadata.Tools, tool => tool.Name == "ephemeral_tool");
 
         [Description("A tool that persists across disconnects")]
         static string StableTool([Description("Input value")] string input) => $"STABLE_{input}";

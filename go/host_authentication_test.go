@@ -8,20 +8,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestAhpAuthenticationPolicyValidatedBeforeConnection(t *testing.T) {
 	valid := func(context.Context, string) (*AhpAuthenticationResult, error) { return nil, nil }
-	for _, mode := range []ClientMode{ModeCopilotCli, ModeEmpty} {
+	for _, mode := range []ClientMode{ModeCodingAgent, ModeEmpty} {
 		for _, policy := range []AhpHostAuthentication{
 			{}, {Mode: "unknown"}, {Mode: "custom", Authenticate: valid},
 			{Mode: "custom", RequireIdentity: "  ", Authenticate: valid},
 			{Mode: "custom", RequireIdentity: "owner"},
 		} {
 			t.Run(string(mode)+"/"+string(policy.Mode)+"/"+policy.RequireIdentity, func(t *testing.T) {
-				client := NewClient(&ClientOptions{Mode: mode, BaseDirectory: ".", Connection: StdioConnection{Path: "must-not-start"}})
+				client := NewClient(&ClientOptions{Mode: mode, Runtime: SpawnedStdioConnection{Path: "must-not-start", BaseDirectory: "."}})
 				_, err := client.StartAhpHost(t.Context(), &AhpHostOptions{
 					LocalServer: &rpc.HostLocalServerOptions{}, Authentication: policy,
 				})
@@ -34,7 +34,7 @@ func TestAhpAuthenticationPolicyValidatedBeforeConnection(t *testing.T) {
 	for _, policy := range []AhpHostAuthentication{
 		{Mode: "none"}, {Mode: "custom", RequireIdentity: "owner", Authenticate: valid},
 	} {
-		client := NewClient(&ClientOptions{Connection: StdioConnection{Path: "must-not-start"}})
+		client := NewClient(&ClientOptions{Mode: ModeCodingAgent, Runtime: SpawnedStdioConnection{Path: "must-not-start"}})
 		_, err := client.StartAhpHost(t.Context(), &AhpHostOptions{
 			GitHubEnvironment: &rpc.HostGitHubEnvironmentOptions{}, Authentication: policy,
 		})
@@ -219,13 +219,13 @@ func TestAhpAuthenticationTrustedSiblingInFactories(t *testing.T) {
 					t.Errorf("authentication = %#v", authentication)
 				}
 				switch config := config.(type) {
-				case *SessionConfig:
-					if config.GitHubToken != "" {
-						t.Errorf("admission identity became a GitHub token: %q", config.GitHubToken)
+				case *CreateSessionOptions:
+					if config.GitHub.Token != "" {
+						t.Errorf("admission identity became a GitHub token: %q", config.GitHub.Token)
 					}
-				case *ResumeSessionConfig:
-					if config.GitHubToken != "" {
-						t.Errorf("admission identity became a GitHub token: %q", config.GitHubToken)
+				case *ResumeSessionOptions:
+					if config.GitHub.Token != "" {
+						t.Errorf("admission identity became a GitHub token: %q", config.GitHub.Token)
 					}
 				}
 			}
@@ -235,13 +235,13 @@ func TestAhpAuthenticationTrustedSiblingInFactories(t *testing.T) {
 				}},
 				CreateSession: func(ctx context.Context, request AhpSessionCreateRequest) (*Session, error) {
 					check(request.Authentication, request.Config)
-					request.Config.OnPermissionRequest = PermissionHandler.ApproveAll
+					request.Config.Permissions.OnRequest = PermissionHandler.ApproveAll
 					return client.CreateSession(ctx, request.Config)
 				},
 				ResumeSession: func(ctx context.Context, request AhpSessionResumeRequest) (*Session, error) {
 					check(request.Authentication, request.Config)
-					request.Config.OnPermissionRequest = PermissionHandler.ApproveAll
-					return client.ResumeSessionWithOptions(ctx, request.SessionID, request.Config)
+					request.Config.Permissions.OnRequest = PermissionHandler.ApproveAll
+					return client.ResumeSession(ctx, request.SessionID, request.Config)
 				},
 			})
 			if err != nil {

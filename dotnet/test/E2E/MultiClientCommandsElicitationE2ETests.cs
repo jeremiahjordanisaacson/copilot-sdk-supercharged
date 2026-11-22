@@ -1,12 +1,12 @@
-﻿/*---------------------------------------------------------------------------------------------
+/*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 /// <summary>
 /// Custom fixture for multi-client commands/elicitation tests.
@@ -24,7 +24,8 @@ public class MultiClientCommandsElicitationFixture : IAsyncLifetime
         Ctx = await E2ETestContext.CreateAsync();
         Client1 = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForTcp(connectionToken: SharedToken),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedTcp(connectionToken: SharedToken)
         }, persistent: true);
     }
 
@@ -62,10 +63,8 @@ public class MultiClientCommandsElicitationE2ETests
         await Ctx.ConfigureForTestAsync("multi_client", _testName);
 
         // Trigger connection so we can read the port
-        var initSession = await Ctx.CreateSessionAsync(Client1, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var initSession = await Ctx.CreateSessionAsync(Client1, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         await initSession.DisposeAsync();
 
         var port = Client1.RuntimePort
@@ -73,7 +72,8 @@ public class MultiClientCommandsElicitationE2ETests
 
         _client2 = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri($"localhost:{port}", connectionToken: MultiClientCommandsElicitationFixture.SharedToken),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp("localhost", port, connectionToken: MultiClientCommandsElicitationFixture.SharedToken)
         });
     }
 
@@ -105,10 +105,8 @@ public class MultiClientCommandsElicitationE2ETests
     [Fact]
     public async Task Client_Receives_Commands_Changed_When_Another_Client_Joins_With_Commands()
     {
-        var session1 = await Ctx.CreateSessionAsync(Client1, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session1 = await Ctx.CreateSessionAsync(Client1, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         // Wait for the commands.changed event deterministically
         var commandsChangedTcs = new TaskCompletionSource<CommandsChangedEvent>(
@@ -123,20 +121,8 @@ public class MultiClientCommandsElicitationE2ETests
         });
 
         // Client2 joins with commands
-        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Commands =
-            [
-                new CommandDefinition
-                {
-                    Name = "deploy",
-                    Description = "Deploy the app",
-                    Handler = _ => Task.CompletedTask,
-                },
-            ],
-            SuppressResumeEvent = true,
-        });
+        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionOptions
+        { SuppressResumeEvent = true, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Interaction = new SessionInteractionOptions { Commands = [new CommandDefinition { Name = "deploy", Description = "Deploy the app", Handler = _ => Task.CompletedTask, },] } });
 
         var commandsChanged = await commandsChangedTcs.Task.WaitAsync(TimeSpan.FromSeconds(15));
 
@@ -151,10 +137,8 @@ public class MultiClientCommandsElicitationE2ETests
     public async Task Capabilities_Changed_Fires_When_Second_Client_Joins_With_Elicitation_Handler()
     {
         // Client1 creates session without elicitation
-        var session1 = await Ctx.CreateSessionAsync(Client1, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session1 = await Ctx.CreateSessionAsync(Client1, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         Assert.True(session1.Capabilities.Ui?.Elicitation != true,
             "Session without elicitation handler should not have elicitation capability");
 
@@ -171,16 +155,8 @@ public class MultiClientCommandsElicitationE2ETests
         });
 
         // Client2 joins WITH elicitation handler — triggers capabilities.changed
-        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            OnElicitationRequest = _ => Task.FromResult(new ElicitationResult
-            {
-                Action = Rpc.UIElicitationResponseAction.Accept,
-                Content = new Dictionary<string, object>(),
-            }),
-            SuppressResumeEvent = true,
-        });
+        var session2 = await Ctx.ResumeSessionAsync(Client2, session1.SessionId, new ResumeSessionOptions
+        { SuppressResumeEvent = true, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Interaction = new SessionInteractionOptions { OnElicitationRequest = _ => Task.FromResult(new ElicitationResult { Action = Rpc.UIElicitationResponseAction.Accept, Content = new Dictionary<string, object>(), }) } });
 
         var capEvent = await capChangedTcs.Task.WaitAsync(TimeSpan.FromSeconds(15));
 
@@ -197,10 +173,8 @@ public class MultiClientCommandsElicitationE2ETests
     public async Task Capabilities_Changed_Fires_When_Elicitation_Provider_Disconnects()
     {
         // Client1 creates session without elicitation
-        var session1 = await Ctx.CreateSessionAsync(Client1, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session1 = await Ctx.CreateSessionAsync(Client1, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         Assert.True(session1.Capabilities.Ui?.Elicitation != true,
             "Session without elicitation handler should not have elicitation capability");
 
@@ -221,20 +195,13 @@ public class MultiClientCommandsElicitationE2ETests
             ?? throw new InvalidOperationException("Client1 RuntimePort is null");
         _client3 = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri($"localhost:{port}", connectionToken: MultiClientCommandsElicitationFixture.SharedToken),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp("localhost", port, connectionToken: MultiClientCommandsElicitationFixture.SharedToken)
         });
 
         // Client3 joins WITH elicitation handler
-        await Ctx.ResumeSessionAsync(_client3, session1.SessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            OnElicitationRequest = _ => Task.FromResult(new ElicitationResult
-            {
-                Action = Rpc.UIElicitationResponseAction.Accept,
-                Content = new Dictionary<string, object>(),
-            }),
-            SuppressResumeEvent = true,
-        });
+        await Ctx.ResumeSessionAsync(_client3, session1.SessionId, new ResumeSessionOptions
+        { SuppressResumeEvent = true, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Interaction = new SessionInteractionOptions { OnElicitationRequest = _ => Task.FromResult(new ElicitationResult { Action = Rpc.UIElicitationResponseAction.Accept, Content = new Dictionary<string, object>(), }) } });
 
         await capEnabledTcs.Task.WaitAsync(TimeSpan.FromSeconds(15));
         Assert.True(session1.Capabilities.Ui?.Elicitation == true);

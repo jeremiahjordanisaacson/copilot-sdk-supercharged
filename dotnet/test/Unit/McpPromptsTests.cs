@@ -6,10 +6,10 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 /// <summary>Generated result fidelity complements the real MCP transport E2E.</summary>
 public class McpPromptsTests

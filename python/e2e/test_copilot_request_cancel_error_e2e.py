@@ -83,7 +83,9 @@ class TestCopilotRequestHandlerError:
     async def test_reports_thrown_callback_error_instead_of_hanging(self, throwing_client):
         client, handler = throwing_client
         await client.start()
-        session = await client.create_session(on_permission_request=PermissionHandler.approve_all)
+        session = await client.create_session(
+            permissions={"on_request": PermissionHandler.approve_all}
+        )
         try:
             # The callback throws on inference; the turn surfaces an error (or
             # completes without an assistant message) rather than hanging.
@@ -106,7 +108,9 @@ class TestCopilotRequestHandlerCancel:
     ):
         client, handler = cancelling_client
         await client.start()
-        session = await client.create_session(on_permission_request=PermissionHandler.approve_all)
+        session = await client.create_session(
+            permissions={"on_request": PermissionHandler.approve_all}
+        )
         try:
             await session.send("Say OK.")
             await asyncio.wait_for(handler.inference_entered.wait(), timeout=60.0)

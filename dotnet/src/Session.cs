@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
@@ -15,7 +15,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading.Channels;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>
 /// Represents a single conversation session with the Copilot CLI.
@@ -41,8 +41,7 @@ namespace GitHub.Copilot;
 /// </remarks>
 /// <example>
 /// <code>
-/// await using var session = await client.CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll, Model = "gpt-4" });
-///
+/// await using var session = await client.CreateSessionAsync(new CreateSessionOptions() { Model = "gpt-5.4", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 /// // Subscribe to events
 /// using var subscription = session.On&lt;SessionEvent&gt;(evt =&gt;
 /// {
@@ -51,7 +50,6 @@ namespace GitHub.Copilot;
 ///         Console.WriteLine($"Assistant: {assistantMessage.Data?.Content}");
 ///     }
 /// });
-///
 /// // Send a message and wait for completion
 /// await session.SendAndWaitAsync(new MessageOptions { Prompt = "Hello, world!" });
 /// </code>
@@ -65,6 +63,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
     private IReadOnlyDictionary<string, Func<ProviderTokenArgs, Task<string>>> _bearerTokenProviders = new Dictionary<string, Func<ProviderTokenArgs, Task<string>>>(StringComparer.Ordinal);
     private readonly object _callbackLock = new();
     private bool _callbacksRetired;
+    private bool _externalToolAdmissionClosed;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingExternalTools = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _externalToolLifetime = new();
     private readonly ILogger _logger;
@@ -74,10 +73,14 @@ public sealed partial class CopilotSession : IAsyncDisposable
     private bool _managedSettingsEnabled;
     private volatile Func<McpAuthContext, Task<McpAuthResult?>>? _mcpAuthHandler;
     private volatile Func<UserInputRequest, UserInputInvocation, Task<UserInputResponse>>? _userInputHandler;
+    private volatile Func<ShellAuthenticationRequest, CancellationToken, Task<ShellAuthenticationResponse>>? _shellAuthenticationHandler;
+    // Cancels the secret prompts this session waits on. Guarded by _callbackLock.
+    private readonly HashSet<ShellAuthenticationCancellation> _pendingShellAuthenticationRequests = [];
     private volatile Func<ElicitationContext, Task<ElicitationResult>>? _elicitationHandler;
     private volatile Func<ExitPlanModeRequest, ExitPlanModeInvocation, Task<ExitPlanModeResult>>? _exitPlanModeHandler;
     private volatile Func<AutoModeSwitchRequest, AutoModeSwitchInvocation, Task<AutoModeSwitchResponse>>? _autoModeSwitchHandler;
     private volatile ISkillProvider? _skillProvider;
+    private volatile Func<StoredMemory, CancellationToken, Task>? _memoryStoreHandler;
     private ImmutableArray<EventSubscription> _eventHandlers = ImmutableArray<EventSubscription>.Empty;
 
     private sealed class EventSubscription(Type eventType, Action<SessionEvent> handler, bool rootAgentOnly)
@@ -127,7 +130,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// Gets the unique identifier for this session.
     /// </summary>
     /// <value>A string that uniquely identifies this session.</value>
-    public string SessionId { get; }
+    public string SessionId { get; internal set; }
 
     /// <summary>
     /// Gets the typed RPC client for session-scoped methods.
@@ -135,6 +138,8 @@ public sealed partial class CopilotSession : IAsyncDisposable
     public SessionRpc Rpc => field ?? Interlocked.CompareExchange(ref field, new(this), null) ?? field;
 
     internal JsonRpc JsonRpc { get; }
+
+    internal Task? AutoModeRecoveryCleanupTask { get; set; }
 
     /// <summary>
     /// Gets the path to the session workspace directory when infinite sessions are enabled.
@@ -147,6 +152,14 @@ public sealed partial class CopilotSession : IAsyncDisposable
 
     /// <summary>Details of transcript repair reported by session.resume, if any.</summary>
     public TranscriptRecoveryReport? TranscriptRecovery { get; internal set; }
+
+    /// <summary>
+    /// Outcome of the <see cref="SessionPermissionOptions.Mode"/> requested when
+    /// the session was created or resumed: whether it was applied, and the
+    /// authoritative mode the session started in. Null when no mode was requested.
+    /// </summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    public PermissionsSetModeResult? PermissionModeResult { get; internal set; }
 
     /// <summary>
     /// Gets the capabilities reported by the host for this session.
@@ -255,6 +268,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// <summary>Releases local callback ownership without an RPC or joining admitted handlers.</summary>
     internal void Retire()
     {
+        ShellAuthenticationCancellation[] pendingShellAuthenticationRequests;
         lock (_callbackLock)
         {
             _callbacksRetired = true;
@@ -264,15 +278,24 @@ public sealed partial class CopilotSession : IAsyncDisposable
             _permissionHandler = null;
             _mcpAuthHandler = null;
             _userInputHandler = null;
+            _shellAuthenticationHandler = null;
+            pendingShellAuthenticationRequests = [.. _pendingShellAuthenticationRequests];
+            _pendingShellAuthenticationRequests.Clear();
             _elicitationHandler = null;
             _exitPlanModeHandler = null;
             _autoModeSwitchHandler = null;
             _skillProvider = null;
+            _memoryStoreHandler = null;
             _hooks = null;
             _transformCallbacks = null;
             ClientSessionApis.ProviderToken = null;
             ClientSessionApis.Canvas = null;
             ClientSessionApis.SessionFs = null;
+        }
+        // Cancellation callbacks are consumer code that can block, so they run off the thread retiring the session.
+        foreach (var pending in pendingShellAuthenticationRequests)
+        {
+            pending.Cancel();
         }
         CancelPendingExternalTools();
         CloseEventChannel();
@@ -283,14 +306,38 @@ public sealed partial class CopilotSession : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_callbacksRetired, this);
 
     /// <summary>
-    /// Removes the session from its parent client and stops its event consumer.
+    /// Retires the session's local callbacks and stops its event consumer,
+    /// after any owned recovery cleanup has settled.
     /// Used on session-creation/resume error paths where the session was registered
     /// (and its event loop started) but never returned to the caller.
+    /// Recovery cleanup keeps the session ID reserved until detach succeeds.
+    /// Failed cleanup reserves the ID until the connection stops.
     /// </summary>
-    internal void Unregister()
+    internal void Unregister(bool cleanupFailed = false)
     {
-        Retire();
-        RemoveFromClient();
+        if (AutoModeRecoveryCleanupTask is { } cleanup)
+        {
+            _ = cleanup.ContinueWith(
+                completed =>
+                {
+                    Retire();
+                    if (!cleanupFailed && completed.Status == System.Threading.Tasks.TaskStatus.RanToCompletion)
+                    {
+                        RemoveFromClient();
+                    }
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+        else
+        {
+            Retire();
+            if (!cleanupFailed)
+            {
+                RemoveFromClient();
+            }
+        }
     }
 
     internal void SetGitHubTokenProviderRegistration(string registrationId)
@@ -308,6 +355,8 @@ public sealed partial class CopilotSession : IAsyncDisposable
 
     internal void StartProcessingEvents()
     {
+        // The reader outlives the caller that creates or resumes the session.
+        using var flow = ExecutionContextHelpers.SuppressFlow();
         _ = ProcessEventsAsync();
     }
 
@@ -362,14 +411,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// </remarks>
     /// <example>
     /// <code>
-    /// var messageId = await session.SendAsync(new MessageOptions
-    /// {
-    ///     Prompt = "Explain this code",
-    ///     Attachments = new List&lt;Attachment&gt;
-    ///     {
-    ///         new AttachmentFile { Path = "./Program.cs", DisplayName = "Program.cs" }
-    ///     }
-    /// });
+    /// var messageId = await session.SendAsync(new MessageOptions { Prompt = "Explain this code", Attachments = new List&lt;Attachment&gt; { new AttachmentFile { Path = "./Program.cs", DisplayName = "Program.cs" } } });
     /// </code>
     /// </example>
     public async Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken = default)
@@ -399,6 +441,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             SessionId = SessionId,
             Prompt = options.Prompt,
             DisplayPrompt = options.DisplayPrompt,
+            ClientTurnId = options.ClientTurnId,
             Attachments = options.Attachments,
             Mode = options.Mode,
             AgentMode = options.AgentMode,
@@ -545,6 +588,12 @@ public sealed partial class CopilotSession : IAsyncDisposable
             }
             await Task.WhenAny(delivered.Task, _eventDispatchStopped.Task, JsonRpc.Completion)
                 .WaitAsync(Timeout.InfiniteTimeSpan, cancellationToken);
+            if (!delivered.Task.IsCompleted && !_eventDispatchStopped.Task.IsCompleted)
+            {
+                // The transport closed, but the boundary may already be queued behind a slow handler.
+                await Task.WhenAny(delivered.Task, _eventDispatchStopped.Task, DispatchQueuedEventsAsync())
+                    .WaitAsync(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
             if (!delivered.Task.IsCompleted)
             {
                 throw new IOException("The session closed before a final response was received.");
@@ -574,18 +623,18 @@ public sealed partial class CopilotSession : IAsyncDisposable
         {
             throw new IOException("The session closed before a final response was received.", error);
         }
-        catch (IOException error) when (error.InnerException is RemoteRpcException remote)
+        catch (RemoteRpcException error)
         {
-            if (remote.ErrorCode == RemoteRpcException.MethodNotFoundErrorCode)
+            if (error.ErrorCode == RemoteRpcException.MethodNotFoundErrorCode)
             {
                 _completionRpcUnsupported = true;
                 return null;
             }
-            if (remote.ErrorData is { ValueKind: JsonValueKind.Object } data &&
+            if (error.ErrorData is { ValueKind: JsonValueKind.Object } data &&
                 data.TryGetProperty("completionEventId", out var id) && id.ValueKind == JsonValueKind.String)
             {
                 await DrainAsync(id.GetString());
-                throw new InvalidOperationException($"Session error: {remote.Message}", error);
+                throw new InvalidOperationException($"Session error: {error.Message}", error);
             }
             throw;
         }
@@ -785,12 +834,8 @@ public sealed partial class CopilotSession : IAsyncDisposable
     ///             break;
     ///     }
     /// });
-    ///
     /// // Or filter to a specific event kind at compile time:
-    /// using var sub2 = session.On&lt;AssistantMessageEvent&gt;(evt =&gt;
-    ///     Console.WriteLine(evt.Data?.Content));
-    ///
-    /// // The handler is automatically unsubscribed when the subscription is disposed.
+    /// using var sub2 = session.On&lt;AssistantMessageEvent&gt;(evt =&gt; Console.WriteLine(evt.Data?.Content));// The handler is automatically unsubscribed when the subscription is disposed.
     /// </code>
     /// </example>
     public IDisposable On<T>(Action<T> handler) where T : SessionEvent
@@ -848,11 +893,21 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// </summary>
     private async Task ProcessEventsAsync()
     {
+        // Yield so even queued events run outside the launch's ExecutionContext suppression scope.
+        Debug.Assert(ExecutionContext.IsFlowSuppressed());
+        await Task.Yield();
+        Debug.Assert(Activity.Current is null);
+
         await foreach (var sessionEvent in _eventChannel.Reader.ReadAllAsync())
         {
             if (_eventDispatchStopped.Task.IsCompleted)
             {
                 return;
+            }
+            if (sessionEvent is EventQueueBarrier barrier)
+            {
+                barrier.Reach();
+                continue;
             }
             var dispatchTimestamp = Stopwatch.GetTimestamp();
             var eventType = sessionEvent.GetType();
@@ -885,6 +940,26 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 SessionId,
                 sessionEvent.Type);
         }
+    }
+
+    /// <summary>
+    /// Completes once the consumer has dispatched every event queued before this call.
+    /// Completes immediately when the queue no longer accepts events; a stopped consumer never completes it.
+    /// </summary>
+    private Task DispatchQueuedEventsAsync()
+    {
+        var barrier = new EventQueueBarrier();
+        return _eventChannel.Writer.TryWrite(barrier) ? barrier.Reached : Task.CompletedTask;
+    }
+
+    /// <summary>A queue position the consumer reaches in order but never dispatches to handlers.</summary>
+    private sealed class EventQueueBarrier : SessionEvent
+    {
+        private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Reached => _reached.Task;
+
+        public void Reach() => _reached.TrySetResult();
     }
 
     /// <summary>
@@ -935,6 +1010,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             Parameters = ToJsonElementDictionary(definition.Parameters),
             OverridesBuiltInTool = definition.OverridesBuiltInTool,
             SkipPermission = definition.SkipPermission,
+            HasHandler = definition.HasHandler,
             Defer = definition.Defer switch
             {
                 CopilotToolDefer.Auto => ProtocolExternalToolDefer.Auto,
@@ -944,6 +1020,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             Metadata = definition.Metadata is { } metadata ? ToJsonElementDictionary(metadata) : null,
             IsTerminal = definition.IsTerminal,
             Namespace = definition.Namespace,
+            Idempotent = definition.Idempotent,
         };
     }
 
@@ -979,7 +1056,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// Replaces the complete custom tool list supplied by this SDK client for the live session.
     /// </summary>
     /// <param name="tools">
-    /// The same tool declarations accepted by <see cref="SessionConfigBase.Tools"/> when creating or resuming a session.
+    /// The same tool declarations accepted by <see cref="SessionToolOptions.Definitions"/> when creating or resuming a session.
     /// Passing an empty collection removes all externally implemented tools supplied by this client.
     /// </param>
     /// <param name="cancellationToken">
@@ -1001,9 +1078,9 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// </para>
     /// <para>
     /// The agent sees the new tools from its next model request, which can fall within a turn in progress. A model request
-    /// already in flight was made with the previous tools, so the agent can still call a tool you removed. This session doesn't
-    /// answer that call, and it can stay pending until the turn is aborted. If a running turn might still call a tool you remove,
-    /// replace tools while the session is idle.
+    /// already in flight was made with the previous tools, so the agent can still call a tool you removed. If no connected client
+    /// supplies a tool with that name any more, the call fails with an error that tells the agent the tool is no longer available,
+    /// and the turn continues. If you don't want the agent to see that failure, replace tools while the session is idle.
     /// </para>
     /// </remarks>
     [Experimental(Diagnostics.Experimental)]
@@ -1120,7 +1197,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             return PermissionDecision.UserNotAvailable();
         }
 
-        var request = JsonSerializer.Deserialize(permissionRequestData.GetRawText(), SessionEventsJsonContext.Default.PermissionRequest)
+        var request = permissionRequestData.Deserialize(SessionEventsJsonContext.Default.PermissionRequest)
             ?? throw new InvalidOperationException("Failed to deserialize permission request");
 
         var invocation = new PermissionInvocation
@@ -1153,7 +1230,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 case ExternalToolRequestedEvent toolEvent:
                     {
                         var data = toolEvent.Data;
-                        if (string.IsNullOrEmpty(data.RequestId) || string.IsNullOrEmpty(data.ToolName))
+                        if (data.HasHandler == false || string.IsNullOrEmpty(data.RequestId) || string.IsNullOrEmpty(data.ToolName))
                             return;
 
                         var tool = GetTool(data.ToolName);
@@ -1192,6 +1269,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
                             data.PermissionRequest,
                             data.PromptRequest,
                             data.AssistedApprovalAssessment,
+                            data.ProgramToolCallId,
                             handler);
                         break;
                     }
@@ -1289,7 +1367,10 @@ public sealed partial class CopilotSession : IAsyncDisposable
                                 Ui = new SessionUiCapabilities
                                 {
                                     Elicitation = changed.Elicitation ?? current?.Elicitation,
+                                    AutoModeRecovery = changed.AutoModeRecovery ?? current?.AutoModeRecovery,
+#pragma warning disable MCPSDK001
                                     McpApps = changed.McpApps ?? current?.McpApps,
+#pragma warning restore MCPSDK001
                                 }
                             };
                         }
@@ -1403,17 +1484,16 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// </summary>
     private async Task ExecuteToolAndRespondAsync(string requestId, string toolName, string toolCallId, JsonElement? arguments, AIFunction tool, string? agentId)
     {
-        if (_externalToolLifetime.IsCancellationRequested)
-        {
-            return;
-        }
-
         using var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(_externalToolLifetime.Token);
-        if (!_pendingExternalTools.TryAdd(requestId, cancellationSource))
+        lock (_callbackLock)
         {
-            return;
+            if (_externalToolAdmissionClosed || !_pendingExternalTools.TryAdd(requestId, cancellationSource))
+            {
+                return;
+            }
         }
 
+        var claimed = false;
         try
         {
             if (cancellationSource.IsCancellationRequested)
@@ -1474,6 +1554,13 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 }
             }
 
+            lock (_callbackLock)
+            {
+                if (_externalToolAdmissionClosed)
+                {
+                    return;
+                }
+            }
             var toolTimestamp = Stopwatch.GetTimestamp();
             var result = await tool.InvokeAsync(aiFunctionArgs, cancellationSource.Token);
             LoggingHelpers.LogTiming(_logger, LogLevel.Debug, null,
@@ -1485,11 +1572,29 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 toolName);
 
             var toolResultObject = ToolResultObject.ConvertFromInvocationResult(result, tool.JsonSerializerOptions);
+
+            // Telemetry that cannot be encoded as JSON would stop the result from being
+            // sent at all, leaving the call unanswered, so answer it with the error.
+            if (toolResultObject.ToolTelemetry is { } toolTelemetry)
+            {
+                try
+                {
+                    JsonSerializer.SerializeToElement(
+                        toolTelemetry,
+                        CopilotClient.SerializerOptionsForMessageFormatter.GetTypeInfo(typeof(IDictionary<string, object>)));
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException($"failed to serialize tool telemetry: {ex.Message}", ex);
+                }
+            }
+
             if (!TryClaimExternalTool(requestId, cancellationSource))
             {
                 return;
             }
 
+            claimed = true;
             var responseRpcTimestamp = Stopwatch.GetTimestamp();
             await Rpc.Tools.HandlePendingToolCallAsync(
                 requestId, toolResultObject, error: null, cancellationSource.Token);
@@ -1515,31 +1620,46 @@ public sealed partial class CopilotSession : IAsyncDisposable
         }
         catch (Exception ex) when (!cancellationSource.IsCancellationRequested)
         {
-            if (!TryClaimExternalTool(requestId, cancellationSource))
+            if (claimed)
+            {
+                // The handler finished but its result never reached the runtime, which
+                // is still waiting on the call. This invocation already owns the
+                // request, so report the failure and answer the call with it.
+                LogExternalToolResultDeliveryFailed(ex, SessionId, requestId, toolName);
+            }
+            else if (!TryClaimExternalTool(requestId, cancellationSource))
             {
                 return;
             }
 
-            try
+            // A handler error is an initial response too. Retry its failed delivery
+            // once, but never recursively retry the fallback error response.
+            var attempts = claimed ? 1 : 2;
+            for (var attempt = 0; attempt < attempts; attempt++)
             {
-                await Rpc.Tools.HandlePendingToolCallAsync(
-                    requestId, result: null, error: ex.Message, cancellationSource.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                // Teardown canceled the in-flight error response.
-            }
-            catch (IOException)
-            {
-                // Connection lost or RPC error — nothing we can do
-            }
-            catch (ObjectDisposedException)
-            {
-                // Connection already disposed — nothing we can do
-            }
-            catch (RemoteRpcException)
-            {
-                // Another client may have answered the broadcast request first.
+                try
+                {
+                    // An empty error reads as no error, so the call would count as a success.
+                    var error = string.IsNullOrEmpty(ex.Message) ? ex.GetType().Name : ex.Message;
+                    await Rpc.Tools.HandlePendingToolCallAsync(
+                        requestId, result: null, error: error, cancellationSource.Token);
+                    break;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Teardown canceled the in-flight error response.
+                    break;
+                }
+                catch (Exception sendError) when (!claimed && attempt == 0 && !cancellationSource.IsCancellationRequested)
+                {
+                    LogExternalToolResultDeliveryFailed(sendError, SessionId, requestId, toolName);
+                    ex = sendError;
+                }
+                catch (Exception sendError) when (sendError is IOException or ObjectDisposedException or RemoteRpcException)
+                {
+                    LogExternalToolResultDeliveryFailed(sendError, SessionId, requestId, toolName);
+                    break;
+                }
             }
         }
         finally
@@ -1637,19 +1757,13 @@ public sealed partial class CopilotSession : IAsyncDisposable
 
     internal void CancelPendingExternalTools()
     {
-        try
+        lock (_callbackLock)
         {
-            _externalToolLifetime.Cancel();
+            // Downlevel cancellation is queued, so close admission before dispatching consumer callbacks.
+            _externalToolAdmissionClosed = true;
+            _pendingExternalTools.Clear();
         }
-        catch (AggregateException)
-        {
-            // User cancellation callbacks must not prevent session teardown.
-        }
-        catch (ObjectDisposedException)
-        {
-            // Session teardown already completed.
-        }
-        _pendingExternalTools.Clear();
+        _ = CopilotClient.CancelCallbacksAsync(_externalToolLifetime);
     }
 
     /// <summary>
@@ -1660,6 +1774,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
         PermissionRequest permissionRequest,
         PermissionPromptRequest? promptRequest,
         AssistedApprovalAssessment? assistedApprovalAssessment,
+        string? programToolCallId,
         Func<PermissionRequest, PermissionInvocation, Task<PermissionDecision>> handler)
     {
         try
@@ -1669,6 +1784,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 SessionId = SessionId,
                 ManagedSettingsEnabled = _managedSettingsEnabled,
                 AssistedApprovalAssessment = assistedApprovalAssessment,
+                ProgramToolCallId = programToolCallId,
                 PromptRequest = promptRequest
             };
 
@@ -1698,7 +1814,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             {
                 await Rpc.Permissions.HandlePendingPermissionRequestAsync(requestId, PermissionDecision.UserNotAvailable());
             }
-            catch (IOException)
+            catch (Exception deliveryError) when (deliveryError is IOException or RemoteRpcException)
             {
                 // Connection lost or RPC error — nothing we can do
             }
@@ -1719,6 +1835,88 @@ public sealed partial class CopilotSession : IAsyncDisposable
         {
             ThrowIfCallbacksRetired();
             _userInputHandler = handler;
+        }
+    }
+
+    /// <summary>
+    /// Registers the handler for passwords and other answers that shell commands run by the agent ask for.
+    /// </summary>
+    /// <param name="handler">The handler to invoke when a command asks for an answer.</param>
+    internal void RegisterShellAuthenticationHandler(Func<ShellAuthenticationRequest, CancellationToken, Task<ShellAuthenticationResponse>> handler)
+    {
+        lock (_callbackLock)
+        {
+            ThrowIfCallbacksRetired();
+            _shellAuthenticationHandler = handler;
+        }
+    }
+
+    /// <summary>
+    /// Asks the registered handler for a secret. Any failure, a response that isn't an accept, or
+    /// <paramref name="pending"/> being cancelled first cancels the prompt, so the program
+    /// that asked fails instead of receiving a wrong value. Never logs the answer.
+    /// </summary>
+    /// <param name="request">The shell authentication request from the runtime.</param>
+    /// <param name="pending">Cancelled when the runtime no longer needs the answer.</param>
+    /// <returns>The answer, or a cancellation.</returns>
+    internal async Task<ShellAuthenticationResponse> HandleShellAuthenticationRequestAsync(ShellAuthenticationRequest request, ShellAuthenticationCancellation pending)
+    {
+        Func<ShellAuthenticationRequest, CancellationToken, Task<ShellAuthenticationResponse>>? handler;
+        lock (_callbackLock)
+        {
+            handler = _callbacksRetired ? null : _shellAuthenticationHandler;
+            if (handler is null || pending.IsCancellationRequested)
+            {
+                return ShellAuthenticationResponse.Cancel();
+            }
+            _pendingShellAuthenticationRequests.Add(pending);
+        }
+        try
+        {
+            var answer = handler(request, pending.Token);
+            // A handler that never finishes after its prompt closes must not keep the request open.
+            var closed = Task.Delay(Timeout.Infinite, pending.Token);
+            if (await Task.WhenAny(answer, closed).ConfigureAwait(false) != answer)
+            {
+                _ = answer.ContinueWith(static task => _ = task.Exception, TaskScheduler.Default);
+                return ShellAuthenticationResponse.Cancel();
+            }
+            var response = await answer.ConfigureAwait(false);
+            // Retirement cancels the prompt on the thread pool, so an answer that arrives once the session has retired
+            // is refused before that runs.
+            bool retired;
+            lock (_callbackLock)
+            {
+                retired = _callbacksRetired;
+            }
+            return !retired
+                && !pending.IsCancellationRequested
+                && response is { Value: { } value }
+                && response.Action == ShellAuthenticationResponseAction.Accept
+                ? ShellAuthenticationResponse.Accept(value)
+                : ShellAuthenticationResponse.Cancel();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !pending.IsCancellationRequested)
+        {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                // The exception's message could contain the answer, so only its type is logged.
+                var exceptionType = ex.GetType().FullName ?? ex.GetType().Name;
+                LogShellAuthenticationHandlerFailed(exceptionType, SessionId, request.RequestId);
+            }
+            return ShellAuthenticationResponse.Cancel();
+        }
+        catch (OperationCanceledException)
+        {
+            // The prompt closed, so the handler was told to stop.
+            return ShellAuthenticationResponse.Cancel();
+        }
+        finally
+        {
+            lock (_callbackLock)
+            {
+                _pendingShellAuthenticationRequests.Remove(pending);
+            }
         }
     }
 
@@ -1802,6 +2000,14 @@ public sealed partial class CopilotSession : IAsyncDisposable
         }
     }
 
+    internal void ClearMemoryStore()
+    {
+        lock (_callbackLock)
+        {
+            _memoryStoreHandler = null;
+        }
+    }
+
     internal async ValueTask<CopilotClient.SkillProviderListResult> HandleSkillProviderListAsync(CancellationToken cancellationToken)
     {
         ISkillProvider provider;
@@ -1841,6 +2047,38 @@ public sealed partial class CopilotSession : IAsyncDisposable
         {
             LogSkillProviderFailed(ex, "readSkill", SessionId);
             throw new InvalidOperationException("Skill provider readSkill failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Registers the session-scoped memory store callback from <see cref="MemoryConfiguration.StoreMemory"/>.
+    /// </summary>
+    internal void RegisterMemoryStore(Func<StoredMemory, CancellationToken, Task>? handler)
+    {
+        lock (_callbackLock)
+        {
+            ThrowIfCallbacksRetired();
+            _memoryStoreHandler = handler;
+        }
+    }
+
+    internal async ValueTask HandleMemoryStoreAsync(StoredMemory memory, CancellationToken cancellationToken)
+    {
+        Func<StoredMemory, CancellationToken, Task> handler;
+        lock (_callbackLock)
+        {
+            ThrowIfCallbacksRetired();
+            handler = _memoryStoreHandler ?? throw new InvalidOperationException("No memory store is registered");
+        }
+
+        try
+        {
+            await handler(memory, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            LogMemoryStoreFailed(ex, SessionId);
+            throw new InvalidOperationException("Memory store callback failed");
         }
     }
 
@@ -2067,7 +2305,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             {
                 await Rpc.Commands.HandlePendingCommandAsync(requestId, error: $"Unknown command: {commandName}");
             }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or RemoteRpcException)
             {
                 // Connection lost — nothing we can do
             }
@@ -2099,16 +2337,18 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 requestId,
                 commandName);
         }
-        catch (Exception error) when (error is not OperationCanceledException)
+        catch (Exception error)
         {
             // User handler can throw any exception — report the error back to the server
-            // so the pending command doesn't hang.
+            // so the pending command doesn't hang. The handler gets no SDK cancellation token,
+            // so its OperationCanceledException (for example an HttpClient timeout) is a handler
+            // failure like any other.
             var message = error.Message;
             try
             {
                 await Rpc.Commands.HandlePendingCommandAsync(requestId, error: message);
             }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or RemoteRpcException)
             {
                 // Connection lost — nothing we can do
             }
@@ -2139,22 +2379,25 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 SessionId,
                 requestId);
             var responseRpcTimestamp = Stopwatch.GetTimestamp();
-            await Rpc.Ui.HandlePendingElicitationAsync(requestId, new UIElicitationResponse
+            // The label is a sibling of the answer, never part of it.
+            await Rpc.Ui.HandlePendingElicitationAsync(requestId: requestId, result: new UIElicitationResponse
             {
                 Action = result.Action,
                 Content = result.Content?.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => CopilotClient.ToJsonElementForWire(kvp.Value)!.Value)
-            });
+                        kvp => kvp.Key,
+                        kvp => SerializeElicitationValue(kvp.Value))
+            }, decisionContext: result.DecisionContext);
             LoggingHelpers.LogTiming(_logger, LogLevel.Debug, null,
                 "CopilotSession.HandleElicitationRequestAsync response sent successfully. Elapsed={Elapsed}, SessionId={SessionId}, RequestId={RequestId}",
                 responseRpcTimestamp,
                 SessionId,
                 requestId);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception)
         {
             // User handler can throw any exception — attempt to cancel so the request doesn't hang.
+            // The handler gets no SDK cancellation token, so its OperationCanceledException (for
+            // example an HttpClient timeout) is a handler failure like any other.
             try
             {
                 await Rpc.Ui.HandlePendingElicitationAsync(requestId, new UIElicitationResponse
@@ -2162,7 +2405,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
                     Action = UIElicitationResponseAction.Cancel
                 });
             }
-            catch (Exception innerEx) when (innerEx is IOException or ObjectDisposedException)
+            catch (Exception innerEx) when (innerEx is IOException or ObjectDisposedException or RemoteRpcException)
             {
                 // Connection lost — nothing we can do
             }
@@ -2415,6 +2658,9 @@ public sealed partial class CopilotSession : IAsyncDisposable
         }
     }
 
+    private static SessionJsonContext IncomingSessionJsonContext { get; } =
+        new(JsonRpc.CreateIncomingSerializerOptions(SessionJsonContext.Default.Options));
+
     /// <summary>
     /// Handles a hook invocation from the Copilot CLI.
     /// </summary>
@@ -2440,6 +2686,23 @@ public sealed partial class CopilotSession : IAsyncDisposable
             SessionId = SessionId
         };
 
+        // The runtime puts the trace context of the span a hook belongs to in the hook input.
+        string? traceparent = null;
+        string? tracestate = null;
+        if (input.ValueKind == JsonValueKind.Object)
+        {
+            if (input.TryGetProperty("traceparent", out var traceparentElement) && traceparentElement.ValueKind == JsonValueKind.String)
+            {
+                traceparent = traceparentElement.GetString();
+            }
+
+            if (input.TryGetProperty("tracestate", out var tracestateElement) && tracestateElement.ValueKind == JsonValueKind.String)
+            {
+                tracestate = tracestateElement.GetString();
+            }
+        }
+
+        using var hookActivity = TelemetryHelpers.RestoreHandlerTraceContext(traceparent, tracestate, "copilot.hook_handler");
         var hookTimestamp = Stopwatch.GetTimestamp();
         try
         {
@@ -2447,62 +2710,62 @@ public sealed partial class CopilotSession : IAsyncDisposable
             {
                 "preToolUse" => hooks.OnPreToolUse != null
                     ? SerializeHookOutputWithPayload(await hooks.OnPreToolUse(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.PreToolUseHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.PreToolUseHookInput)!,
                         invocation))
                     : null,
                 "preMcpToolCall" => hooks.OnPreMcpToolCall != null
                     ? SerializeHookOutput(await hooks.OnPreMcpToolCall(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.PreMcpToolCallHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.PreMcpToolCallHookInput)!,
                         invocation))
                     : null,
                 "postToolUse" => hooks.OnPostToolUse != null
                     ? SerializeHookOutputWithPayload(await hooks.OnPostToolUse(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.PostToolUseHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.PostToolUseHookInput)!,
                         invocation))
                     : null,
                 "postToolUseFailure" => hooks.OnPostToolUseFailure != null
                     ? await hooks.OnPostToolUseFailure(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.PostToolUseFailureHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.PostToolUseFailureHookInput)!,
                         invocation)
                     : null,
                 "userPromptSubmitted" => hooks.OnUserPromptSubmitted != null
                     ? await hooks.OnUserPromptSubmitted(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.UserPromptSubmittedHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.UserPromptSubmittedHookInput)!,
                         invocation)
                     : null,
                 "userPromptTransformed" => hooks.OnUserPromptTransformed != null
                     ? await hooks.OnUserPromptTransformed(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.UserPromptTransformedHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.UserPromptTransformedHookInput)!,
                         invocation)
                     : null,
                 "sessionStart" => hooks.OnSessionStart != null
                     ? await hooks.OnSessionStart(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.SessionStartHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.SessionStartHookInput)!,
                         invocation)
                     : null,
                 "sessionEnd" => hooks.OnSessionEnd != null
                     ? await hooks.OnSessionEnd(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.SessionEndHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.SessionEndHookInput)!,
                         invocation)
                     : null,
                 "errorOccurred" => hooks.OnErrorOccurred != null
                     ? await hooks.OnErrorOccurred(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.ErrorOccurredHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.ErrorOccurredHookInput)!,
                         invocation)
                     : null,
                 "agentStop" => hooks.OnAgentStop != null
                     ? await hooks.OnAgentStop(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.AgentStopHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.AgentStopHookInput)!,
                         invocation)
                     : null,
                 "subagentStart" => hooks.OnSubagentStart != null
                     ? await hooks.OnSubagentStart(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.SubagentStartHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.SubagentStartHookInput)!,
                         invocation)
                     : null,
                 "subagentStop" => hooks.OnSubagentStop != null
                     ? await hooks.OnSubagentStop(
-                        JsonSerializer.Deserialize(input.GetRawText(), SessionJsonContext.Default.SubagentStopHookInput)!,
+                        input.Deserialize(IncomingSessionJsonContext.SubagentStopHookInput)!,
                         invocation)
                     : null,
                 _ => null
@@ -2527,29 +2790,19 @@ public sealed partial class CopilotSession : IAsyncDisposable
         output is null ? null : JsonSerializer.SerializeToElement(output, SessionJsonContext.Default.PreMcpToolCallHookOutput);
 
     /// <summary>
-    /// Serializer options for hook outputs with an <c>object?</c> payload
-    /// (<see cref="PreToolUseHookOutput.ModifiedArgs"/>, <see cref="PostToolUseHookOutput.ModifiedResult"/>),
-    /// which can hold caller-defined types, such as anonymous objects, that no source-generated
-    /// context describes. As for structured output and custom tools, those types are serialized
-    /// with reflection when the application enables it.
+    /// Serializer options for <c>object</c> payloads a handler returns: hook outputs
+    /// (<see cref="PreToolUseHookOutput.ModifiedArgs"/>, <see cref="PostToolUseHookOutput.ModifiedResult"/>)
+    /// and elicitation answers (<see cref="ElicitationResult.Content"/>). See
+    /// <see cref="CopilotClient.CallerPayloadSerializerOptions"/>.
     /// </summary>
-    private static readonly JsonSerializerOptions s_hookPayloadSerializerOptions = CreateHookPayloadSerializerOptions();
-
-    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "The reflection resolver is only added when JsonSerializer.IsReflectionEnabledByDefault is enabled.")]
-    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "The reflection resolver is only added when JsonSerializer.IsReflectionEnabledByDefault is enabled.")]
-    private static JsonSerializerOptions CreateHookPayloadSerializerOptions()
-    {
-        var options = new JsonSerializerOptions(CopilotClient.SerializerOptionsForMessageFormatter);
-        if (JsonSerializer.IsReflectionEnabledByDefault)
-        {
-            options.TypeInfoResolverChain.Add(new DefaultJsonTypeInfoResolver());
-        }
-        options.MakeReadOnly();
-        return options;
-    }
+    private static JsonSerializerOptions s_callerPayloadSerializerOptions => CopilotClient.CallerPayloadSerializerOptions;
 
     private static JsonElement? SerializeHookOutputWithPayload<T>(T? output) where T : class =>
-        output is null ? null : JsonSerializer.SerializeToElement(output, s_hookPayloadSerializerOptions.GetTypeInfo(typeof(T)));
+        output is null ? null : JsonSerializer.SerializeToElement(output, s_callerPayloadSerializerOptions.GetTypeInfo(typeof(T)));
+
+    private static JsonElement SerializeElicitationValue(object value) => value is JsonElement element
+        ? element
+        : JsonSerializer.SerializeToElement(value, s_callerPayloadSerializerOptions.GetTypeInfo(value.GetType()));
 
     /// <summary>
     /// Registers transform callbacks for system message sections.
@@ -2578,8 +2831,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             callbacks = _transformCallbacks;
         }
 
-        var parsed = JsonSerializer.Deserialize(
-            sections.GetRawText(),
+        var parsed = sections.Deserialize(
             SessionJsonContext.Default.DictionaryStringSystemMessageTransformSection) ?? new();
 
         var result = new Dictionary<string, SystemMessageTransformSection>();
@@ -2617,7 +2869,8 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// <exception cref="InvalidOperationException">Thrown if the session has been disposed.</exception>
     /// <remarks>
     /// This returns the complete conversation history including user messages, assistant responses,
-    /// tool executions, and other session events.
+    /// tool executions, and other session events. Use <see cref="GetRawEventsAsync"/> instead
+    /// when preserving the original JSON for task analytics or exact retries.
     /// </remarks>
     /// <example>
     /// <code>
@@ -2633,15 +2886,42 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// </example>
     public async Task<IReadOnlyList<SessionEvent>> GetEventsAsync(CancellationToken cancellationToken = default)
     {
+        var rawEvents = await GetRawEventsAsync(cancellationToken);
+        var eventTypeInfo = (JsonTypeInfo<SessionEvent>)CopilotClient.SerializerOptionsForIncomingMessages.GetTypeInfo(typeof(SessionEvent));
+        var events = new List<SessionEvent>(rawEvents.Count);
+        foreach (var sessionEvent in rawEvents)
+        {
+            events.Add(sessionEvent.Deserialize(eventTypeInfo) ?? throw new JsonException("Session event cannot be null."));
+        }
+        return events;
+    }
+
+    /// <summary>
+    /// Gets the complete session history without projecting events into typed SDK objects.
+    /// </summary>
+    /// <param name="cancellationToken">A token that can cancel the operation.</param>
+    /// <returns>The original event JSON objects in chronological order.</returns>
+    /// <remarks>
+    /// Use these objects for native task-analytics archives and exact retries. Unlike typed
+    /// events, they preserve explicit nulls, unknown fields, and original timestamp strings.
+    /// </remarks>
+    public async Task<IReadOnlyList<JsonElement>> GetRawEventsAsync(CancellationToken cancellationToken = default)
+    {
         ThrowIfDisposed();
 
         var response = await InvokeRpcAsync<GetMessagesResponse>(
             "session.getMessages", [new GetMessagesRequest { SessionId = SessionId }], cancellationToken);
 
-        return response.Events
-            .Select(static e => SessionEvent.FromJson(e.ToJsonString()))
-            .OfType<SessionEvent>()
-            .ToList();
+        if (response.Events.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return [];
+        }
+        if (response.Events.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("Expected session events to be a JSON array.");
+        }
+
+        return response.Events.EnumerateArray().ToArray();
     }
 
     /// <summary>
@@ -2649,6 +2929,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
     /// <returns>A task representing the abort operation.</returns>
+    /// <exception cref="RemoteRpcException">Thrown when the runtime rejects the abort operation.</exception>
     /// <exception cref="InvalidOperationException">Thrown if the session has been disposed.</exception>
     /// <remarks>
     /// Use this to cancel a long-running request. The session remains valid and can continue
@@ -2657,11 +2938,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// <example>
     /// <code>
     /// // Start a long-running request
-    /// var messageTask = session.SendAsync(new MessageOptions
-    /// {
-    ///     Prompt = "Write a very long story..."
-    /// });
-    ///
+    /// var messageTask = session.SendAsync(new MessageOptions { Prompt = "Write a very long story..." });
     /// // Abort after 5 seconds
     /// await Task.Delay(TimeSpan.FromSeconds(5));
     /// await session.AbortAsync();
@@ -2720,9 +2997,29 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 nameof(options));
         }
 
+        if (options.FusionTier is { } fusionTier)
+        {
+            if (options.AutoTier is not null || options.ResetAutoTier)
+            {
+                throw new ArgumentException(
+                    $"{nameof(SetModelOptions.FusionTier)} cannot be combined with {nameof(SetModelOptions.AutoTier)} or {nameof(SetModelOptions.ResetAutoTier)}.",
+                    nameof(options));
+            }
+
+            await Rpc.Model.SwitchToAsync(
+                modelId: model,
+                fusionTier: fusionTier,
+                reasoningEffort: options.ReasoningEffort,
+                reasoningSummary: options.ReasoningSummary,
+                modelCapabilities: options.ModelCapabilities,
+                contextTier: options.ContextTier,
+                cancellationToken: cancellationToken);
+            return;
+        }
+
         if (options.ResetAutoTier)
         {
-            var request = new ModelSwitchToRequestWithSession
+            var request = new ModelSwitchToRequest
             {
                 SessionId = SessionId,
                 ModelId = model,
@@ -2734,7 +3031,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             await CopilotClient.InvokeRpcAsync(
                 Rpc,
                 "session.model.switchTo",
-                [WithExplicitNullAutoTier(request, RpcJsonContext.Default.ModelSwitchToRequestWithSession)],
+                [WithExplicitNullAutoTier(request, RpcJsonContext.Default.ModelSwitchToRequest)],
                 cancellationToken);
             return;
         }
@@ -2771,6 +3068,11 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// Only the most recent request survives: issuing a new request replaces any earlier one
     /// that has not yet been claimed by a turn.
     /// </para>
+    /// <para>
+    /// For Copilot Fusion, prefer <see cref="SetFusionTierAsync"/>. The <c>balance</c>,
+    /// <c>hydrafusion</c> and <c>hydrafusion-max</c> identifiers it replaces remain accepted
+    /// but are deprecated.
+    /// </para>
     /// </remarks>
     /// <param name="autoTier">Routing preference to activate, or <see langword="null"/> to return to the provider's default Auto routing.</param>
     /// <param name="cancellationToken">Optional cancellation token.</param>
@@ -2796,6 +3098,32 @@ public sealed partial class CopilotSession : IAsyncDisposable
             "session.model.switchAutoTier",
             [WithExplicitNullAutoTier(request, RpcJsonContext.Default.ModelSwitchAutoTierRequest)],
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Changes the Copilot Fusion tier without changing the selected model, naming the tier
+    /// as the CLI's <c>--fusion-tier</c> does.
+    /// </summary>
+    /// <remarks>
+    /// The runtime resolves the tier to the Auto routing preference it stands for and then
+    /// handles the request exactly like <see cref="SetAutoTierAsync"/>: it takes effect on a
+    /// later user turn that uses the <c>fusion</c> or <c>auto</c> model. To return to the
+    /// provider's default routing, call <see cref="SetAutoTierAsync"/> with
+    /// <see langword="null"/>.
+    /// </remarks>
+    /// <param name="fusionTier">Copilot Fusion tier to activate.</param>
+    /// <param name="cancellationToken">Optional cancellation token.</param>
+    /// <returns>The runtime's immediate acknowledgement and Auto preference snapshot.</returns>
+    /// <example>
+    /// <code>
+    /// var result = await session.SetFusionTierAsync(FusionTier.Max);
+    /// </code>
+    /// </example>
+    [Experimental(Diagnostics.Experimental)]
+    public async Task<ModelSwitchAutoTierResult> SetFusionTierAsync(FusionTier fusionTier, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        return await Rpc.Model.SwitchFusionTierAsync(fusionTier, cancellationToken: cancellationToken);
     }
 
     /// <summary>
@@ -2879,48 +3207,76 @@ public sealed partial class CopilotSession : IAsyncDisposable
     /// </remarks>
     /// <example>
     /// <code>
-    /// // Using 'await using' for automatic disposal — session can still be resumed later
-    /// await using var session = await client.CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll });
-    ///
+    /// // Using 'await using' for automatic disposal � session can still be resumed later
+    /// await using var session = await client.CreateSessionAsync(new CreateSessionOptions() { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
     /// // Or manually dispose
-    /// var session2 = await client.CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll });
+    /// var session2 = await client.CreateSessionAsync(new CreateSessionOptions() { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
     /// // ... use the session ...
     /// await session2.DisposeAsync();
     /// </code>
     /// </example>
     public async ValueTask DisposeAsync()
     {
+        try
+        {
+            await DisconnectAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            GC.SuppressFinalize(this);
+        }
+    }
+
+    internal async ValueTask DisconnectAsync(CancellationToken cancellationToken, bool requireAcknowledgement = false, bool retainCallbacks = false)
+    {
         if (Interlocked.Exchange(ref _isDisposed, 1) == 1)
         {
             return;
         }
 
-        ClearSkillProvider();
-        CancelPendingExternalTools();
-        CloseEventChannel();
+        if (!requireAcknowledgement)
+        {
+            ClearSkillProvider();
+            CancelPendingExternalTools();
+            CloseEventChannel();
+        }
 
         try
         {
             var response = await InvokeRpcAsync<SessionDetachResponse>(
-                "session.detach", [new SessionDetachRequest() { SessionId = SessionId }], CancellationToken.None);
+                "session.detach", [new SessionDetachRequest() { SessionId = SessionId }], cancellationToken);
             if (!response.Success)
             {
+                if (requireAcknowledgement)
+                {
+                    throw new InvalidOperationException($"Failed to detach session {SessionId}: {response.Error ?? "unknown error"}");
+                }
                 LogSessionDetachFailed(SessionId, response.Error ?? "unknown error");
             }
         }
-        catch (ObjectDisposedException)
+        catch (ObjectDisposedException) when (!requireAcknowledgement)
         {
             // Connection was already disposed (e.g., client.StopAsync() was called first)
         }
-        catch (IOException)
+        catch (IOException) when (!requireAcknowledgement)
         {
             // Connection is broken or closed
         }
+        catch (RemoteRpcException error) when (!requireAcknowledgement)
+        {
+            LogSessionDetachFailed(SessionId, error.Message);
+        }
         finally
         {
-            Retire();
-            RemoveFromClient();
-            GC.SuppressFinalize(this);
+            if (!retainCallbacks)
+            {
+                Retire();
+            }
+            // Rejected enrollment owns the ID through any cloud rollback as well.
+            if (!requireAcknowledgement)
+            {
+                RemoveFromClient();
+            }
         }
     }
 
@@ -2939,14 +3295,23 @@ public sealed partial class CopilotSession : IAsyncDisposable
     [LoggerMessage(Level = LogLevel.Error, Message = "Permission handler or response delivery failed. SessionId={SessionId}, RequestId={RequestId}")]
     private partial void LogPermissionHandlerOrDeliveryFailed(Exception exception, string sessionId, string requestId);
 
+    [LoggerMessage(Level = LogLevel.Error, Message = "Shell authentication handler failed with {ExceptionType}. SessionId={SessionId}, RequestId={RequestId}")]
+    private partial void LogShellAuthenticationHandlerFailed(string exceptionType, string sessionId, string requestId);
+    [LoggerMessage(Level = LogLevel.Error, Message = "External tool result delivery failed. SessionId={SessionId}, RequestId={RequestId}, Tool={ToolName}")]
+    private partial void LogExternalToolResultDeliveryFailed(Exception exception, string sessionId, string requestId, string toolName);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Skill provider {Operation} failed. SessionId={SessionId}")]
     private partial void LogSkillProviderFailed(Exception exception, string operation, string sessionId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Memory store callback failed. SessionId={SessionId}")]
+    private partial void LogMemoryStoreFailed(Exception exception, string sessionId);
 
     internal record SendMessageRequest
     {
         public string SessionId { get; init; } = string.Empty;
         public string Prompt { get; init; } = string.Empty;
         public string? DisplayPrompt { get; init; }
+        public string? ClientTurnId { get; init; }
         public IList<Attachment>? Attachments { get; init; }
         public string? Mode { get; init; }
         [JsonPropertyName("agentMode")]
@@ -2972,7 +3337,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
 
     internal record GetMessagesResponse
     {
-        public IList<JsonObject> Events { get => field ??= []; init; }
+        public JsonElement Events { get; init; }
     }
 
     internal record SessionAbortRequest
@@ -3005,13 +3370,16 @@ public sealed partial class CopilotSession : IAsyncDisposable
     [JsonSerializable(typeof(AgentStopHookOutput))]
     [JsonSerializable(typeof(AutoModeSwitchRequest))]
     [JsonSerializable(typeof(AutoModeSwitchResponse))]
+    [JsonSerializable(typeof(decimal))]
     [JsonSerializable(typeof(Dictionary<string, SystemMessageTransformSection>))]
     [JsonSerializable(typeof(ErrorOccurredHookInput))]
     [JsonSerializable(typeof(ErrorOccurredHookOutput))]
     [JsonSerializable(typeof(ExitPlanModeRequest))]
     [JsonSerializable(typeof(ExitPlanModeResult))]
+    [JsonSerializable(typeof(float))]
     [JsonSerializable(typeof(GetMessagesRequest))]
     [JsonSerializable(typeof(GetMessagesResponse))]
+    [JsonSerializable(typeof(List<string>))]
     [JsonSerializable(typeof(PostToolUseFailureHookInput))]
     [JsonSerializable(typeof(PostToolUseFailureHookOutput))]
     [JsonSerializable(typeof(PostToolUseHookInput))]

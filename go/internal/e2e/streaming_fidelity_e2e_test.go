@@ -5,11 +5,12 @@ import (
 	"sync"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 func TestStreamingFidelityE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -17,10 +18,7 @@ func TestStreamingFidelityE2E(t *testing.T) {
 	t.Run("should produce delta events when streaming is enabled", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Streaming:           copilot.Bool(true),
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Events: copilot.SessionEventOptions{Streaming: copilot.Bool(true)}})
 		if err != nil {
 			t.Fatalf("Failed to create session with streaming: %v", err)
 		}
@@ -92,10 +90,7 @@ func TestStreamingFidelityE2E(t *testing.T) {
 	t.Run("should not produce deltas when streaming is disabled", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Streaming:           copilot.Bool(false),
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Events: copilot.SessionEventOptions{Streaming: copilot.Bool(false)}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -148,10 +143,7 @@ func TestStreamingFidelityE2E(t *testing.T) {
 		testharness.SkipIfInProcessOnMacOS(t, "session resume ignores COPILOT_API_URL")
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Streaming:           copilot.Bool(false),
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Events: copilot.SessionEventOptions{Streaming: copilot.Bool(false)}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -165,10 +157,7 @@ func TestStreamingFidelityE2E(t *testing.T) {
 		newClient := ctx.NewClient()
 		defer newClient.ForceStop()
 
-		session2, err := newClient.ResumeSession(t.Context(), session.SessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Streaming:           copilot.Bool(true),
-		})
+		session2, err := newClient.ResumeSession(t.Context(), session.SessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Events: copilot.SessionEventOptions{Streaming: copilot.Bool(true)}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -222,10 +211,7 @@ func TestStreamingFidelityE2E(t *testing.T) {
 		testharness.SkipIfInProcessOnMacOS(t, "session resume ignores COPILOT_API_URL")
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Streaming:           copilot.Bool(true),
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Events: copilot.SessionEventOptions{Streaming: copilot.Bool(true)}})
 		if err != nil {
 			t.Fatalf("Failed to create session with streaming: %v", err)
 		}
@@ -238,10 +224,7 @@ func TestStreamingFidelityE2E(t *testing.T) {
 		newClient := ctx.NewClient()
 		defer newClient.ForceStop()
 
-		session2, err := newClient.ResumeSession(t.Context(), session.SessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Streaming:           copilot.Bool(false),
-		})
+		session2, err := newClient.ResumeSession(t.Context(), session.SessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Events: copilot.SessionEventOptions{Streaming: copilot.Bool(false)}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -299,19 +282,16 @@ func TestStreamingFidelityE2E(t *testing.T) {
 		}
 		ctx.ConfigureForTest(t)
 		reasoningClient := ctx.NewClient(func(options *copilot.ClientOptions) {
-			options.BaseDirectory = t.TempDir()
-			options.GitHubToken = reasoningToken
+			connection := options.Runtime.(copilot.SpawnedStdioConnection)
+			connection.BaseDirectory = t.TempDir()
+			options.Runtime = connection
+			options.GitHub.Token = reasoningToken
 		})
 		t.Cleanup(func() { reasoningClient.ForceStop() })
 
 		// Verifies that setting ReasoningEffort alongside Streaming=true does not break
 		// the streaming pipeline — deltas still arrive and complete successfully.
-		session, err := reasoningClient.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "gpt-5.4",
-			Streaming:           copilot.Bool(true),
-			ReasoningEffort:     "high",
-		})
+		session, err := reasoningClient.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: "gpt-5.4", Events: copilot.SessionEventOptions{Streaming: copilot.Bool(true)}, Inference: copilot.SessionInferenceOptions{ReasoningEffort: "high"}})
 		if err != nil {
 			t.Fatalf("Failed to create session with streaming + reasoning effort: %v", err)
 		}

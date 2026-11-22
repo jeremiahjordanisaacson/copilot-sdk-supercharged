@@ -1,13 +1,13 @@
-﻿/*---------------------------------------------------------------------------------------------
+/*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class RpcShellAndFleetE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "rpc_shell_and_fleet", output)
@@ -31,11 +31,8 @@ public class RpcShellAndFleetE2ETests(E2ETestFixture fixture, ITestOutputHelper 
         var markerPath = Path.Join(Ctx.WorkDir, $"fleet-rpc-{Guid.NewGuid():N}.txt");
         const string marker = "copilot-sdk-fleet-rpc";
         const string toolName = "record_fleet_completion";
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(RecordFleetCompletion, toolName, "Records completion of the fleet validation task.")],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(RecordFleetCompletion, toolName, "Records completion of the fleet validation task.")] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var prompt = $"Use the {toolName} tool with content '{marker}', then report that the fleet task is complete.";
 

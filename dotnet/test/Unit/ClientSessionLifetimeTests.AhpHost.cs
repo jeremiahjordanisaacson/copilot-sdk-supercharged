@@ -2,14 +2,14 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 using System.Collections.Concurrent;
 using System.Text.Json;
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -33,7 +33,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Requires_Explicit_Transport_Before_Connecting()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         await Assert.ThrowsAsync<ArgumentNullException>(() => client.StartAhpHostAsync(null!));
         await Assert.ThrowsAsync<ArgumentException>(() => client.StartAhpHostAsync(new() { Authentication = new AhpHostAuthentication.GitHub() }));
         Assert.Empty(server.Requests);
@@ -43,7 +43,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Unpublish_Session_Forwards_Owning_Host_And_Each_Result()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         await using var host = await client.StartAhpHostAsync(new() { Authentication = new AhpHostAuthentication.GitHub(), LocalServer = new() });
         var calls = 0;
         server.ResponseFactory = request =>
@@ -72,7 +72,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Forwards_Environment_Fields_For_Runtime_Validation(string name, string computeId)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         await using var host = await client.StartAhpHostAsync(new()
         {
             Authentication = new AhpHostAuthentication.GitHub(),
@@ -88,7 +88,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Snapshots_Transport_Settings_Before_Connecting()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var connecting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var finishConnect = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.BeforeResponseAsync = async (request, cancellationToken) =>
@@ -137,7 +137,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Forwards_Explicit_Transports_And_Optional_Readiness(bool local, bool github)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         await using var host = await client.StartAhpHostAsync(new()
         {
             Authentication = new AhpHostAuthentication.GitHub(),
@@ -173,7 +173,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Forwards_Workspace_Without_Supplying_A_Default(string? workspace)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         await using var host = await client.StartAhpHostAsync(new()
         {
             Authentication = new AhpHostAuthentication.None(),
@@ -188,37 +188,32 @@ public sealed partial class ClientSessionLifetimeTests
     }
 
     [Fact]
-    public async Task Ahp_Legacy_Positional_Start_And_Additive_Request_Overloads()
+    public async Task Ahp_Start_Preserves_Transport_And_Factory_Options()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         await client.StartAsync();
         var local = new HostLocalServerOptions { Port = 12345 };
         var github = new HostGitHubEnvironmentOptions { Name = "host", ComputeId = "compute" };
 
-        await client.Rpc.Host.StartAsync("legacy", local, github, true, false, CancellationToken.None);
+        await client.Rpc.Host.StartAsync("transports", localServer: local, githubEnvironment: github,
+            sessionFactory: true, resumeFactory: false, cancellationToken: CancellationToken.None);
         await client.Rpc.Host.StartAsync("defaults");
-        await client.Rpc.Host.StartAsync(new HostStartRequest
-        {
-            HostId = "request",
-            ComputeId = "compute",
-            LocalServer = local,
-            GitHubEnvironment = github,
-            SessionFactory = true,
-            ResumeFactory = false
-        }, CancellationToken.None);
+        await client.Rpc.Host.StartAsync("compute-host", computeId: "compute",
+            localServer: local, githubEnvironment: github, sessionFactory: true,
+            resumeFactory: false, cancellationToken: CancellationToken.None);
 
         var requests = server.Requests.Where(request => request.Method == "host.start").ToArray();
         Assert.Equal(3, requests.Length);
-        var legacy = requests[0].Params;
-        Assert.Equal("legacy", legacy.GetProperty("hostId").GetString());
-        Assert.False(legacy.TryGetProperty("computeId", out _));
+        var transports = requests[0].Params;
+        Assert.Equal("transports", transports.GetProperty("hostId").GetString());
+        Assert.False(transports.TryGetProperty("computeId", out _));
         Assert.Equal("defaults", requests[1].Params.GetProperty("hostId").GetString());
         Assert.False(requests[1].Params.TryGetProperty("localServer", out _));
-        var additive = requests[2].Params;
-        Assert.Equal("request", additive.GetProperty("hostId").GetString());
-        Assert.Equal("compute", additive.GetProperty("computeId").GetString());
-        foreach (var parameters in new[] { legacy, additive })
+        var compute = requests[2].Params;
+        Assert.Equal("compute-host", compute.GetProperty("hostId").GetString());
+        Assert.Equal("compute", compute.GetProperty("computeId").GetString());
+        foreach (var parameters in new[] { transports, compute })
         {
             Assert.Equal(12345, parameters.GetProperty("localServer").GetProperty("port").GetInt32());
             Assert.Equal("compute", parameters.GetProperty("githubEnvironment").GetProperty("computeId").GetString());
@@ -231,7 +226,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_List_Sessions_Uses_Owning_Host()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         await using var host = await client.StartAhpHostAsync(new() { Authentication = new AhpHostAuthentication.GitHub(), LocalServer = new() });
 
         var result = await host.ListSessionsAsync();
@@ -248,7 +243,7 @@ public sealed partial class ClientSessionLifetimeTests
     {
         await using var server = await FakeCopilotServer.StartAsync();
         var logger = new AhpFactoryLogger();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url), Logger = logger });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port), Observability = new ClientObservabilityOptions { Logger = logger } });
         var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new TaskCompletionSource<CopilotSession>();
         var host = await client.StartAhpHostAsync(new()
@@ -289,7 +284,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Cancelled_Startup_Disposes_After_Start_Completes()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var entered = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var disposed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -317,7 +312,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Disposal_Is_Repeated_And_Exit_Is_Once()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var exits = new ConcurrentQueue<AhpHostExit>();
         var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var host = await client.StartAhpHostAsync(new()
@@ -345,7 +340,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Factories_Preserve_Config_And_Release_Exact_Original(bool resume, bool enabled)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         CopilotSession? original = null;
         CancellationToken cancellation = default;
         var released = new TaskCompletionSource<CopilotSession>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -378,11 +373,34 @@ public sealed partial class ClientSessionLifetimeTests
             ["configDir"] = "/config",
             ["additionalDirectories"] = Array.Empty<string>(),
             ["mcpOAuthTokenStorage"] = "in-memory",
-            ["gitHubToken"] = "test-auth",
             ["enableMcpApps"] = enabled,
+            ["gitHubToken"] = "test-auth",
+            ["capi"] = new Dictionary<string, object?> { ["enabled"] = false },
+            ["defaultProvider"] = enabled ? "gateway" : null,
+            ["providers"] = new[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["name"] = "gateway",
+                    ["type"] = "openai",
+                    ["baseUrl"] = "https://gateway.invalid",
+                    ["apiKeyCommand"] = "provider-token",
+                    ["transport"] = "http"
+                }
+            },
+            ["models"] = new[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["provider"] = "gateway",
+                    ["id"] = "friendly",
+                    ["modelId"] = "gpt-4o",
+                    ["wireModel"] = "deployment"
+                }
+            },
             ["streaming"] = enabled,
-            ["enableExperimentalMode"] = false,
             ["infiniteSessions"] = new Dictionary<string, object?> { ["enabled"] = false, ["backgroundCompactionThreshold"] = 0.7 },
+            ["enableExperimentalMode"] = false,
             ["featureFlags"] = new Dictionary<string, object?> { ["Arbitrary.MixedCase"] = true }
         };
         if (resume)
@@ -399,6 +417,22 @@ public sealed partial class ClientSessionLifetimeTests
             ["config"] = config
         });
         Assert.Equal("original", result.GetProperty("sessionId").GetString());
+        var wire = Assert.Single(server.Requests, request => request.Method == (resume ? "session.resume" : "session.create")).Params;
+        Assert.False(wire.GetProperty("github").GetProperty("capi").GetProperty("enabled").GetBoolean());
+        Assert.Equal(enabled ? "gateway" : null, wire.GetProperty("inference").GetProperty("defaultProvider").GetString());
+        var provider = Assert.Single(wire.GetProperty("inference").GetProperty("providers").EnumerateArray());
+        Assert.Equal("gateway", provider.GetProperty("name").GetString());
+        Assert.Equal("provider-token", provider.GetProperty("apiKeyCommand").GetString());
+        Assert.Equal("http", provider.GetProperty("transport").GetString());
+        var model = Assert.Single(wire.GetProperty("inference").GetProperty("models").EnumerateArray());
+        Assert.Equal("gateway", model.GetProperty("provider").GetString());
+        Assert.Equal("friendly", model.GetProperty("id").GetString());
+        Assert.Equal("gpt-4o", model.GetProperty("modelId").GetString());
+        Assert.Equal("deployment", model.GetProperty("wireModel").GetString());
+        Assert.False(wire.TryGetProperty("providers", out _));
+        Assert.False(wire.TryGetProperty("models", out _));
+        Assert.False(wire.TryGetProperty("defaultProvider", out _));
+        Assert.False(wire.TryGetProperty("capi", out _));
         await server.SendRequestAsync("host.sessionReleased", new() { ["hostId"] = "wrong", ["handoffId"] = "handoff" });
         Assert.False(cancellation.IsCancellationRequested);
         for (var i = 0; i < 2; i++)
@@ -415,7 +449,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Cancellation_Callback_Can_Wait_For_Rpc()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         CancellationTokenRegistration registration = default;
@@ -468,10 +502,16 @@ public sealed partial class ClientSessionLifetimeTests
     [InlineData("enableMcpApps", true)]
     [InlineData("suppressResumeEvent", false)]
     [InlineData("suppressResumeEvent", true)]
+    [InlineData("skipCustomInstructions", false)]
+    [InlineData("skipCustomInstructions", true)]
+    [InlineData("coauthorEnabled", false)]
+    [InlineData("coauthorEnabled", true)]
+    [InlineData("manageScheduleEnabled", false)]
+    [InlineData("manageScheduleEnabled", true)]
     public async Task Ahp_Rejects_Changed_Boolean_Settings(string setting, bool expected)
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var host = await client.StartAhpHostAsync(new()
         {
             Authentication = new AhpHostAuthentication.GitHub(),
@@ -480,9 +520,12 @@ public sealed partial class ClientSessionLifetimeTests
             {
                 switch (setting)
                 {
-                    case "streaming": request.Config.Streaming = !expected; break;
-                    case "enableMcpApps": request.Config.EnableMcpApps = !expected; break;
+                    case "streaming": request.Config.Events.Streaming = !expected; break;
+                    case "enableMcpApps": request.Config.Mcp.EnableApps = !expected; break;
                     case "suppressResumeEvent": request.Config.SuppressResumeEvent = !expected; break;
+                    case "skipCustomInstructions": request.Config.Instructions.SkipCustomInstructions = !expected; break;
+                    case "coauthorEnabled": request.Config.Git.CoauthorEnabled = !expected; break;
+                    case "manageScheduleEnabled": request.Config.Tools.ManageScheduleEnabled = !expected; break;
                 }
                 return client.ResumeSessionAsync(request.SessionId, request.Config);
             }
@@ -498,11 +541,48 @@ public sealed partial class ClientSessionLifetimeTests
         Assert.Contains("preserve", error.Message);
     }
 
+    [Theory]
+    [InlineData(false, "instructions", "skipCustomInstructions", false)]
+    [InlineData(false, "instructions", "skipCustomInstructions", true)]
+    [InlineData(false, "git", "coauthorEnabled", false)]
+    [InlineData(false, "git", "coauthorEnabled", true)]
+    [InlineData(false, "tools", "manageScheduleEnabled", false)]
+    [InlineData(false, "tools", "manageScheduleEnabled", true)]
+    [InlineData(true, "instructions", "skipCustomInstructions", false)]
+    [InlineData(true, "instructions", "skipCustomInstructions", true)]
+    [InlineData(true, "git", "coauthorEnabled", false)]
+    [InlineData(true, "git", "coauthorEnabled", true)]
+    [InlineData(true, "tools", "manageScheduleEnabled", false)]
+    [InlineData(true, "tools", "manageScheduleEnabled", true)]
+    public async Task Ahp_Factories_Preserve_Settings_Applied_After_Creation(bool resume, string group, string setting, bool expected)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        var host = await client.StartAhpHostAsync(new()
+        {
+            Authentication = new AhpHostAuthentication.GitHub(),
+            LocalServer = new(),
+            CreateSession = request => client.CreateSessionAsync(request.Config),
+            ResumeSession = request => client.ResumeSessionAsync(request.SessionId, request.Config)
+        });
+        var result = await server.SendRequestAsync("host.materializeSession", new()
+        {
+            ["hostId"] = host.HostId,
+            ["handoffId"] = "applied",
+            ["authentication"] = new Dictionary<string, object?> { ["mode"] = "github", ["identity"] = "123" },
+            ["resume"] = resume,
+            ["config"] = new Dictionary<string, object?> { ["sessionId"] = "applied", [setting] = expected }
+        });
+        Assert.Equal("applied", result.GetProperty("sessionId").GetString());
+        var update = Assert.Single(server.Requests, request => request.Method == "session.options.update");
+        Assert.Equal(expected, update.Params.GetProperty(group).GetProperty(setting).GetBoolean());
+    }
+
     [Fact]
     public async Task Ahp_Pending_Cancellation_Unblocks_And_Releases_Late_Result()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         var original = await client.CreateSessionAsync(new() { SessionId = "late" });
         var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new TaskCompletionSource<CopilotSession>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -537,7 +617,7 @@ public sealed partial class ClientSessionLifetimeTests
     public async Task Ahp_Rejects_Modified_Config_But_Allows_Retained_Resume()
     {
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new() { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new() { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         CopilotSession? original = null;
         var released = new TaskCompletionSource<CopilotSession>(TaskCreationOptions.RunContinuationsAsynchronously);
         var host = await client.StartAhpHostAsync(new()

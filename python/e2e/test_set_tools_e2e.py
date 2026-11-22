@@ -6,6 +6,8 @@ import pytest
 from pydantic import BaseModel, Field
 
 from copilot import define_tool
+from copilot._generated.rpc import ToolsExecuteRequest
+from copilot._generated.session_events import AssistantMessageData
 from copilot.session import PermissionHandler
 from copilot.tools import Tool, ToolInvocation, ToolResult
 
@@ -19,6 +21,11 @@ FRUIT_AND_VEGETABLE_PROMPT = (
     "vegetable for code 7."
 )
 VEGETABLE_PROMPT = "Use lookup_vegetable to find the vegetable for code 7."
+
+# The replacement cases run in the control arm, the default for every SDK. The stable
+# prompt-prefix treatment of previously sent definitions is shared runtime behavior,
+# covered by the Node.js SDK's explicit treatment cases.
+CONTROL_ARM = {"STABLE_PROMPT_PREFIX": False}
 
 
 class FruitParams(BaseModel):
@@ -90,12 +97,14 @@ class TestSetTools:
         replacement_lookups: list[int] = []
         vegetable_lookups: list[int] = []
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[lookup_fruit("apple", original_lookups), retired_lookup()],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [lookup_fruit("apple", original_lookups), retired_lookup()]},
+            experiments={"flags": CONTROL_ARM},
         )
 
         first = await session.send_and_wait(FRUIT_PROMPT, timeout=30)
         assert first is not None
+        assert isinstance(first.data, AssistantMessageData)
         assert "apple" in (first.data.content or "")
 
         await session.set_tools(
@@ -107,6 +116,7 @@ class TestSetTools:
 
         second = await session.send_and_wait(FRUIT_AND_VEGETABLE_PROMPT, timeout=30)
         assert second is not None
+        assert isinstance(second.data, AssistantMessageData)
         assert "dragonfruit" in (second.data.content or "")
         assert "carrot" in (second.data.content or "")
         assert original_lookups == [42]
@@ -131,12 +141,14 @@ class TestSetTools:
     async def test_replaces_tools_on_a_resumed_session(self, ctx: E2ETestContext):
         created_lookups: list[int] = []
         created = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[lookup_fruit("apple", created_lookups)],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [lookup_fruit("apple", created_lookups)]},
+            experiments={"flags": CONTROL_ARM},
         )
         session_id = created.session_id
         first = await created.send_and_wait(FRUIT_PROMPT, timeout=30)
         assert first is not None
+        assert isinstance(first.data, AssistantMessageData)
         assert "apple" in (first.data.content or "")
         assert created_lookups == [42]
         await created.disconnect()
@@ -145,16 +157,18 @@ class TestSetTools:
         vegetable_lookups: list[int] = []
         resumed = await ctx.client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[lookup_fruit("apple", fruit_lookups)],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [lookup_fruit("apple", fruit_lookups)]},
+            experiments={"flags": CONTROL_ARM},
         )
         await resumed.set_tools([lookup_vegetable(vegetable_lookups)])
 
         answer = await resumed.send_and_wait(VEGETABLE_PROMPT, timeout=30)
         assert answer is not None
+        assert isinstance(answer.data, AssistantMessageData)
         assert "carrot" in (answer.data.content or "")
         assert vegetable_lookups == [7]
-        assert fruit_lookups == []
+        assert not fruit_lookups
 
         exchanges = await ctx.get_exchanges()
         replaced_from = index_of_prompt(exchanges, VEGETABLE_PROMPT)
@@ -163,6 +177,15 @@ class TestSetTools:
             tools = offered_tools(exchange)
             assert "lookup_vegetable" in tools
             assert "lookup_fruit" not in tools
+
+        result = await resumed.rpc.tools.execute(
+            ToolsExecuteRequest(name="lookup_fruit", arguments={"code": 42})
+        )
+        assert isinstance(result, dict)
+        assert result["resultType"] == "failure"
+        assert "does not exist" in result["textResultForLlm"]
+        assert created_lookups == [42]
+        assert not fruit_lookups
 
         await resumed.disconnect()
 
@@ -173,8 +196,8 @@ class TestSetTools:
         replacement_lookups: list[int] = []
         invalid_calls: list[int] = []
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[lookup_fruit("apple", original_lookups)],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [lookup_fruit("apple", original_lookups)]},
         )
 
         with pytest.raises(Exception):
@@ -187,9 +210,10 @@ class TestSetTools:
 
         answer = await session.send_and_wait(FRUIT_PROMPT, timeout=30)
         assert answer is not None
+        assert isinstance(answer.data, AssistantMessageData)
         assert "apple" in (answer.data.content or "")
         assert original_lookups == [42]
-        assert replacement_lookups == []
-        assert invalid_calls == []
+        assert not replacement_lookups
+        assert not invalid_calls
 
         await session.disconnect()

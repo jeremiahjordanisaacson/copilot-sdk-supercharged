@@ -2,10 +2,10 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -28,9 +28,10 @@ public sealed partial class ClientSessionLifetimeTests
         };
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.ClearRequests();
 
         Assert.Empty((await session.Rpc.Mcp.Prompts.ListAsync("fixture")).Prompts);

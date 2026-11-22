@@ -1,4 +1,4 @@
-# Using MCP servers with the GitHub Copilot SDK
+# Using MCP servers with the Microsoft Copilot SDK
 
 The Copilot SDK can integrate with **MCP servers** (Model Context Protocol) to extend the assistant's capabilities with external tools. MCP servers run as separate processes and expose tools (functions) that Copilot can invoke during conversations.
 
@@ -68,28 +68,30 @@ or configuration-source precedence.
 
 <!-- docs-validate: strict -->
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 const session = await client.createSession({
     model: "gpt-5",
-    mcpServers: {
-        // Local MCP server (stdio)
-        "my-local-server": {
-            type: "local",
-            command: "node",
-            args: ["./mcp-server.js"],
-            env: { DEBUG: "true" },
-            workingDirectory: "./servers",
-            tools: ["*"],  // "*" = all tools, [] = none, or list specific tools
-            timeout: 30000,
-        },
-        // Remote MCP server (HTTP)
-        "github": {
-            type: "http",
-            url: "https://api.githubcopilot.com/mcp/",
-            headers: { "Authorization": "Bearer ${TOKEN}" },
-            tools: ["*"],
+    mcp: {
+        servers: {
+            // Local MCP server (stdio)
+            "my-local-server": {
+                type: "local",
+                command: "node",
+                args: ["./mcp-server.js"],
+                env: { DEBUG: "true" },
+                workingDirectory: "./servers",
+                tools: ["*"], // "*" = all tools, [] = none, or list specific tools
+                timeout: 30000,
+            },
+            // Remote MCP server (HTTP)
+            github: {
+                type: "http",
+                url: "https://api.githubcopilot.com/mcp/",
+                headers: { Authorization: "Bearer ${TOKEN}" },
+                tools: ["*"],
+            },
         },
     },
 });
@@ -103,35 +105,43 @@ from copilot import CopilotClient
 from copilot.session import PermissionHandler
 from copilot.session_events import AssistantMessageData
 
+
 async def main():
-    client = CopilotClient()
+    client = CopilotClient(mode="coding-agent")
     await client.start()
 
-    session = await client.create_session(on_permission_request=PermissionHandler.approve_all, model="gpt-5", mcp_servers={
-        # Local MCP server (stdio)
-        "my-local-server": {
-            "type": "local",
-            "command": "python",
-            "args": ["./mcp_server.py"],
-            "env": {"DEBUG": "true"},
-            "working_directory": "./servers",
-            "tools": ["*"],
-            "timeout": 30000,
+    session = await client.create_session(
+        model="gpt-5",
+        permissions={"on_request": PermissionHandler.approve_all},
+        mcp={
+            "servers": {
+                # Local MCP server (stdio)
+                "my-local-server": {
+                    "type": "local",
+                    "command": "python",
+                    "args": ["./mcp_server.py"],
+                    "env": {"DEBUG": "true"},
+                    "working_directory": "./servers",
+                    "tools": ["*"],
+                    "timeout": 30000,
+                },
+                # Remote MCP server (HTTP)
+                "github": {
+                    "type": "http",
+                    "url": "https://api.githubcopilot.com/mcp/",
+                    "headers": {"Authorization": "Bearer ${TOKEN}"},
+                    "tools": ["*"],
+                },
+            }
         },
-        # Remote MCP server (HTTP)
-        "github": {
-            "type": "http",
-            "url": "https://api.githubcopilot.com/mcp/",
-            "headers": {"Authorization": "Bearer ${TOKEN}"},
-            "tools": ["*"],
-        },
-    })
+    )
 
     response = await session.send_and_wait("List my recent GitHub notifications")
     if response and isinstance(response.data, AssistantMessageData):
         print(response.data.content)
 
     await client.stop()
+
 
 asyncio.run(main())
 ```
@@ -142,84 +152,101 @@ asyncio.run(main())
 package main
 
 import (
-    "context"
-    "log"
-    copilot "github.com/github/copilot-sdk/go"
+	"context"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"log"
 )
 
 func main() {
-    ctx := context.Background()
-    client := copilot.NewClient(nil)
-    if err := client.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-    defer client.Stop()
+	ctx := context.Background()
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+	if err := client.Start(ctx); err != nil {
+		log.Fatal(err)
+	}
+	defer client.Stop()
 
-    session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-        Model: "gpt-5",
-        MCPServers: map[string]copilot.MCPServerConfig{
-            "my-local-server": copilot.MCPStdioServerConfig{
-                Command: "node",
-                Args:    []string{"./mcp-server.js"},
-                Tools:   []string{"*"},
-            },
-        },
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer session.Disconnect()
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Model: "gpt-5",
+		MCP: copilot.SessionMCPOptions{
+			Servers: map[string]copilot.MCPServerConfig{
+				"my-local-server": copilot.MCPStdioServerConfig{
+					Command: "node",
+					Args:    []string{"./mcp-server.js"},
+					Tools:   []string{"*"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer session.Disconnect()
 
-    // Use the session...
+	// Use the session...
 }
 ```
 
 ### .NET
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
-await using var client = new CopilotClient();
-await using var session = await client.CreateSessionAsync(new SessionConfig
+await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
     Model = "gpt-5",
-    McpServers = new Dictionary<string, McpServerConfig>
+    Mcp = new SessionMcpOptions
     {
-        ["my-local-server"] = new McpStdioServerConfig
+        Servers = new Dictionary<string, McpServerConfig>
         {
-            Command = "node",
-            Args = new List<string> { "./mcp-server.js" },
-            Tools = new List<string> { "*" },
-        },
-    },
+            ["my-local-server"] = new McpStdioServerConfig
+            {
+                Command = "node",
+                Args = new List<string>
+                {
+                    "./mcp-server.js"
+                },
+                Tools = new List<string>
+                {
+                    "*"
+                },
+            },
+        }
+    }
 });
 ```
 
 ## Disabling configured servers per session
 
-Set `disabledMcpServers` to exact MCP server names that must not run in a session.
+Set `mcp.disabledServers` to exact MCP server names that must not run in a session.
 The setting is scoped to the individual create or resume request; it does not
 modify global MCP settings or the server configuration.
 
 <!-- docs-validate: strict -->
 ```typescript
 const session = await client.createSession({
-    mcpServers: {
-        filesystem: { type: "local", command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "."] },
-        github: { type: "http", url: "https://api.githubcopilot.com/mcp/" },
+    mcp: {
+        servers: {
+            filesystem: {
+                type: "local",
+                command: "npx",
+                args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
+            },
+            github: { type: "http", url: "https://api.githubcopilot.com/mcp/" },
+        },
+        disabledServers: ["github"],
     },
-    disabledMcpServers: ["github"],
 });
 ```
 
 | SDK | Configuration property |
 | --- | --- |
-| Node.js | `disabledMcpServers` |
-| Python | `disabled_mcp_servers` |
-| Go | `DisabledMCPServers` |
-| .NET | `DisabledMcpServers` |
-| Java | `setDisabledMcpServers(...)` |
-| Rust | `with_disabled_mcp_servers(...)` |
+| Node.js | `mcp: { disabledServers: [...] }` |
+| Python | `mcp={"disabled_servers": [...]}` |
+| Go | `MCP: copilot.SessionMCPOptions{DisabledServers: ...}` |
+| .NET | `Mcp = new SessionMcpOptions { DisabledServers = ... }` |
+| Java | `.setMcp(new SessionMcpOptions().setDisabledServers(...))` |
+| Rust | `.with_mcp(\|mcp\| mcp.with_disabled_servers(...))` |
 
 On session creation and a **cold** resume, disabled servers are not started and
 the runtime does not initiate their authentication. A resident resume cannot
@@ -290,8 +317,10 @@ const sandboxConfig = {
     userPolicy: { network: { allowOutbound: false } },
 };
 const session = await client.createSession({
-    onPermissionRequest: approveAll,
-    sandboxConfig,
+    permissions: {
+        onRequest: approveAll,
+        sandbox: sandboxConfig,
+    },
 });
 ```
 
@@ -356,19 +385,21 @@ tools: []
 Here's a complete working example using the official [`@modelcontextprotocol/server-filesystem`](https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem) MCP server:
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 async function main() {
-    const client = new CopilotClient();
+    const client = new CopilotClient({ mode: "coding-agent" });
 
     // Create session with filesystem MCP server
     const session = await client.createSession({
-        mcpServers: {
-            filesystem: {
-                type: "local",
-                command: "npx",
-                args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-                tools: ["*"],
+        mcp: {
+            servers: {
+                filesystem: {
+                    type: "local",
+                    command: "npx",
+                    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                    tools: ["*"],
+                },
             },
         },
     });
@@ -408,11 +439,42 @@ directories for different applications.
 |----------|------|----------|-------------|
 | `type` | `"local"` or `"stdio"` | No | Server type (defaults to local) |
 | `command` | `string` | Yes | Command to execute |
-| `args` | `string[]` | Yes | Command arguments |
+| `args` | `string[]` | No | Command arguments |
 | `env` | `object` | No | Environment variables |
-| `cwd` | `string` | No | Working directory |
+| `workingDirectory` | `string` | No | Working directory for the server process |
 | `tools` | `string[]` | No | Tools to enable (`["*"]` for all, `[]` for none) |
 | `timeout` | `number` | No | Timeout in milliseconds |
+
+#### Session identity for local servers
+
+The runtime sets the `COPILOT_AGENT_SESSION_ID` environment variable on every
+local/stdio server process. Its value is the ID of the session that started the
+process: the `sessionId` you pass to `createSession`, or the generated ID in
+`session.sessionId`. Use it to correlate a server's own logs, caches, or state
+with a Copilot session.
+
+* **Scope**: Each session starts its own server processes, so two sessions that
+  use the same configuration see different values.
+* **Lifetime**: The value is fixed for the life of a server process. A server
+  process never observes a different session ID.
+* **Resume**: Resuming a session keeps its ID, both when the session is still
+  resident in the runtime and when a new runtime process resumes it from disk
+  (cold resume). After a cold resume, the servers that start receive the
+  original session ID.
+* **Override**: A value you set for this name in the server's `env` takes
+  precedence, and the server receives your value instead of the session ID.
+  Omit this name from `env` to receive the session ID.
+* **Format**: Treat the value as an opaque string. Do not parse it or depend on
+  its length or character set.
+
+> [!WARNING]
+> The session ID is not a secret, does not authenticate the caller, and does
+> not attest that any sandbox or policy is enforced. A server can't use it to
+> prove that a request came from Copilot or that a policy applies. The ID also
+> doesn't tell a server where or how policy is stored; there is no supported
+> on-disk policy format to read.
+
+Remote (HTTP/SSE) servers don't receive this variable.
 
 ### Remote server (HTTP/SSE)
 
@@ -570,15 +632,17 @@ and wakeups.
 
 <!-- docs-validate: strict -->
 ```ts
-import { approveAll, CopilotClient } from "@github/copilot-sdk";
+import { approveAll, CopilotClient } from "copilot-sdk-supercharged";
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 const stop = new AbortController();
 const appendLine = (line: string) => console.log(line);
 
 await client.start();
 const session = await client.createSession({
-    onPermissionRequest: approveAll,
+    permissions: {
+        onRequest: approveAll,
+    },
     diagnostics: { sources: { mcp: { level: "debug" } } },
 });
 
@@ -612,7 +676,7 @@ The abort signal stops the loop after its current bounded read completes; it is
 not passed to the RPC call. Disabling capture wakes an outstanding read.
 
 MCP startup is lazy: enabling or reading diagnostics does not start a server.
-Configure `mcpServers` on session creation, then either use the session normally
+Configure `mcp.servers` on session creation, then either use the session normally
 or call `session.rpc.mcp.startServer({ serverName })` for an installed server
 to troubleshoot initialization without making a model request.
 

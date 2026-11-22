@@ -1,15 +1,10 @@
-#:project ../src/GitHub.Copilot.SDK.csproj
+#:project ../src/Microsoft.Copilot.SDK.csproj
 
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
-await using var client = new CopilotClient(new CopilotClientOptions
-{
-    SessionIdleTimeoutSeconds = 600,
-});
-await using var session = await client.CreateSessionAsync(new SessionConfig
-{
-    OnPermissionRequest = PermissionHandler.ApproveAll
-});
+await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+{ Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
 using var _ = session.On<SessionEvent>(evt =>
 {

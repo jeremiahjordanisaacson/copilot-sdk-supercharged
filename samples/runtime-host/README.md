@@ -147,7 +147,7 @@ for E2Es; run the identical command above.
 The package must contain local build outputs at
 `prebuilds/<platform>/{copilot-runtime,runtime.node}` for in-process hosting. Its
 `package.json` must identify `@github/copilot-<platform>` or
-`@github/copilot-sdk-<platform>` and carry existing `copilotRuntime` metadata:
+`@microsoft/copilot-sdk-<platform>` and carry existing `copilotRuntime` metadata:
 `sourceRepository: "github/copilot-agent-runtime"` and `sourceSha` equal to the
 manifest's runtime source commit.
 

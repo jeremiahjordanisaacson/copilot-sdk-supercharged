@@ -2,10 +2,10 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public class E2ETestBackendTests
 {
@@ -35,27 +35,27 @@ public class E2ETestBackendTests
         string expectedModel)
     {
         var backend = E2ETestBackendConfiguration.Parse(backendValue);
-        var config = new SessionConfig();
+        var config = new CreateSessionOptions();
         backend.ApplyProvider(config, "http://localhost:1234");
 
         Assert.Equal(expectedModel, config.Model);
-        Assert.Equal("http://localhost:1234", config.Provider!.BaseUrl);
-        Assert.Equal(expectedType, config.Provider.Type);
-        Assert.Equal(expectedWireApi, config.Provider.WireApi);
-        Assert.Equal(expectedModel, config.Provider.ModelId);
-        Assert.Equal(expectedModel, config.Provider.WireModel);
-        Assert.False(string.IsNullOrEmpty(config.Provider.BearerToken));
+        Assert.Equal("http://localhost:1234", config.Inference.Providers![0].BaseUrl);
+        Assert.Equal(expectedType, config.Inference.Providers![0].Type);
+        Assert.Equal(expectedWireApi, config.Inference.Providers![0].WireApi);
+        Assert.Equal(expectedModel, config.Inference.Models![0].ModelId);
+        Assert.Equal(expectedModel, config.Inference.Models![0].WireModel);
+        Assert.False(string.IsNullOrEmpty(config.Inference.Providers![0].BearerToken));
     }
 
     [Fact]
     public void PreservesExplicitModel()
     {
-        var config = new SessionConfig { Model = "test-model" };
+        var config = new CreateSessionOptions { Model = "test-model" };
         E2ETestBackend.OpenAIResponses.ApplyProvider(config, "http://localhost:1234");
 
         Assert.Equal("test-model", config.Model);
-        Assert.Equal("test-model", config.Provider!.ModelId);
-        Assert.Equal("test-model", config.Provider.WireModel);
+        Assert.Equal("test-model", config.Inference.Models![0].ModelId);
+        Assert.Equal("test-model", config.Inference.Models![0].WireModel);
     }
 
     [Fact]
@@ -66,15 +66,17 @@ public class E2ETestBackendTests
             Type = "custom",
             ModelId = "provider-model",
         };
-        var config = new SessionConfig
+        var config = new CreateSessionOptions
         {
+            GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } },
             Model = "session-model",
-            Provider = provider,
+            Inference = ByokTestOptions.Inference(provider, new SessionInferenceOptions { })
         };
 
         E2ETestBackend.OpenAIResponses.ApplyProvider(config, "http://localhost:1234");
 
         Assert.Equal("session-model", config.Model);
-        Assert.Same(provider, config.Provider);
+        Assert.Equal("custom", config.Inference.Providers![0].Type);
+        Assert.Equal("provider-model", config.Inference.Models![0].ModelId);
     }
 }

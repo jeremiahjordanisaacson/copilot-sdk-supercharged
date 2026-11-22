@@ -37,7 +37,6 @@ AUTO_MODE_PROMPT = "Explain that auto mode recovered from a rate limit in one sh
 async def mode_ctx(ctx: E2ETestContext):
     """Configure per-token user responses for mode-handler tests."""
     proxy_url = ctx.proxy_url
-    ctx.add_runtime_env("COPILOT_DEBUG_GITHUB_API_URL", proxy_url)
 
     await ctx.set_copilot_user_by_token(
         MODE_HANDLER_TOKEN,
@@ -71,9 +70,9 @@ class TestModeHandlers:
             }
 
         session = await mode_ctx.client.create_session(
-            github_token=MODE_HANDLER_TOKEN,
-            on_permission_request=PermissionHandler.approve_all,
-            on_exit_plan_mode_request=on_exit_plan_mode_request,
+            github={"token": MODE_HANDLER_TOKEN},
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_exit_plan_mode_request": on_exit_plan_mode_request},
         )
 
         requested_event = wait_for_event(
@@ -82,6 +81,7 @@ class TestModeHandlers:
                 isinstance(event.data, ExitPlanModeRequestedData)
                 and event.data.summary == PLAN_SUMMARY
             ),
+            timeout=None,
         )
         completed_event = wait_for_event(
             session,
@@ -90,6 +90,7 @@ class TestModeHandlers:
                 and event.data.approved is True
                 and event.data.selected_action == ExitPlanModeAction.INTERACTIVE
             ),
+            timeout=None,
         )
 
         try:
@@ -103,10 +104,10 @@ class TestModeHandlers:
             assert request["recommendedAction"] == "interactive"
             assert request.get("planContent") is not None
 
-            requested = await requested_event
+            requested = await asyncio.wait_for(requested_event, timeout=30.0)
             assert requested.data.summary == PLAN_SUMMARY
 
-            completed = await completed_event
+            completed = await asyncio.wait_for(completed_event, timeout=30.0)
             assert completed.data.approved is True
             assert completed.data.selected_action == ExitPlanModeAction.INTERACTIVE
             assert completed.data.feedback == "Approved by the Python E2E test"
@@ -128,9 +129,9 @@ class TestModeHandlers:
             return "yes"
 
         session = await mode_ctx.client.create_session(
-            github_token=MODE_HANDLER_TOKEN,
-            on_permission_request=PermissionHandler.approve_all,
-            on_auto_mode_switch_request=on_auto_mode_switch_request,
+            github={"token": MODE_HANDLER_TOKEN},
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_auto_mode_switch_request": on_auto_mode_switch_request},
         )
 
         requested_event = wait_for_event(

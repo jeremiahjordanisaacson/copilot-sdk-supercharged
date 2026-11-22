@@ -20,12 +20,26 @@ from copilot.session_events import (
     ElicitationCompletedAction,
     ElicitationRequestedMode,
     ElicitationRequestedSchema,
+    IdeConnectionChangedData,
+    IdeSelection,
+    IdeSelectionChangedData,
     ManagedSettingsResolvedSource,
     PermissionApprovalEvaluationReasonCode,
     PermissionPromptRequestMemory,
+    PermissionRecoveryAttempt,
+    PermissionRecoveryAttemptDisposition,
+    PermissionRecoveryAttemptReason,
+    PermissionRecoveryAttemptRelation,
     PermissionRequestedData,
     PermissionRequestMemory,
     PermissionRequestMemoryAction,
+    SandboxControl,
+    SandboxDecisionData,
+    SandboxDecisionDataKind,
+    SandboxEnforcementPoint,
+    SandboxManagedControl,
+    SandboxOutcome,
+    SandboxPlatform,
     SessionAutoTierSwitchFailedData,
     SessionEvent,
     SessionEventType,
@@ -34,6 +48,8 @@ from copilot.session_events import (
     SessionStartData,
     SessionTaskCompleteData,
     ToolExecutionCompleteData,
+    ToolExecutionCompleteResult,
+    ToolExecutionCompleteUIResource,
     UserMessageAgentMode,
     session_event_from_dict,
     session_event_to_dict,
@@ -43,36 +59,82 @@ from copilot.session_events import (
 class TestEventForwardCompatibility:
     """Test forward compatibility for unknown event types."""
 
-    @pytest.mark.parametrize("ephemeral", [False, True])
-    def test_event_preserves_legacy_positional_constructor(self, ephemeral):
-        original = session_event_from_dict(
+    @pytest.mark.parametrize(
+        "selection",
+        [
             {
-                "id": "11111111-1111-1111-1111-111111111111",
-                "timestamp": "2026-09-18T22:00:00+00:00",
-                "parentId": "22222222-2222-2222-2222-222222222222",
-                "type": "future.event",
-                "data": {"future": "payload"},
-            }
+                "text": "selected",
+                "filePath": "/workspace/file.rs",
+                "fileUrl": "file:///workspace/file.rs",
+                "selection": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": 0, "character": 8},
+                    "isEmpty": False,
+                },
+            },
+            None,
+        ],
+        ids=["selected", "cleared"],
+    )
+    def test_ide_selection_changed_decodes_selected_and_cleared_state(self, selection):
+        wire = {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "timestamp": "2026-09-18T22:00:00+00:00",
+            "parentId": None,
+            "type": "ide.selection_changed",
+            "data": {"selection": selection},
+        }
+
+        event = session_event_from_dict(wire)
+
+        assert event.type is SessionEventType.IDE_SELECTION_CHANGED
+        assert isinstance(event.data, IdeSelectionChangedData)
+        if selection is None:
+            assert event.data.selection is None
+        else:
+            assert event.data.selection is not None
+            assert event.data.selection.text == selection["text"]
+            state = IdeConnectionChangedData.from_dict({"selection": selection})
+            assert event.data.selection == state.selection
+            assert isinstance(event.data.selection, IdeSelection)
+            state.selection = event.data.selection
+            assert state.to_dict() == {"selection": selection}
+        assert session_event_to_dict(event) == wire
+
+    def test_permission_recovery_attempt_preserves_tool_call_id_and_review_metadata(self):
+        attempt = PermissionRecoveryAttempt(
+            attempt_id="attempt-1",
+            disposition=PermissionRecoveryAttemptDisposition.DEFERRED,
+            ordinal=1,
+            permission_kind="shell",
+            reason=PermissionRecoveryAttemptReason.PERMISSION_REQUIRED,
+            relation=PermissionRecoveryAttemptRelation.INITIAL,
+            request_fingerprint="fingerprint",
+            tool_call_id="call-1",
         )
-        event = SessionEvent(
-            original.data,
-            original.id,
-            original.timestamp,
-            original.type,
-            "worker",
-            ephemeral,
-            original.parent_id,
-            original.raw_type,
+        assert attempt.tool_call_id == "call-1"
+        assert attempt.review_incomplete is None
+        wire = {**attempt.to_dict(), "reviewIncomplete": True}
+        assert PermissionRecoveryAttempt.from_dict(wire).to_dict() == wire
+
+    def test_sandbox_decision_managed_controls_round_trip(self):
+        decision = SandboxDecisionData(
+            control=SandboxControl.PROCESS,
+            enforcement_point=SandboxEnforcementPoint.SHELL,
+            kind=SandboxDecisionDataKind.POLICY_RESOLVED,
+            outcome=SandboxOutcome.RESOLVED,
+            platform=SandboxPlatform.MACOS,
+            tool_call_id="call-1",
         )
-        assert event.ephemeral is ephemeral
-        assert event.parent_id == original.parent_id
-        assert event.raw_type == "future.event"
-        assert event.checkpoint is None
-        wire = session_event_to_dict(event)
-        assert wire["ephemeral"] is ephemeral
-        assert wire["parentId"] == str(original.parent_id)
-        assert wire["type"] == "future.event"
-        assert "checkpoint" not in wire
+        assert decision.tool_call_id == "call-1"
+        assert decision.managed_controls is None
+        wire = {**decision.to_dict(), "managedControls": ["enabled", "allow_bypass"]}
+        restored = SandboxDecisionData.from_dict(wire)
+        assert restored.managed_controls == [
+            SandboxManagedControl.ENABLED,
+            SandboxManagedControl.ALLOW_BYPASS,
+        ]
+        assert restored.to_dict() == wire
 
     @pytest.mark.parametrize("checkpoint", [None, False, True])
     def test_checkpoint_metadata_round_trips_as_a_keyword(self, checkpoint):
@@ -85,7 +147,11 @@ class TestEventForwardCompatibility:
             }
         )
         event = SessionEvent(
-            event.data, event.id, event.timestamp, event.type, checkpoint=checkpoint
+            data=event.data,
+            id=event.id,
+            timestamp=event.timestamp,
+            type=event.type,
+            checkpoint=checkpoint,
         )
         wire = session_event_to_dict(event)
         assert session_event_from_dict(wire).checkpoint is checkpoint
@@ -117,6 +183,28 @@ class TestEventForwardCompatibility:
         assert event.data.file_edits[0].kind is other.data.file_edits[0].kind
         assert event.data.file_edits[0] == other.data.file_edits[0]
         assert len({event.data.file_edits[0].kind, other.data.file_edits[0].kind}) == 1
+
+    def test_tool_result_preserves_wire_fields_with_tool_references(self):
+        ui_resource = ToolExecutionCompleteUIResource(mime_type="text/html", uri="ui://app")
+        result = ToolExecutionCompleteResult(
+            content="content",
+            detailed_content="detailed",
+            structured_content={"structured": True},
+            ui_resource=ui_resource,
+        )
+
+        assert result.ui_resource == ui_resource
+        assert result.tool_references is None
+        wire = result.to_dict()
+        assert wire == {
+            "content": "content",
+            "detailedContent": "detailed",
+            "structuredContent": {"structured": True},
+            "uiResource": {"mimeType": "text/html", "uri": "ui://app"},
+        }
+        result.tool_references = ["search_files"]
+        assert result.to_dict()["toolReferences"] == ["search_files"]
+        assert ToolExecutionCompleteResult.from_dict(result.to_dict()) == result
 
     @staticmethod
     def _permission_requested_with_reason(reason_code):
@@ -412,19 +500,29 @@ class TestEventForwardCompatibility:
         event = session_event_from_dict(unknown_event)
         assert event.type == SessionEventType.UNKNOWN, f"Expected UNKNOWN, got {event.type}"
 
-    def test_internal_event_type_maps_to_unknown(self):
+    @pytest.mark.parametrize(
+        "event_type",
+        [
+            "session.memory_changed",
+            "program.execution",
+            "program.tool_execution_start",
+            "program.tool_execution_complete",
+            "program.permission_requested",
+        ],
+    )
+    def test_internal_event_type_maps_to_unknown(self, event_type):
         """Internal events should use the forward-compatible raw event path."""
         internal_event = {
             "id": str(uuid4()),
             "timestamp": datetime.now().isoformat(),
             "parentId": None,
-            "type": "session.memory_changed",
+            "type": event_type,
             "data": {},
         }
 
         event = session_event_from_dict(internal_event)
         assert event.type == SessionEventType.UNKNOWN
-        assert session_event_to_dict(event)["type"] == "session.memory_changed"
+        assert session_event_to_dict(event)["type"] == event_type
 
     def test_known_event_preserves_top_level_agent_id(self):
         """Known events should preserve the top-level sub-agent envelope ID."""
@@ -577,7 +675,7 @@ class TestEventForwardCompatibility:
         the schema default instead of ``None`` and broke ``from_dict(to_dict(x))``
         round-trips for instances where the field was ``None``.
         """
-        from copilot.generated.session_events import (
+        from copilot._generated.session_events import (
             _load_PermissionPromptRequest,
             _load_PermissionRequest,
         )
@@ -624,13 +722,13 @@ class TestEventForwardCompatibility:
 
         # PermissionRequest is now a discriminated union; the dispatch loader
         # should round-trip via the correct variant class.
-        from copilot.generated.session_events import _load_PermissionRequest
+        from copilot._generated.session_events import _load_PermissionRequest
 
         round_tripped = _load_PermissionRequest(permission.to_dict())
         assert isinstance(round_tripped, PermissionRequestMemory)
         assert round_tripped == permission
         # PermissionPromptRequest likewise.
-        from copilot.generated.session_events import _load_PermissionPromptRequest
+        from copilot._generated.session_events import _load_PermissionPromptRequest
 
         round_tripped_prompt = _load_PermissionPromptRequest(prompt.to_dict())
         assert isinstance(round_tripped_prompt, PermissionPromptRequestMemory)

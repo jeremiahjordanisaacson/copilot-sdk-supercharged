@@ -1,15 +1,68 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 
-#if NET8_0_OR_GREATER
-using GitHub.Copilot.Rpc;
+#if NET
+using Microsoft.Copilot.Rpc;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task BuiltInAgentAllowlist_Is_Preserved_On_Create_Resume_And_Clone(int kind)
+    {
+        IList<string>? agents = kind switch
+        {
+            0 => null,
+            1 => [],
+            _ => ["explore"]
+        };
+        var createConfig = new CreateSessionOptions
+        {
+            Agents = new SessionAgentOptions
+            {
+                IncludedBuiltInAgents = agents
+            }
+        };
+        var resumeConfig = new ResumeSessionOptions
+        {
+            Agents = new SessionAgentOptions
+            {
+                IncludedBuiltInAgents = agents
+            }
+        };
+        var createClone = createConfig.Clone();
+        var resumeClone = resumeConfig.Clone();
+        agents?.Add("task");
+        string[]? expected = kind == 0 ? null : kind == 1 ? Array.Empty<string>() : ["explore"];
+
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
+        });
+        await using var created = await client.CreateSessionAsync(createClone);
+        await using var resumed = await client.ResumeSessionAsync("resumed", resumeClone);
+        foreach (var method in new[] { "session.create", "session.resume" })
+        {
+            var payload = Assert.Single(server.Requests, request => request.Method == method).Params;
+            if (expected is null)
+            {
+                Assert.False(payload.GetProperty("agents").TryGetProperty("includedBuiltinAgents", out _));
+            }
+            else
+            {
+                Assert.Equal(expected, payload.GetProperty("agents").GetProperty("includedBuiltinAgents").EnumerateArray().Select(item => item.GetString()));
+            }
+        }
+    }
+
     [Fact]
-    public async Task CustomizationDirectories_Preserve_Positional_Discovery_Calls()
+    public async Task CustomizationDirectories_Discovery_Omits_Unspecified_Directories()
     {
         await using var server = await FakeCopilotServer.StartAsync();
         server.ResponseFactory = _ => new Dictionary<string, object?>
@@ -21,16 +74,17 @@ public sealed partial class ClientSessionLifetimeTests
         };
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         IList<string> projects = ["project-root"];
         await client.StartAsync();
-        await client.Rpc.Agents.DiscoverAsync(projects, true, CancellationToken.None);
-        await client.Rpc.Agents.GetDiscoveryPathsAsync(projects, true, CancellationToken.None);
-        await client.Rpc.Hooks.DiscoverAsync(projects, true, CancellationToken.None);
-        await client.Rpc.Instructions.DiscoverAsync(projects, true, CancellationToken.None);
-        await client.Rpc.Instructions.GetDiscoveryPathsAsync(projects, true, CancellationToken.None);
-        await client.Rpc.Skills.GetDiscoveryPathsAsync(projects, ["ignored"], true, CancellationToken.None);
+        await client.Rpc.Agents.DiscoverAsync(projectPaths: projects, excludeHostAgents: true, cancellationToken: CancellationToken.None);
+        await client.Rpc.Agents.GetDiscoveryPathsAsync(projectPaths: projects, excludeHostAgents: true, cancellationToken: CancellationToken.None);
+        await client.Rpc.Hooks.DiscoverAsync(projectPaths: projects, excludeHostHooks: true, cancellationToken: CancellationToken.None);
+        await client.Rpc.Instructions.DiscoverAsync(projectPaths: projects, excludeHostInstructions: true, cancellationToken: CancellationToken.None);
+        await client.Rpc.Instructions.GetDiscoveryPathsAsync(projectPaths: projects, excludeHostInstructions: true, cancellationToken: CancellationToken.None);
+        await client.Rpc.Skills.GetDiscoveryPathsAsync(projectPaths: projects, ignoredSkillsLocations: ["ignored"], excludeHostSkills: true, cancellationToken: CancellationToken.None);
         foreach (var method in new[]
         {
             "agents.discover", "agents.getDiscoveryPaths", "hooks.discover",
@@ -44,10 +98,7 @@ public sealed partial class ClientSessionLifetimeTests
                 Assert.False(payload.TryGetProperty(key, out _));
             }
         }
-        await client.Rpc.Agents.DiscoverAsync(new AgentsDiscoverRequest
-        {
-            AgentDirectories = ["explicit-agent-root"]
-        });
+        await client.Rpc.Agents.DiscoverAsync(agentDirectories: ["explicit-agent-root"]);
         var explicitPayload = server.Requests.Last(request => request.Method == "agents.discover").Params;
         Assert.Equal("explicit-agent-root", Assert.Single(explicitPayload.GetProperty("agentDirectories").EnumerateArray()).GetString());
         Assert.False(explicitPayload.TryGetProperty("projectPaths", out _));
@@ -75,28 +126,13 @@ public sealed partial class ClientSessionLifetimeTests
         await using var server = await FakeCopilotServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var created = await client.CreateSessionAsync(new SessionConfig
-        {
-            WorkingDirectory = "request-cwd",
-            EnableConfigDiscovery = false,
-            EnableFileHooks = false,
-            SkillDirectories = directories["skillDirectories"],
-            AgentDirectories = directories["agentDirectories"],
-            InstructionDirectories = directories["instructionDirectories"],
-            HookDirectories = directories["hookDirectories"]
-        });
-        await using var resumed = await client.ResumeSessionAsync("resumed", new ResumeSessionConfig
-        {
-            WorkingDirectory = "resume-cwd",
-            EnableConfigDiscovery = false,
-            EnableFileHooks = false,
-            SkillDirectories = directories["skillDirectories"],
-            AgentDirectories = directories["agentDirectories"],
-            InstructionDirectories = directories["instructionDirectories"],
-            HookDirectories = directories["hookDirectories"]
-        });
+        await using var created = await client.CreateSessionAsync(new CreateSessionOptions
+        { WorkingDirectory = "request-cwd", EnableConfigDiscovery = false, Hooks = new SessionHookOptions { EnableRepositoryHooks = false, Directories = directories["hookDirectories"] }, Skills = new SessionSkillOptions { Directories = directories["skillDirectories"] }, Agents = new SessionAgentOptions { Directories = directories["agentDirectories"] }, Instructions = new CreateSessionInstructionOptions { Directories = directories["instructionDirectories"] } });
+        await using var resumed = await client.ResumeSessionAsync("resumed", new ResumeSessionOptions
+        { WorkingDirectory = "resume-cwd", EnableConfigDiscovery = false, Hooks = new SessionHookOptions { EnableRepositoryHooks = false, Directories = directories["hookDirectories"] }, Skills = new SessionSkillOptions { Directories = directories["skillDirectories"] }, Agents = new SessionAgentOptions { Directories = directories["agentDirectories"] }, Instructions = new SessionInstructionOptions { Directories = directories["instructionDirectories"] } });
         foreach (var method in new[] { "session.create", "session.resume" })
         {
             var payload = Assert.Single(server.Requests, request => request.Method == method).Params;
@@ -104,18 +140,18 @@ public sealed partial class ClientSessionLifetimeTests
             {
                 if (entry.Value is null)
                 {
-                    Assert.False(payload.TryGetProperty(entry.Key, out _));
+                    Assert.False(payload.GetProperty(entry.Key.Replace("Directories", "s")).TryGetProperty("directories", out _));
                 }
                 else
                 {
-                    Assert.Equal(entry.Value, payload.GetProperty(entry.Key).EnumerateArray().Select(item => item.GetString()));
+                    Assert.Equal(entry.Value, payload.GetProperty(entry.Key.Replace("Directories", "s")).GetProperty("directories").EnumerateArray().Select(item => item.GetString()));
                 }
             }
             Assert.False(payload.GetProperty("enableConfigDiscovery").GetBoolean());
-            Assert.False(payload.GetProperty("enableFileHooks").GetBoolean());
-            Assert.False(payload.TryGetProperty("additionalDirectories", out _));
-            Assert.False(payload.TryGetProperty("customAgents", out _));
-            Assert.False(payload.TryGetProperty("hooks", out _));
+            Assert.False(payload.GetProperty("hooks").GetProperty("enableRepositoryHooks").GetBoolean());
+            Assert.False(payload.GetProperty("filesystem").TryGetProperty("additionalDirectories", out _));
+            Assert.False(payload.GetProperty("agents").TryGetProperty("definitions", out _));
+            Assert.False(payload.GetProperty("hooks").TryGetProperty("hasHandlers", out _));
         }
     }
 
@@ -124,34 +160,46 @@ public sealed partial class ClientSessionLifetimeTests
     [InlineData(true)]
     public void CustomizationDirectories_Clone_Owns_Its_Lists(bool resume)
     {
-        SessionConfigBase original;
-        SessionConfigBase clone;
+        SessionOptionsBase original;
+        SessionOptionsBase clone;
         if (resume)
         {
-            var config = new ResumeSessionConfig
+            var config = new ResumeSessionOptions
             {
-                AgentDirectories = ["agents"],
-                HookDirectories = ["hooks"]
+                Agents = new SessionAgentOptions
+                {
+                    Directories = ["agents"]
+                },
+                Hooks = new SessionHookOptions
+                {
+                    Directories = ["hooks"]
+                }
             };
             original = config;
             clone = config.Clone();
         }
         else
         {
-            var config = new SessionConfig
+            var config = new CreateSessionOptions
             {
-                AgentDirectories = ["agents"],
-                HookDirectories = ["hooks"]
+                Agents = new SessionAgentOptions
+                {
+                    Directories = ["agents"]
+                },
+                Hooks = new SessionHookOptions
+                {
+                    Directories = ["hooks"]
+                }
             };
             original = config;
             clone = config.Clone();
         }
-        clone.AgentDirectories!.Add("clone-agents");
-        clone.HookDirectories!.Add("clone-hooks");
-        Assert.Equal("agents", Assert.Single(original.AgentDirectories!));
-        Assert.Equal("hooks", Assert.Single(original.HookDirectories!));
-        Assert.Collection(clone.AgentDirectories, item => Assert.Equal("agents", item), item => Assert.Equal("clone-agents", item));
-        Assert.Collection(clone.HookDirectories, item => Assert.Equal("hooks", item), item => Assert.Equal("clone-hooks", item));
+        clone.Agents.Directories!.Add("clone-agents");
+        clone.Hooks.Directories!.Add("clone-hooks");
+        Assert.Equal("agents", Assert.Single(original.Agents.Directories!));
+        Assert.Equal("hooks", Assert.Single(original.Hooks.Directories!));
+        Assert.Collection(clone.Agents.Directories, item => Assert.Equal("agents", item), item => Assert.Equal("clone-agents", item));
+        Assert.Collection(clone.Hooks.Directories, item => Assert.Equal("hooks", item), item => Assert.Equal("clone-hooks", item));
     }
 }
 #endif

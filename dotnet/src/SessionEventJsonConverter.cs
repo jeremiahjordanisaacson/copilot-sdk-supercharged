@@ -5,12 +5,13 @@
 using System.Buffers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-#if !NETSTANDARD2_0
+#if NET
 using System.Text.Unicode;
 #endif
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 internal sealed partial class SessionEventJsonConverter
 {
@@ -18,20 +19,20 @@ internal sealed partial class SessionEventJsonConverter
 
     internal static SessionEvent Deserialize(string json)
     {
-#if !NETSTANDARD2_0
+#if NET
         const int StackallocThreshold = 512;
 #endif
         ArgumentNullException.ThrowIfNull(json);
 
         byte[]? rented = null;
         Span<byte> buffer =
-#if !NETSTANDARD2_0
+#if NET
             json.Length <= StackallocThreshold / 3 ? stackalloc byte[StackallocThreshold] :
 #endif
             rented = ArrayPool<byte>.Shared.Rent(GetUtf8ByteCount(json));
         try
         {
-#if NETSTANDARD2_0
+#if !NET
             int byteCount = StrictUtf8.GetBytes(json, 0, json.Length, rented, 0);
 #else
             var status = Utf8.FromUtf16(json.AsSpan(), buffer, out _, out int byteCount, replaceInvalidSequences: false);
@@ -41,7 +42,7 @@ internal sealed partial class SessionEventJsonConverter
             }
 #endif
             ReadOnlySpan<byte> utf8 = buffer.Slice(0, byteCount);
-            var reader = new Utf8JsonReader(utf8);
+            var reader = new Utf8JsonReader(utf8, new JsonReaderOptions { MaxDepth = JsonRpc.MaxIncomingMessageDepth });
 
             // Select metadata without entering the converter: reader-based nested deserialization
             // would scan the entire object again to scope its input before parsing it.
@@ -91,4 +92,15 @@ internal sealed partial class SessionEventJsonConverter
             throw new JsonException(ex.Message, ex);
         }
     }
+}
+
+public partial class SessionEvent
+{
+    /// <summary>
+    /// Event fields not recognized by this SDK, including the type and data of unknown events.
+    /// Entries can be inspected, replaced, or removed before serializing or forwarding an event.
+    /// Use raw history instead when exact original JSON is required.
+    /// </summary>
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? AdditionalProperties { get; set; }
 }

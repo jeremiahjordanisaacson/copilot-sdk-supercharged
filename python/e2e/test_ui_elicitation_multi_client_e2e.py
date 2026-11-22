@@ -62,17 +62,19 @@ class ElicitationMultiClientContext:
 
         # Client 1 uses TCP mode so additional clients can connect
         self._client1 = CopilotClient(
-            connection=RuntimeConnection.for_tcp(
-                path=self.cli_path, connection_token="py-tcp-shared-test-token"
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_tcp(
+                path=self.cli_path,
+                connection_token="py-tcp-shared-test-token",
+                working_directory=self.work_dir,
+                env=self._get_env(),
             ),
-            working_directory=self.work_dir,
-            env=self._get_env(),
-            github_token=github_token,
+            github={"token": github_token},
         )
 
         # Trigger connection to obtain the TCP port
         init_session = await self._client1.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await init_session.disconnect()
 
@@ -80,9 +82,10 @@ class ElicitationMultiClientContext:
         assert self._actual_port is not None
 
         self._client2 = CopilotClient(
-            connection=RuntimeConnection.for_uri(
-                f"localhost:{self._actual_port}", connection_token="py-tcp-shared-test-token"
-            )
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_tcp(
+                "localhost", self._actual_port, connection_token="py-tcp-shared-test-token"
+            ),
         )
 
     async def teardown(self, test_failed: bool = False):
@@ -135,9 +138,10 @@ class ElicitationMultiClientContext:
         """Create a new external client connected to the same CLI server."""
         assert self._actual_port is not None
         return CopilotClient(
-            connection=RuntimeConnection.for_uri(
-                f"localhost:{self._actual_port}", connection_token="py-tcp-shared-test-token"
-            )
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_tcp(
+                "localhost", self._actual_port, connection_token="py-tcp-shared-test-token"
+            ),
         )
 
     @property
@@ -197,7 +201,7 @@ class TestUiElicitationMultiClient:
         from copilot.session_events import CommandsChangedData
 
         session1 = await mctx.client1.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         commands_changed = asyncio.Event()
@@ -216,14 +220,16 @@ class TestUiElicitationMultiClient:
 
         session2 = await mctx.client2.resume_session(
             session1.session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            commands=[
-                CommandDefinition(
-                    name="deploy",
-                    description="Deploy the app",
-                    handler=deploy_handler,
-                ),
-            ],
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={
+                "commands": [
+                    CommandDefinition(
+                        name="deploy",
+                        description="Deploy the app",
+                        handler=deploy_handler,
+                    ),
+                ]
+            },
         )
 
         try:
@@ -240,7 +246,7 @@ class TestUiElicitationMultiClient:
         """capabilities.changed fires when second client joins with elicitation handler."""
         # Client 1 creates session without elicitation
         session1 = await mctx.client1.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         assert session1.capabilities.get("ui", {}).get("elicitation") in (False, None)
 
@@ -266,8 +272,8 @@ class TestUiElicitationMultiClient:
 
         session2 = await mctx.client2.resume_session(
             session1.session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            on_elicitation_request=handler,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_elicitation_request": handler},
         )
 
         await asyncio.wait_for(cap_changed.wait(), timeout=15.0)
@@ -287,7 +293,7 @@ class TestUiElicitationMultiClient:
         """capabilities.changed fires when elicitation provider disconnects."""
         # Client 1 creates session without elicitation
         session1 = await mctx.client1.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         assert session1.capabilities.get("ui", {}).get("elicitation") in (False, None)
 
@@ -314,8 +320,8 @@ class TestUiElicitationMultiClient:
         # Client 3 joins WITH elicitation handler
         await client3.resume_session(
             session1.session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            on_elicitation_request=handler,
+            permissions={"on_request": PermissionHandler.approve_all},
+            interaction={"on_elicitation_request": handler},
         )
 
         await asyncio.wait_for(cap_enabled.wait(), timeout=15.0)

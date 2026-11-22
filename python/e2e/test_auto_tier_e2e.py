@@ -10,6 +10,8 @@ what the SDK serialized.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from copilot import CopilotClient, RuntimeConnection
@@ -32,18 +34,18 @@ async def pending_auto_tier(session) -> AutoTier | None:
 
 def create_auto_client(ctx: E2ETestContext) -> CopilotClient:
     return CopilotClient(
-        connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-        working_directory=ctx.work_dir,
-        env=ctx.get_env(),
-        github_token=DEFAULT_GITHUB_TOKEN,
+        mode="coding-agent",
+        runtime=RuntimeConnection.for_spawned_stdio(
+            path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+        ),
+        github={"token": DEFAULT_GITHUB_TOKEN},
     )
 
 
 class TestAutoTier:
     async def test_should_stage_and_reset_auto_tier_preference(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            model="auto",
+            model="auto", permissions={"on_request": PermissionHandler.approve_all}
         )
         try:
             assert await pending_auto_tier(session) is None
@@ -78,8 +80,7 @@ class TestAutoTier:
 
     async def test_should_preserve_auto_tier_when_set_model_omits_it(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            model="auto",
+            model="auto", permissions={"on_request": PermissionHandler.approve_all}
         )
         try:
             await session.set_auto_tier("balance")
@@ -105,14 +106,14 @@ class TestAutoTier:
     ):
         client = create_auto_client(ctx)
         fast_session = await client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="auto",
-            capi={"auto_tier": "fast", "enable_web_socket_responses": False},
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"capi": {"auto_tier": "fast", "enable_web_socket_responses": False}},
         )
         tierless_session = await client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="auto",
-            capi={"enable_web_socket_responses": False},
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"capi": {"enable_web_socket_responses": False}},
         )
         fast_session_id = fast_session.session_id
         tierless_session_id = tierless_session.session_id
@@ -128,12 +129,10 @@ class TestAutoTier:
 
         restored_client = create_auto_client(ctx)
         restored_fast = await restored_client.resume_session(
-            fast_session_id,
-            on_permission_request=PermissionHandler.approve_all,
+            fast_session_id, permissions={"on_request": PermissionHandler.approve_all}
         )
         restored_tierless = await restored_client.resume_session(
-            tierless_session_id,
-            on_permission_request=PermissionHandler.approve_all,
+            tierless_session_id, permissions={"on_request": PermissionHandler.approve_all}
         )
         assert (await restored_fast.rpc.model.get_current()).auto_tier == AutoTier.FAST
         assert (await restored_tierless.rpc.model.get_current()).auto_tier is None
@@ -144,9 +143,9 @@ class TestAutoTier:
         override_client = create_auto_client(ctx)
         overridden = await override_client.resume_session(
             fast_session_id,
-            on_permission_request=PermissionHandler.approve_all,
             model="auto",
-            capi={"auto_tier": "balance", "enable_web_socket_responses": False},
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"capi": {"auto_tier": "balance", "enable_web_socket_responses": False}},
         )
         assert (await overridden.rpc.model.get_current()).auto_tier == AutoTier.BALANCE
         await overridden.disconnect()
@@ -155,12 +154,12 @@ class TestAutoTier:
     async def test_should_commit_fast_auto_tier_after_successful_turn(self, ctx: E2ETestContext):
         client = create_auto_client(ctx)
         session = await client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="auto",
-            capi={"auto_tier": "efficiency", "enable_web_socket_responses": False},
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"capi": {"auto_tier": "efficiency", "enable_web_socket_responses": False}},
         )
+        model_change_task = get_next_event_of_type(session, "session.model_change", timeout=None)
         try:
-            model_change_task = get_next_event_of_type(session, "session.model_change")
             staged = await session.set_auto_tier("fast")
             assert staged.status == ModelSwitchAutoTierStatus.PENDING
             assert staged.effective_auto_tier == AutoTier.EFFICIENCY
@@ -172,7 +171,7 @@ class TestAutoTier:
 
             await session.send_and_wait("Reply with exactly AUTO_TIER_FAST_COMMITTED.")
 
-            model_change = await model_change_task
+            model_change = await asyncio.wait_for(model_change_task, timeout=30.0)
             assert isinstance(model_change.data, SessionModelChangeData)
             assert model_change.data.previous_model == "auto"
             assert model_change.data.new_model == "auto"
@@ -184,6 +183,8 @@ class TestAutoTier:
             assert committed.pending_auto_tier is None
             assert committed.activating_auto_tier is None
         finally:
+            model_change_task.cancel()
+            await asyncio.gather(model_change_task, return_exceptions=True)
             await session.disconnect()
             await client.stop()
 
@@ -192,9 +193,9 @@ class TestAutoTier:
     ):
         client = create_auto_client(ctx)
         session = await client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             model="auto",
-            capi={"auto_tier": "efficiency", "enable_web_socket_responses": False},
+            permissions={"on_request": PermissionHandler.approve_all},
+            github={"capi": {"auto_tier": "efficiency", "enable_web_socket_responses": False}},
         )
         session_id = session.session_id
 
@@ -208,37 +209,41 @@ class TestAutoTier:
                 fast_committed |= event.data.auto_tier == AutoTier.FAST
 
         unsubscribe = session.on(on_event)
-        failure_task = get_next_event_of_type(session, "session.auto_tier_switch_failed")
+        failure_task = get_next_event_of_type(
+            session, "session.auto_tier_switch_failed", timeout=None
+        )
 
-        staged = await session.set_auto_tier("fast")
-        assert staged.status == ModelSwitchAutoTierStatus.PENDING
-        assert staged.effective_auto_tier == AutoTier.EFFICIENCY
-        assert staged.pending_auto_tier == AutoTier.FAST
+        try:
+            staged = await session.set_auto_tier("fast")
+            assert staged.status == ModelSwitchAutoTierStatus.PENDING
+            assert staged.effective_auto_tier == AutoTier.EFFICIENCY
+            assert staged.pending_auto_tier == AutoTier.FAST
 
-        await session.send_and_wait("Reply with exactly AUTO_TIER_FAILURE_RECOVERED.")
+            await session.send_and_wait("Reply with exactly AUTO_TIER_FAILURE_RECOVERED.")
 
-        failure = await failure_task
-        assert failure.ephemeral is True
-        assert isinstance(failure.data, SessionAutoTierSwitchFailedData)
-        assert failure.data.effective_auto_tier == AutoTier.EFFICIENCY
-        assert failure.data.requested_auto_tier == AutoTier.FAST
-        assert failure.data.reason.value == "request_failed"
-        assert fast_committed is False
+            failure = await asyncio.wait_for(failure_task, timeout=30.0)
+            assert failure.ephemeral is True
+            assert isinstance(failure.data, SessionAutoTierSwitchFailedData)
+            assert failure.data.effective_auto_tier == AutoTier.EFFICIENCY
+            assert failure.data.requested_auto_tier == AutoTier.FAST
+            assert failure.data.reason.value == "request_failed"
+            assert fast_committed is False
 
-        current = await session.rpc.model.get_current()
-        assert current.auto_tier == AutoTier.EFFICIENCY
-        assert current.pending_auto_tier is None
-        assert current.activating_auto_tier is None
-
-        unsubscribe()
-        await session.disconnect()
-        await client.stop()
+            current = await session.rpc.model.get_current()
+            assert current.auto_tier == AutoTier.EFFICIENCY
+            assert current.pending_auto_tier is None
+            assert current.activating_auto_tier is None
+        finally:
+            failure_task.cancel()
+            await asyncio.gather(failure_task, return_exceptions=True)
+            unsubscribe()
+            await session.disconnect()
+            await client.stop()
 
         resumed_client = create_auto_client(ctx)
         try:
             resumed = await resumed_client.resume_session(
-                session_id,
-                on_permission_request=PermissionHandler.approve_all,
+                session_id, permissions={"on_request": PermissionHandler.approve_all}
             )
             resumed_current = await resumed.rpc.model.get_current()
             assert resumed_current.auto_tier == AutoTier.EFFICIENCY

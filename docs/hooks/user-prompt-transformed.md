@@ -8,7 +8,7 @@ Use it when you need to inspect or replace the exact model-facing prompt. The `p
 
 | Input field | Type | Description |
 | --- | --- | --- |
-| `sessionId` | string | Runtime session ID |
+| `sessionId` | string | Session reported by the hook input, not necessarily the callback owner's session |
 | `timestamp` | date/time | Time the hook was invoked |
 | `workingDirectory` | string | Current working directory |
 | `prompt` | string | Prompt after `userPromptSubmitted` hooks |
@@ -27,21 +27,25 @@ Return no value to leave the transformed prompt unchanged. Return `modifiedTrans
 declare function redact(text: string): string;
 
 const session = await client.createSession({
-  hooks: {
-    onUserPromptTransformed: async (input) => ({
-      modifiedTransformedPrompt: redact(input.transformedPrompt),
-    }),
-  },
+    hooks: {
+        handlers: {
+            onUserPromptTransformed: async (input) => ({
+                modifiedTransformedPrompt: redact(input.transformedPrompt),
+            }),
+        },
+    },
 });
 ```
 <!-- /docs-validate: hidden -->
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onUserPromptTransformed: async (input) => ({
-      modifiedTransformedPrompt: redact(input.transformedPrompt),
-    }),
-  },
+    hooks: {
+        handlers: {
+            onUserPromptTransformed: async (input) => ({
+                modifiedTransformedPrompt: redact(input.transformedPrompt),
+            }),
+        },
+    },
 });
 ```
 
@@ -54,14 +58,18 @@ const session = await client.createSession({
 ```python
 from copilot import CopilotClient
 
+
 def redact(text: str) -> str:
     return text
+
 
 async def main(client: CopilotClient):
     session = await client.create_session(
         hooks={
-            "on_user_prompt_transformed": lambda input_data, invocation: {
-                "modifiedTransformedPrompt": redact(input_data["transformedPrompt"])
+            "handlers": {
+                "on_user_prompt_transformed": lambda input_data, invocation: {
+                    "modifiedTransformedPrompt": redact(input_data["transformedPrompt"])
+                }
             }
         }
     )
@@ -70,8 +78,10 @@ async def main(client: CopilotClient):
 ```python
 session = await client.create_session(
     hooks={
-        "on_user_prompt_transformed": lambda input_data, invocation: {
-            "modifiedTransformedPrompt": redact(input_data["transformedPrompt"])
+        "handlers": {
+            "on_user_prompt_transformed": lambda input_data, invocation: {
+                "modifiedTransformedPrompt": redact(input_data["transformedPrompt"])
+            }
         }
     }
 )
@@ -89,7 +99,7 @@ package main
 import (
 	"context"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func redact(text string) string { return text }
@@ -97,12 +107,14 @@ func redact(text string) string { return text }
 func main() {
 	var client *copilot.Client
 	ctx := context.Background()
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		Hooks: &copilot.SessionHooks{
-			OnUserPromptTransformed: func(input copilot.UserPromptTransformedHookInput, invocation copilot.HookInvocation) (*copilot.UserPromptTransformedHookOutput, error) {
-				return &copilot.UserPromptTransformedHookOutput{
-					ModifiedTransformedPrompt: copilot.String(redact(input.TransformedPrompt)),
-				}, nil
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Hooks: copilot.SessionHookOptions{
+			Handlers: &copilot.SessionHooks{
+				OnUserPromptTransformed: func(input copilot.UserPromptTransformedHookInput, invocation copilot.HookInvocation) (*copilot.UserPromptTransformedHookOutput, error) {
+					return &copilot.UserPromptTransformedHookOutput{
+						ModifiedTransformedPrompt: copilot.String(redact(input.TransformedPrompt)),
+					}, nil
+				},
 			},
 		},
 	})
@@ -111,15 +123,18 @@ func main() {
 ```
 <!-- /docs-validate: hidden -->
 ```go
-session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-	Hooks: &copilot.SessionHooks{
-		OnUserPromptTransformed: func(input copilot.UserPromptTransformedHookInput, invocation copilot.HookInvocation) (*copilot.UserPromptTransformedHookOutput, error) {
-			return &copilot.UserPromptTransformedHookOutput{
-				ModifiedTransformedPrompt: copilot.String(redact(input.TransformedPrompt)),
-			}, nil
+session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	Hooks: copilot.SessionHookOptions{
+		Handlers: &copilot.SessionHooks{
+			OnUserPromptTransformed: func(input copilot.UserPromptTransformedHookInput, invocation copilot.HookInvocation) (*copilot.UserPromptTransformedHookOutput, error) {
+				return &copilot.UserPromptTransformedHookOutput{
+					ModifiedTransformedPrompt: copilot.String(redact(input.TransformedPrompt)),
+				}, nil
+			},
 		},
 	},
 })
+
 ```
 
 </details>
@@ -129,36 +144,38 @@ session, err := client.CreateSession(ctx, &copilot.SessionConfig{
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 static string Redact(string text) => text;
-
-await using var client = new CopilotClient();
-
-var session = await client.CreateSessionAsync(new SessionConfig
+await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    Hooks = new SessionHooks
+    Hooks = new SessionHookOptions
     {
-        OnUserPromptTransformed = (input, invocation) =>
-            Task.FromResult<UserPromptTransformedHookOutput?>(new()
+        Handlers = new SessionHooks
+        {
+            OnUserPromptTransformed = (input, invocation) => Task.FromResult<UserPromptTransformedHookOutput?>(new()
             {
                 ModifiedTransformedPrompt = Redact(input.TransformedPrompt),
             }),
-    },
+        }
+    }
 });
 ```
 <!-- /docs-validate: hidden -->
 ```csharp
-var session = await client.CreateSessionAsync(new SessionConfig
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    Hooks = new SessionHooks
+    Hooks = new SessionHookOptions
     {
-        OnUserPromptTransformed = (input, invocation) =>
-            Task.FromResult<UserPromptTransformedHookOutput?>(new()
+        Handlers = new SessionHooks
+        {
+            OnUserPromptTransformed = (input, invocation) => Task.FromResult<UserPromptTransformedHookOutput?>(new()
             {
                 ModifiedTransformedPrompt = Redact(input.TransformedPrompt),
             }),
-    },
+        }
+    }
 });
 ```
 
@@ -169,8 +186,8 @@ var session = await client.CreateSessionAsync(new SessionConfig
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 public class UserPromptTransformedExample {
@@ -179,29 +196,69 @@ public class UserPromptTransformedExample {
     }
 
     public static void main(String[] args) throws Exception {
-        try (var client = new CopilotClient()) {
-            var hooks = new SessionHooks().setOnUserPromptTransformed((input, invocation) ->
-                CompletableFuture.completedFuture(
-                    new UserPromptTransformedHookOutput(redact(input.transformedPrompt()))));
+        try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
+            var hooks = new SessionHooks()
+                    .setOnUserPromptTransformed((input, invocation) -> CompletableFuture
+                            .completedFuture(new UserPromptTransformedHookOutput(redact(input
+                                    .transformedPrompt()))));
 
-            var session = client.createSession(new SessionConfig().setHooks(hooks)).get();
+            var session = client
+                    .createSession(new CreateSessionOptions()
+                            .setHooks(new SessionHookOptions()
+                                    .setHandlers(hooks)))
+                    .get();
         }
     }
 }
 ```
 <!-- /docs-validate: hidden -->
 ```java
-var hooks = new SessionHooks().setOnUserPromptTransformed((input, invocation) ->
-    CompletableFuture.completedFuture(
-        new UserPromptTransformedHookOutput(redact(input.transformedPrompt()))));
+var hooks = new SessionHooks()
+        .setOnUserPromptTransformed((input, invocation) -> CompletableFuture
+                .completedFuture(new UserPromptTransformedHookOutput(redact(input
+                        .transformedPrompt()))));
 
-var session = client.createSession(new SessionConfig().setHooks(hooks)).get();
+var session = client
+        .createSession(new CreateSessionOptions()
+                .setHooks(new SessionHookOptions()
+                        .setHandlers(hooks)))
+        .get();
 ```
 
 </details>
 
 <details>
 <summary><strong>Rust</strong></summary>
+
+<!-- docs-validate: hidden -->
+```rust
+struct MyHooks;
+
+fn redact(prompt: &str) -> String {
+    prompt.to_string()
+}
+
+#[async_trait]
+impl SessionHooks for MyHooks {
+    async fn on_user_prompt_transformed(
+        &self,
+        input: UserPromptTransformedInput,
+        _ctx: HookContext,
+    ) -> Option<UserPromptTransformedOutput> {
+        Some(UserPromptTransformedOutput {
+            modified_transformed_prompt: Some(redact(&input.transformed_prompt)),
+        })
+    }
+}
+
+let session = client
+    .create_session(
+        CreateSessionOptions::default()
+            .with_hooks(|__sdk_group| __sdk_group.with_handlers(Arc::new(MyHooks))),
+    )
+    .await?;
+```
+<!-- /docs-validate: hidden -->
 
 ```rust
 #[async_trait]
@@ -218,7 +275,10 @@ impl SessionHooks for MyHooks {
 }
 
 let session = client
-    .create_session(SessionConfig::default().with_hooks(Arc::new(MyHooks)))
+    .create_session(
+        CreateSessionOptions::default()
+            .with_hooks(|__sdk_group| __sdk_group.with_handlers(Arc::new(MyHooks))),
+    )
     .await?;
 ```
 

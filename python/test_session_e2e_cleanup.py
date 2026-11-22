@@ -22,6 +22,15 @@ async def test_timeout_e2e_cleanup_without_idle(monkeypatch, admitted, detach_su
     ctx = SimpleNamespace(client=SimpleNamespace(create_session=AsyncMock(return_value=session)))
     timeout_context = asyncio.timeout(None)
     monkeypatch.setattr(asyncio, "timeout_at", lambda _: timeout_context)
+    send_and_wait = session.send_and_wait
+
+    def send_with_controlled_timeout(prompt, *, timeout):
+        assert timeout == 0.1
+        # Only the manual context should expire this fixture's wait, not the SDK's
+        # wall-clock preflight guard. The real E2E keeps its 100 ms timeout.
+        return send_and_wait(prompt, timeout=float("inf"))
+
+    monkeypatch.setattr(session, "send_and_wait", send_with_controlled_timeout)
     request_cancelled = False
     active_work: asyncio.Task | None = None
     detached = False
@@ -33,7 +42,7 @@ async def test_timeout_e2e_cleanup_without_idle(monkeypatch, admitted, detach_su
             assert params["prompt"] == "Run 'sleep 2 && echo done'"
             if admitted:
                 active_work = asyncio.create_task(asyncio.Event().wait())
-            # Expire the real SDK deadline at a controlled admission boundary.
+            # Expire the SDK wait at a controlled admission boundary.
             timeout_context.reschedule(asyncio.get_running_loop().time())
             try:
                 await asyncio.Future()

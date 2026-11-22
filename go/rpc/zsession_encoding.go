@@ -4,8 +4,10 @@
 package rpc
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"time"
 )
 
@@ -157,6 +159,24 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		e.Data = &d
+	case SessionEventTypeAutoModeRecoveryConsentCompleted:
+		var d AutoModeRecoveryConsentCompletedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
+	case SessionEventTypeAutoModeRecoveryConsentRequested:
+		var d AutoModeRecoveryConsentRequestedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
+	case SessionEventTypeAutoModeRecoveryOutcome:
+		var d AutoModeRecoveryOutcomeData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
 	case SessionEventTypeAutoModeSwitchCompleted:
 		var d AutoModeSwitchCompletedData
 		if err := json.Unmarshal(raw.Data, &d); err != nil {
@@ -255,6 +275,30 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 		e.Data = &d
 	case SessionEventTypeHumanResponseRecorded:
 		var d HumanResponseRecordedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
+	case SessionEventTypeIdeAddFileReference:
+		var d IdeAddFileReferenceData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
+	case SessionEventTypeIdeConnectionChanged:
+		var d IdeConnectionChangedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
+	case SessionEventTypeIdeElicitationComplete:
+		var d IdeElicitationCompleteData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
+	case SessionEventTypeIdeSelectionChanged:
+		var d IdeSelectionChangedData
 		if err := json.Unmarshal(raw.Data, &d); err != nil {
 			return err
 		}
@@ -511,6 +555,12 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		e.Data = &d
+	case SessionEventTypeSessionCompactionSummarized:
+		var d SessionCompactionSummarizedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
 	case SessionEventTypeSessionCompletionReceipt:
 		var d SessionCompletionReceiptData
 		if err := json.Unmarshal(raw.Data, &d); err != nil {
@@ -733,6 +783,12 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		e.Data = &d
+	case SessionEventTypeSessionSandboxStateChanged:
+		var d SessionSandboxStateChangedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
 	case SessionEventTypeSessionScheduleCancelled:
 		var d SessionScheduleCancelledData
 		if err := json.Unmarshal(raw.Data, &d); err != nil {
@@ -747,6 +803,12 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 		e.Data = &d
 	case SessionEventTypeSessionScheduleRearmed:
 		var d SessionScheduleRearmedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
+	case SessionEventTypeSessionSensitivityLabelObservation:
+		var d SessionSensitivityLabelObservationData
 		if err := json.Unmarshal(raw.Data, &d); err != nil {
 			return err
 		}
@@ -913,12 +975,6 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		e.Data = &d
-	case SessionEventTypeToolExecutionPartialResult:
-		var d ToolExecutionPartialResultData
-		if err := json.Unmarshal(raw.Data, &d); err != nil {
-			return err
-		}
-		e.Data = &d
 	case SessionEventTypeToolExecutionProgress:
 		var d ToolExecutionProgressData
 		if err := json.Unmarshal(raw.Data, &d); err != nil {
@@ -1040,8 +1096,11 @@ func (r *UserMessageData) UnmarshalJSON(data []byte) error {
 	type rawUserMessageData struct {
 		AgentMode                        *UserMessageAgentMode `json:"agentMode,omitempty"`
 		Attachments                      []json.RawMessage     `json:"attachments,omitzero"`
+		CausalDependencies               []string              `json:"causalDependencies,omitzero"`
+		ClientTurnID                     *string               `json:"clientTurnId,omitempty"`
 		Content                          string                `json:"content"`
 		Delivery                         *UserMessageDelivery  `json:"delivery,omitempty"`
+		HasSubmittedTask                 *bool                 `json:"hasSubmittedTask,omitempty"`
 		InteractionID                    *string               `json:"interactionId,omitempty"`
 		IsAutopilotContinuation          *bool                 `json:"isAutopilotContinuation,omitempty"`
 		MessageID                        *string               `json:"messageId,omitempty"`
@@ -1068,8 +1127,11 @@ func (r *UserMessageData) UnmarshalJSON(data []byte) error {
 			r.Attachments = append(r.Attachments, value)
 		}
 	}
+	r.CausalDependencies = raw.CausalDependencies
+	r.ClientTurnID = raw.ClientTurnID
 	r.Content = raw.Content
 	r.Delivery = raw.Delivery
+	r.HasSubmittedTask = raw.HasSubmittedTask
 	r.InteractionID = raw.InteractionID
 	r.IsAutopilotContinuation = raw.IsAutopilotContinuation
 	r.MessageID = raw.MessageID
@@ -1404,12 +1466,6 @@ func unmarshalToolExecutionCompleteContent(data []byte) (ToolExecutionCompleteCo
 			return nil, err
 		}
 		return &d, nil
-	case ToolExecutionCompleteContentTypeTerminal:
-		var d ToolExecutionCompleteContentTerminal
-		if err := json.Unmarshal(data, &d); err != nil {
-			return nil, err
-		}
-		return &d, nil
 	case ToolExecutionCompleteContentTypeText:
 		var d ToolExecutionCompleteContentText
 		if err := json.Unmarshal(data, &d); err != nil {
@@ -1549,17 +1605,6 @@ func (r ToolExecutionCompleteContentShellExit) MarshalJSON() ([]byte, error) {
 	})
 }
 
-func (r ToolExecutionCompleteContentTerminal) MarshalJSON() ([]byte, error) {
-	type alias ToolExecutionCompleteContentTerminal
-	return json.Marshal(struct {
-		Type ToolExecutionCompleteContentType `json:"type"`
-		alias
-	}{
-		Type:  r.Type(),
-		alias: alias(r),
-	})
-}
-
 func (r ToolExecutionCompleteContentText) MarshalJSON() ([]byte, error) {
 	type alias ToolExecutionCompleteContentText
 	return json.Marshal(struct {
@@ -1581,6 +1626,7 @@ func (r *ToolExecutionCompleteResult) UnmarshalJSON(data []byte) error {
 		MCPMeta             any                              `json:"mcpMeta,omitempty"`
 		MCPResultMeta       map[string]any                   `json:"mcpResultMeta,omitzero"`
 		StructuredContent   any                              `json:"structuredContent,omitempty"`
+		ToolReferences      []string                         `json:"toolReferences,omitzero"`
 		UIResource          *ToolExecutionCompleteUIResource `json:"uiResource,omitempty"`
 	}
 	var raw rawToolExecutionCompleteResult
@@ -1613,6 +1659,7 @@ func (r *ToolExecutionCompleteResult) UnmarshalJSON(data []byte) error {
 	r.MCPMeta = raw.MCPMeta
 	r.MCPResultMeta = raw.MCPResultMeta
 	r.StructuredContent = raw.StructuredContent
+	r.ToolReferences = raw.ToolReferences
 	r.UIResource = raw.UIResource
 	return nil
 }
@@ -1893,6 +1940,7 @@ func (r SystemNotificationWorkflowCompleted) MarshalJSON() ([]byte, error) {
 
 func (r *SystemNotificationData) UnmarshalJSON(data []byte) error {
 	type rawSystemNotificationData struct {
+		CausalDependencies []string            `json:"causalDependencies,omitzero"`
 		Content            string              `json:"content"`
 		Kind               json.RawMessage     `json:"kind"`
 		ResponsesReasoning *ResponsesReasoning `json:"responsesReasoning,omitempty"`
@@ -1901,6 +1949,7 @@ func (r *SystemNotificationData) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	r.CausalDependencies = raw.CausalDependencies
 	r.Content = raw.Content
 	if raw.Kind != nil {
 		value, err := unmarshalSystemNotification(raw.Kind)
@@ -2115,6 +2164,101 @@ func unmarshalPermissionRequest(data []byte) (PermissionRequest, error) {
 	default:
 		return &RawPermissionRequest{Discriminator: raw.Kind, Raw: data}, nil
 	}
+}
+
+func marshalPermissionRequestWithOriginalFields(original, previous, current json.RawMessage) ([]byte, error) {
+	if string(previous) == string(current) {
+		return original, nil
+	}
+	if bytes.HasPrefix(bytes.TrimSpace(original), []byte("[")) &&
+		bytes.HasPrefix(bytes.TrimSpace(previous), []byte("[")) &&
+		bytes.HasPrefix(bytes.TrimSpace(current), []byte("[")) {
+		var items, before, after []json.RawMessage
+		if err := json.Unmarshal(original, &items); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(previous, &before); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(current, &after); err != nil {
+			return nil, err
+		}
+		// Resizing replaces the array; otherwise merge a single entry edit by index.
+		if len(items) != len(before) || len(before) != len(after) {
+			return current, nil
+		}
+		// Typed array values have no stable identity after multiple edits.
+		changed := 0
+		for i := range after {
+			if !bytes.Equal(before[i], after[i]) {
+				changed++
+				for j := range before {
+					if i != j && bytes.Equal(before[j], after[i]) {
+						return nil, errors.New("ambiguous array edits: edit the original JSON and decode a new PermissionRequestEnvelope")
+					}
+				}
+			}
+		}
+		if changed > 1 {
+			return nil, errors.New("ambiguous array edits: edit the original JSON and decode a new PermissionRequestEnvelope")
+		}
+		if changed == 1 && len(before) > 1 {
+			// Hidden metadata makes copies followed by field edits ambiguous too.
+			var originalValue, projectedValue any
+			originalDecoder := json.NewDecoder(bytes.NewReader(original))
+			originalDecoder.UseNumber()
+			if err := originalDecoder.Decode(&originalValue); err != nil {
+				return nil, err
+			}
+			projectedDecoder := json.NewDecoder(bytes.NewReader(previous))
+			projectedDecoder.UseNumber()
+			if err := projectedDecoder.Decode(&projectedValue); err != nil {
+				return nil, err
+			}
+			if !reflect.DeepEqual(originalValue, projectedValue) {
+				return nil, errors.New("ambiguous array edits: edit the original JSON and decode a new PermissionRequestEnvelope")
+			}
+		}
+		for i, value := range after {
+			merged, err := marshalPermissionRequestWithOriginalFields(items[i], before[i], value)
+			if err != nil {
+				return nil, err
+			}
+			items[i] = merged
+		}
+		return json.Marshal(items)
+	}
+	if !bytes.HasPrefix(bytes.TrimSpace(original), []byte("{")) ||
+		!bytes.HasPrefix(bytes.TrimSpace(previous), []byte("{")) ||
+		!bytes.HasPrefix(bytes.TrimSpace(current), []byte("{")) {
+		return current, nil
+	}
+	var fields, before, after map[string]json.RawMessage
+	if err := json.Unmarshal(original, &fields); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(previous, &before); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(current, &after); err != nil {
+		return nil, err
+	}
+	// Apply typed field edits without changing untouched original JSON values.
+	for key := range before {
+		if _, present := after[key]; !present {
+			delete(fields, key)
+		}
+	}
+	for key, value := range after {
+		if string(value) != string(before[key]) {
+			merged, err := marshalPermissionRequestWithOriginalFields(fields[key], before[key], value)
+			if err != nil {
+				return nil, err
+			}
+			fields[key] = merged
+		}
+	}
+	return json.Marshal(fields)
 }
 
 func (r RawPermissionRequest) MarshalJSON() ([]byte, error) {
@@ -2519,6 +2663,7 @@ func (r *PermissionRequestedData) UnmarshalJSON(data []byte) error {
 		OwnerSessionID             *string            `json:"ownerSessionId,omitempty"`
 		PermissionMode             *PermissionMode    `json:"permissionMode,omitempty"`
 		PermissionRequest          json.RawMessage    `json:"permissionRequest"`
+		ProgramToolCallID          *string            `json:"programToolCallId,omitempty"`
 		PromptRequest              json.RawMessage    `json:"promptRequest,omitempty"`
 		RecoveryEpisodeID          *string            `json:"recoveryEpisodeId,omitempty"`
 		RequestID                  string             `json:"requestId"`
@@ -2548,6 +2693,7 @@ func (r *PermissionRequestedData) UnmarshalJSON(data []byte) error {
 		}
 		r.PermissionRequest = value
 	}
+	r.ProgramToolCallID = raw.ProgramToolCallID
 	if raw.PromptRequest != nil {
 		value, err := unmarshalPermissionPromptRequest(raw.PromptRequest)
 		if err != nil {

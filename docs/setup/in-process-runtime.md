@@ -1,20 +1,20 @@
 # Run the Copilot runtime in process
 
-In-process hosting loads the native Copilot runtime into your application process instead of starting a separate Copilot CLI process. Use it to remove child-process management while keeping the same Copilot SDK sessions, events, tools, hooks, and JSON-RPC behavior.
+SDK v2 hosts the native Copilot runtime in your application process by default instead of starting a separate runtime process. Sessions, events, tools, hooks, and JSON-RPC framing remain the same.
 
 > [!WARNING]
-> In-process hosting is experimental in every SDK. Test startup, model turns, and shutdown behavior on every operating system and architecture that you deploy.
+> In-process hosting is not a sandbox and provides no crash isolation from the runtime. A native crash can terminate your application. Test startup, model turns, and shutdown on every operating system and architecture that you deploy.
 
 ## When to use in-process hosting
 
 In-process hosting is a good fit when:
 
-* Your application must run without a separate runtime process.
-* You want the SDK to own the runtime lifecycle.
-* You can ship a native library for each deployment platform.
-* Process-wide environment and working-directory settings are acceptable.
+- Your application must run without a separate runtime process.
+- You want the SDK to own the runtime lifecycle.
+- You can ship a native library for each deployment platform.
+- Process-wide environment and working-directory settings are acceptable.
 
-Use the [default bundled CLI setup](./bundled-cli.md) when process isolation and the most established deployment path are more important. Use a [backend service](./backend-services.md) when multiple application instances must connect to a shared runtime over TCP.
+Select an explicit stdio or TCP subprocess connection when crash isolation or per-client process configuration is required. Use a [backend service](./backend-services.md) when multiple application instances must connect to a shared runtime over TCP.
 
 ## How it works
 
@@ -36,53 +36,41 @@ flowchart LR
 
 The runtime:
 
-* Runs in the application process without Node.js, a child process, a TCP port, or a connection token.
-* Supports the same sessions, streaming events, tools, hooks, permissions, and server-to-client requests as other transports.
-* Can invoke SDK callbacks from native worker threads. The SDK handles thread marshalling and callback lifetime.
-* Keeps the loaded native library and its worker pool available for the lifetime of the application process.
+- Runs native Rust in the application process, not in an embedded Node.js interpreter. The SDK connection needs no child process, TCP port, or connection token; tools can still launch subprocesses.
+- Supports the same sessions, streaming events, tools, hooks, permissions, and server-to-client requests as other transports.
+- Can invoke SDK callbacks from native worker threads. The SDK handles thread marshalling and callback lifetime.
+- Keeps the loaded native library and its worker pool available for the lifetime of the application process.
 
 ## SDK requirements
 
 All SDKs expose an explicit in-process connection option. Some languages require additional build or package configuration.
 
-| SDK | Connection option | Additional requirement |
-|-----|-------------------|------------------------|
-| TypeScript | `RuntimeConnection.forInProcess()` | None when the package includes a compatible runtime bundle |
-| Python | `RuntimeConnection.for_inprocess()` | Pre-download with `python -m copilot download-runtime --in-process` when runtime download is unavailable during startup |
-| Go | `copilot.InProcessConnection{}` | Build with `-tags copilot_inprocess` |
-| .NET | `RuntimeConnection.ForInProcess()` | Allow the `GHCP001` experimental API diagnostic |
-| Rust | `Transport::InProcess` | Enable the `bundled-in-process` Cargo feature |
-| Java | `RuntimeConnection.forInProcess()` | Add JNA, a platform runtime classifier, and experimental API opt-in |
+| SDK        | Connection option                                       | Additional requirement                                                                                                  |
+| ---------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| TypeScript | `RuntimeConnection.forInProcess()`                      | None when the package includes a compatible runtime bundle                                                              |
+| Python     | `RuntimeConnection.for_inprocess()`                     | Pre-download with `python -m copilot download-runtime --in-process` when runtime download is unavailable during startup |
+| Go         | `copilot.InProcessConnection{}`                         | Run the application bundler or supply a compatible runtime package; no build tag is needed                              |
+| .NET       | `RuntimeConnection.ForInProcess()`                      | Include the runtime assets acquired for the deployment RID                                                              |
+| Rust       | `RuntimeConnection::for_in_process(Default::default())` | Included by the default `bundled-in-process` Cargo feature                                                              |
+| Java       | `RuntimeConnection.forInProcess()`                      | Add the matching platform runtime classifier; JNA is a transitive SDK dependency                                        |
 
 The native runtime bundle must match the host operating system, CPU architecture, and, on Linux, C library. Unsupported hosts fail during runtime resolution or startup instead of falling back to a child process.
 
 ## Configure an in-process connection
 
-Pass the language-specific connection option when you create the client.
+Ordinary clients use in-process hosting without a connection option. Set it explicitly to ignore the environment override:
 
 <details open>
 <summary><strong>TypeScript</strong></summary>
 
 <!-- docs-validate: strict -->
-<!-- docs-validate: hidden -->
-```typescript
-import { CopilotClient as Client, RuntimeConnection } from "@github/copilot-sdk";
-
-async function main() {
-  const client = new Client({
-    connection: RuntimeConnection.forInProcess(),
-  });
-
-  await client.start();
-}
-```
-<!-- /docs-validate: hidden -->
 
 ```typescript
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient({
-  connection: RuntimeConnection.forInProcess(),
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forInProcess(),
 });
 
 await client.start();
@@ -95,9 +83,7 @@ await client.start();
 ```python
 from copilot import CopilotClient, RuntimeConnection
 
-client = CopilotClient(
-    connection=RuntimeConnection.for_inprocess(),
-)
+client = CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_inprocess())
 
 await client.start()
 ```
@@ -107,6 +93,7 @@ await client.start()
 <summary><strong>Go</strong></summary>
 
 <!-- docs-validate: hidden -->
+
 ```go
 package main
 
@@ -114,12 +101,13 @@ import (
 	"context"
 	"log"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
 	client := copilot.NewClient(&copilot.ClientOptions{
-		Connection: copilot.InProcessConnection{},
+		Mode: copilot.ModeCodingAgent,
+		Runtime: copilot.InProcessConnection{},
 	})
 
 	if err := client.Start(context.Background()); err != nil {
@@ -128,16 +116,20 @@ func main() {
 	defer client.Stop()
 }
 ```
+
 <!-- /docs-validate: hidden -->
+
 ```go
 client := copilot.NewClient(&copilot.ClientOptions{
-    Connection: copilot.InProcessConnection{},
+	Mode: copilot.ModeCodingAgent,
+	Runtime: copilot.InProcessConnection{},
 })
 
 if err := client.Start(context.Background()); err != nil {
-    log.Fatal(err)
+	log.Fatal(err)
 }
 defer client.Stop()
+
 ```
 
 </details>
@@ -145,13 +137,11 @@ defer client.Stop()
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-#pragma warning disable GHCP001
-
 var client = new CopilotClient(new CopilotClientOptions
 {
-    Connection = RuntimeConnection.ForInProcess(),
+    Mode = CopilotClientMode.CodingAgent,
+    Runtime = RuntimeConnection.ForInProcess()
 });
-
 await client.StartAsync();
 ```
 
@@ -159,11 +149,10 @@ await client.StartAsync();
 <details>
 <summary><strong>Rust</strong></summary>
 
-<!-- docs-validate: skip -->
-
 ```rust
-let options = ClientOptions::default()
-    .with_transport(Transport::InProcess);
+let options = ClientOptions::new(copilot_sdk::ClientMode::CodingAgent).with_runtime(RuntimeConnection::for_in_process(
+    InProcessRuntimeOptions::default(),
+));
 
 let client = Client::start(options).await?;
 ```
@@ -173,44 +162,65 @@ let client = Client::start(options).await?;
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.AllowCopilotExperimental;
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.CopilotClientOptions;
-import com.github.copilot.rpc.RuntimeConnection;
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.RuntimeConnection;
 
-@AllowCopilotExperimental
 public class Example {
     public void run() throws Exception {
-        CopilotClientOptions options = new CopilotClientOptions()
-            .setConnection(RuntimeConnection.forInProcess());
+        CopilotClientOptions options = new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT)
+                .setRuntime(RuntimeConnection
+                        .forInProcess());
 
         CopilotClient client = new CopilotClient(options);
-        client.start().join();
+        client
+                .start()
+                .join();
     }
 }
 ```
 
-`RuntimeConnection.forInProcess()` is `@CopilotExperimental`, so the consuming class or method must opt in with `@AllowCopilotExperimental` (or compile with `-Acopilot.experimental.allowed=true`). See [Using experimental APIs](../../java/README.md#using-experimental-apis).
-
 </details>
 
-You can also set `COPILOT_SDK_DEFAULT_CONNECTION=inprocess` before starting the application. The SDK uses this value only when the client does not specify a connection explicitly. An invalid value causes startup to fail.
+`COPILOT_SDK_DEFAULT_CONNECTION` accepts `inprocess` or `stdio`, case-insensitively. Unset or empty selects in-process. An explicit connection wins, even over an invalid override; otherwise invalid values fail. Java configures subprocesses through `RuntimeConnection.forSpawnedStdio()` or `RuntimeConnection.forSpawnedTcp()`.
 
 Prefer explicit client configuration in application code. Use the environment variable when deployment configuration must select the transport without changing the application.
+
+## Migrate to the v2 default
+
+Clients that omit a connection now load native code into the application process. To retain an owned subprocess, select it explicitly:
+
+| SDK        | Subprocess selection                                                                                                                    |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| TypeScript | `new CopilotClient({ mode: "coding-agent", runtime: RuntimeConnection.forSpawnedStdio() })`                                             |
+| Python     | `CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio())`                                                     |
+| Go         | `copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedStdioConnection{}})`                   |
+| .NET       | `new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForSpawnedStdio() })`   |
+| Rust       | `Client::start(ClientOptions::new(ClientMode::CodingAgent).with_runtime(RuntimeConnection::SpawnedStdio(Default::default()))).await?`   |
+| Java       | `new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT).setRuntime(RuntimeConnection.forSpawnedStdio()))` |
+
+Alternatively, set `COPILOT_SDK_DEFAULT_CONNECTION=stdio` before starting the application. Existing explicit TCP and external-server connections retain their behavior. A missing native library or unsupported option never triggers an automatic subprocess fallback.
+
+Environment maps and process working directories belong only to spawned connections. Clients using those options must select a subprocess or move process-wide configuration to the host before startup. Supported typed settings such as authentication, telemetry, and base directory still work. Session working directories are separate and remain supported.
+
+Rust applications disabling default features must enable `in-process` (or `local-runtime` with an application-supplied runtime) to use the new default. Subprocess-only builds can retain `bundled-cli` or `runtime` and select `RuntimeConnection::for_spawned_stdio(...)` explicitly.
+
+Java GraalVM native-image cannot use JNA callback upcalls. Select `RuntimeConnection.forSpawnedStdio()` or `RuntimeConnection.forTcp(host, port)` explicitly for those deployments.
 
 ## Configure the runtime
 
 The SDK converts supported typed client options into native runtime arguments and host-scoped environment values. Depending on the SDK, these options include:
 
-* Authentication token and logged-in-user fallback.
-* Copilot base directory.
-* Log level.
-* Session idle timeout.
-* Remote session mode.
+- Authentication token and logged-in-user fallback.
+- Copilot base directory.
+- Log level.
+- Session idle timeout.
+- Remote session mode.
 
-The in-process runtime receives a snapshot of the host environment plus supported SDK-managed overrides. It does not mutate the host environment.
+The in-process runtime receives a host environment snapshot plus supported typed overrides. It does not mutate the host environment.
 
-Set process-wide values before creating the first in-process client. This includes environment variables that are not represented by typed client options and the application's current working directory.
+Configure working directories per session. Set genuinely process-wide values before creating the first in-process client.
 
 ## Runtime library resolution
 
@@ -242,16 +252,17 @@ The native library can remain loaded until the application process exits. Do not
 
 In-process hosting has these current constraints:
 
-* **Experimental API**: behavior and packaging requirements can change between releases.
-* **Shared process state**: all clients share the host process environment, current working directory, native library, and runtime worker pool.
-* **Restricted process options**: SDK options for an arbitrary environment, working directory, telemetry configuration, executable path, or CLI arguments are rejected where applicable. Configure process-global values on the host process and use supported typed options for runtime settings.
-* **No per-client working directory**: the runtime uses the hosting process working directory.
-* **One runtime version per process**: loading another native library path or version is not supported.
-* **Platform maturity varies**: some SDK and platform combinations have reduced model-turn or shutdown coverage. Validate the exact combination that you deploy.
+- **Shared process state**: all clients share the host process environment, current working directory, native library, and runtime worker pool.
+- **Restricted process options**: arbitrary environment maps, client working directories, executable paths, and extra runtime arguments are rejected where applicable.
+- **No per-client working directory**: set working directories per session instead.
+- **One runtime version per process**: loading another native library path or version is not supported.
+- **macOS library validation**: hardened hosts must permit loading the runtime's signed native library. Verifying its signature alone does not establish host/library Team ID compatibility.
+- **Java native-image**: JNA callback upcalls are unavailable; use an explicit subprocess or external-server connection.
+- **Platform maturity varies**: some SDK and platform combinations have reduced model-turn or shutdown coverage. Validate the exact combination that you deploy.
 
 ## Further reading
 
-* [Choosing a setup path](./choosing-a-setup-path.md): compare in-process hosting with other deployment models
-* [Default setup](./bundled-cli.md): run the bundled runtime in a managed child process
-* [Backend services](./backend-services.md): connect applications to a shared runtime over TCP
-* [Session lifecycle](../hooks/session-lifecycle.md): handle session start and end events
+- [Choosing a setup path](./choosing-a-setup-path.md): compare in-process hosting with other deployment models
+- [Default setup](./bundled-cli.md): acquire and run the bundled native runtime
+- [Backend services](./backend-services.md): connect applications to a shared runtime over TCP
+- [Session lifecycle](../hooks/session-lifecycle.md): handle session start and end events

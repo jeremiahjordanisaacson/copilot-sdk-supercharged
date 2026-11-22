@@ -27,13 +27,15 @@ class TestCompaction:
     ):
         # Create session with very low compaction thresholds to trigger compaction quickly
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            infinite_sessions={
-                "enabled": True,
-                # Trigger background compaction at 0.5% context usage (~1000 tokens)
-                "background_compaction_threshold": 0.005,
-                # Block at 1% to ensure compaction runs
-                "buffer_exhaustion_threshold": 0.01,
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={
+                "infinite_sessions": {
+                    "enabled": True,
+                    # Trigger background compaction at 0.5% context usage (~1000 tokens)
+                    "background_compaction_threshold": 0.005,
+                    # Block at 1% to ensure compaction runs
+                    "buffer_exhaustion_threshold": 0.01,
+                }
             },
         )
 
@@ -133,15 +135,15 @@ class TestCompaction:
         assert answer is not None
         content = (answer.data.content or "").lower()
         # Should remember it was about a dragon (context preserved via summary)
-        assert "kaedrith" in content, f"Expected answer to mention 'Kaedrith', got: {content!r}"
+        assert "vessaryn" in content, f"Expected answer to mention 'Vessaryn', got: {content!r}"
         assert "dragon" in content, f"Expected answer to mention 'dragon', got: {content!r}"
 
     async def test_should_not_emit_compaction_events_when_infinite_sessions_disabled(
         self, ctx: E2ETestContext
     ):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            infinite_sessions={"enabled": False},
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={"infinite_sessions": {"enabled": False}},
         )
 
         compaction_events = []

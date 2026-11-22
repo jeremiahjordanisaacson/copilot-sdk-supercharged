@@ -11,16 +11,18 @@ import re
 import shutil
 import subprocess
 import tempfile
-import time
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from copilot import CopilotClient, RuntimeConnection
+from copilot import CopilotClient, CopilotSession, RuntimeConnection
+from copilot._ffi_runtime_host import resolve_library_path
+from copilot.client import ChildProcessRuntimeConnection, _InternalTestOptions
 
 from .proxy import CapiProxy
 
 
-def _prepare_pinned_cli(repo_root: Path) -> str:
+def _prepare_checkout_cli(repo_root: Path) -> str:
     npm = "npm.cmd" if os.name == "nt" else "npm"
     result = subprocess.run(
         [npm, "run", "--silent", "prepare:runtime", "--", "--print-path"],
@@ -32,28 +34,27 @@ def _prepare_pinned_cli(repo_root: Path) -> str:
     output = result.stdout.strip()
     if result.returncode != 0 or not output:
         detail = result.stderr.strip() or output or f"exit code {result.returncode}"
-        raise RuntimeError(f"Failed to prepare the pinned Copilot CLI: {detail}")
+        raise RuntimeError(f"Failed to prepare the same-checkout Copilot CLI: {detail}")
     cli_path = Path(output.splitlines()[-1])
     if not cli_path.is_file():
-        raise RuntimeError(f"Pinned Copilot CLI was not created at {cli_path}")
+        raise RuntimeError(f"Same-checkout Copilot CLI was not found at {cli_path}")
     return str(cli_path.resolve())
 
 
 def get_cli_path_for_tests() -> str:
     """Get CLI path for E2E tests.
 
-    Uses COPILOT_CLI_PATH env var if set, otherwise prepares the release pinned
-    by the sibling Node.js SDK.
+    Uses COPILOT_CLI_PATH if set, otherwise resolves the same-checkout runtime.
     """
     env_path = os.environ.get("COPILOT_CLI_PATH")
-    if env_path and Path(env_path).exists():
+    if env_path and Path(env_path).is_file():
         return str(Path(env_path).resolve())
-    if os.environ.get("COPILOT_RUNTIME_SOURCE") == "checkout":
+    if env_path:
         raise RuntimeError(
             "COPILOT_CLI_PATH must select an existing same-checkout runtime for SDK tests"
         )
 
-    return _prepare_pinned_cli(Path(__file__).parents[3])
+    return _prepare_checkout_cli(Path(__file__).parents[3])
 
 
 CLI_PATH = get_cli_path_for_tests()
@@ -64,26 +65,50 @@ DEFAULT_GITHUB_TOKEN = "fake-token-for-e2e-tests"
 def is_inprocess_transport() -> bool:
     """Return True when the E2E suite should run over the in-process (FFI) transport.
 
-    Selected by the ``inprocess`` CI matrix cell via
-    ``COPILOT_SDK_DEFAULT_CONNECTION=inprocess``. Mirrors the Node/.NET harnesses.
+    This is the SDK default; the stdio CI cell selects its transport explicitly.
     """
-    return (os.environ.get("COPILOT_SDK_DEFAULT_CONNECTION") or "").lower() == "inprocess"
+    return (os.environ.get("COPILOT_SDK_DEFAULT_CONNECTION") or "").lower() in ("", "inprocess")
+
+
+class _TestClient(CopilotClient):
+    def __init__(self, work_dir: str | None, *, cli_path: str, **options: Any):
+        self._test_cli_path = cli_path
+        super().__init__(**options)
+        self._test_work_dir = work_dir
+
+    def _resolve_inprocess_runtime(self) -> str:
+        runtime_path = resolve_library_path(self._test_cli_path)
+        if runtime_path is None:
+            raise RuntimeError(
+                f"In-process runtime library not found next to '{self._test_cli_path}'."
+            )
+        self._cli_path_source = "explicit"
+        self._inprocess_cli_entrypoint = self._test_cli_path
+        return runtime_path
+
+    @wraps(CopilotClient.create_session)
+    async def create_session(self, **options: Any) -> CopilotSession:
+        if (
+            self._test_work_dir is not None
+            and options.get("working_directory") is None
+            and options.get("cloud") is None
+        ):
+            options["working_directory"] = self._test_work_dir
+        return await super().create_session(**options)
 
 
 class E2ETestContext:
     """Holds shared resources for E2E tests."""
 
-    def __init__(self):
+    def __init__(self, *, use_stdio: bool = False):
         self.cli_path: str = ""
         self.home_dir: str = ""
         self.work_dir: str = ""
         self.proxy_url: str = ""
         self._proxy: CapiProxy | None = None
         self._client: CopilotClient | None = None
-        self._inprocess: bool = is_inprocess_transport()
+        self._inprocess: bool = is_inprocess_transport() and not use_stdio
         self._client_inprocess: bool = False
-        self._restore_env: list[tuple[str, str | None]] = []
-        self._restore_cwd: str | None = None
 
     async def setup(self, cli_args: list[str] | None = None):
         """Set up the test context with a shared client.
@@ -112,87 +137,60 @@ class E2ETestContext:
             },
         )
 
-        # Create the shared client (like Node.js/Go do). The in-process (FFI)
-        # transport loads the runtime into this test host process, so it cannot
-        # honor a per-client working_directory or env block: the worker inherits
-        # this process's ambient cwd and environment. We therefore mirror the
-        # per-test redirects, isolated home, and credentials onto the real process
-        # (os.environ writes reach native getenv on CPython) and chdir into the
-        # work dir, then create the client without working_directory/env. This
-        # matches the Node/.NET in-process harnesses.
         self._client_inprocess = self._inprocess and not cli_args
+        runtime_env = self.get_env()
+        test_options = _InternalTestOptions(
+            copilot_api_url=runtime_env["COPILOT_API_URL"],
+            github_api_url=runtime_env["COPILOT_DEBUG_GITHUB_API_URL"],
+            proxy_url=runtime_env.get("HTTPS_PROXY"),
+            no_proxy=runtime_env.get("NO_PROXY"),
+            ca_certificate_path=runtime_env.get("NODE_EXTRA_CA_CERTS"),
+        )
+        for key in test_options._to_environment():
+            runtime_env.pop(key, None)
         if self._client_inprocess:
-            self._apply_inprocess_environment()
-            self._client = CopilotClient(
-                connection=RuntimeConnection.for_inprocess(),
-                github_token=DEFAULT_GITHUB_TOKEN,
+            self._client = _TestClient(
+                self.work_dir,
+                mode="coding-agent",
+                cli_path=self.cli_path,
+                _test_options=test_options,
+                runtime=RuntimeConnection.for_inprocess(base_directory=self.home_dir),
+                github={"token": DEFAULT_GITHUB_TOKEN},
             )
         else:
-            self._client = CopilotClient(
-                connection=RuntimeConnection.for_stdio(
+            self._client = _TestClient(
+                None,
+                mode="coding-agent",
+                cli_path=self.cli_path,
+                _test_options=test_options,
+                runtime=RuntimeConnection.for_spawned_stdio(
                     path=self.cli_path,
                     args=tuple(cli_args or []),
+                    working_directory=self.work_dir,
+                    base_directory=self.home_dir,
+                    env=runtime_env,
                 ),
-                working_directory=self.work_dir,
-                env=self.get_env(),
-                github_token=DEFAULT_GITHUB_TOKEN,
+                github={"token": DEFAULT_GITHUB_TOKEN},
             )
 
-    def _apply_inprocess_environment(self) -> None:
-        """Mirror the isolated test environment onto the real process for in-process hosting.
-
-        The in-process worker inherits this process's environment and cwd at
-        spawn, so the per-test redirects must live on ``os.environ`` and the
-        process cwd. Auth flows via GH_TOKEN/GITHUB_TOKEN (the FFI argv omits the
-        stdio ``--auth-token-env`` wiring) and HMAC is disabled so host-side auth
-        resolution matches the replay snapshots. Restored in ``teardown``.
-        """
-        inprocess_env = dict(self.get_env())
-        inprocess_env.update(
-            {
-                "GH_TOKEN": DEFAULT_GITHUB_TOKEN,
-                "GITHUB_TOKEN": DEFAULT_GITHUB_TOKEN,
-                "COPILOT_CLI_PATH": self.cli_path,
-                "COPILOT_HMAC_KEY": "",
-                "CAPI_HMAC_KEY": "",
-            }
+    def create_inprocess_client(self, **options: Any) -> CopilotClient:
+        """Create an independent client using this fixture's prepared runtime."""
+        options.setdefault("runtime", RuntimeConnection.for_inprocess())
+        return _TestClient(
+            None,
+            cli_path=self.cli_path,
+            **options,
         )
-        for key, value in inprocess_env.items():
-            self._restore_env.append((key, os.environ.get(key)))
-            os.environ[key] = value
-
-        self._restore_cwd = os.getcwd()
-        os.chdir(self.work_dir)
 
     def add_runtime_env(self, key: str, value: str) -> None:
-        """Set an env var seen by the runtime, honoring the active transport.
-
-        Child-process transports read env from the client's env block, but the
-        in-process worker inherits *this* process's environment, so the var must
-        live on ``os.environ`` (and be restored in teardown). Must be called
-        before the runtime starts (i.e., before the first ``create_session``).
-        """
+        """Set a child runtime's environment before starting the client."""
         if self._client_inprocess:
-            self._restore_env.append((key, os.environ.get(key)))
-            os.environ[key] = value
-        else:
-            options = self.client._options
-            if options.env is None:
-                options.env = {}
-            options.env[key] = value
-
-    def _restore_inprocess_environment(self) -> None:
-        """Undo the in-process environment mirror and cwd change from setup."""
-        for key, previous in reversed(self._restore_env):
-            if previous is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = previous
-        self._restore_env = []
-        if self._restore_cwd is not None:
-            with contextlib.suppress(OSError):
-                os.chdir(self._restore_cwd)
-            self._restore_cwd = None
+            raise ValueError("In-process fixtures require typed client/session options")
+        connection = self.client._options.connection
+        assert isinstance(connection, ChildProcessRuntimeConnection)
+        if connection.env is None:
+            connection.env = {}
+        connection.env[key] = value
 
     async def teardown(self, test_failed: bool = False):
         """Clean up the test context.
@@ -207,9 +205,6 @@ class E2ETestContext:
                 pass  # stop() completes all cleanup before raising; safe to ignore in teardown
             self._client = None
 
-        if self._client_inprocess:
-            self._restore_inprocess_environment()
-
         try:
             if self._proxy:
                 await self._proxy.stop(skip_writing_cache=test_failed)
@@ -220,6 +215,23 @@ class E2ETestContext:
             if self.work_dir and os.path.exists(self.work_dir):
                 shutil.rmtree(self.work_dir, ignore_errors=True)
 
+    async def disconnect_sessions(self) -> None:
+        """Stop test-owned sessions without restarting the module-shared runtime."""
+        if self._client is None:
+            return
+        with self._client._sessions_lock:
+            sessions = list(self._client._sessions.values())
+        errors: list[Exception] = []
+        for session in sessions:
+            try:
+                # Last-owner detach awaits shutdown, including background work;
+                # foreground idle alone does not establish this boundary.
+                await session.disconnect()
+            except Exception as error:
+                errors.append(error)
+        if errors:
+            raise ExceptionGroup("Failed to disconnect E2E sessions", errors)
+
     async def configure_for_test(self, test_file: str, test_name: str):
         """
         Configure the proxy for a specific test.
@@ -228,6 +240,8 @@ class E2ETestContext:
             test_file: The test file name (e.g., "session" from "test_session.py")
             test_name: The test name (e.g., "should_have_stateful_conversation")
         """
+        await self.disconnect_sessions()
+
         sanitized_name = re.sub(r"[^a-zA-Z0-9]", "_", test_name).lower()
         snapshot_path = SNAPSHOTS_DIR / test_file / f"{sanitized_name}.yaml"
         abs_snapshot_path = str(snapshot_path.resolve())
@@ -267,6 +281,10 @@ class E2ETestContext:
                 # reaching connected.
                 "COPILOT_DEBUG_GITHUB_API_URL": self.proxy_url,
                 "COPILOT_HOME": self.home_dir,
+                "COPILOT_CACHE_HOME": str(Path(self.home_dir) / "cache"),
+                "COPILOT_CLI_PATH": self.cli_path,
+                "COPILOT_HMAC_KEY": "",
+                "CAPI_HMAC_KEY": "",
                 "COPILOT_SDK_AUTH_TOKEN": DEFAULT_GITHUB_TOKEN,
                 "GH_CONFIG_DIR": self.home_dir,
                 "GH_TOKEN": DEFAULT_GITHUB_TOKEN,
@@ -292,21 +310,33 @@ class E2ETestContext:
             raise RuntimeError("Proxy not started")
         await self._proxy.set_copilot_user_by_token(token, response)
 
-    async def get_exchanges(self):
+    async def get_exchanges(self, *, timeout: float | None = None):
         """Retrieve the captured HTTP exchanges from the proxy."""
         if not self._proxy:
             raise RuntimeError("Proxy not started")
-        return await self._proxy.get_exchanges()
+        return await self._proxy.get_exchanges(timeout=timeout)
 
     async def wait_for_exchanges(
         self, minimum_count: int = 1, timeout: float = 120.0
     ) -> list[dict[str, Any]]:
         """Wait until the proxy has captured at least the requested exchanges."""
-        deadline = time.monotonic() + timeout
-        exchanges: list[dict[str, Any]] = []
-        while time.monotonic() < deadline:
-            exchanges = await self.get_exchanges()
+
+        async def observe() -> list[dict[str, Any]]:
+            while True:
+                exchanges = await self.get_exchanges(timeout=None)
+                if len(exchanges) >= minimum_count:
+                    return exchanges
+                await asyncio.sleep(0.1)
+
+        observation = asyncio.create_task(observe())
+        try:
+            return await asyncio.wait_for(observation, timeout=timeout)
+        except TimeoutError as error:
+            if not observation.cancelled():
+                return observation.result()
+            exchanges = await self.get_exchanges(timeout=None)
             if len(exchanges) >= minimum_count:
                 return exchanges
-            await asyncio.sleep(0.1)
-        raise TimeoutError(f"Timed out waiting for {minimum_count} chat completion request(s)")
+            raise TimeoutError(
+                f"Timed out waiting for {minimum_count} chat completion request(s)"
+            ) from error

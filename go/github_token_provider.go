@@ -3,7 +3,7 @@ package copilot
 import (
 	"fmt"
 
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 // GitHubTokenRequestReason describes why the runtime needs a GitHub token.
@@ -39,8 +39,9 @@ type GitHubToken struct {
 	AccessToken string
 	// TokenType is the OAuth token type. The runtime defaults it to "bearer".
 	TokenType *string
-	// ExpiresIn is the required positive number of seconds remaining when the
-	// callback completes. Production GitHub tokens typically last eight hours.
+	// ExpiresIn is the required number of seconds remaining when the callback
+	// completes. More than one hour must still remain after the runtime
+	// validates the token. Production GitHub tokens typically last eight hours.
 	ExpiresIn int64
 }
 

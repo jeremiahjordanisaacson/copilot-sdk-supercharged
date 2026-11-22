@@ -154,7 +154,12 @@ Your Application
   Native Copilot runtime
 ```
 
-See [Run the Copilot runtime in process](./docs/setup/in-process-runtime.md) for the connection option in each language and its requirements.
+The SDK manages its runtime host, but the native library remains loaded for the application process lifetime. In-process hosting provides neither crash isolation nor a sandbox. See [Run the Copilot runtime in process](./docs/setup/in-process-runtime.md) for requirements and v2 migration options.
+
+You can also run the runtime outside your application process:
+
+- **Spawned child process**: select a spawned stdio or TCP connection (`RuntimeConnection.forSpawnedStdio()` or `RuntimeConnection.forSpawnedTcp()` in TypeScript and Java; each SDK has an equivalent). The SDK starts the runtime as a child process and manages its lifecycle. Use it when you need crash isolation or per-client process configuration.
+- **Standalone runtime server**: run `copilot-runtime --server` yourself and attach to it over TCP with `RuntimeConnection.forTcp(host, port)`. One multi-tenant runtime server can serve many SDK clients and concurrent sessions. See [Connecting to a standalone runtime server](./docs/getting-started.md#connecting-to-a-standalone-runtime-server).
 
 ### Portable elicitation schemas
 
@@ -186,7 +191,7 @@ and non-absolute personal target location. Summaries report `ownershipState`,
 
 ### Do I need a GitHub Copilot subscription to use the SDK?
 
-Yes, a GitHub Copilot subscription is required to use the GitHub Copilot SDK, **unless you are using BYOK (Bring Your Own Key)**. With BYOK, you can use the SDK without GitHub authentication by configuring your own API keys from supported LLM providers. For standard usage (non-BYOK), refer to the [GitHub Copilot pricing page](https://github.com/features/copilot#pricing), which includes a free tier with limited usage.
+Yes, a GitHub Copilot subscription is required to use the Microsoft Copilot SDK, **unless you are using BYOK (Bring Your Own Key)**. With BYOK, you can use the SDK without GitHub authentication by configuring your own API keys from supported LLM providers. For standard usage (non-BYOK), refer to the [GitHub Copilot pricing page](https://github.com/features/copilot#pricing), which includes a free tier with limited usage.
 
 ### How does billing work for SDK usage?
 
@@ -211,7 +216,7 @@ See the **[Authentication documentation](./docs/auth/README.md)** for details on
 
 ### Do I need to install the Copilot CLI separately?
 
-No — for Node.js, Python, and .NET SDKs, the Copilot CLI is bundled automatically as a dependency. You do not need to install it separately.
+No. The default needs a compatible native runtime, not a separately running CLI. Node.js, .NET, Python, and Rust provide acquisition or bundling; Go needs application-level bundling or an explicit runtime package, and Java needs the platform classifier dependency.
 
 For Go SDK, you may still need to install the CLI manually.
 
@@ -223,7 +228,7 @@ By default, the SDK will operate the Copilot CLI in the equivalent of `--allow-a
 
 ### Can I use custom agents, skills or tools?
 
-Yes, the GitHub Copilot SDK allows you to define custom agents, skills, and tools. You can extend the functionality of the agents by implementing your own logic and integrating additional tools as needed. Refer to the SDK documentation of your preferred language for more details.
+Yes, the Microsoft Copilot SDK allows you to define custom agents, skills, and tools. You can extend the functionality of the agents by implementing your own logic and integrating additional tools as needed. Refer to the SDK documentation of your preferred language for more details.
 
 ### Are there instructions for Copilot to speed up development with the SDK?
 

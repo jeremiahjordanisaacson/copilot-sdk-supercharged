@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 type outputInventory struct {
@@ -23,23 +23,21 @@ type outputAnswer struct {
 	Answer int `json:"answer"`
 }
 
-func structuredSessionConfig(proxy string) *copilot.SessionConfig {
-	return &copilot.SessionConfig{
-		Model: "gpt-4.1", AvailableTools: []string{"custom:*"},
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		Provider: &copilot.ProviderConfig{
-			Type: "openai", WireAPI: "completions", BaseURL: proxy,
-			ModelID: "gpt-4.1", WireModel: "gpt-4.1", APIKey: "fake-token-for-e2e-tests",
-			Headers: map[string]string{
-				"Copilot-Integration-Id": "copilot-developer-cli",
-				"Copilot-Harness-Id":     "copilot-sdk",
-				"X-GitHub-Api-Version":   "2026-08-01",
-			},
+func structuredSessionConfig(proxy string) *copilot.CreateSessionOptions {
+	return &copilot.CreateSessionOptions{GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}}, Model: "gpt-4.1", Tools: copilot.SessionToolOptions{AvailableTools: []string{"custom:*"}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Inference: byokInference(&copilot.ProviderConfig{
+		Type: "openai", WireAPI: "completions", BaseURL: proxy,
+		ModelID: "gpt-4.1", WireModel: "gpt-4.1", APIKey: "fake-token-for-e2e-tests",
+		Headers: map[string]string{
+			"Copilot-Integration-Id": "copilot-developer-cli",
+			"Copilot-Harness-Id":     "copilot-sdk",
+			"X-GitHub-Api-Version":   "2026-08-01",
 		},
+	}, copilot.SessionInferenceOptions{}),
 	}
 }
 
 func TestStructuredOutputE2E(t *testing.T) {
+	t.Parallel()
 	harness := testharness.NewTestContext(t)
 	client := harness.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -51,8 +49,8 @@ func TestStructuredOutputE2E(t *testing.T) {
 		var calls atomic.Int32
 		config := structuredSessionConfig(harness.ProxyURL)
 		streaming := true
-		config.Streaming = &streaming
-		config.Tools = []copilot.Tool{copilot.DefineTool("get_inventory", "Get the current widget inventory.",
+		config.Events.Streaming = &streaming
+		config.Tools.Definitions = []copilot.Tool{copilot.DefineTool("get_inventory", "Get the current widget inventory.",
 			func(_ struct{}, _ copilot.ToolInvocation) (string, error) {
 				calls.Add(1)
 				return "The inventory contains 42 red widgets.", nil
@@ -113,7 +111,7 @@ func TestStructuredOutputE2E(t *testing.T) {
 		defer cancel()
 		var stops atomic.Int32
 		config := structuredSessionConfig(harness.ProxyURL)
-		config.Hooks = &copilot.SessionHooks{OnAgentStop: func(_ copilot.AgentStopHookInput, _ copilot.HookInvocation) (*copilot.AgentStopHookOutput, error) {
+		config.Hooks.Handlers = &copilot.SessionHooks{OnAgentStop: func(_ copilot.AgentStopHookInput, _ copilot.HookInvocation) (*copilot.AgentStopHookOutput, error) {
 			if stops.Add(1) == 1 {
 				return &copilot.AgentStopHookOutput{Decision: "block", Reason: "Correct the answer to 99, not 42. Do not use tools."}, nil
 			}
@@ -159,11 +157,11 @@ func TestStructuredOutputE2E(t *testing.T) {
 		var releaseOnce sync.Once
 		defer releaseOnce.Do(func() { close(release) })
 		config := structuredSessionConfig(harness.ProxyURL)
-		config.Tools = []copilot.Tool{copilot.DefineTool("read_inventory", "Read the current widget count and color.",
+		config.Tools.Definitions = []copilot.Tool{copilot.DefineTool("read_inventory", "Read the current widget count and color.",
 			func(_ struct{}, _ copilot.ToolInvocation) (string, error) {
 				return "The inventory contains 42 red widgets.", nil
 			})}
-		config.Hooks = &copilot.SessionHooks{OnAgentStop: func(_ copilot.AgentStopHookInput, _ copilot.HookInvocation) (*copilot.AgentStopHookOutput, error) {
+		config.Hooks.Handlers = &copilot.SessionHooks{OnAgentStop: func(_ copilot.AgentStopHookInput, _ copilot.HookInvocation) (*copilot.AgentStopHookOutput, error) {
 			close(entered)
 			select {
 			case <-release:
@@ -376,8 +374,8 @@ func TestStructuredOutputE2E(t *testing.T) {
 			func(_ struct{}, _ copilot.ToolInvocation) (int, error) { calls.Add(1); return 58, nil })
 		tool.IsTerminal, tool.SkipPermission = true, true
 		config := structuredSessionConfig(harness.ProxyURL)
-		config.Tools = []copilot.Tool{tool}
-		config.Hooks = &copilot.SessionHooks{OnAgentStop: func(_ copilot.AgentStopHookInput, _ copilot.HookInvocation) (*copilot.AgentStopHookOutput, error) {
+		config.Tools.Definitions = []copilot.Tool{tool}
+		config.Hooks.Handlers = &copilot.SessionHooks{OnAgentStop: func(_ copilot.AgentStopHookInput, _ copilot.HookInvocation) (*copilot.AgentStopHookOutput, error) {
 			if stops.Add(1) == 1 {
 				return &copilot.AgentStopHookOutput{Decision: "block", Reason: "Correct the answer to 99, not 63. Do not use tools."}, nil
 			}
@@ -402,7 +400,7 @@ func TestStructuredOutputE2E(t *testing.T) {
 		var session *copilot.Session
 		var stops atomic.Int32
 		config := structuredSessionConfig(harness.ProxyURL)
-		config.Hooks = &copilot.SessionHooks{OnAgentStop: func(_ copilot.AgentStopHookInput, _ copilot.HookInvocation) (*copilot.AgentStopHookOutput, error) {
+		config.Hooks.Handlers = &copilot.SessionHooks{OnAgentStop: func(_ copilot.AgentStopHookInput, _ copilot.HookInvocation) (*copilot.AgentStopHookOutput, error) {
 			if stops.Add(1) == 1 {
 				_, err := session.Send(ctx, copilot.MessageOptions{Prompt: "Change the answer to 99. Do not use tools.", Mode: "immediate"})
 				return nil, err
@@ -436,7 +434,7 @@ func TestStructuredOutputE2E(t *testing.T) {
 			})
 		tool.IsTerminal, tool.SkipPermission = true, true
 		config := structuredSessionConfig(harness.ProxyURL)
-		config.Tools = []copilot.Tool{tool}
+		config.Tools.Definitions = []copilot.Tool{tool}
 		var err error
 		session, err = client.CreateSession(ctx, config)
 		if err != nil {
@@ -476,7 +474,7 @@ func TestStructuredOutputE2E(t *testing.T) {
 		var releaseOnce sync.Once
 		defer releaseOnce.Do(func() { close(release) })
 		config := structuredSessionConfig(harness.ProxyURL)
-		config.Tools = []copilot.Tool{copilot.DefineTool("first_number", "Get the number for the first question.",
+		config.Tools.Definitions = []copilot.Tool{copilot.DefineTool("first_number", "Get the number for the first question.",
 			func(_ struct{}, _ copilot.ToolInvocation) (int, error) {
 				close(entered)
 				select {

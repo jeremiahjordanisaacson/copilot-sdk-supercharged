@@ -6,6 +6,7 @@ Mirrors the Node.js client.test.ts tests for these features.
 """
 
 import asyncio
+from unittest.mock import Mock
 
 import pytest
 
@@ -15,11 +16,14 @@ from copilot.session import (
     AutoModeSwitchResponse,
     CommandContext,
     CommandDefinition,
+    CopilotSession,
     ElicitationContext,
     ElicitationResult,
     ExitPlanModeRequest,
     ExitPlanModeResult,
     PermissionHandler,
+    UserInputRequest,
+    UserInputResponse,
 )
 from e2e.testharness import CLI_PATH
 
@@ -32,7 +36,9 @@ class TestCommands:
     @pytest.mark.asyncio
     async def test_forwards_commands_in_session_create_rpc(self):
         """Verifies that commands (name + description) are serialized in session.create payload."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
@@ -46,22 +52,24 @@ class TestCommands:
             client._client.request = mock_request
 
             await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                commands=[
-                    CommandDefinition(
-                        name="deploy",
-                        description="Deploy the app",
-                        handler=lambda ctx: None,
-                    ),
-                    CommandDefinition(
-                        name="rollback",
-                        handler=lambda ctx: None,
-                    ),
-                ],
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "commands": [
+                        CommandDefinition(
+                            name="deploy",
+                            description="Deploy the app",
+                            handler=lambda ctx: None,
+                        ),
+                        CommandDefinition(
+                            name="rollback",
+                            handler=lambda ctx: None,
+                        ),
+                    ]
+                },
             )
 
             payload = captured["session.create"]
-            assert payload["commands"] == [
+            assert payload["interaction"]["commands"] == [
                 {"name": "deploy", "description": "Deploy the app"},
                 {"name": "rollback", "description": ""},
             ]
@@ -71,12 +79,14 @@ class TestCommands:
     @pytest.mark.asyncio
     async def test_forwards_commands_in_session_resume_rpc(self):
         """Verifies that commands are serialized in session.resume payload."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all
+                permissions={"on_request": PermissionHandler.approve_all}
             )
 
             captured: dict = {}
@@ -91,25 +101,31 @@ class TestCommands:
 
             await client.resume_session(
                 session.session_id,
-                on_permission_request=PermissionHandler.approve_all,
-                commands=[
-                    CommandDefinition(
-                        name="deploy",
-                        description="Deploy",
-                        handler=lambda ctx: None,
-                    ),
-                ],
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "commands": [
+                        CommandDefinition(
+                            name="deploy",
+                            description="Deploy",
+                            handler=lambda ctx: None,
+                        ),
+                    ]
+                },
             )
 
             payload = captured["session.resume"]
-            assert payload["commands"] == [{"name": "deploy", "description": "Deploy"}]
+            assert payload["interaction"]["commands"] == [
+                {"name": "deploy", "description": "Deploy"}
+            ]
         finally:
             await client.force_stop()
 
     @pytest.mark.asyncio
     async def test_routes_command_execute_event_to_correct_handler(self):
         """Verifies the command dispatch works for command.execute events."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
@@ -119,10 +135,12 @@ class TestCommands:
                 handler_calls.append(ctx)
 
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                commands=[
-                    CommandDefinition(name="deploy", handler=deploy_handler),
-                ],
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "commands": [
+                        CommandDefinition(name="deploy", handler=deploy_handler),
+                    ]
+                },
             )
 
             # Mock the RPC so handlePendingCommand doesn't fail
@@ -182,7 +200,9 @@ class TestCommands:
     @pytest.mark.asyncio
     async def test_sends_error_when_command_handler_throws(self):
         """Verifies error is sent via RPC when a command handler raises."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
@@ -191,10 +211,12 @@ class TestCommands:
                 raise RuntimeError("deploy failed")
 
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                commands=[
-                    CommandDefinition(name="fail", handler=fail_handler),
-                ],
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "commands": [
+                        CommandDefinition(name="fail", handler=fail_handler),
+                    ]
+                },
             )
 
             rpc_calls: list[tuple] = []
@@ -242,15 +264,19 @@ class TestCommands:
     @pytest.mark.asyncio
     async def test_sends_error_for_unknown_command(self):
         """Verifies error is sent via RPC for an unrecognized command."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                commands=[
-                    CommandDefinition(name="deploy", handler=lambda ctx: None),
-                ],
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "commands": [
+                        CommandDefinition(name="deploy", handler=lambda ctx: None),
+                    ]
+                },
             )
 
             rpc_calls: list[tuple] = []
@@ -305,7 +331,9 @@ class TestUiElicitation:
     @pytest.mark.asyncio
     async def test_reads_capabilities_from_session_create_response(self):
         """Verifies capabilities are parsed from session.create response."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
@@ -320,7 +348,7 @@ class TestUiElicitation:
             client._client.request = mock_request
 
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             assert session.capabilities == {"ui": {"elicitation": True}}
         finally:
@@ -329,12 +357,14 @@ class TestUiElicitation:
     @pytest.mark.asyncio
     async def test_defaults_capabilities_when_not_injected(self):
         """Verifies capabilities default to empty when server returns none."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             # CLI returns actual capabilities; in headless mode, elicitation is
             # either False or absent. Just verify we don't crash.
@@ -346,12 +376,14 @@ class TestUiElicitation:
     @pytest.mark.asyncio
     async def test_elicitation_throws_when_capability_is_missing(self):
         """Verifies that UI methods throw when elicitation is not supported."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             # Force capabilities to not support elicitation
             session._set_capabilities({})
@@ -373,12 +405,14 @@ class TestUiElicitation:
     @pytest.mark.asyncio
     async def test_confirm_throws_when_capability_is_missing(self):
         """Verifies confirm throws when elicitation is not supported."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             session._set_capabilities({})
 
@@ -397,7 +431,9 @@ class TestOnElicitationContext:
     @pytest.mark.asyncio
     async def test_sends_request_elicitation_flag_when_handler_provided(self):
         """Verifies requestElicitation=true is sent when onElicitationContext is provided."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
@@ -416,20 +452,22 @@ class TestOnElicitationContext:
                 return {"action": "accept", "content": {}}
 
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                on_elicitation_request=elicitation_handler,
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={"on_elicitation_request": elicitation_handler},
             )
             assert session is not None
 
             payload = captured["session.create"]
-            assert payload["requestElicitation"] is True
+            assert payload["interaction"]["requestElicitation"] is True
         finally:
             await client.force_stop()
 
     @pytest.mark.asyncio
     async def test_does_not_send_request_elicitation_when_no_handler(self):
         """Verifies requestElicitation=false when no handler is provided."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
@@ -443,21 +481,23 @@ class TestOnElicitationContext:
             client._client.request = mock_request
 
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             assert session is not None
 
             payload = captured["session.create"]
-            assert payload["requestElicitation"] is False
-            assert payload["requestExitPlanMode"] is False
-            assert payload["requestAutoModeSwitch"] is False
+            assert payload["interaction"]["requestElicitation"] is False
+            assert payload["interaction"]["requestExitPlanMode"] is False
+            assert payload["interaction"]["requestAutoModeSwitch"] is False
         finally:
             await client.force_stop()
 
     @pytest.mark.asyncio
     async def test_sends_mode_callback_flags_when_handlers_provided(self):
         """Verifies mode callback flags are sent when handlers are provided."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
@@ -481,27 +521,31 @@ class TestOnElicitationContext:
                 return "yes_always"
 
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                on_exit_plan_mode_request=exit_handler,
-                on_auto_mode_switch_request=auto_handler,
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "on_exit_plan_mode_request": exit_handler,
+                    "on_auto_mode_switch_request": auto_handler,
+                },
             )
             assert session is not None
 
             payload = captured["session.create"]
-            assert payload["requestExitPlanMode"] is True
-            assert payload["requestAutoModeSwitch"] is True
+            assert payload["interaction"]["requestExitPlanMode"] is True
+            assert payload["interaction"]["requestAutoModeSwitch"] is True
         finally:
             await client.force_stop()
 
     @pytest.mark.asyncio
     async def test_sends_mode_callback_flags_on_resume_when_handlers_provided(self):
         """Verifies mode callback flags are sent on session.resume."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             captured: dict = {}
 
@@ -515,21 +559,25 @@ class TestOnElicitationContext:
 
             await client.resume_session(
                 session.session_id,
-                on_permission_request=PermissionHandler.approve_all,
-                on_exit_plan_mode_request=lambda request, invocation: {"approved": True},
-                on_auto_mode_switch_request=lambda request, invocation: "yes",
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "on_exit_plan_mode_request": lambda request, invocation: {"approved": True},
+                    "on_auto_mode_switch_request": lambda request, invocation: "yes",
+                },
             )
 
             payload = captured["session.resume"]
-            assert payload["requestExitPlanMode"] is True
-            assert payload["requestAutoModeSwitch"] is True
+            assert payload["interaction"]["requestExitPlanMode"] is True
+            assert payload["interaction"]["requestAutoModeSwitch"] is True
         finally:
             await client.force_stop()
 
     @pytest.mark.asyncio
     async def test_dispatches_mode_callback_requests_to_registered_handlers(self):
         """Verifies direct mode requests are dispatched to registered handlers."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
@@ -557,9 +605,11 @@ class TestOnElicitationContext:
                 return "yes_always"
 
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                on_exit_plan_mode_request=exit_handler,
-                on_auto_mode_switch_request=auto_handler,
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={
+                    "on_exit_plan_mode_request": exit_handler,
+                    "on_auto_mode_switch_request": auto_handler,
+                },
             )
 
             exit_result = await client._handle_exit_plan_mode_request(
@@ -591,7 +641,9 @@ class TestOnElicitationContext:
     @pytest.mark.asyncio
     async def test_sends_cancel_when_elicitation_handler_throws(self):
         """Verifies auto-cancel when the elicitation handler raises."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
@@ -602,8 +654,8 @@ class TestOnElicitationContext:
                 raise RuntimeError("handler exploded")
 
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                on_elicitation_request=bad_handler,
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={"on_elicitation_request": bad_handler},
             )
 
             rpc_calls: list[tuple] = []
@@ -634,9 +686,100 @@ class TestOnElicitationContext:
             await client.force_stop()
 
     @pytest.mark.asyncio
+    async def test_sends_cancel_when_elicitation_handler_raises_cancelled_error(self):
+        """A CancelledError raised by the handler itself is a handler failure."""
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
+        await client.start()
+
+        try:
+
+            async def gave_up_handler(
+                context: ElicitationContext,
+            ) -> ElicitationResult:
+                raise asyncio.CancelledError("dialog closed")
+
+            session = await client.create_session(
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={"on_elicitation_request": gave_up_handler},
+            )
+
+            rpc_calls: list[tuple] = []
+            original_request = client._client.request
+
+            async def mock_request(method, params, **kwargs):
+                if method == "session.ui.handlePendingElicitation":
+                    rpc_calls.append((method, params))
+                    return {"success": True}
+                return await original_request(method, params)
+
+            client._client.request = mock_request
+
+            await session._handle_elicitation_request(
+                {"session_id": session.session_id, "message": "Pick a color"}, "req-456"
+            )
+
+            assert len(rpc_calls) == 1
+            assert rpc_calls[0][1]["requestId"] == "req-456"
+            assert rpc_calls[0][1]["result"]["action"] == "cancel"
+        finally:
+            await client.force_stop()
+
+    @pytest.mark.asyncio
+    async def test_cancelling_elicitation_dispatch_propagates_without_answer(self):
+        """Cancelling the dispatch task itself is not reported as a handler failure."""
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
+        await client.start()
+
+        try:
+            handler_started = asyncio.Event()
+
+            async def waiting_handler(
+                context: ElicitationContext,
+            ) -> ElicitationResult:
+                handler_started.set()
+                await asyncio.Event().wait()
+                return {"action": "accept"}
+
+            session = await client.create_session(
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={"on_elicitation_request": waiting_handler},
+            )
+
+            rpc_calls: list[tuple] = []
+            original_request = client._client.request
+
+            async def mock_request(method, params, **kwargs):
+                if method == "session.ui.handlePendingElicitation":
+                    rpc_calls.append((method, params))
+                    return {"success": True}
+                return await original_request(method, params)
+
+            client._client.request = mock_request
+
+            dispatch = asyncio.ensure_future(
+                session._handle_elicitation_request(
+                    {"session_id": session.session_id, "message": "Pick a color"}, "req-789"
+                )
+            )
+            await asyncio.wait_for(handler_started.wait(), timeout=10)
+            dispatch.cancel()
+
+            with pytest.raises(asyncio.CancelledError):
+                await dispatch
+            assert rpc_calls == []
+        finally:
+            await client.force_stop()
+
+    @pytest.mark.asyncio
     async def test_dispatches_elicitation_requested_event_to_handler(self):
         """Verifies that an elicitation.requested event dispatches to the handler."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
@@ -649,8 +792,8 @@ class TestOnElicitationContext:
                 return {"action": "accept", "content": {"color": "blue"}}
 
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                on_elicitation_request=elicitation_handler,
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={"on_elicitation_request": elicitation_handler},
             )
 
             rpc_calls: list[tuple] = []
@@ -699,7 +842,9 @@ class TestOnElicitationContext:
     @pytest.mark.asyncio
     async def test_elicitation_handler_receives_full_schema(self):
         """Verifies that requestedSchema passes type, properties, and required to handler."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
@@ -714,8 +859,8 @@ class TestOnElicitationContext:
                 return {"action": "cancel"}
 
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                on_elicitation_request=elicitation_handler,
+                permissions={"on_request": PermissionHandler.approve_all},
+                interaction={"on_elicitation_request": elicitation_handler},
             )
 
             original_request = client._client.request
@@ -769,6 +914,130 @@ class TestOnElicitationContext:
 
 
 # ============================================================================
+# Mode callback request IDs (userInput.request / exitPlanMode.request)
+# ============================================================================
+
+
+def _client_with_session() -> tuple[CopilotClient, CopilotSession]:
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
+    session = CopilotSession("session-1", Mock())
+    client._sessions[session.session_id] = session
+    return client, session
+
+
+class TestModeCallbackRequestIds:
+    @pytest.mark.asyncio
+    async def test_user_input_request_threads_runtime_request_id(self):
+        client, session = _client_with_session()
+        received: list[UserInputRequest] = []
+
+        def handler(request: UserInputRequest, invocation: dict[str, str]) -> UserInputResponse:
+            received.append(request)
+            return {"answer": "yes", "wasFreeform": True}
+
+        session._register_user_input_handler(handler)
+
+        result = await client._handle_user_input_request(
+            {
+                "sessionId": session.session_id,
+                "question": "Proceed?",
+                "choices": ["yes", "no"],
+                "allowFreeform": False,
+                "requestId": "user-input-request-1",
+            }
+        )
+
+        assert result == {"answer": "yes", "wasFreeform": True}
+        assert received == [
+            {
+                "question": "Proceed?",
+                "choices": ["yes", "no"],
+                "allowFreeform": False,
+                "requestId": "user-input-request-1",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("extra", [{}, {"requestId": ""}, {"requestId": None}])
+    async def test_user_input_request_omits_missing_request_id(self, extra: dict):
+        client, session = _client_with_session()
+        received: list[UserInputRequest] = []
+
+        def handler(request: UserInputRequest, invocation: dict[str, str]) -> UserInputResponse:
+            received.append(request)
+            return {"answer": "yes", "wasFreeform": True}
+
+        session._register_user_input_handler(handler)
+
+        await client._handle_user_input_request(
+            {"sessionId": session.session_id, "question": "Proceed?", **extra}
+        )
+
+        assert len(received) == 1, received
+        assert "requestId" not in received[0], received[0]
+
+    @pytest.mark.asyncio
+    async def test_exit_plan_mode_request_threads_runtime_request_id(self):
+        client, session = _client_with_session()
+        received: list[ExitPlanModeRequest] = []
+
+        def handler(request: ExitPlanModeRequest, invocation: dict[str, str]) -> ExitPlanModeResult:
+            received.append(request)
+            return {"approved": True, "selectedAction": "interactive"}
+
+        session._register_exit_plan_mode_handler(handler)
+
+        result = await client._handle_exit_plan_mode_request(
+            {
+                "sessionId": session.session_id,
+                "summary": "Review the plan",
+                "planContent": "Plan body",
+                "actions": ["interactive", "autopilot"],
+                "recommendedAction": "autopilot",
+                "requestId": "exit-plan-request-1",
+            }
+        )
+
+        assert result == {"approved": True, "selectedAction": "interactive"}
+        assert received == [
+            {
+                "summary": "Review the plan",
+                "planContent": "Plan body",
+                "actions": ["interactive", "autopilot"],
+                "recommendedAction": "autopilot",
+                "requestId": "exit-plan-request-1",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("extra", [{}, {"requestId": ""}, {"requestId": None}])
+    async def test_exit_plan_mode_request_omits_missing_request_id(self, extra: dict):
+        client, session = _client_with_session()
+        received: list[ExitPlanModeRequest] = []
+
+        def handler(request: ExitPlanModeRequest, invocation: dict[str, str]) -> ExitPlanModeResult:
+            received.append(request)
+            return {"approved": True}
+
+        session._register_exit_plan_mode_handler(handler)
+
+        await client._handle_exit_plan_mode_request(
+            {
+                "sessionId": session.session_id,
+                "summary": "Review the plan",
+                "actions": ["interactive"],
+                "recommendedAction": "interactive",
+                **extra,
+            }
+        )
+
+        assert len(received) == 1, received
+        assert "requestId" not in received[0], received[0]
+
+
+# ============================================================================
 # Capabilities changed event
 # ============================================================================
 
@@ -777,12 +1046,14 @@ class TestCapabilitiesChanged:
     @pytest.mark.asyncio
     async def test_capabilities_changed_event_updates_session(self):
         """Verifies that a capabilities.changed event updates session capabilities."""
-        client = CopilotClient(connection=RuntimeConnection.for_stdio(path=CLI_PATH))
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
         await client.start()
 
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             session._set_capabilities({})
 

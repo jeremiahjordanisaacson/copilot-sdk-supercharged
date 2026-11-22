@@ -4,7 +4,7 @@
 
 using System.Text.Json.Serialization;
 
-namespace GitHub.Copilot.Rpc;
+namespace Microsoft.Copilot.Rpc;
 
 /// <summary>
 /// SDK-only <see cref="PermissionDecision"/> value indicating the handler
@@ -20,7 +20,7 @@ public sealed class PermissionDecisionNoResult : PermissionDecision
 
 /// <summary>
 /// Static factories for the common <see cref="PermissionDecision"/> variants
-/// returned by <c>OnPermissionRequest</c> handlers. Use these for quick
+/// returned by <c>Permissions.OnRequest</c> handlers. Use these for quick
 /// discoverability via <c>PermissionDecision.&lt;dot&gt;</c>. For richer
 /// decisions (per-session, per-location, permanent) that need an
 /// <c>Approval</c> payload, instantiate the variant class directly.
@@ -48,7 +48,10 @@ public partial class PermissionDecision
     /// Optional provenance describing how and where this decision was made.
     /// This is never serialized as part of the decision itself: the SDK forwards
     /// it to the runtime as a sibling of <c>result</c> so that auto-approval
-    /// telemetry can be attributed correctly.
+    /// telemetry can be attributed correctly. When it says a person decided
+    /// (<c>source</c> <c>human_response</c>), the runtime records the decision as
+    /// the person's own, but only from the session's authenticated owning
+    /// connection; from any other caller the decision applies without that authority.
     /// </summary>
     [JsonIgnore]
     public PermissionDecisionContext? DecisionContext { get; set; }

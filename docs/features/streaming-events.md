@@ -1,10 +1,10 @@
 # Streaming session events
 
-Every action the Copilot agent takes—thinking, writing code, running tools—is emitted as a **session event** you can subscribe to. This guide is a field-level reference for each event type so you know exactly what data to expect without reading the SDK source.
+Every action the Copilot agent takes—thinking, writing code, running tools—is emitted as a **session event** you can subscribe to. This guide is a field-level reference for the event types applications most often handle, so you know exactly what data to expect without reading the SDK source. It does not cover every event type: the session event types each SDK generates (for example, the `SessionEvent` union in Node.js) list every event the runtime can emit.
 
 ## Overview
 
-When `streaming: true` is set on a session, the SDK emits **ephemeral** events in real time (deltas, progress updates) alongside **persisted** events (complete messages, tool results). All events share a common envelope and carry a `data` payload whose shape depends on the event `type`.
+When `events.streaming` is set to `true` on a session, the SDK emits **ephemeral** events in real time (deltas, progress updates) alongside **persisted** events (complete messages, tool results). All events share a common envelope and carry a `data` payload whose shape depends on the event `type`.
 
 ```mermaid
 sequenceDiagram
@@ -45,7 +45,7 @@ sequenceDiagram
 | **Ephemeral event** | Transient; streamed in real time but **not** persisted to the session log. Not replayed on session resume. |
 | **Persisted event** | Saved to the session event log on disk. Replayed when resuming a session. |
 | **Delta event** | An ephemeral streaming chunk (text or reasoning). Accumulate deltas to build the complete content. |
-| **`parentId` chain** | Each event's `parentId` points to the previous event, forming a linked list you can walk. |
+| **`parentId` chain** | Each persisted event's `parentId` points to the persisted event before it, forming a chain you can walk. An ephemeral event's `parentId` points to the most recent persisted event, and no event's `parentId` points to an ephemeral event, so walking the chain visits only persisted events. |
 
 ## Event envelope
 
@@ -55,7 +55,7 @@ Every session event, regardless of type, includes these fields:
 |-------|------|-------------|
 | `id` | `string` (UUID v4) | Unique event identifier |
 | `timestamp` | `string` (ISO 8601) | When the event was created |
-| `parentId` | `string \| null` | ID of the previous event in the chain; `null` for the first event |
+| `parentId` | `string \| null` | ID of the most recent persisted event when this event was emitted; `null` if there was none yet |
 | `agentId` | `string?` | Sub-agent instance ID for sub-agent-originated events; absent for root/main agent and session-level events |
 | `ephemeral` | `boolean?` | `true` for transient events; absent or `false` for persisted events |
 | `type` | `string` | Event type discriminator (see tables below) |
@@ -85,18 +85,15 @@ session.on("assistant.message_delta", (event) => {
 
 <!-- docs-validate: hidden -->
 ```python
-from copilot import CopilotClient
+from copilot.session import CopilotSession
 from copilot.session_events import SessionEventType
-
-client = CopilotClient()
-
-session = None  # assume session is created elsewhere
 
 def handle(event):
     if event.type == SessionEventType.ASSISTANT_MESSAGE_DELTA:
         print(event.data.delta_content, end="", flush=True)
 
-# session.on(handle)
+def register(session: CopilotSession):
+    session.on(handle)
 ```
 <!-- /docs-validate: hidden -->
 
@@ -122,19 +119,23 @@ package main
 import (
 	"context"
 	"fmt"
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func main() {
 	ctx := context.Background()
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
-	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-		Model:     "gpt-5.4",
-		Streaming: copilot.Bool(true),
-		OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-			return &rpc.PermissionDecisionApproveOnce{}, nil
+	session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Model: "auto",
+		Events: copilot.SessionEventOptions{
+			Streaming: copilot.Bool(true),
+		},
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+				return &rpc.PermissionDecisionApproveOnce{}, nil
+			},
 		},
 	})
 
@@ -161,26 +162,6 @@ session.On(func(event copilot.SessionEvent) {
 <details>
 <summary><strong>.NET</strong></summary>
 
-<!-- docs-validate: hidden -->
-```csharp
-using GitHub.Copilot;
-
-public static class StreamingEventsExample
-{
-    public static async Task Example(CopilotSession session)
-    {
-        session.On<SessionEvent>(evt =>
-        {
-            if (evt is AssistantMessageDeltaEvent delta)
-            {
-                Console.Write(delta.Data.DeltaContent);
-            }
-        });
-    }
-}
-```
-<!-- /docs-validate: hidden -->
-
 ```csharp
 session.On<SessionEvent>(evt =>
 {
@@ -196,7 +177,24 @@ session.On<SessionEvent>(evt =>
 <details>
 <summary><strong>Java</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```java
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.generated.*;
+
+public class SubscribingToEventsExample {
+    static void subscribe(CopilotSession session) {
+        // All events
+        session.on(event -> System.out.println(event.getType()));
+
+        // Specific event type — data is narrowed to the matching class
+        session.on(AssistantMessageDeltaEvent.class, event ->
+            System.out.print(event.getData().deltaContent())
+        );
+    }
+}
+```
+<!-- /docs-validate: hidden -->
 ```java
 // All events
 session.on(event -> System.out.println(event.getType()));
@@ -226,13 +224,14 @@ A session can emit events before its create or resume call returns. The agent ma
 > **(Rust)** `Client::prepare_session` and `Client::prepare_resume_session` return a `PreparedSession` that owns the session's event channel before any protocol activity happens. Subscribe first, then call `start()`.
 
 ```rust
-use github_copilot_sdk::{Client, SessionConfig};
+use copilot_sdk::{Client, CreateSessionOptions};
 
 async fn create_without_missing_startup_events(
     client: &Client,
-) -> Result<(), github_copilot_sdk::Error> {
+) -> Result<(), copilot_sdk::Error> {
     let prepared = client.prepare_session(
-        SessionConfig::default().with_event_buffer_capacity(2048),
+        CreateSessionOptions::default()
+            .with_events(|__sdk_group| __sdk_group.with_buffer_capacity(2048)),
     )?;
 
     // Installed before any wire activity: nothing is dropped for lack of a receiver.
@@ -249,7 +248,7 @@ async fn create_without_missing_startup_events(
 }
 ```
 
-`prepare_*` is synchronous and inert: it validates the buffer capacity, allocates a local channel, and does nothing else. No session is registered and nothing reaches the CLI until `start()` is first polled. Dropping a prepared session that was never started leaves no state behind and closes its subscriptions; dropping the `start()` future cancels the in-flight startup and unregisters the session, so a retry with the same session ID succeeds. Cleanup is scoped to the exact registration the abandoned startup owned, so it cannot evict a retry that has already taken over the same session ID.
+`prepare_*` is synchronous and inert: it validates the buffer capacity, allocates a local channel, and does nothing else. No session is registered and nothing reaches the runtime until `start()` is first polled. Dropping a prepared session that was never started leaves no state behind and closes its subscriptions; dropping the `start()` future cancels the in-flight startup and unregisters the session, so a retry with the same session ID succeeds. Cleanup is scoped to the exact registration the abandoned startup owned, so it cannot evict a retry that has already taken over the same session ID.
 
 Startup buffering is worth planning for:
 
@@ -268,7 +267,7 @@ Sub-agent events share the parent session stream and include envelope-level `age
 <summary><strong>TypeScript</strong></summary>
 
 ```typescript
-import type { CopilotSession } from "@github/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 export function subscribeParentResponse(session: CopilotSession): void {
     session.on("assistant.message_delta", (event) => {
@@ -310,7 +309,7 @@ package example
 import (
 	"fmt"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func subscribeParentResponse(session *copilot.Session) {
@@ -333,7 +332,7 @@ func subscribeParentResponse(session *copilot.Session) {
 
 ```csharp
 using System;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 static class ParentAgentResponseExample
 {
@@ -356,8 +355,8 @@ static class ParentAgentResponseExample
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotSession;
-import com.github.copilot.generated.AssistantMessageDeltaEvent;
+import com.microsoft.copilot.CopilotSession;
+import com.microsoft.copilot.generated.AssistantMessageDeltaEvent;
 
 final class ParentAgentResponseExample {
     static void subscribeParentResponse(CopilotSession session) {
@@ -376,7 +375,7 @@ final class ParentAgentResponseExample {
 <summary><strong>Rust</strong></summary>
 
 ```rust
-use github_copilot_sdk::session::Session;
+use copilot_sdk::session::Session;
 
 async fn subscribe_parent_response(session: &Session) {
     let mut events = session.subscribe();
@@ -405,6 +404,9 @@ Emitted when the agent begins processing a turn.
 |------------|------|----------|-------------|
 | `turnId` | `string` | ✅ | Turn identifier (typically a stringified turn number) |
 | `interactionId` | `string` | | CAPI interaction ID for telemetry correlation |
+| `agentMode` | `"interactive" \| "plan" \| "autopilot"` | | Agent mode whose tools this turn was offered; absent on historical events and sub-agent turns |
+| `model` | `string` | | Model identifier used for this turn, when known |
+| `parentToolCallId` | `string` | | Parent task tool call ID when this turn belongs to a sub-agent |
 
 ### `assistant.intent`
 
@@ -431,6 +433,7 @@ Ephemeral. Incremental chunk of the model's extended thinking, streamed in real 
 |------------|------|----------|-------------|
 | `reasoningId` | `string` | ✅ | Matches the corresponding `assistant.reasoning` event |
 | `deltaContent` | `string` | ✅ | Text chunk to append to reasoning content |
+| `fusion` | `FusionAttribution` | | Experimental. HydraFusion phase attribution; present without a `commitId` while a staged phase streams provisional reasoning that may still be discarded |
 
 ### `assistant.message`
 
@@ -443,11 +446,13 @@ The assistant's complete response for this LLM call. May include tool invocation
 | `toolRequests` | `ToolRequest[]` | | Tool calls the assistant wants to make (see below) |
 | `reasoningOpaque` | `string` | | Encrypted extended thinking (Anthropic models); session-bound |
 | `reasoningText` | `string` | | Readable reasoning text from extended thinking |
-| `encryptedContent` | `string` | | Encrypted reasoning content (OpenAI models); session-bound |
+| `encryptedContent` | `string` | | **Deprecated.** Older events can contain this field; new events omit it |
+| `reasoningBlocks` | `AssistantMessageReasoningBlocks` | | Experimental. For `provider: "openai-responses"`, reasoning items in `blocks` can contain `encrypted_content` |
 | `phase` | `string` | | Generation phase (e.g., `"thinking"` vs `"response"`) |
-| `outputTokens` | `number` | | Actual output token count from the API response |
+| `outputTokens` | `number` | | Output tokens this message adds to replayed context, for token accounting. Use `assistant.usage` for billed usage |
 | `interactionId` | `string` | | CAPI interaction ID for telemetry |
-| `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
+
+If your SDK's event decoder does not expose `reasoningBlocks`, its typed callback cannot read the ciphertext from new events. In .NET, explicitly referencing `AssistantMessageReasoningBlocks` raises the `MCPSDK001` experimental diagnostic. For readable reasoning, use `reasoningText` instead.
 
 **`ToolRequest` fields:**
 
@@ -466,7 +471,7 @@ Ephemeral. Incremental chunk of the assistant's text response, streamed in real 
 |------------|------|----------|-------------|
 | `messageId` | `string` | ✅ | Matches the corresponding `assistant.message` event |
 | `deltaContent` | `string` | ✅ | Text chunk to append to the message |
-| `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
+| `fusion` | `FusionAttribution` | | Experimental. HydraFusion phase attribution; present without a `commitId` while a staged phase streams provisional text that may still be discarded |
 
 ### `assistant.turn_end`
 
@@ -475,6 +480,8 @@ Emitted when the agent finishes a turn (all tool executions complete, final resp
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `turnId` | `string` | ✅ | Matches the corresponding `assistant.turn_start` event |
+| `model` | `string` | | Model identifier used for this turn, when known |
+| `parentToolCallId` | `string` | | Parent task tool call ID when this turn belongs to a sub-agent |
 
 ### `assistant.usage`
 
@@ -482,7 +489,7 @@ Ephemeral. Token usage and cost information for an individual API call.
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
-| `model` | `string` | ✅ | Model identifier (e.g., `"gpt-5.4"`) |
+| `model` | `string` | ✅ | Model identifier (e.g., `"claude-sonnet-5"`) |
 | `inputTokens` | `number` | | Total input tokens for this call, including `cacheReadTokens` and `cacheWriteTokens` |
 | `outputTokens` | `number` | | Output tokens produced |
 | `reasoningTokens` | `number` | | Output tokens used for reasoning/chain-of-thought (subset of `outputTokens`) |
@@ -496,12 +503,11 @@ Ephemeral. Token usage and cost information for an individual API call.
 | `timeToFirstTokenMs` | `number` | | Time from request dispatch to first token received (streaming latency) |
 | `interTokenLatencyMs` | `number` | | Average latency between consecutive tokens (streaming throughput) |
 | `reasoningEffort` | `string` | | Reasoning effort level used for this call (e.g., `"low"`, `"medium"`, `"high"`) |
-| `initiator` | `string` | | What triggered this call (e.g., `"sub-agent"`); absent for user-initiated |
+| `initiator` | `string` | | What triggered this call: `"user"` for a request that carries a user prompt, `"agent"` for an agent-driven request such as the follow-up after a tool result, or the delegating caller (e.g., `"sub-agent"`, `"mcp-sampling"`) |
 | `apiCallId` | `string` | | Completion ID from the provider (e.g., `chatcmpl-abc123`) |
 | `serviceRequestId` | `string` | | Copilot service request ID (`x-copilot-service-request-id`) for CAPI log correlation |
-| `apiEndpoint` | `"/chat/completions" \| "/v1/messages" \| "/responses" \| "ws:/responses"` | | API endpoint used for the model call; useful for observability and cost attribution. `ws:/responses` is the websocket variant of the responses API |
+| `apiEndpoint` | `"/chat/completions" \| "/v1/messages" \| "/responses" \| "ws:/responses" \| "/interactions"` | | API endpoint used for the model call; useful for observability and cost attribution. `ws:/responses` is the websocket variant of the responses API; `/interactions` is the native Gemini Interactions API, served by CAPI or by a BYOK `google` provider |
 | `providerCallId` | `string` | | GitHub request tracing ID (`x-github-request-id`) |
-| `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
 | `quotaSnapshots` | `Record<string, QuotaSnapshot>` | | Per-quota resource usage, keyed by quota identifier |
 | `copilotUsage` | `CopilotUsage` | | Itemized token cost breakdown from the API |
 
@@ -519,7 +525,7 @@ These events track the full lifecycle of each tool invocation—from the model r
 
 ### `tool.execution_start`
 
-Emitted when a tool begins executing. MCP identity: `mcpConfigServerName ?? mcpServerName` (legacy-compatible).
+Emitted for each tool call the model requests, when its response arrives and before the tool runs. Permission is checked after this event, so it doesn't mean the call is approved: a call that needs approval emits `permission.requested` next, and a denied call ends with a `tool.execution_complete` whose `success` is `false`. This order is the same for built-in, custom and MCP tools. The exception is a tool from an extension that hasn't started yet ([request-driven activation](../../nodejs/docs/extensions.md#opting-into-request-driven-activation)). Its `tool.execution_start` is held while permission is requested. It's emitted after approval, once the extension starts, or just before its `tool.execution_complete` if the call fails, for example when permission is denied. Don't wait for `tool.execution_start` before answering a `permission.requested`. MCP identity: `mcpConfigServerName ?? mcpServerName` (legacy-compatible).
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
@@ -529,16 +535,6 @@ Emitted when a tool begins executing. MCP identity: `mcpConfigServerName ?? mcpS
 | `mcpServerName` | `string` | | Configured MCP server key |
 | `mcpServerDisplayName` | `string` | | Explicit display label; otherwise display `mcpServerName` |
 | `mcpToolName` | `string` | | Original tool name on the MCP server |
-| `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
-
-### `tool.execution_partial_result`
-
-Deprecated. Use `tool.shell_output` for live terminal output. This ephemeral event remains emitted alongside the replacement during migration; subscribe to only one representation to avoid displaying the same output twice.
-
-| Data Field | Type | Required | Description |
-|------------|------|----------|-------------|
-| `toolCallId` | `string` | ✅ | Matches the corresponding `tool.execution_start` |
-| `partialOutput` | `string` | ✅ | Bounded, cumulative replacement snapshot with stdout and stderr merged; not an append-only chunk |
 
 ### `tool.shell_output`
 
@@ -582,7 +578,6 @@ Emitted when a tool finishes executing—successfully or with an error.
 | `result` | `Result` | | Present on success. On failure, present when the tool returned content with its error, or when the text sent to the LLM differs from `error.message`; `content` is then that text |
 | `error` | `{ message, code? }` | | Present on failure |
 | `toolTelemetry` | `object` | | Tool-specific telemetry (e.g., CodeQL check counts) |
-| `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
 
 **`Result` fields:**
 
@@ -611,6 +606,7 @@ Ephemeral. The agent has finished all processing and is ready for the next messa
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `aborted` | `boolean` | | True when the preceding turn was cancelled via abort signal |
+| `mode` | `"interactive" \| "plan" \| "autopilot"` | | Session mode the agent was in when it went idle; absent when the mode is unknown |
 
 ### `session.error`
 
@@ -619,7 +615,9 @@ An error occurred during session processing.
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `errorType` | `string` | ✅ | Error category (e.g., `"authentication"`, `"quota"`, `"rate_limit"`) |
+| `errorCode` | `string` | | Fine-grained classification, an extensible string (e.g., `"no_account"` when the session has no account to send with, `"rate_limited"`) |
 | `message` | `string` | ✅ | Human-readable error message |
+| `remediation` | `string` | | Action the user must take to recover, when the runtime knows one (e.g., `"sign_in"`) |
 | `stack` | `string` | | Error stack trace |
 | `statusCode` | `number` | | HTTP status code from the upstream request |
 | `providerCallId` | `string` | | GitHub request tracing ID for server-side log correlation |
@@ -675,6 +673,10 @@ Ephemeral. Context window utilization snapshot.
 | `tokenLimit` | `number` | ✅ | Maximum tokens for the model's context window |
 | `currentTokens` | `number` | ✅ | Current tokens in the context window |
 | `messagesLength` | `number` | ✅ | Current message count in the conversation |
+| `systemTokens` | `number` | | Tokens used by system messages |
+| `conversationTokens` | `number` | | Tokens used by non-system messages (user, assistant, tool) |
+| `toolDefinitionsTokens` | `number` | | Tokens used by tool definitions |
+| `isInitial` | `boolean` | | Whether this is the session's first `session.usage_info` event |
 
 ### `session.session_limits_changed`
 
@@ -683,7 +685,7 @@ Session limits changed for the current accounting window. A `null` `sessionLimit
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `sessionLimits` | `SessionLimitsConfig \| null` | ✅ | Current session limits, or `null` when no limits are active |
-| `sessionLimits.maxAiCredits` | `number` | | Maximum AI Credits allowed across the session's current accounting window |
+| `sessionLimits.maxAiCredits` | `number` | | Maximum AI Credits allowed across the session's current accounting window. When setting a limit, the value must be at least 30 and greater than the AI Credits the session has already used |
 
 ### `session.usage_checkpoint`
 
@@ -725,10 +727,13 @@ These events are emitted when the agent needs approval or input from the user be
 
 The agent needs permission to perform an action (run a command, write a file, etc.).
 
+For a tool call, the request is made while the tool executes, so it usually arrives after that call's `tool.execution_start`. A tool from an extension that hasn't started yet asks for permission before its `tool.execution_start` (see [`tool.execution_start`](#toolexecution_start)). Use `permissionRequest.toolCallId` to match a request to its call, and don't require a prior start. A call can raise more than one request. A call that an approval rule or the session's mode already allows normally gets no `permission.requested`. A request the runtime already decided, through a `permissionRequest` hook or an automatic assisted-mode decision, is still reported as a `permission.requested` with `resolvedByHook: true`, followed immediately by its `permission.completed`. Don't prompt for or respond to it: it isn't pending, and SDK permission handlers aren't called for it.
+
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
-| `requestId` | `string` | ✅ | Use this to respond via `session.respondToPermission()` |
+| `requestId` | `string` | ✅ | Pass this as the `requestId` of the `session.permissions.handlePendingPermissionRequest` RPC to respond, unless `resolvedByHook` is `true` |
 | `permissionRequest` | `PermissionRequest` | ✅ | Details of the permission being requested |
+| `resolvedByHook` | `boolean` | | When `true`, the request is already decided and needs no prompt or response |
 
 The `permissionRequest` is a discriminated union on `kind`:
 
@@ -756,6 +761,7 @@ A permission request was resolved.
 |------------|------|----------|-------------|
 | `requestId` | `string` | ✅ | Matches the corresponding `permission.requested` |
 | `result.kind` | `string` | ✅ | One of: `"approved"`, `"denied-by-rules"`, `"denied-interactively-by-user"`, `"denied-no-approval-rule-and-could-not-request-from-user"`, `"denied-by-content-exclusion-policy"` |
+| `decisionSource` | `string` | | Who decided: `"human_response"`, `"assisted_approval"`, `"host_policy"` or `"unattended_fallback"`. Sessions recorded by older runtimes may also contain the historical value `"authorization_carry_forward"`, which current runtimes no longer produce. Read this, not `result.kind`, to tell a person's decision from an automatic one: the Assisted Permissions judge's denials are also saved as `"denied-interactively-by-user"`. Treat an absent value as not a person's decision. |
 
 ### `user_input.requested`
 
@@ -763,10 +769,11 @@ Ephemeral. The agent is asking the user a question.
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
-| `requestId` | `string` | ✅ | Use this to respond via `session.respondToUserInput()` |
+| `requestId` | `string` | ✅ | Pass this as the `requestId` of the `session.ui.handlePendingUserInput` RPC to respond |
 | `question` | `string` | ✅ | The question to present to the user |
 | `choices` | `string[]` | | Predefined choices for the user |
 | `allowFreeform` | `boolean` | | Whether free-form text input is allowed |
+| `toolCallId` | `string` | | The tool call that asked the question, for correlating the request with it |
 
 ### `user_input.completed`
 
@@ -775,6 +782,8 @@ Ephemeral. A user input request was resolved.
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `requestId` | `string` | ✅ | Matches the corresponding `user_input.requested` |
+| `answer` | `string` | | The user's answer |
+| `wasFreeform` | `boolean` | | Whether the answer was typed as free-form text rather than selected from `choices` |
 
 ### `elicitation.requested`
 
@@ -782,11 +791,14 @@ Ephemeral. The agent needs input from the user, either as structured form fields
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
-| `requestId` | `string` | ✅ | Use this to respond via `session.respondToElicitation()` |
+| `requestId` | `string` | ✅ | Pass this as the `requestId` of the `session.ui.handlePendingElicitation` RPC to respond |
 | `message` | `string` | ✅ | Description of what information is needed |
 | `mode` | `"form" \| "url"` | | Elicitation mode: structured form or browser URL |
 | `requestedSchema` | `{ type: "object", properties, required? }` | | JSON Schema describing the form fields (form mode only) |
 | `url` | `string` | | URL to open in the user's browser (url mode only) |
+| `elicitationSource` | `string` | | The MCP server that initiated the request; absent when the agent initiated it |
+| `elicitationSourceDisplayName` | `string` | | Display label for a connector-owned MCP server; `elicitationSource` remains its identity |
+| `toolCallId` | `string` | | The tool call that triggered the request, for correlating the request with it |
 
 ### `elicitation.completed`
 
@@ -795,6 +807,8 @@ Ephemeral. An elicitation request was resolved.
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `requestId` | `string` | ✅ | Matches the corresponding `elicitation.requested` |
+| `action` | `"accept" \| "decline" \| "cancel"` | | The user's choice: submitted the form, explicitly refused, or dismissed |
+| `content` | `Record<string, JsonValue>` | | The submitted form values when `action` is `"accept"`; keys match the `requestedSchema` fields |
 
 ## Sub-agent and skill events
 
@@ -899,6 +913,8 @@ A system or developer prompt was injected into the conversation.
 | `role` | `"system" \| "developer"` | ✅ | Message role |
 | `name` | `string` | | Source identifier |
 | `metadata` | `{ promptVersion?, variables? }` | | Prompt template metadata |
+| `contentBlocks` | `{ content, cacheBreakpoint?, isStatic? }[]` | | Ordered structured blocks corresponding to `content`, retained to restore the prompt-cache layout |
+| `interactionId` | `string` | | Interaction identifier of the model run receiving this prompt |
 
 ### `external_tool.requested`
 
@@ -906,7 +922,7 @@ The agent wants to invoke an external tool (one provided by the SDK consumer).
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
-| `requestId` | `string` | ✅ | Use this to respond via `session.respondToExternalTool()` |
+| `requestId` | `string` | ✅ | Pass this as the `requestId` of the `session.tools.handlePendingToolCall` RPC to respond |
 | `sessionId` | `string` | ✅ | Session this request belongs to |
 | `toolCallId` | `string` | ✅ | Tool call ID for this invocation |
 | `toolName` | `string` | ✅ | Name of the external tool |
@@ -926,7 +942,7 @@ Ephemeral. The agent has created a plan and wants to exit plan mode.
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
-| `requestId` | `string` | ✅ | Use this to respond via `session.respondToExitPlanMode()` |
+| `requestId` | `string` | ✅ | Pass this as the `requestId` of the `session.ui.handlePendingExitPlanMode` RPC to respond |
 | `summary` | `string` | ✅ | Summary of the plan |
 | `planContent` | `string` | ✅ | Full plan file content |
 | `actions` | `("exit_only" \| "interactive" \| "autopilot" \| "autopilot_fleet")[]` | ✅ | Available user actions |
@@ -947,12 +963,13 @@ Ephemeral. An exit plan mode request was resolved.
 
 ### `command.queued`
 
-Ephemeral. A slash command was queued for execution.
+Ephemeral. `scheduled: true` requires checking scheduling eligibility before execution.
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
-| `requestId` | `string` | ✅ | Use this to respond via `session.respondToQueuedCommand()` |
+| `requestId` | `string` | ✅ | Pass this as the `requestId` of the `session.commands.respondToQueuedCommand` RPC to respond |
 | `command` | `string` | ✅ | The slash command text (e.g., `/help`, `/clear`) |
+| `scheduled` | `boolean` | | Whether a schedule dispatched this command; absent for ordinary queued commands |
 
 ### `command.completed`
 
@@ -964,7 +981,7 @@ Ephemeral. A queued command was resolved.
 
 ### `session_limits_exhausted.requested`
 
-Ephemeral. The current session budget was exhausted and the runtime needs a user decision before continuing.
+Ephemeral. The session budget is used up, or 10% or less of it remains and the next model call would be the session's final call without tools; the runtime needs a user decision before continuing.
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
@@ -997,9 +1014,9 @@ assistant.turn_start          → Turn begins
 ├── assistant.usage           → Token usage for this API call (ephemeral)
 │
 ├── [If tools were requested:]
-│   ├── permission.requested  → Needs user approval
+│   ├── tool.execution_start  → Tool call announced (not yet approved; held until approval for an unstarted extension's tool)
+│   ├── permission.requested  → Needs user approval (when no rule or mode allows it)
 │   ├── permission.completed  → Approval result
-│   ├── tool.execution_start  → Tool begins
 │   ├── tool.shell_output              → Stream-tagged terminal output (ephemeral, repeated)
 │   ├── tool.execution_progress        → Progress updates (ephemeral, repeated)
 │   ├── tool.execution_complete        → Tool finished
@@ -1010,9 +1027,9 @@ assistant.turn_end            → Turn complete
 session.idle                  → Ready for next message (ephemeral)
 ```
 
-## All event types at a glance
+## Documented event types at a glance
 
-This table lists key `data` payload fields. Common envelope fields are documented above.
+This table lists every event type documented on this page with its key `data` payload fields. Common envelope fields are documented above.
 
 | Event Type | Ephemeral | Category | Key Data Fields |
 |------------|-----------|----------|-----------------|
@@ -1027,11 +1044,10 @@ This table lists key `data` payload fields. Common envelope fields are documente
 | `assistant.usage` | ✅ | Assistant | `model`, `apiEndpoint?`, `inputTokens?`, `outputTokens?`, `cost?`, `duration?` |
 | `tool.user_requested` | | Tool | `toolCallId`, `toolName`, `arguments?` |
 | `tool.execution_start` | | Tool | `toolCallId`, `toolName`, `arguments?`, `mcpServerName?`, `mcpServerDisplayName?` |
-| `tool.execution_partial_result` | ✅ | Tool | `toolCallId`, `partialOutput` |
 | `tool.shell_output` | ✅ | Tool | `toolCallId`, `text`, `stream?`, `sequence` |
 | `tool.execution_progress` | ✅ | Tool | `toolCallId`, `progressMessage` |
 | `tool.execution_complete` | | Tool | `toolCallId`, `success`, `result?`, `error?` |
-| `session.idle` | ✅ | Session | `aborted?` |
+| `session.idle` | ✅ | Session | `aborted?`, `mode?` |
 | `session.error` | | Session | `errorType`, `message`, `statusCode?` |
 | `session.compaction_start` | | Session | *(empty)* |
 | `session.compaction_complete` | | Session | `success`, `preCompactionTokens?`, `summaryContent?` |
@@ -1045,9 +1061,9 @@ This table lists key `data` payload fields. Common envelope fields are documente
 | `permission.requested` | | Permission | `requestId`, `permissionRequest` |
 | `permission.completed` | | Permission | `requestId`, `result.kind` |
 | `user_input.requested` | ✅ | User Input | `requestId`, `question`, `choices?` |
-| `user_input.completed` | ✅ | User Input | `requestId` |
+| `user_input.completed` | ✅ | User Input | `requestId`, `answer?` |
 | `elicitation.requested` | ✅ | User Input | `requestId`, `message`, `mode?`, `requestedSchema?`, `url?` |
-| `elicitation.completed` | ✅ | User Input | `requestId` |
+| `elicitation.completed` | ✅ | User Input | `requestId`, `action?`, `content?` |
 | `subagent.started` | | Sub-Agent | `toolCallId`, `agentName`, `agentDisplayName`, `model?` |
 | `subagent.completed` | | Sub-Agent | `toolCallId`, `agentName`, `agentDisplayName`, `model?`, `durationMs?`, `totalTokens?`, `totalToolCalls?` |
 | `subagent.failed` | | Sub-Agent | `toolCallId`, `agentName`, `error`, `model?`, `durationMs?`, `totalTokens?`, `totalToolCalls?` |
@@ -1059,7 +1075,7 @@ This table lists key `data` payload fields. Common envelope fields are documente
 | `system.message` | | System | `content`, `role` |
 | `external_tool.requested` | | External Tool | `requestId`, `toolName`, `arguments?` |
 | `external_tool.completed` | | External Tool | `requestId` |
-| `command.queued` | ✅ | Command | `requestId`, `command` |
+| `command.queued` | ✅ | Command | `requestId`, `command`, `scheduled?` |
 | `command.completed` | ✅ | Command | `requestId` |
 | `session_limits_exhausted.requested` | ✅ | Session | `requestId`, `maxAiCredits`, `usedAiCredits` |
 | `session_limits_exhausted.completed` | ✅ | Session | `requestId`, `response.action` |

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func assistantContent(t *testing.T, event *copilot.SessionEvent) string {
@@ -66,7 +66,17 @@ func waitForMatchingEvent(session *copilot.Session, eventType copilot.SessionEve
 		case err := <-errCh:
 			return nil, err
 		case <-time.After(30 * time.Second):
-			return nil, fmt.Errorf("timed out waiting for %s", description)
+			select {
+			case err := <-errCh:
+				return nil, err
+			default:
+			}
+			select {
+			case event := <-result:
+				return event, nil
+			default:
+				return nil, fmt.Errorf("timed out waiting for %s", description)
+			}
 		}
 	}
 }
@@ -93,7 +103,23 @@ func rpcPtr[T any](value T) *T {
 	return &value
 }
 
-func waitForListedSessions(t *testing.T, client *copilot.Client, ids ...string) []copilot.SessionMetadata {
+func useTCP(options *copilot.ClientOptions, port int, token string) {
+	stdio := options.Runtime.(copilot.SpawnedStdioConnection)
+	options.Runtime = copilot.SpawnedTCPConnection{
+		Path:                      stdio.Path,
+		Args:                      stdio.Args,
+		Env:                       stdio.Env,
+		WorkingDirectory:          stdio.WorkingDirectory,
+		BaseDirectory:             stdio.BaseDirectory,
+		SessionIdleTimeoutSeconds: stdio.SessionIdleTimeoutSeconds,
+		Port:                      port,
+		ConnectionToken:           token,
+	}
+}
+
+func waitForListedSessions(t *testing.T, client interface {
+	ListSessions(context.Context, *copilot.SessionListFilter) ([]copilot.SessionMetadata, error)
+}, ids ...string) []copilot.SessionMetadata {
 	t.Helper()
 	return waitForPersistedValue(t, "persisted sessions to appear in list", func(ctx context.Context) ([]copilot.SessionMetadata, error) {
 		return client.ListSessions(ctx, nil)
@@ -139,13 +165,16 @@ func waitForRPCCondition(t *testing.T, timeout time.Duration, description string
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	var lastErr error
-	for time.Now().Before(deadline) {
+	for {
 		ok, err := condition()
 		if err == nil && ok {
 			return
 		}
 		if err != nil {
 			lastErr = err
+		}
+		if !time.Now().Before(deadline) {
+			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

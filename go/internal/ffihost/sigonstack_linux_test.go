@@ -1,4 +1,4 @@
-//go:build copilot_inprocess && linux
+//go:build !copilot_no_inprocess && linux && (amd64 || arm64)
 
 package ffihost
 

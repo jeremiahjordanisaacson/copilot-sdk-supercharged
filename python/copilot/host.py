@@ -13,6 +13,7 @@ import types
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -26,7 +27,7 @@ from typing import (
 from uuid import uuid4
 from weakref import WeakKeyDictionary
 
-from .generated.rpc import (
+from ._generated.rpc import (
     HostExitedNotification,
     HostGitHubEnvironmentOptions,
     HostListSessionsResult,
@@ -257,6 +258,8 @@ def _config_value(value: Any, annotation: Any) -> Any:
         for variant in variants:
             if value is not None and variant is not type(None):
                 return _config_value(value, variant)
+    if isinstance(annotation, type) and issubclass(annotation, Enum):
+        return annotation(value)
     if isinstance(value, dict):
         if is_typeddict(annotation):
             hints = get_type_hints(annotation)
@@ -280,20 +283,28 @@ def _config_value(value: Any, annotation: Any) -> Any:
 
 
 def _session_config(config: dict[str, Any], method: Callable[..., Any]) -> dict[str, Any]:
+    from .client import _group_session_payload
+
     hints = get_type_hints(method)
     result = {}
-    for key, value in config.items():
-        name = "config_directory" if key == "configDir" else _config_key(key, hints)
+    for key, value in _group_session_payload(config).items():
+        name = _config_key(key, hints)
         if name not in hints:
             raise ValueError(f"Unsupported AHP session setting: {key}")
         result[name] = _config_value(value, hints[name])
     return result
 
 
-def _contains(actual: Any, expected: Any) -> bool:
+def _contains(actual: Any, expected: Any, path: tuple[str, ...] = ()) -> bool:
     if isinstance(expected, dict):
         return isinstance(actual, dict) and all(
-            key in actual and _contains(actual[key], value) for key, value in expected.items()
+            (
+                key not in actual
+                and value is False
+                and (*path, key) in (("suppressResumeEvent",), ("mcp", "enableApps"))
+            )
+            or (key in actual and _contains(actual[key], value, (*path, key)))
+            for key, value in expected.items()
         )
     return type(actual) is type(expected) and actual == expected
 
@@ -313,10 +324,29 @@ class _AhpHostManager:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._authentications: dict[str, _Authentication] = {}
 
-    def capture(self, session: CopilotSession, config: dict[str, Any]) -> None:
+    def capture(
+        self,
+        session: CopilotSession,
+        config: dict[str, Any],
+        options_patch: dict[str, Any] | None,
+    ) -> None:
+        # These settings are sent by the post-create options patch, never in
+        # the create or resume payload, so record the values that patch applied.
         for entry in self._handoffs.values():
             if entry.session_id == session.session_id:
-                entry.configs[session] = copy.deepcopy(config)
+                from .client import _group_session_payload
+
+                snapshot = copy.deepcopy(_group_session_payload(config))
+                if options_patch is not None:
+                    for group, member in (
+                        ("instructions", "skipCustomInstructions"),
+                        ("git", "coauthorEnabled"),
+                        ("tools", "manageScheduleEnabled"),
+                    ):
+                        applied = options_patch.get(group, {})
+                        if member in applied:
+                            snapshot.setdefault(group, {})[member] = copy.deepcopy(applied[member])
+                entry.configs[session] = snapshot
 
     async def start(self, rpc: JsonRpcClient, options: AhpHostOptions) -> AhpHost:
         _validate_options(options)
@@ -562,14 +592,9 @@ class _AhpHostManager:
         ):
             raise ValueError("Invalid trusted AHP authentication context")
         authentication = AhpSessionAuthentication(context["mode"], context.get("identity"))
-        expected = copy.deepcopy(params["config"])
-        for public, wire in {
-            "suppressResumeEvent": "disableResume",
-            "enableExperimentalMode": "isExperimentalMode",
-            "enableMcpApps": "requestMcpApps",
-        }.items():
-            if public in expected:
-                expected[wire] = expected.pop(public)
+        from .client import _group_session_payload
+
+        expected = _group_session_payload(copy.deepcopy(params["config"]))
         session_id = expected.get("sessionId")
         if not isinstance(session_id, str) or not session_id:
             raise ValueError("AHP session handoff requires sessionId")

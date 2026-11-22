@@ -12,11 +12,11 @@ using System.Security.Cryptography;
 using System.Text;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 /// <summary>
 /// Integration tests for the MSBuild targets shipped in
-/// <c>dotnet/src/build/GitHub.Copilot.SDK.targets</c>. Each test creates a throwaway
+/// <c>dotnet/src/build/Microsoft.Copilot.SDK.targets</c>. Each test creates a throwaway
 /// project that imports the targets file directly and invokes <c>dotnet build</c> in
 /// a subprocess so we exercise real MSBuild evaluation.
 /// </summary>
@@ -100,6 +100,40 @@ public class MSBuildTargetsTests
     }
 
     [Fact]
+    public async Task DevPlaceholderVersion_SkipsDownloadWithActionableMessage()
+    {
+        using var sandbox = MSBuildSandbox.Create(version: "0.0.0-dev");
+
+        var result = await sandbox.BuildAsync(new Dictionary<string, string>
+        {
+            // Unroutable, so any download attempt fails the build.
+            ["CopilotCliReleaseBaseUrl"] = "http://127.0.0.1:9/releases",
+        });
+
+        Assert.True(result.Succeeded, result.FailureMessage());
+        Assert.DoesNotContain("Downloading Copilot CLI", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("development placeholder '0.0.0-dev'", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("CopilotCliBinaryPath", result.StandardOutput, StringComparison.Ordinal);
+        Assert.False(File.Exists(sandbox.ExpectedOutputBinary()), result.FailureMessage());
+    }
+
+    [Fact]
+    public async Task DevPlaceholderVersion_WithCliBinaryPath_StillCopiesToOutput()
+    {
+        using var sandbox = MSBuildSandbox.Create(version: "0.0.0-dev");
+        var preinstalled = sandbox.WritePreinstalledBinary("fake-cli-contents");
+
+        var result = await sandbox.BuildAsync(new Dictionary<string, string>
+        {
+            ["CopilotCliBinaryPath"] = preinstalled,
+        });
+
+        Assert.True(result.Succeeded, result.FailureMessage());
+        Assert.DoesNotContain("development placeholder", result.StandardOutput, StringComparison.Ordinal);
+        Assert.True(File.Exists(sandbox.ExpectedOutputBinary()), result.FailureMessage());
+    }
+
+    [Fact]
     public async Task PreinstalledCliBinaryPath_WithSkipCliDownload_StillCopiesToOutput()
     {
         using var sandbox = MSBuildSandbox.Create();
@@ -148,11 +182,34 @@ public class MSBuildTargetsTests
         Assert.Equal(1, server.RequestPaths.Count(path => path == checksumsPath));
         Assert.Equal(1, server.RequestPaths.Count(path => path == assetPath));
         Assert.False(File.Exists(sandbox.ExpectedRuntimeAsset("SHA256SUMS.txt")));
+        Assert.False(File.Exists(sandbox.ExpectedCacheAsset("copilot.tgz")));
 
         var secondBuild = await sandbox.BuildAsync(properties);
 
         Assert.True(secondBuild.Succeeded, secondBuild.FailureMessage());
         Assert.Equal(2, server.RequestPaths.Count);
+        Assert.Equal("runtime", File.ReadAllText(sandbox.ExpectedRuntimeAsset("runtime.node")));
+    }
+
+    [Fact]
+    public async Task CompleteCache_WithLeftoverArchive_RemovesArchiveWithoutDownloading()
+    {
+        using var sandbox = MSBuildSandbox.Create();
+        sandbox.WriteRuntimeCacheAsset("prebuilds", GetReleasePlatform(), RuntimeWrapperName, "cached-runtime-wrapper");
+        sandbox.WriteRuntimeCacheAsset("prebuilds", GetReleasePlatform(), "runtime.node", "runtime");
+        sandbox.WriteRuntimeCacheAsset(".copilot-runtime-complete", "0.0.0-test");
+        sandbox.WriteRuntimeCacheAsset("copilot.tgz", "archive kept by an earlier build");
+        using var server = new ReleaseServer(new Dictionary<string, byte[]>());
+
+        var result = await sandbox.BuildAsync(new Dictionary<string, string>
+        {
+            ["CopilotCliReleaseBaseUrl"] = server.BaseUrl,
+        });
+
+        Assert.True(result.Succeeded, result.FailureMessage());
+        Assert.Empty(server.RequestPaths);
+        Assert.False(File.Exists(sandbox.ExpectedCacheAsset("copilot.tgz")));
+        Assert.Equal("cached-runtime-wrapper", File.ReadAllText(sandbox.ExpectedOutputBinary()));
     }
 
     [Theory]
@@ -288,7 +345,7 @@ public class MSBuildTargetsTests
 
         var rid = MSBuildSandbox.GetPortableRid();
         var entries = sandbox.GetPackageEntries();
-        var nativePath = $"tools/net8.0/{rid}/runtimes/{rid}/native";
+        var nativePath = $"tools/net10.0/{rid}/runtimes/{rid}/native";
         Assert.Contains($"{nativePath}/{BinaryName}", entries);
         Assert.Contains($"{nativePath}/{RuntimeWrapperName}", entries);
         Assert.Contains($"{nativePath}/runtime.node", entries);
@@ -335,13 +392,62 @@ public class MSBuildTargetsTests
         Assert.Contains(nonexistent, result.StandardOutput, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task PackSdk_NamesBuildAssetsAfterEffectivePackageId()
+    {
+        using var sandbox = MSBuildSandbox.Create();
+
+        var defaultPack = await sandbox.PackSdkAsync("default-package", packageId: null);
+        Assert.True(defaultPack.Succeeded, defaultPack.FailureMessage());
+        var renamedPack = await sandbox.PackSdkAsync("renamed-package", "Example.Copilot.SDK");
+        Assert.True(renamedPack.Succeeded, renamedPack.FailureMessage());
+
+        // NuGet imports build/<PackageId>.props and .targets only under the package's own id.
+        var defaultEntries = sandbox.GetPackageEntries("default-package");
+        Assert.Contains("build/Microsoft.Copilot.SDK.props", defaultEntries);
+        Assert.Contains("build/Microsoft.Copilot.SDK.targets", defaultEntries);
+        var renamedEntries = sandbox.GetPackageEntries("renamed-package");
+        Assert.Contains("build/Example.Copilot.SDK.props", renamedEntries);
+        Assert.Contains("build/Example.Copilot.SDK.targets", renamedEntries);
+        Assert.DoesNotContain(renamedEntries, entry => entry.StartsWith("build/Microsoft.Copilot.SDK.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RenamedPackageTargets_ImportTheirMatchingProps()
+    {
+        using var sandbox = MSBuildSandbox.Create(version: "1.2.3", packageId: "Example.Copilot.SDK");
+        sandbox.WriteGeneratedProps();
+
+        var result = await sandbox.EvaluatePropertyAsync("CopilotCliVersion");
+
+        Assert.True(result.Succeeded, result.FailureMessage());
+        Assert.Equal("1.2.3", result.StandardOutput.Trim());
+    }
+
+    [Fact]
+    public async Task RenamedPackageTargets_WithoutMatchingProps_NameTheMissingFile()
+    {
+        using var sandbox = MSBuildSandbox.Create(packageId: "Example.Copilot.SDK");
+
+        var result = await sandbox.BuildAsync(new Dictionary<string, string>
+        {
+            ["CopilotSkipCliDownload"] = "false",
+        });
+
+        Assert.False(result.Succeeded, "Build should fail when the package's props file is missing.");
+        Assert.Contains(
+            "CopilotCliVersion is not set. The Example.Copilot.SDK.props file may be missing from the NuGet package.",
+            result.StandardOutput,
+            StringComparison.Ordinal);
+    }
+
     private static string FindTargetsFile([CallerFilePath] string? thisFile = null)
     {
         // thisFile == <repo>/dotnet/test/Unit/MSBuildTargetsTests.cs
         if (thisFile is not null && File.Exists(thisFile))
         {
             var candidate = Path.GetFullPath(Path.Combine(
-                Path.GetDirectoryName(thisFile)!, "..", "..", "src", "build", "GitHub.Copilot.SDK.targets"));
+                Path.GetDirectoryName(thisFile)!, "..", "..", "src", "build", "Microsoft.Copilot.SDK.targets"));
             if (File.Exists(candidate))
             {
                 return candidate;
@@ -352,7 +458,7 @@ public class MSBuildTargetsTests
         var dir = AppContext.BaseDirectory;
         for (var i = 0; i < 8 && dir is not null; i++)
         {
-            var candidate = Path.Combine(dir, "src", "build", "GitHub.Copilot.SDK.targets");
+            var candidate = Path.Combine(dir, "src", "build", "Microsoft.Copilot.SDK.targets");
             if (File.Exists(candidate))
             {
                 return candidate;
@@ -361,7 +467,7 @@ public class MSBuildTargetsTests
         }
 
         throw new InvalidOperationException(
-            "Could not locate GitHub.Copilot.SDK.targets relative to test assembly or source file.");
+            "Could not locate Microsoft.Copilot.SDK.targets relative to test assembly or source file.");
     }
 
     private static string GetReleasePlatform()
@@ -378,7 +484,7 @@ public class MSBuildTargetsTests
 
     private static bool IsMusl()
     {
-#if NETFRAMEWORK
+#if !NET
         return false;
 #else
         return System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier.StartsWith(
@@ -389,7 +495,7 @@ public class MSBuildTargetsTests
 
     private static string ComputeSha256(byte[] contents)
     {
-#if NETFRAMEWORK
+#if !NET
         using var sha256 = SHA256.Create();
         return BitConverter.ToString(sha256.ComputeHash(contents)).Replace("-", "").ToLowerInvariant();
 #else
@@ -405,17 +511,36 @@ public class MSBuildTargetsTests
     {
         public string ProjectDir { get; }
         private readonly string _version;
+        private readonly string? _packageId;
 
-        private MSBuildSandbox(string projectDir, string version)
+        private MSBuildSandbox(string projectDir, string version, string? packageId)
         {
             ProjectDir = projectDir;
             _version = version;
+            _packageId = packageId;
         }
 
-        public static MSBuildSandbox Create(bool packAsTool = false, string version = "0.0.0-test")
+        // With a packageId, the targets file is imported as build/<packageId>.targets, the way
+        // NuGet lays it out in a package with that id, and the project leaves CopilotCliVersion
+        // to the package's generated props file.
+        public static MSBuildSandbox Create(bool packAsTool = false, string version = "0.0.0-test", string? packageId = null)
         {
             var dir = Path.Combine(Path.GetTempPath(), "copilot-sdk-targets-test-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
+
+            var targetsPath = TargetsFilePath;
+            var cliVersionProperty = $"""
+
+                    <CopilotCliVersion>{version}</CopilotCliVersion>
+                """;
+            if (packageId is not null)
+            {
+                var buildDir = Path.Combine(dir, "build");
+                Directory.CreateDirectory(buildDir);
+                targetsPath = Path.Combine(buildDir, packageId + ".targets");
+                File.Copy(TargetsFilePath, targetsPath);
+                cliVersionProperty = string.Empty;
+            }
 
             // Tool packages are produced from the publish layout, so the tool variant
             // exercises the packaging path reported in issue #2067.
@@ -440,13 +565,12 @@ public class MSBuildTargetsTests
             var csproj = $"""
                 <Project Sdk="Microsoft.NET.Sdk">
                   <PropertyGroup>
-                    <TargetFramework>net8.0</TargetFramework>
+                    <TargetFramework>net10.0</TargetFramework>
                     <RuntimeIdentifier>{GetPortableRid()}</RuntimeIdentifier>
-                    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
-                    <CopilotCliVersion>{version}</CopilotCliVersion>
+                    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>{cliVersionProperty}
                     <EnableDefaultCompileItems>true</EnableDefaultCompileItems>{toolProperties}
                   </PropertyGroup>
-                  <Import Project="{TargetsFilePath}" />
+                  <Import Project="{targetsPath}" />
                 </Project>
                 """;
             File.WriteAllText(Path.Combine(dir, "App.csproj"), csproj);
@@ -461,7 +585,19 @@ public class MSBuildTargetsTests
                     ? "namespace CopilotSdkTargetsTest { internal static class Stub { private static void Main() { } } }\n"
                     : "namespace CopilotSdkTargetsTest { internal static class Stub { } }\n");
 
-            return new MSBuildSandbox(dir, version);
+            return new MSBuildSandbox(dir, version, packageId);
+        }
+
+        /// <summary>
+        /// Writes the props file the SDK build generates beside the package's targets,
+        /// carrying this sandbox's CLI version.
+        /// </summary>
+        public void WriteGeneratedProps()
+        {
+            var packageId = _packageId ?? throw new InvalidOperationException("The sandbox was created without a package id.");
+            File.WriteAllText(
+                Path.Combine(ProjectDir, "build", packageId + ".props"),
+                $"<Project><PropertyGroup><CopilotCliVersion>{_version}</CopilotCliVersion></PropertyGroup></Project>");
         }
 
         public string WritePreinstalledBinary(string contents, string? fileName = null)
@@ -508,7 +644,7 @@ public class MSBuildTargetsTests
         public string ExpectedOutputBinary()
         {
             var rid = GetPortableRid();
-            return Path.Combine(ProjectDir, "bin", "Debug", "net8.0", "runtimes", rid, "native", BinaryName);
+            return Path.Combine(ProjectDir, "bin", "Debug", "net10.0", "runtimes", rid, "native", BinaryName);
         }
 
         public void WriteRuntimeCacheAsset(params string[] pathAndContents)
@@ -521,7 +657,7 @@ public class MSBuildTargetsTests
 
         public string ExpectedCacheAsset(params string[] pathParts)
         {
-            var path = Path.Combine(ProjectDir, "obj", "Debug", "net8.0", "copilot-cli", _version,
+            var path = Path.Combine(ProjectDir, "obj", "Debug", "net10.0", "copilot-cli", _version,
                 GetReleasePlatform());
             foreach (var part in pathParts)
             {
@@ -537,7 +673,7 @@ public class MSBuildTargetsTests
         public string PublishedRuntimeAsset(params string[] pathParts)
         {
             var rid = GetPortableRid();
-            var path = Path.Combine(ProjectDir, "bin", "Debug", "net8.0", rid, "publish", "runtimes", rid, "native");
+            var path = Path.Combine(ProjectDir, "bin", "Debug", "net10.0", rid, "publish", "runtimes", rid, "native");
             foreach (var part in pathParts)
             {
                 path = Path.Combine(path, part);
@@ -547,7 +683,7 @@ public class MSBuildTargetsTests
 
         public string ExpectedRuntimeAsset(params string[] pathParts)
         {
-            var path = Path.Combine(ProjectDir, "bin", "Debug", "net8.0", "runtimes", GetPortableRid(), "native");
+            var path = Path.Combine(ProjectDir, "bin", "Debug", "net10.0", "runtimes", GetPortableRid(), "native");
             foreach (var part in pathParts)
             {
                 path = Path.Combine(path, part);
@@ -575,6 +711,38 @@ public class MSBuildTargetsTests
             await RunAsync("msbuild --nologo -t:_DownloadCopilotCli -getProperty:_CopilotDownloadUrl,_CopilotChecksumsUrl",
                 new Dictionary<string, string>());
 
+        public async Task<BuildResult> EvaluatePropertyAsync(string name) =>
+            await RunAsync($"msbuild --nologo -getProperty:{name}", new Dictionary<string, string>());
+
+        /// <summary>
+        /// Packs the real SDK project into <paramref name="outputDir"/> under this sandbox,
+        /// with its intermediate and output trees redirected here so the checkout's own
+        /// obj and bin directories are left alone.
+        /// </summary>
+        public async Task<BuildResult> PackSdkAsync(string outputDir, string? packageId)
+        {
+            var sdkProjectPath = Path.GetFullPath(
+                Path.Combine(Path.GetDirectoryName(TargetsFilePath)!, "..", "Microsoft.Copilot.SDK.csproj"));
+            var properties = new Dictionary<string, string>
+            {
+                ["CopilotSkipCliDownload"] = "true",
+                // The build assets are package-level and do not depend on the compiled code, so
+                // pack one target framework and no globbed sources. Globbing would also pick up
+                // the checkout's own obj directory once the intermediate path moves out of it.
+                ["TargetFrameworks"] = "netstandard2.0",
+                ["EnableDefaultItems"] = "false",
+                // Forward slashes: a trailing backslash would escape RunAsync's closing quote.
+                ["BaseIntermediateOutputPath"] = Path.Combine(ProjectDir, "sdk-obj") + "/",
+                ["BaseOutputPath"] = Path.Combine(ProjectDir, "sdk-bin") + "/",
+            };
+            if (packageId is not null)
+            {
+                properties["PackageId"] = packageId;
+            }
+
+            return await RunAsync($"pack --nologo -clp:NoSummary -o {outputDir} \"{sdkProjectPath}\"", properties);
+        }
+
         /// <summary>
         /// Builds, publishes, then packs without rebuilding — the tool packaging sequence
         /// used by CI pipelines and reported in issue #2067.
@@ -601,9 +769,9 @@ public class MSBuildTargetsTests
                 properties);
         }
 
-        public List<string> GetPackageEntries()
+        public List<string> GetPackageEntries(string packagesDir = "packages")
         {
-            var package = Directory.GetFiles(Path.Combine(ProjectDir, "packages"), "*.nupkg").Single();
+            var package = Directory.GetFiles(Path.Combine(ProjectDir, packagesDir), "*.nupkg").Single();
             using var stream = File.OpenRead(package);
             using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
             return archive.Entries.Select(entry => entry.FullName).ToList();
@@ -780,7 +948,7 @@ public class MSBuildTargetsTests
 
         private static Task WriteBytesAsync(Stream stream, byte[] contents)
         {
-#if NETFRAMEWORK
+#if !NET
             return stream.WriteAsync(contents, 0, contents.Length);
 #else
             return stream.WriteAsync(contents).AsTask();

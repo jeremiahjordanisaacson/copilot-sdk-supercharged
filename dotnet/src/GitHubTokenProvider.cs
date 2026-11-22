@@ -4,7 +4,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>Why the runtime is requesting a GitHub token.</summary>
 [Experimental(Diagnostics.Experimental)]
@@ -45,8 +45,9 @@ public sealed class GitHubToken
     public string? TokenType { get; set; }
 
     /// <summary>
-    /// Gets or sets the required positive number of seconds remaining when the
-    /// callback completes. Production GitHub tokens typically last eight hours.
+    /// Gets or sets the required number of seconds remaining when the callback
+    /// completes. More than one hour must still remain after the runtime
+    /// validates the token. Production GitHub tokens typically last eight hours.
     /// </summary>
     public required long ExpiresIn { get; set; }
 

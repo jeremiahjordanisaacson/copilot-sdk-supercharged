@@ -2,13 +2,13 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class ScenarioTestingCanvasE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : ScenarioTestingE2ETestBase(fixture, "scenario_testing_canvas", output)
@@ -112,10 +112,10 @@ public class ScenarioTestingCanvasE2ETests(E2ETestFixture fixture, ITestOutputHe
             _ => throw new ArgumentOutOfRangeException(nameof(operation)),
         };
 
-        IOException? exception = null;
+        RemoteRpcException? exception = null;
         if (surfacesToCaller)
         {
-            exception = await Assert.ThrowsAsync<IOException>(InvokeAsync);
+            exception = await Assert.ThrowsAsync<RemoteRpcException>(InvokeAsync);
         }
         else
         {
@@ -197,28 +197,46 @@ public class ScenarioTestingCanvasE2ETests(E2ETestFixture fixture, ITestOutputHe
         Assert.Empty((await session2.Rpc.Canvas.ListOpenAsync()).OpenCanvases);
     }
 
-    private static SessionConfig CreateSessionConfig(RecordingCanvasHandler handler) => new()
+    private static CreateSessionOptions CreateSessionConfig(RecordingCanvasHandler handler) => new()
     {
-        Streaming = true,
-        OnPermissionRequest = PermissionHandler.ApproveAll,
-        RequestCanvasRenderer = true,
-        CanvasProvider = CreateProvider(),
-        Canvases = CreateCanvases(),
-        CanvasHandler = handler,
+        Events = new SessionEventOptions
+        {
+            Streaming = true
+        },
+        Permissions = new SessionPermissionOptions
+        {
+            OnRequest = PermissionHandler.ApproveAll
+        },
+        Canvases = new SessionCanvasOptions
+        {
+            RequestRenderer = true,
+            Provider = CreateProvider(),
+            Definitions = CreateCanvases(),
+            Handler = handler
+        }
     };
 
-    private static ResumeSessionConfig CreateResumeConfig(
+    private static ResumeSessionOptions CreateResumeConfig(
         RecordingCanvasHandler handler,
         IList<OpenCanvasInstance> openCanvases) => new()
         {
-            Streaming = true,
             ContinuePendingWork = false,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            RequestCanvasRenderer = true,
-            CanvasProvider = CreateProvider(),
-            Canvases = CreateCanvases(),
-            CanvasHandler = handler,
-            OpenCanvases = openCanvases,
+            Events = new SessionEventOptions
+            {
+                Streaming = true
+            },
+            Permissions = new SessionPermissionOptions
+            {
+                OnRequest = PermissionHandler.ApproveAll
+            },
+            Canvases = new ResumeSessionCanvasOptions
+            {
+                RequestRenderer = true,
+                Provider = CreateProvider(),
+                Definitions = CreateCanvases(),
+                Handler = handler,
+                Open = openCanvases
+            }
         };
 
     private static CanvasProviderIdentity CreateProvider() => new()

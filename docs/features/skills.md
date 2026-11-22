@@ -20,16 +20,17 @@ Specify directories containing skills when creating a session:
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 const session = await client.createSession({
-    model: "gpt-5.4",
-    skillDirectories: [
-        "./skills/code-review",
-        "./skills/documentation",
-    ],
-    onPermissionRequest: async () => ({ kind: "approve-once" }),
+    model: "auto",
+    skills: {
+        directories: ["./skills/code-review", "./skills/documentation"],
+    },
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 
 // Copilot now has access to skills in those directories
@@ -45,17 +46,20 @@ await session.sendAndWait({ prompt: "Review this code for security issues" });
 from copilot import CopilotClient
 from copilot.session import PermissionDecisionApproveOnce
 
+
 async def main():
-    client = CopilotClient()
+    client = CopilotClient(mode="coding-agent")
     await client.start()
 
     session = await client.create_session(
-        on_permission_request=lambda req, inv: PermissionDecisionApproveOnce(),
-        model="gpt-5.4",
-        skill_directories=[
-            "./skills/code-review",
-            "./skills/documentation",
-        ],
+        model="auto",
+        permissions={"on_request": lambda req, inv: PermissionDecisionApproveOnce()},
+        skills={
+            "directories": [
+                "./skills/code-review",
+                "./skills/documentation",
+            ]
+        },
     )
 
     # Copilot now has access to skills in those directories
@@ -73,41 +77,46 @@ async def main():
 package main
 
 import (
-    "context"
-    "log"
-    copilot "github.com/github/copilot-sdk/go"
-    "github.com/github/copilot-sdk/go/rpc"
+	"context"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
+	"log"
 )
 
 func main() {
-    ctx := context.Background()
-    client := copilot.NewClient(nil)
-    if err := client.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-    defer client.Stop()
+	ctx := context.Background()
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+	if err := client.Start(ctx); err != nil {
+		log.Fatal(err)
+	}
+	defer client.Stop()
 
-    session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-        Model: "gpt-5.4",
-        SkillDirectories: []string{
-            "./skills/code-review",
-            "./skills/documentation",
-        },
-        OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-            return &rpc.PermissionDecisionApproveOnce{}, nil
-        },
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Model: "auto",
+		Skills: copilot.SessionSkillOptions{
+			Directories: []string{
+				"./skills/code-review",
+				"./skills/documentation",
+			},
+		},
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+				return &rpc.PermissionDecisionApproveOnce{}, nil
+			},
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
-    // Copilot now has access to skills in those directories
-    _, err = session.SendAndWait(ctx, copilot.MessageOptions{
-        Prompt: "Review this code for security issues",
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
+	// Copilot now has access to skills in those directories
+	_, err = session.SendAndWait(ctx, copilot.MessageOptions{
+
+		Prompt: "Review this code for security issues",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 
@@ -117,22 +126,27 @@ func main() {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot;
-using GitHub.Copilot.Rpc;
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
+using Microsoft.Copilot;
+using Microsoft.Copilot.Rpc;
 
-await using var client = new CopilotClient();
-await using var session = await client.CreateSessionAsync(new SessionConfig
+await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    Model = "gpt-5.4",
-    SkillDirectories = new List<string>
+    Model = "auto",
+    Skills = new SessionSkillOptions
     {
-        "./skills/code-review",
-        "./skills/documentation",
+        Directories = new List<string>
+        {
+            "./skills/code-review",
+            "./skills/documentation",
+        }
     },
-    OnPermissionRequest = (req, inv) =>
-        Task.FromResult(PermissionDecision.ApproveOnce()),
+    Permissions = new SessionPermissionOptions
+    {
+        OnRequest = (req, inv) => Task.FromResult(PermissionDecision.ApproveOnce())
+    }
 });
-
 // Copilot now has access to skills in those directories
 await session.SendAndWaitAsync(new MessageOptions
 {
@@ -146,27 +160,30 @@ await session.SendAndWaitAsync(new MessageOptions
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 import java.util.List;
 
-try (var client = new CopilotClient()) {
-    client.start().get();
+try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
+    client
+            .start()
+            .get();
 
-    var session = client.createSession(
-        new SessionConfig()
-            .setModel("gpt-5.4")
-            .setSkillDirectories(List.of(
-                "./skills/code-review",
-                "./skills/documentation"
-            ))
-            .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-    ).get();
+    var session = client
+            .createSession(new CreateSessionOptions()
+                    .setModel("auto")
+                    .setSkills(new SessionSkillOptions()
+                            .setDirectories(List
+                                    .of("./skills/code-review", "./skills/documentation")))
+                    .setPermissions(new SessionPermissionOptions()
+                            .setOnRequest(PermissionHandler.APPROVE_ALL)))
+            .get();
 
     // Copilot now has access to skills in those directories
-    session.sendAndWait(new MessageOptions()
-        .setPrompt("Review this code for security issues")
-    ).get();
+    session
+            .sendAndWait(new MessageOptions()
+                    .setPrompt("Review this code for security issues"))
+            .get();
 }
 ```
 
@@ -181,8 +198,10 @@ Disable specific skills while keeping others active:
 
 ```typescript
 const session = await client.createSession({
-    skillDirectories: ["./skills"],
-    disabledSkills: ["experimental-feature", "deprecated-tool"],
+    skills: {
+        directories: ["./skills"],
+        disabledSkills: ["experimental-feature", "deprecated-tool"],
+    },
 });
 ```
 
@@ -195,12 +214,14 @@ const session = await client.createSession({
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
 
 session = await client.create_session(
-    on_permission_request=PermissionHandler.approve_all,
-    skill_directories=["./skills"],
-    disabled_skills=["experimental-feature", "deprecated-tool"],
+    permissions={"on_request": PermissionHandler.approve_all},
+    skills={
+        "directories": ["./skills"],
+        "disabled_skills": ["experimental-feature", "deprecated-tool"],
+    },
 )
 ```
 
@@ -215,19 +236,16 @@ package main
 
 import (
 	"context"
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
-	ctx := context.Background()
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
-	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-		SkillDirectories: []string{"./skills"},
-		DisabledSkills:   []string{"experimental-feature", "deprecated-tool"},
-		OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-			return &rpc.PermissionDecisionApproveOnce{}, nil
+	session, _ := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+		Skills: copilot.SessionSkillOptions{
+			Directories:    []string{"./skills"},
+			DisabledSkills: []string{"experimental-feature", "deprecated-tool"},
 		},
 	})
 	_ = session
@@ -236,10 +254,13 @@ func main() {
 <!-- /docs-validate: hidden -->
 
 ```go
-session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
-    SkillDirectories: []string{"./skills"},
-    DisabledSkills:   []string{"experimental-feature", "deprecated-tool"},
+session, _ := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+	Skills: copilot.SessionSkillOptions{
+		Directories:    []string{"./skills"},
+		DisabledSkills: []string{"experimental-feature", "deprecated-tool"},
+	},
 })
+
 ```
 
 </details>
@@ -247,34 +268,21 @@ session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
 <details>
 <summary><strong>.NET</strong></summary>
 
-<!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
-using GitHub.Copilot.Rpc;
-
-public static class SkillsExample
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    public static async Task Main()
+    Skills = new SessionSkillOptions
     {
-        await using var client = new CopilotClient();
-
-        var session = await client.CreateSessionAsync(new SessionConfig
+        Directories = new List<string>
         {
-            SkillDirectories = new List<string> { "./skills" },
-            DisabledSkills = new List<string> { "experimental-feature", "deprecated-tool" },
-            OnPermissionRequest = (req, inv) =>
-                Task.FromResult(PermissionDecision.ApproveOnce()),
-        });
+            "./skills"
+        },
+        DisabledSkills = new List<string>
+        {
+            "experimental-feature",
+            "deprecated-tool"
+        }
     }
-}
-```
-<!-- /docs-validate: hidden -->
-
-```csharp
-var session = await client.CreateSessionAsync(new SessionConfig
-{
-    SkillDirectories = new List<string> { "./skills" },
-    DisabledSkills = new List<string> { "experimental-feature", "deprecated-tool" },
 });
 ```
 
@@ -283,17 +291,44 @@ var session = await client.CreateSessionAsync(new SessionConfig
 <details>
 <summary><strong>Java</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.List;
 
-var session = client.createSession(
-    new SessionConfig()
-        .setSkillDirectories(List.of("./skills"))
-        .setDisabledSkills(List.of("experimental-feature", "deprecated-tool"))
-        .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-).get();
+public class SkillDirectoriesExample {
+    public static void main(String[] args) throws Exception {
+        try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
+            var session = client
+                    .createSession(new CreateSessionOptions()
+                            .setSkills(new SessionSkillOptions()
+                                    .setDirectories(List
+                                            .of("./skills"))
+                                    .setDisabledSkills(List
+                                            .of("experimental-feature", "deprecated-tool")))
+                            .setPermissions(new SessionPermissionOptions()
+                                    .setOnRequest(PermissionHandler.APPROVE_ALL)))
+                    .get();
+        }
+    }
+}
+```
+<!-- /docs-validate: hidden -->
+```java
+import com.microsoft.copilot.rpc.*;
+import java.util.List;
+
+var session = client
+        .createSession(new CreateSessionOptions()
+                .setSkills(new SessionSkillOptions()
+                        .setDirectories(List
+                                .of("./skills"))
+                        .setDisabledSkills(List
+                                .of("experimental-feature", "deprecated-tool")))
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL)))
+        .get();
 ```
 
 </details>
@@ -310,7 +345,7 @@ skills/
     └── SKILL.md
 ```
 
-The `skillDirectories` option points to the parent directory (e.g., `./skills`). The CLI searches that directory recursively and loads the topmost `SKILL.md` on each path, so skills grouped in category folders (for example `skills/testing/coverage/SKILL.md`) are found too. It does not look inside a directory that already holds a `SKILL.md`: files nested in a skill's folder are that skill's resources, not separate skills. Directories whose names start with `.` are skipped.
+The `skills.directories` option points to the parent directory (e.g., `./skills`). The runtime searches that directory recursively and loads the topmost `SKILL.md` on each path, so skills grouped in category folders (for example `skills/testing/coverage/SKILL.md`) are found too. It does not look inside a directory that already holds a `SKILL.md`: files nested in a skill's folder are that skill's resources, not separate skills. Directories whose names start with `.` are skipped.
 
 ### SKILL.md format
 
@@ -335,7 +370,7 @@ Provide specific line-number references and suggested fixes.
 ```
 
 The frontmatter fields:
-* **`name`**: The skill's identifier (used with `disabledSkills` to selectively disable it). If omitted, the directory name is used.
+* **`name`**: The skill's identifier (used with `skills.disabledSkills` to selectively disable it). If omitted, the directory name is used.
 * **`description`**: A short description of what the skill does.
 
 Both fields are optional, but the frontmatter block itself is required: a `SKILL.md` without the `---` lines is skipped.
@@ -360,7 +395,7 @@ Pass the provider when you create or resume a session:
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { approveAll, CopilotClient, type SkillProvider } from "@github/copilot-sdk";
+import { approveAll, CopilotClient, type SkillProvider } from "copilot-sdk-supercharged";
 
 const releaseSkills = new Map([
     [
@@ -378,10 +413,14 @@ const skillProvider: SkillProvider = {
     readSkill: (name) => releaseSkills.get(name)?.markdown ?? null,
 };
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 const session = await client.createSession({
-    onPermissionRequest: approveAll,
-    skillProvider,
+    permissions: {
+        onRequest: approveAll,
+    },
+    skills: {
+        provider: skillProvider,
+    },
 });
 ```
 
@@ -414,11 +453,11 @@ class ReleaseSkills:
 
 
 async def main():
-    client = CopilotClient()
+    client = CopilotClient(mode="coding-agent")
     await client.start()
     session = await client.create_session(
-        on_permission_request=PermissionHandler.approve_all,
-        skill_provider=ReleaseSkills(),
+        permissions={"on_request": PermissionHandler.approve_all},
+        skills={"provider": ReleaseSkills()},
     )
 ```
 
@@ -434,8 +473,8 @@ import (
 	"fmt"
 	"log"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 type releaseSkill struct {
@@ -463,13 +502,17 @@ func (s releaseSkills) ReadSkill(ctx context.Context, name string) (string, erro
 
 func main() {
 	ctx := context.Background()
-	client := copilot.NewClient(nil)
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		SkillProvider: releaseSkills{
-			"release-notes": {
-				description: "Writes release notes in the team's format.",
-				markdown:    "Group changes by feature area and link each pull request.",
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: copilot.PermissionHandler.ApproveAll,
+		},
+		Skills: copilot.SessionSkillOptions{
+			Provider: releaseSkills{
+				"release-notes": {
+					description: "Writes release notes in the team's format.",
+					markdown:    "Group changes by feature area and link each pull request.",
+				},
 			},
 		},
 	})
@@ -485,85 +528,93 @@ func main() {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-#pragma warning disable GHCP001 // Skill providers are experimental.
-using GitHub.Copilot;
-using GitHub.Copilot.Rpc;
+#pragma warning disable MCPSDK001 // Skill providers are experimental.
+
+using Microsoft.Copilot;
+using Microsoft.Copilot.Rpc;
 
 public sealed class ReleaseSkills : ISkillProvider
 {
     private readonly Dictionary<string, (string Description, string Markdown)> _skills = new()
     {
-        ["release-notes"] = (
-            "Writes release notes in the team's format.",
-            "Group changes by feature area and link each pull request."),
+        ["release-notes"] = ("Writes release notes in the team's format.", "Group changes by feature area and link each pull request."),
     };
-
-    public Task<IReadOnlyList<SkillProviderDescriptor>> ListSkillsAsync(CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<SkillProviderDescriptor>>(
-            _skills.Select(skill => new SkillProviderDescriptor
-            {
-                Name = skill.Key,
-                Description = skill.Value.Description,
-            }).ToList());
-
-    public Task<string?> ReadSkillAsync(string name, CancellationToken cancellationToken) =>
-        Task.FromResult(_skills.TryGetValue(name, out var skill) ? skill.Markdown : null);
+    public Task<IReadOnlyList<SkillProviderDescriptor>> ListSkillsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<SkillProviderDescriptor>>(_skills.Select(skill => new SkillProviderDescriptor
+    {
+        Name = skill.Key,
+        Description = skill.Value.Description,
+    }).ToList());
+    public Task<string?> ReadSkillAsync(string name, CancellationToken cancellationToken) => Task.FromResult(_skills.TryGetValue(name, out var skill) ? skill.Markdown : null);
 }
 
 public static class SkillProviderExample
 {
     public static async Task RunAsync(CopilotClient client)
     {
-        await using var session = await client.CreateSessionAsync(new SessionConfig
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            SkillProvider = new ReleaseSkills(),
+            Permissions = new SessionPermissionOptions
+            {
+                OnRequest = PermissionHandler.ApproveAll
+            },
+            Skills = new SessionSkillOptions
+            {
+                Provider = new ReleaseSkills()
+            }
         });
     }
 }
 ```
 
-The .NET skill provider types raise the `GHCP001` experimental diagnostic. Suppress it with `#pragma warning disable GHCP001` or a project-level `<NoWarn>GHCP001</NoWarn>`.
+The .NET skill provider types raise the `MCPSDK001` experimental diagnostic. Suppress it with `#pragma warning disable MCPSDK001` or a project-level `<NoWarn>MCPSDK001</NoWarn>`.
 
 </details>
 <details>
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.AllowCopilotExperimental;
-import com.github.copilot.CopilotClient;
-import com.github.copilot.CopilotSession;
-import com.github.copilot.SkillProvider;
-import com.github.copilot.SkillProviderDescriptor;
-import com.github.copilot.rpc.PermissionHandler;
-import com.github.copilot.rpc.SessionConfig;
+import com.microsoft.copilot.AllowCopilotExperimental;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.CopilotSession;
+import com.microsoft.copilot.SkillProvider;
+import com.microsoft.copilot.SkillProviderDescriptor;
+import com.microsoft.copilot.rpc.PermissionHandler;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import com.microsoft.copilot.rpc.SessionPermissionOptions;
+import com.microsoft.copilot.rpc.SessionSkillOptions;
 
 @AllowCopilotExperimental
 class ReleaseSkills implements SkillProvider {
-    private final Map<String, String> markdown = Map.of(
-            "release-notes", "Group changes by feature area and link each pull request.");
+    private final Map<String, String> markdown = Map
+            .of("release-notes", "Group changes by feature area and link each pull request.");
 
     @Override
     public CompletableFuture<List<SkillProviderDescriptor>> listSkills() {
-        return CompletableFuture.completedFuture(List.of(new SkillProviderDescriptor(
-                "release-notes", "Writes release notes in the team's format.", null, null, null)));
+        return CompletableFuture
+                .completedFuture(List
+                        .of(new SkillProviderDescriptor("release-notes", "Writes release notes in the team's format.", null, null, null)));
     }
 
     @Override
     public CompletableFuture<String> readSkill(String name) {
-        return CompletableFuture.completedFuture(markdown.get(name));
+        return CompletableFuture
+                .completedFuture(markdown
+                        .get(name));
     }
 }
 
 @AllowCopilotExperimental
 class SkillProviderExample {
     static CopilotSession createSession(CopilotClient client) throws Exception {
-        return client.createSession(new SessionConfig()
-                .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                .setSkillProvider(new ReleaseSkills()))
+        return client
+                .createSession(new CreateSessionOptions()
+                        .setPermissions(new SessionPermissionOptions()
+                                .setOnRequest(PermissionHandler.APPROVE_ALL))
+                        .setSkills(new SessionSkillOptions()
+                                .setProvider(new ReleaseSkills())))
                 .get();
     }
 }
@@ -575,12 +626,11 @@ The Java skill provider API is `@CopilotExperimental`, so the consuming class or
 <details>
 <summary><strong>Rust</strong></summary>
 
-<!-- docs-validate: skip -->
 ```rust
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use github_copilot_sdk::{Error, SessionConfig, SkillProvider, SkillProviderDescriptor};
+use copilot_sdk::{Error, CreateSessionOptions, SkillProvider, SkillProviderDescriptor};
 
 struct ReleaseSkills;
 
@@ -602,9 +652,9 @@ impl SkillProvider for ReleaseSkills {
 
 let session = client
     .create_session(
-        SessionConfig::default()
-            .approve_all_permissions()
-            .with_skill_provider(Arc::new(ReleaseSkills)),
+        CreateSessionOptions::default()
+            .with_permissions(|__sdk_group| __sdk_group.approve_all_permissions())
+            .with_skills(|__sdk_group| __sdk_group.with_provider(Arc::new(ReleaseSkills))),
     )
     .await?;
 ```
@@ -629,7 +679,7 @@ A provider skill can come with supporting files, such as scripts, references, te
 When the model activates the skill, the runtime lists the folder the same way it lists a file-based skill's folder. The model gets the same "Base directory for this skill" line and related-files list that a file-based skill gets, in place of the text-only notice, and reads the files with its ordinary file tools. The runtime never reads, copies, or writes the files itself.
 
 ```typescript
-import { approveAll, CopilotClient, type SkillProvider } from "@github/copilot-sdk";
+import { approveAll, CopilotClient, type SkillProvider } from "copilot-sdk-supercharged";
 
 const skillProvider: SkillProvider = {
     listSkills: () => [
@@ -645,10 +695,14 @@ const skillProvider: SkillProvider = {
             : null,
 };
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 const session = await client.createSession({
-    onPermissionRequest: approveAll,
-    skillProvider,
+    permissions: {
+        onRequest: approveAll,
+    },
+    skills: {
+        provider: skillProvider,
+    },
 });
 ```
 
@@ -674,7 +728,7 @@ The runtime lists the folder after read skill returns, so you can create the fol
 
 #### Access
 
-* **Local disk.** From the time skills are listed, the runtime treats each enabled provider skill's `directory` like a configured `skillDirectories` folder: reads under it skip the outside-workspace path prompt, and sandboxed processes get read-only access to it. Reads still go to your permission handler, as they do for file-based skills. Don't return a broad directory, such as your home folder or a folder that holds every tenant's files.
+* **Local disk.** From the time skills are listed, the runtime treats each enabled provider skill's `directory` like a configured `skills.directories` folder: reads under it skip the outside-workspace path prompt, and sandboxed processes get read-only access to it. Reads still go to your permission handler, as they do for file-based skills. Don't return a broad directory, such as your home folder or a folder that holds every tenant's files.
 * **Session filesystem.** The runtime adds no access for the folder. Have your permission handler approve reads under it, and when the sandbox is on, add the folder to the sandbox's `readonlyPaths`.
 
 Your application owns the folder: where it lives, how long it exists, cleaning it up, and keeping the model from changing it. The read-only access covers only sandboxed processes. Outside the sandbox, or when the folder is inside the workspace, the model can write to it unless your permission handler, or your `sessionFs` handler, refuses.
@@ -689,7 +743,7 @@ Your application owns the folder: where it lives, how long it exists, cleaning i
 * `directory` must be absolute in the session's path conventions; on a Windows-style session filesystem it needs a drive or UNC prefix. It's resolved the way file tools resolve paths, so `.` and `..` segments and repeated or trailing separators are removed, and it can't resolve to a filesystem root. It counts toward the catalog's 1 MiB metadata limit, and it isn't shown in skill catalogs. An invalid `directory` rejects the whole catalog, like any other invalid listed skill.
 * The related-files list follows the file-based rules: build and dependency folders, such as `node_modules`, `bin`, `obj`, and `dist`, are hidden; a folder with more than 50 entries is summarized; files nested more than 10 folders deep are not listed; `SKILL.md` is never listed; and at most 100 files are shown.
 * After the conversation is compacted, the model keeps the skill's instructions but not its folder path. Invoking the skill again shows it. File-based skills keep their path.
-* Supporting files need a Copilot CLI at least as new as the SDK release that adds them. An older CLI rejects the whole skill catalog when any listed skill has a `directory`. Providers that don't set `directory` work with older CLIs.
+* Supporting files need a Copilot runtime at least as new as the SDK release that adds them. An older runtime rejects the whole skill catalog when any listed skill has a `directory`. Providers that don't set `directory` work with older runtimes.
 
 ### Serving existing SKILL.md files
 
@@ -723,7 +777,7 @@ The runtime validates the provider's catalog and content:
   | Java | The returned `CompletableFuture` is cancelled with `cancel(true)`, which doesn't interrupt running work. |
   | Rust | The provider future is dropped. |
 
-  These signals cover calls that the runtime cancels. When the connection closes or the client is force-stopped, the .NET, Java, and Rust SDKs also cancel calls that are still running. The Node.js, Python, and Go SDKs don't: a running call continues until it returns, and the SDK discards its result.
+  These signals cover calls that the runtime cancels. When the connection closes or the client is force-stopped, the Python, Go, .NET, Java, and Rust SDKs also cancel calls that are still running. The Node.js SDK doesn't: a running call continues until it returns, and the SDK discards its result.
 
 If listing fails or returns an invalid catalog, the runtime reports the problem in the `errors` list returned by `skills.reload`. A failed reload keeps the provider skills from the last successful list. If reading a skill fails, the `skill` tool reports a generic load failure to the model. The SDK never forwards the text of errors your provider throws or returns, so that text can't leak into the conversation.
 
@@ -731,7 +785,7 @@ If listing fails or returns an invalid catalog, the runtime reports the problem 
 
 A provider is bound to one session:
 
-* A provider enables skills unless you set `enableSkills` to `false`, which keeps the provider bound but never called. In `mode: "empty"`, skills stay disabled until you set `enableSkills` to `true`.
+* A provider enables skills unless you set `skills.enabled` to `false`, which keeps the provider bound but never called. In `mode: "empty"`, skills stay disabled until you set `skills.enabled` to `true`.
 * The provider is never persisted. Pass it again when you resume a session. Resuming without a provider removes it from the session. Extensions that join the session don't change it.
 * A provider skill with the same name as a file-based skill replaces the file-based skill, and `skills.reload` reports a warning.
 * Sub-agents use their parent session's provider.
@@ -740,24 +794,24 @@ A provider is bound to one session:
 
 ## Configuration options
 
-### SessionConfig skill fields
+### SessionSkillOptions fields
 
 | Language | Field | Type | Description |
 |----------|-------|------|-------------|
-| Node.js | `skillDirectories` | `string[]` | Directories to load skills from |
-| Node.js | `disabledSkills` | `string[]` | Skills to disable |
-| Node.js | `skillProvider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
-| Python | `skill_directories` | `list[str]` | Directories to load skills from |
-| Python | `disabled_skills` | `list[str]` | Skills to disable |
-| Python | `skill_provider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
-| Go | `SkillDirectories` | `[]string` | Directories to load skills from |
-| Go | `DisabledSkills` | `[]string` | Skills to disable |
-| Go | `SkillProvider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
-| .NET | `SkillDirectories` | `List<string>` | Directories to load skills from |
-| .NET | `DisabledSkills` | `List<string>` | Skills to disable |
-| .NET | `SkillProvider` | `ISkillProvider` | Experimental provider for SDK-supplied skills |
-| Java | `setSkillProvider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
-| Rust | `with_skill_provider` | `Arc<dyn SkillProvider>` | Experimental provider for SDK-supplied skills |
+| Node.js | `skills.directories` | `string[]` | Directories to load skills from |
+| Node.js | `skills.disabledSkills` | `string[]` | Skills to disable |
+| Node.js | `skills.provider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
+| Python | `skills={"directories": ...}` | `list[str]` | Directories to load skills from |
+| Python | `skills={"disabled_skills": ...}` | `list[str]` | Skills to disable |
+| Python | `skills={"provider": ...}` | `SkillProvider` | Experimental provider for SDK-supplied skills |
+| Go | `Skills.Directories` | `[]string` | Directories to load skills from |
+| Go | `Skills.DisabledSkills` | `[]string` | Skills to disable |
+| Go | `Skills.Provider` | `SkillProvider` | Experimental provider for SDK-supplied skills |
+| .NET | `Skills.Directories` | `IList<string>` | Directories to load skills from |
+| .NET | `Skills.DisabledSkills` | `IList<string>` | Skills to disable |
+| .NET | `Skills.Provider` | `ISkillProvider` | Experimental provider for SDK-supplied skills |
+| Java | `setSkills(new SessionSkillOptions().setProvider(...))` | `SkillProvider` | Experimental provider for SDK-supplied skills |
+| Rust | `with_skills(\|skills\| skills.with_provider(...))` | `Arc<dyn SkillProvider>` | Experimental provider for SDK-supplied skills |
 
 ### Built-in skills and `mode: "empty"`
 
@@ -769,11 +823,11 @@ the post-create and post-resume options patch, alongside the empty
 `installedPlugins` list.
 
 This exclusion is the default, not a permanent restriction. To allow selected
-runtime-bundled skills, set `includedBuiltinSkills` (or the language-specific
+runtime-bundled skills, set `skills.includedBuiltinSkills` (or the language-specific
 casing) to their names. You can also opt into your **own** custom skills under
-`mode: "empty"`—enable skills and pass your own `skillDirectories`—and those
+`mode: "empty"`—enable skills and pass your own `skills.directories`—and those
 remain fully usable, including a custom skill that shares a name with a built-in.
-Under `mode: "copilot-cli"` the field is omitted unless you set the option.
+Under `mode: "coding-agent"` the field is omitted unless you set the option.
 
 Custom skill directories are scanned when skills first load, including directories
 that are missing or empty at that point. Filesystem changes in those directories
@@ -807,18 +861,26 @@ Changing the configured skill directories also refreshes the catalog.
 
 ### Skills + custom agents
 
-Skills listed in an agent's `skills` field are **eagerly preloaded**—their full content is injected into the agent's context at startup, so the agent has access to the skill instructions immediately without needing to invoke a skill tool. Skill names are resolved from the session-level `skillDirectories`.
+Skills listed in an agent's `skills` field are **eagerly preloaded**—their full content is injected into the agent's context at startup, so the agent has access to the skill instructions immediately without needing to invoke a skill tool. Skill names are resolved from the session-level `skills.directories`.
 
 ```typescript
 const session = await client.createSession({
-    skillDirectories: ["./skills/security"],
-    customAgents: [{
-        name: "security-auditor",
-        description: "Security-focused code reviewer",
-        prompt: "Focus on OWASP Top 10 vulnerabilities",
-        skills: ["security-scan", "dependency-check"],
-    }],
-    onPermissionRequest: async () => ({ kind: "approve-once" }),
+    skills: {
+        directories: ["./skills/security"],
+    },
+    agents: {
+        definitions: [
+            {
+                name: "security-auditor",
+                description: "Security-focused code reviewer",
+                prompt: "Focus on OWASP Top 10 vulnerabilities",
+                skills: ["security-scan", "dependency-check"],
+            },
+        ],
+    },
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 > [!NOTE]
@@ -830,16 +892,22 @@ Skills can complement MCP server capabilities:
 
 ```typescript
 const session = await client.createSession({
-    skillDirectories: ["./skills/database"],
-    mcpServers: {
-        postgres: {
-            type: "local",
-            command: "npx",
-            args: ["-y", "@modelcontextprotocol/server-postgres"],
-            tools: ["*"],
+    skills: {
+        directories: ["./skills/database"],
+    },
+    mcp: {
+        servers: {
+            postgres: {
+                type: "local",
+                command: "npx",
+                args: ["-y", "@modelcontextprotocol/server-postgres"],
+                tools: ["*"],
+            },
         },
     },
-    onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -856,7 +924,7 @@ const session = await client.createSession({
 ### Skill conflicts
 
 If multiple skills provide conflicting instructions:
-* Use `disabledSkills` to exclude conflicting skills
+* Use `skills.disabledSkills` to exclude conflicting skills
 * Reorganize skill directories to avoid overlaps
 
 ## See also

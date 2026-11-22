@@ -15,26 +15,32 @@ import {
     streamedTurn,
 } from "../../nodejs/test/e2e/harness/runtimeHost.js";
 
-if (process.platform !== "linux")
-    throw new Error("This source-build topology smoke requires Linux");
+if (process.platform !== "linux") throw new Error("This source-build topology smoke requires Linux");
 const artifacts = localHostArtifacts();
 const workDir = resolve(process.argv[2] ?? ".");
 const githubToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 assert(githubToken, "Set GITHUB_TOKEN or GH_TOKEN for the live smoke");
 const owner = new CopilotClient({
-    connection: RuntimeConnection.forTcp({ path: artifacts.runtimePath }),
-    workingDirectory: workDir,
-    gitHubToken: githubToken,
-    env: {
-        ...process.env,
-        ...artifacts.env,
-        GITHUB_TOKEN: githubToken,
-        GH_TOKEN: githubToken,
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forSpawnedTcp({
+        path: artifacts.runtimePath,
+        workingDirectory: workDir,
+        env: {
+            ...process.env,
+            ...artifacts.env,
+            GITHUB_TOKEN: githubToken,
+            GH_TOKEN: githubToken,
+        },
+    }),
+    github: {
+        token: githubToken,
     },
 });
 try {
     await using sdkSession = await owner.createSession({
-        onPermissionRequest: approveAll,
+        permissions: {
+            onRequest: approveAll,
+        },
         model: "claude-sonnet-5",
     });
     await using host = await owner.startAhpHost({
@@ -69,9 +75,7 @@ try {
         await host.dispose();
         await assertHostStopped(host, ahp, runtime);
         await sdkSession.getEvents();
-        console.log(
-            "Listener closed, AHP client disconnected; hosting runtime and SDK session survive."
-        );
+        console.log("Listener closed, AHP client disconnected; hosting runtime and SDK session survive.");
     } finally {
         await ahp.client.shutdown();
     }

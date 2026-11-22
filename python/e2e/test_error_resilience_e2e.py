@@ -14,7 +14,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="module")
 class TestErrorResilience:
     async def test_should_throw_when_sending_to_disconnected_session(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await session.disconnect()
 
@@ -25,7 +25,7 @@ class TestErrorResilience:
         self, ctx: E2ETestContext
     ):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await session.disconnect()
 
@@ -34,7 +34,7 @@ class TestErrorResilience:
 
     async def test_should_handle_double_abort_without_error(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         try:
             await session.abort()
@@ -46,5 +46,5 @@ class TestErrorResilience:
         with pytest.raises(Exception):
             await ctx.client.resume_session(
                 "non-existent-session-id-12345",
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all},
             )

@@ -3,40 +3,38 @@
  *--------------------------------------------------------------------------------------------*/
 
 using Xunit;
-using InstallationDecision = GitHub.Copilot.Rpc.InstallationDecision;
-using KerberosAuthMode = GitHub.Copilot.Rpc.KerberosAuthMode;
-using SandboxConfig = GitHub.Copilot.Rpc.SandboxConfig;
+using InstallationDecision = Microsoft.Copilot.Rpc.InstallationDecision;
+using NetworkAuthenticateBasicResult = Microsoft.Copilot.Rpc.NetworkAuthenticateBasicResult;
+using NetworkScope = Microsoft.Copilot.Rpc.NetworkScope;
+using SandboxConfig = Microsoft.Copilot.Rpc.SandboxConfig;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public class CloneTests
 {
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
     [Fact]
     public void CopilotClientOptions_Clone_CopiesAllProperties()
     {
         var extensionLaunchProvider = new TestExtensionLaunchProvider();
         InstallationConfirmationHandler installationConfirmationHandler =
             (_request, _context) => ValueTask.FromResult(InstallationDecision.Decline);
-        var kerberosAuth = new KerberosAuthConfig
+        var network = new NetworkConfig
         {
-            Mode = KerberosAuthMode.Fallback,
-            Callback = (_request, _cancellationToken) => Task.FromResult<string?>(null),
+            Scope = NetworkScope.Runtime,
+            ResolveProxy = (_request, _cancellationToken) => Task.FromResult<string?>(null),
+            AuthenticateNegotiate = (_request, _cancellationToken) => Task.FromResult<string?>(null),
+            AuthenticateBasic = (_request, _cancellationToken) => Task.FromResult<NetworkAuthenticateBasicResult?>(null),
         };
+        var connection = RuntimeConnection.ForSpawnedTcp(8080, "tok", "/usr/bin/copilot", ["--verbose", "--debug"]);
+        connection.WorkingDirectory = "/home/user";
+        connection.Environment = new Dictionary<string, string> { ["KEY"] = "value" };
+        connection.BaseDirectory = "/custom/copilot/home";
+        connection.SessionIdleTimeoutSeconds = 600;
         var original = new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForTcp(port: 8080, connectionToken: "tok", path: "/usr/bin/copilot", args: ["--verbose", "--debug"]),
-            WorkingDirectory = "/home/user",
-            LogLevel = CopilotLogLevel.Debug,
-            Environment = new Dictionary<string, string> { ["KEY"] = "value" },
-            GitHubToken = "ghp_test",
-            UseLoggedInUser = false,
-            BaseDirectory = "/custom/copilot/home",
-            BuiltinPluginDirectories = ["/plugins/core", "/plugins/github"],
-            SessionIdleTimeoutSeconds = 600,
-            ExtensionLaunchProvider = extensionLaunchProvider,
-            KerberosAuth = kerberosAuth,
-            InstallationConfirmationHandler = installationConfirmationHandler,
+            Mode = CopilotClientMode.CodingAgent,
+            Network = network,
             ClientInfo = new CopilotClientInfo
             {
                 ApplicationName = "example-app",
@@ -44,55 +42,61 @@ public class CloneTests
                 IntegrationName = "example-integration",
                 IntegrationVersion = "2.0.0",
             },
+            Runtime = connection,
+            Observability = new ClientObservabilityOptions { LogLevel = CopilotLogLevel.Debug },
+            GitHub = new ClientGitHubOptions { Token = "ghp_test", UseLoggedInUser = false },
+            Plugins = new ClientPluginOptions { BuiltinDirectories = ["/plugins/core", "/plugins/github"] },
+            Extensions = new ClientExtensionOptions { LaunchProvider = extensionLaunchProvider },
+            Installations = new ClientInstallationOptions { ConfirmationHandler = installationConfirmationHandler }
         };
 
         var clone = original.Clone();
 
-        Assert.Same(original.Connection, clone.Connection);
-        Assert.Equal(original.WorkingDirectory, clone.WorkingDirectory);
-        Assert.Equal(original.LogLevel, clone.LogLevel);
-        Assert.Equal(original.Environment, clone.Environment);
-        Assert.Equal(original.GitHubToken, clone.GitHubToken);
-        Assert.Equal(original.UseLoggedInUser, clone.UseLoggedInUser);
-        Assert.Equal(original.BaseDirectory, clone.BaseDirectory);
-        Assert.Equal(original.BuiltinPluginDirectories, clone.BuiltinPluginDirectories);
-        Assert.NotSame(original.BuiltinPluginDirectories, clone.BuiltinPluginDirectories);
-        Assert.Equal(original.SessionIdleTimeoutSeconds, clone.SessionIdleTimeoutSeconds);
-        Assert.Same(extensionLaunchProvider, clone.ExtensionLaunchProvider);
-        Assert.Same(kerberosAuth, clone.KerberosAuth);
-        Assert.Same(installationConfirmationHandler, clone.InstallationConfirmationHandler);
+        Assert.Same(original.Runtime, clone.Runtime);
+        Assert.Equal((original.Runtime as ChildProcessRuntimeConnection)?.WorkingDirectory, (clone.Runtime as ChildProcessRuntimeConnection)?.WorkingDirectory);
+        Assert.Equal(original.Observability.LogLevel, clone.Observability.LogLevel);
+        Assert.Equal((original.Runtime as ChildProcessRuntimeConnection)?.Environment, (clone.Runtime as ChildProcessRuntimeConnection)?.Environment);
+        Assert.Equal(original.GitHub.Token, clone.GitHub.Token);
+        Assert.Equal(original.GitHub.UseLoggedInUser, clone.GitHub.UseLoggedInUser);
+        Assert.Equal((original.Runtime as OwnedRuntimeConnection)?.BaseDirectory, (clone.Runtime as OwnedRuntimeConnection)?.BaseDirectory);
+        Assert.Equal(original.Plugins.BuiltinDirectories, clone.Plugins.BuiltinDirectories);
+        Assert.NotSame(original.Plugins.BuiltinDirectories, clone.Plugins.BuiltinDirectories);
+        Assert.Equal((original.Runtime as OwnedRuntimeConnection)?.SessionIdleTimeoutSeconds, (clone.Runtime as OwnedRuntimeConnection)?.SessionIdleTimeoutSeconds);
+        Assert.Same(extensionLaunchProvider, clone.Extensions.LaunchProvider);
+        Assert.Same(network, clone.Network);
+        Assert.Same(installationConfirmationHandler, clone.Installations.ConfirmationHandler);
         Assert.Same(original.ClientInfo, clone.ClientInfo);
     }
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 
     [Fact]
     public void CopilotClientOptions_Clone_ConnectionIsShared()
     {
-        var connection = RuntimeConnection.ForStdio();
-        var original = new CopilotClientOptions { Connection = connection };
+        var connection = RuntimeConnection.ForSpawnedStdio();
+        var original = new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = connection };
 
         var clone = original.Clone();
 
-        Assert.Same(connection, clone.Connection);
+        Assert.Same(connection, clone.Runtime);
     }
 
     [Fact]
     public void CopilotClientOptions_Clone_EnvironmentIsShared()
     {
         var env = new Dictionary<string, string> { ["key"] = "value" };
-        var original = new CopilotClientOptions { Environment = env };
+        var original = new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForSpawnedStdio(environment: env) };
 
         var clone = original.Clone();
 
-        Assert.Same(original.Environment, clone.Environment);
+        Assert.Same((original.Runtime as ChildProcessRuntimeConnection)?.Environment, (clone.Runtime as ChildProcessRuntimeConnection)?.Environment);
     }
 
-    private sealed class TestExtensionLaunchProvider : GitHub.Copilot.Rpc.IExtensionLaunchProviderHandler
+    private sealed class TestExtensionLaunchProvider : Microsoft.Copilot.Rpc.IExtensionLaunchProviderHandler
     {
-        public Task<GitHub.Copilot.Rpc.ExtensionLaunchProviderResolveResult> ResolveAsync(
-            GitHub.Copilot.Rpc.ExtensionLaunchProviderResolveRequest request,
+        public Task<Microsoft.Copilot.Rpc.ExtensionLaunchProviderResolveResult> ResolveAsync(
+            Microsoft.Copilot.Rpc.ExtensionLaunchProviderResolveRequest request,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult(new GitHub.Copilot.Rpc.ExtensionLaunchProviderResolveResult());
+            Task.FromResult(new Microsoft.Copilot.Rpc.ExtensionLaunchProviderResolveResult());
     }
 
     private sealed class TestSkillProvider : ISkillProvider
@@ -107,33 +111,12 @@ public class CloneTests
     [Fact]
     public void SessionConfig_Clone_CopiesAllProperties()
     {
-        var original = new SessionConfig
+        var original = new CreateSessionOptions
         {
             SessionId = "test-session",
             ClientName = "my-app",
             Model = "gpt-4",
-            ReasoningEffort = "high",
-            ReasoningSummary = ReasoningSummary.Detailed,
-            ContextTier = ContextTier.LongContext,
-            AskUserVariant = AskUserVariant.Elicitation,
-            ConfigDirectory = "/config",
-            AvailableTools = ["tool1", "tool2"],
-            ExcludedTools = ["tool3"],
-            ExcludedBuiltInAgents = ["explore", "task"],
             WorkingDirectory = "/workspace",
-            AdditionalDirectories = ["/shared", "/generated"],
-            Streaming = true,
-            EnableCitations = true,
-            EnableFileChangeTracking = true,
-            EnableSessionTelemetry = false,
-            EnableExperimentalMode = true,
-            EnableOnDemandInstructionDiscovery = true,
-            IncludeSubAgentStreamingEvents = false,
-            McpServers = new Dictionary<string, McpServerConfig> { ["server1"] = new McpStdioServerConfig { Command = "echo" } },
-            McpOAuthTokenStorage = McpOAuthTokenStorageMode.Persistent,
-            CustomAgents = [new CustomAgentConfig { Name = "agent1", Model = "claude-haiku-4.5", ReasoningEffort = "high" }],
-            Agent = "agent1",
-            Capi = new CapiSessionOptions { EnableWebSocketResponses = false },
             Cloud = new CloudSessionOptions
             {
                 Repository = new CloudSessionRepository
@@ -143,18 +126,118 @@ public class CloneTests
                     Branch = "main"
                 }
             },
-            DefaultAgent = new DefaultAgentConfig { ExcludedTools = ["hidden-tool"] },
-            SkillDirectories = ["/skills"],
-            InstructionDirectories = ["/instructions"],
-            DisabledSkills = ["skill1"],
-            DisabledMcpServers = ["server1"],
-            SandboxConfig = new SandboxConfig { Enabled = true, SandboxMcpServers = false },
-            PluginDirectories = ["/plugins"],
-            LargeOutput = new LargeToolOutputConfig { Enabled = true, MaxSizeBytes = 2048, OutputDirectory = "/tmp/out" },
-            Memory = new MemoryConfiguration { Enabled = true },
-            SessionLimits = new SessionLimitsConfig { MaxAiCredits = 42.5 },
-            OnExitPlanModeRequest = static (_, _) => Task.FromResult(new ExitPlanModeResult()),
-            OnAutoModeSwitchRequest = static (_, _) => Task.FromResult(AutoModeSwitchResponse.No),
+            Inference = new SessionInferenceOptions
+            {
+                ReasoningEffort = "high",
+                ReasoningSummary = ReasoningSummary.Detailed,
+                ContextTier = ContextTier.LongContext,
+                EnableCitations = true
+            },
+            Interaction = new SessionInteractionOptions
+            {
+                AskUserVariant = AskUserVariant.Elicitation,
+                OnExitPlanModeRequest = static (_, _) => Task.FromResult(new ExitPlanModeResult()),
+                OnAutoModeSwitchRequest = static (_, _) => Task.FromResult(AutoModeSwitchResponse.No)
+            },
+            ConfigDirectory = "/config",
+            Tools = new SessionToolOptions
+            {
+                AvailableTools = ["tool1", "tool2"],
+                ExcludedTools = ["tool3"],
+                LargeOutput = new LargeToolOutputConfig
+                {
+                    Enabled = true,
+                    MaxSizeBytes = 2048,
+                    OutputDirectory = "/tmp/out"
+                }
+            },
+            Agents = new SessionAgentOptions
+            {
+                ExcludedBuiltInAgents = ["explore", "task"],
+                Definitions = [new CustomAgentConfig
+        {
+            Name = "agent1",
+            Model = "claude-haiku-4.5",
+            ReasoningEffort = "high"
+        }
+
+        ],
+                Selected = "agent1",
+                Default = new DefaultAgentConfig
+                {
+                    ExcludedTools = ["hidden-tool"]
+                }
+            },
+            Filesystem = new CreateSessionFilesystemOptions
+            {
+                AdditionalDirectories = ["/shared", "/generated"],
+                TrackFileChanges = true
+            },
+            Events = new SessionEventOptions
+            {
+                Streaming = true,
+                IncludeSubAgentStreamingEvents = false
+            },
+            GitHub = new SessionGitHubOptions
+            {
+                TelemetryEnabled = false,
+                Capi = new CapiSessionOptions
+                {
+                    EnableWebSocketResponses = false
+                }
+            },
+            Experiments = new SessionExperimentOptions
+            {
+                EnableExperimentalMode = true
+            },
+            Instructions = new CreateSessionInstructionOptions
+            {
+                OnDemandDiscovery = true,
+                Directories = ["/instructions"]
+            },
+            Mcp = new SessionMcpOptions
+            {
+                Servers = new Dictionary<string, McpServerConfig>
+                {
+                    ["server1"] = new McpStdioServerConfig
+                    {
+                        Command = "echo"
+                    }
+                },
+                OauthTokenStorage = McpOAuthTokenStorageMode.Persistent,
+                DisabledServers = ["server1"]
+            },
+            Skills = new SessionSkillOptions
+            {
+                Directories = ["/skills"],
+                DisabledSkills = ["skill1"]
+            },
+            Permissions = new SessionPermissionOptions
+            {
+                Sandbox = new SandboxConfig
+                {
+                    Enabled = true,
+                    SandboxMcpServers = false
+                }
+            },
+            Plugins = new SessionPluginOptions
+            {
+                Directories = ["/plugins"]
+            },
+            State = new SessionStateOptions
+            {
+                Memory = new MemoryConfiguration
+                {
+                    Enabled = true
+                }
+            },
+            Execution = new SessionExecutionOptions
+            {
+                Limits = new SessionLimitsConfig
+                {
+                    MaxAiCredits = 42.5
+                }
+            }
         };
 
         var clone = original.Clone();
@@ -162,43 +245,43 @@ public class CloneTests
         Assert.Equal(original.SessionId, clone.SessionId);
         Assert.Equal(original.ClientName, clone.ClientName);
         Assert.Equal(original.Model, clone.Model);
-        Assert.Equal(original.ReasoningEffort, clone.ReasoningEffort);
-        Assert.Equal(original.ReasoningSummary, clone.ReasoningSummary);
-        Assert.Equal(original.ContextTier, clone.ContextTier);
-        Assert.Equal(original.AskUserVariant, clone.AskUserVariant);
+        Assert.Equal(original.Inference.ReasoningEffort, clone.Inference.ReasoningEffort);
+        Assert.Equal(original.Inference.ReasoningSummary, clone.Inference.ReasoningSummary);
+        Assert.Equal(original.Inference.ContextTier, clone.Inference.ContextTier);
+        Assert.Equal(original.Interaction.AskUserVariant, clone.Interaction.AskUserVariant);
         Assert.Equal(original.ConfigDirectory, clone.ConfigDirectory);
-        Assert.Equal(original.AvailableTools, clone.AvailableTools);
-        Assert.Equal(original.ExcludedTools, clone.ExcludedTools);
-        Assert.Equal(original.ExcludedBuiltInAgents, clone.ExcludedBuiltInAgents);
+        Assert.Equal(original.Tools.AvailableTools, clone.Tools.AvailableTools);
+        Assert.Equal(original.Tools.ExcludedTools, clone.Tools.ExcludedTools);
+        Assert.Equal(original.Agents.ExcludedBuiltInAgents, clone.Agents.ExcludedBuiltInAgents);
         Assert.Equal(original.WorkingDirectory, clone.WorkingDirectory);
-        Assert.Equal(original.AdditionalDirectories, clone.AdditionalDirectories);
-        Assert.Equal(original.Streaming, clone.Streaming);
-        Assert.Equal(original.EnableCitations, clone.EnableCitations);
-        Assert.Equal(original.EnableFileChangeTracking, clone.EnableFileChangeTracking);
-        Assert.Equal(original.EnableSessionTelemetry, clone.EnableSessionTelemetry);
-        Assert.Equal(original.EnableExperimentalMode, clone.EnableExperimentalMode);
-        Assert.Equal(original.EnableOnDemandInstructionDiscovery, clone.EnableOnDemandInstructionDiscovery);
-        Assert.Equal(original.IncludeSubAgentStreamingEvents, clone.IncludeSubAgentStreamingEvents);
-        Assert.Equal(original.McpServers.Count, clone.McpServers!.Count);
-        Assert.Equal(original.McpOAuthTokenStorage, clone.McpOAuthTokenStorage);
-        Assert.Equal(original.CustomAgents.Count, clone.CustomAgents!.Count);
-        Assert.Equal(original.CustomAgents[0].Model, clone.CustomAgents[0].Model);
-        Assert.Equal(original.CustomAgents[0].ReasoningEffort, clone.CustomAgents[0].ReasoningEffort);
-        Assert.Equal(original.Agent, clone.Agent);
-        Assert.Same(original.Capi, clone.Capi);
+        Assert.Equal(original.Filesystem.AdditionalDirectories, clone.Filesystem.AdditionalDirectories);
+        Assert.Equal(original.Events.Streaming, clone.Events.Streaming);
+        Assert.Equal(original.Inference.EnableCitations, clone.Inference.EnableCitations);
+        Assert.Equal(original.Filesystem.TrackFileChanges, clone.Filesystem.TrackFileChanges);
+        Assert.Equal(original.GitHub.TelemetryEnabled, clone.GitHub.TelemetryEnabled);
+        Assert.Equal(original.Experiments.EnableExperimentalMode, clone.Experiments.EnableExperimentalMode);
+        Assert.Equal(original.Instructions.OnDemandDiscovery, clone.Instructions.OnDemandDiscovery);
+        Assert.Equal(original.Events.IncludeSubAgentStreamingEvents, clone.Events.IncludeSubAgentStreamingEvents);
+        Assert.Equal(original.Mcp.Servers.Count, clone.Mcp.Servers!.Count);
+        Assert.Equal(original.Mcp.OauthTokenStorage, clone.Mcp.OauthTokenStorage);
+        Assert.Equal(original.Agents.Definitions.Count, clone.Agents.Definitions!.Count);
+        Assert.Equal(original.Agents.Definitions[0].Model, clone.Agents.Definitions[0].Model);
+        Assert.Equal(original.Agents.Definitions[0].ReasoningEffort, clone.Agents.Definitions[0].ReasoningEffort);
+        Assert.Equal(original.Agents.Selected, clone.Agents.Selected);
+        Assert.Same(original.GitHub.Capi, clone.GitHub.Capi);
         Assert.Same(original.Cloud, clone.Cloud);
-        Assert.Equal(original.DefaultAgent!.ExcludedTools, clone.DefaultAgent!.ExcludedTools);
-        Assert.Equal(original.SkillDirectories, clone.SkillDirectories);
-        Assert.Equal(original.InstructionDirectories, clone.InstructionDirectories);
-        Assert.Equal(original.DisabledSkills, clone.DisabledSkills);
-        Assert.Equal(original.DisabledMcpServers, clone.DisabledMcpServers);
-        Assert.Same(original.SandboxConfig, clone.SandboxConfig);
-        Assert.Equal(original.PluginDirectories, clone.PluginDirectories);
-        Assert.Same(original.LargeOutput, clone.LargeOutput);
-        Assert.Same(original.Memory, clone.Memory);
-        Assert.Same(original.SessionLimits, clone.SessionLimits);
-        Assert.Same(original.OnExitPlanModeRequest, clone.OnExitPlanModeRequest);
-        Assert.Same(original.OnAutoModeSwitchRequest, clone.OnAutoModeSwitchRequest);
+        Assert.Equal(original.Agents.Default!.ExcludedTools, clone.Agents.Default!.ExcludedTools);
+        Assert.Equal(original.Skills.Directories, clone.Skills.Directories);
+        Assert.Equal(original.Instructions.Directories, clone.Instructions.Directories);
+        Assert.Equal(original.Skills.DisabledSkills, clone.Skills.DisabledSkills);
+        Assert.Equal(original.Mcp.DisabledServers, clone.Mcp.DisabledServers);
+        Assert.Same(original.Permissions.Sandbox, clone.Permissions.Sandbox);
+        Assert.Equal(original.Plugins.Directories, clone.Plugins.Directories);
+        Assert.Same(original.Tools.LargeOutput, clone.Tools.LargeOutput);
+        Assert.Same(original.State.Memory, clone.State.Memory);
+        Assert.Same(original.Execution.Limits, clone.Execution.Limits);
+        Assert.Same(original.Interaction.OnExitPlanModeRequest, clone.Interaction.OnExitPlanModeRequest);
+        Assert.Same(original.Interaction.OnAutoModeSwitchRequest, clone.Interaction.OnAutoModeSwitchRequest);
     }
 
     [Theory]
@@ -207,152 +290,270 @@ public class CloneTests
     [InlineData(null)]
     public void SessionConfig_Clone_PreservesRefreshCustomInstructions(bool? refresh)
     {
-        var original = new SessionConfig { RefreshCustomInstructions = refresh };
+        var original = new CreateSessionOptions { Instructions = new CreateSessionInstructionOptions { RefreshCustomInstructions = refresh } };
 
         var clone = original.Clone();
 
         Assert.NotSame(original, clone);
-        Assert.Equal(refresh, clone.RefreshCustomInstructions);
+        Assert.Equal(refresh, clone.Instructions.RefreshCustomInstructions);
     }
 
     [Fact]
     public void SessionConfig_RefreshCustomInstructions_IsCreateOnlyAndDefaultsToNull()
     {
-        Assert.Null(new SessionConfig().RefreshCustomInstructions);
-        Assert.Null(typeof(SessionConfigBase).GetProperty(nameof(SessionConfig.RefreshCustomInstructions)));
-        Assert.Null(typeof(ResumeSessionConfig).GetProperty(nameof(SessionConfig.RefreshCustomInstructions)));
+        Assert.Null(new CreateSessionOptions().Instructions.RefreshCustomInstructions);
+        Assert.Null(typeof(SessionOptionsBase).GetProperty(nameof(CreateSessionOptions.Instructions.RefreshCustomInstructions)));
+        Assert.Null(typeof(ResumeSessionOptions).GetProperty(nameof(CreateSessionOptions.Instructions.RefreshCustomInstructions)));
     }
 
     [Fact]
     public void SessionConfig_Clone_CopiesSkillProvider()
     {
         var provider = new TestSkillProvider();
-        var original = new SessionConfig { SkillProvider = provider };
+        var original = new CreateSessionOptions
+        {
+            Skills = new SessionSkillOptions
+            {
+                Provider = provider
+            }
+        };
 
         var clone = original.Clone();
 
-        Assert.Same(provider, clone.SkillProvider);
+        Assert.Same(provider, clone.Skills.Provider);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesSkillProvider()
     {
         var provider = new TestSkillProvider();
-        var original = new ResumeSessionConfig { SkillProvider = provider };
+        var original = new ResumeSessionOptions
+        {
+            Skills = new SessionSkillOptions
+            {
+                Provider = provider
+            }
+        };
 
         var clone = original.Clone();
 
-        Assert.Same(provider, clone.SkillProvider);
+        Assert.Same(provider, clone.Skills.Provider);
     }
 
     [Fact]
     public void SessionConfig_Clone_CollectionsAreIndependent()
     {
-        var original = new SessionConfig
+        var original = new CreateSessionOptions
         {
-            AvailableTools = ["tool1"],
-            ExcludedTools = ["tool2"],
-            ExcludedBuiltInAgents = ["explore"],
-            McpServers = new Dictionary<string, McpServerConfig> { ["s1"] = new McpStdioServerConfig { Command = "echo" } },
-            CustomAgents = [new CustomAgentConfig { Name = "a1" }],
-            AdditionalDirectories = ["/shared"],
-            SkillDirectories = ["/skills"],
-            InstructionDirectories = ["/instructions"],
-            DisabledSkills = ["skill1"],
-            DisabledMcpServers = ["server1"],
+            Tools = new SessionToolOptions
+            {
+                AvailableTools = ["tool1"],
+                ExcludedTools = ["tool2"]
+            },
+            Agents = new SessionAgentOptions
+            {
+                ExcludedBuiltInAgents = ["explore"],
+                Definitions = [new CustomAgentConfig
+        {
+            Name = "a1"
+        }
+
+        ]
+            },
+            Mcp = new SessionMcpOptions
+            {
+                Servers = new Dictionary<string, McpServerConfig>
+                {
+                    ["s1"] = new McpStdioServerConfig
+                    {
+                        Command = "echo"
+                    }
+                },
+                DisabledServers = ["server1"]
+            },
+            Filesystem = new CreateSessionFilesystemOptions
+            {
+                AdditionalDirectories = ["/shared"]
+            },
+            Skills = new SessionSkillOptions
+            {
+                Directories = ["/skills"],
+                DisabledSkills = ["skill1"]
+            },
+            Instructions = new CreateSessionInstructionOptions
+            {
+                Directories = ["/instructions"]
+            }
         };
 
         var clone = original.Clone();
 
         // Mutate clone collections
-        clone.AvailableTools!.Add("tool99");
-        clone.ExcludedTools!.Add("tool99");
-        clone.ExcludedBuiltInAgents!.Add("task");
-        clone.McpServers!["s2"] = new McpStdioServerConfig { Command = "echo" };
-        clone.CustomAgents!.Add(new CustomAgentConfig { Name = "a2" });
-        clone.AdditionalDirectories!.Add("/generated");
-        clone.SkillDirectories!.Add("/more");
-        clone.InstructionDirectories!.Add("/more-instructions");
-        clone.DisabledSkills!.Add("skill99");
-        clone.DisabledMcpServers!.Add("server99");
+        clone.Tools.AvailableTools!.Add("tool99");
+        clone.Tools.ExcludedTools!.Add("tool99");
+        clone.Agents.ExcludedBuiltInAgents!.Add("task");
+        clone.Mcp.Servers!["s2"] = new McpStdioServerConfig { Command = "echo" };
+        clone.Agents.Definitions!.Add(new CustomAgentConfig { Name = "a2" });
+        clone.Filesystem.AdditionalDirectories!.Add("/generated");
+        clone.Skills.Directories!.Add("/more");
+        clone.Instructions.Directories!.Add("/more-instructions");
+        clone.Skills.DisabledSkills!.Add("skill99");
+        clone.Mcp.DisabledServers!.Add("server99");
 
         // Original is unaffected
-        Assert.Single(original.AvailableTools!);
-        Assert.Single(original.ExcludedTools!);
-        Assert.Single(original.ExcludedBuiltInAgents!);
-        Assert.Single(original.McpServers!);
-        Assert.Single(original.CustomAgents!);
-        Assert.Single(original.AdditionalDirectories!);
-        Assert.Single(original.SkillDirectories!);
-        Assert.Single(original.InstructionDirectories!);
-        Assert.Single(original.DisabledSkills!);
-        Assert.Single(original.DisabledMcpServers!);
+        Assert.Single(original.Tools.AvailableTools!);
+        Assert.Single(original.Tools.ExcludedTools!);
+        Assert.Single(original.Agents.ExcludedBuiltInAgents!);
+        Assert.Single(original.Mcp.Servers!);
+        Assert.Single(original.Agents.Definitions!);
+        Assert.Single(original.Filesystem.AdditionalDirectories!);
+        Assert.Single(original.Skills.Directories!);
+        Assert.Single(original.Instructions.Directories!);
+        Assert.Single(original.Skills.DisabledSkills!);
+        Assert.Single(original.Mcp.DisabledServers!);
     }
 
     [Fact]
     public void SessionConfig_Clone_PreservesMcpServersComparer()
     {
         var servers = new Dictionary<string, McpServerConfig>(StringComparer.OrdinalIgnoreCase) { ["server"] = new McpStdioServerConfig { Command = "echo" } };
-        var original = new SessionConfig { McpServers = servers };
+        var original = new CreateSessionOptions
+        {
+            Mcp = new SessionMcpOptions
+            {
+                Servers = servers
+            }
+        };
 
         var clone = original.Clone();
 
-        Assert.True(clone.McpServers!.ContainsKey("SERVER")); // case-insensitive lookup works
+        Assert.True(clone.Mcp.Servers!.ContainsKey("SERVER")); // case-insensitive lookup works
+    }
+
+    [Fact]
+    public void OperationOptions_Clone_AcceptsSharedConfigurationGroups()
+    {
+        var create = new CreateSessionOptions();
+        SessionOptionsBase sharedCreate = create;
+        sharedCreate.Filesystem = new SessionFilesystemOptions { AdditionalDirectories = ["/shared"] };
+        sharedCreate.Instructions = new SessionInstructionOptions { OrganizationText = "Shared instructions" };
+        var createClone = create.Clone();
+        createClone.Filesystem.TrustWorkingDirectory = WorkingDirectoryTrust.Session;
+        createClone.Instructions.RefreshCustomInstructions = true;
+        createClone.Filesystem.AdditionalDirectories!.Add("/clone");
+        Assert.Equal(["/shared"], create.Filesystem.AdditionalDirectories);
+        Assert.Equal("Shared instructions", createClone.Instructions.OrganizationText);
+        Assert.Null(create.Instructions.RefreshCustomInstructions);
+
+        var resume = new ResumeSessionOptions();
+        SessionOptionsBase sharedResume = resume;
+        sharedResume.Canvases = new SessionCanvasOptions { RequestRenderer = true };
+        var resumeClone = resume.Clone();
+        resumeClone.Canvases.Open = [new Microsoft.Copilot.Rpc.OpenCanvasInstance
+        {
+            CanvasId = "editor", ExtensionId = "test", InstanceId = "document"
+        }];
+        Assert.True(resumeClone.Canvases.RequestRenderer);
+        Assert.Null(resume.Canvases.Open);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CollectionsAreIndependent()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            AvailableTools = ["tool1"],
-            ExcludedTools = ["tool2"],
-            ExcludedBuiltInAgents = ["explore"],
-            McpServers = new Dictionary<string, McpServerConfig> { ["s1"] = new McpStdioServerConfig { Command = "echo" } },
-            CustomAgents = [new CustomAgentConfig { Name = "a1" }],
-            AdditionalDirectories = ["/shared"],
-            SkillDirectories = ["/skills"],
-            InstructionDirectories = ["/instructions"],
-            DisabledSkills = ["skill1"],
-            DisabledMcpServers = ["server1"],
+            Tools = new SessionToolOptions
+            {
+                AvailableTools = ["tool1"],
+                ExcludedTools = ["tool2"]
+            },
+            Agents = new SessionAgentOptions
+            {
+                ExcludedBuiltInAgents = ["explore"],
+                Definitions = [new CustomAgentConfig
+        {
+            Name = "a1"
+        }
+
+        ]
+            },
+            Mcp = new SessionMcpOptions
+            {
+                Servers = new Dictionary<string, McpServerConfig>
+                {
+                    ["s1"] = new McpStdioServerConfig
+                    {
+                        Command = "echo"
+                    }
+                },
+                DisabledServers = ["server1"]
+            },
+            Filesystem = new SessionFilesystemOptions
+            {
+                AdditionalDirectories = ["/shared"]
+            },
+            Skills = new SessionSkillOptions
+            {
+                Directories = ["/skills"],
+                DisabledSkills = ["skill1"]
+            },
+            Instructions = new SessionInstructionOptions
+            {
+                Directories = ["/instructions"]
+            },
+            Canvases = new ResumeSessionCanvasOptions
+            {
+                Open = [new Microsoft.Copilot.Rpc.OpenCanvasInstance
+                {
+                    CanvasId = "editor", ExtensionId = "test", InstanceId = "document"
+                }]
+            }
         };
 
         var clone = original.Clone();
 
         // Mutate clone collections
-        clone.AvailableTools!.Add("tool99");
-        clone.ExcludedTools!.Add("tool99");
-        clone.ExcludedBuiltInAgents!.Add("task");
-        clone.McpServers!["s2"] = new McpStdioServerConfig { Command = "echo" };
-        clone.CustomAgents!.Add(new CustomAgentConfig { Name = "a2" });
-        clone.AdditionalDirectories!.Add("/generated");
-        clone.SkillDirectories!.Add("/more");
-        clone.InstructionDirectories!.Add("/more-instructions");
-        clone.DisabledSkills!.Add("skill99");
-        clone.DisabledMcpServers!.Add("server99");
+        clone.Tools.AvailableTools!.Add("tool99");
+        clone.Tools.ExcludedTools!.Add("tool99");
+        clone.Agents.ExcludedBuiltInAgents!.Add("task");
+        clone.Mcp.Servers!["s2"] = new McpStdioServerConfig { Command = "echo" };
+        clone.Agents.Definitions!.Add(new CustomAgentConfig { Name = "a2" });
+        clone.Filesystem.AdditionalDirectories!.Add("/generated");
+        clone.Skills.Directories!.Add("/more");
+        clone.Instructions.Directories!.Add("/more-instructions");
+        clone.Skills.DisabledSkills!.Add("skill99");
+        clone.Mcp.DisabledServers!.Add("server99");
+        clone.Canvases.Open!.Clear();
 
         // Original is unaffected
-        Assert.Single(original.AvailableTools!);
-        Assert.Single(original.ExcludedTools!);
-        Assert.Single(original.ExcludedBuiltInAgents!);
-        Assert.Single(original.McpServers!);
-        Assert.Single(original.CustomAgents!);
-        Assert.Single(original.AdditionalDirectories!);
-        Assert.Single(original.SkillDirectories!);
-        Assert.Single(original.InstructionDirectories!);
-        Assert.Single(original.DisabledSkills!);
-        Assert.Single(original.DisabledMcpServers!);
+        Assert.Single(original.Tools.AvailableTools!);
+        Assert.Single(original.Tools.ExcludedTools!);
+        Assert.Single(original.Agents.ExcludedBuiltInAgents!);
+        Assert.Single(original.Mcp.Servers!);
+        Assert.Single(original.Agents.Definitions!);
+        Assert.Single(original.Filesystem.AdditionalDirectories!);
+        Assert.Single(original.Skills.Directories!);
+        Assert.Single(original.Instructions.Directories!);
+        Assert.Single(original.Skills.DisabledSkills!);
+        Assert.Single(original.Mcp.DisabledServers!);
+        Assert.Single(original.Canvases.Open!);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_PreservesMcpServersComparer()
     {
         var servers = new Dictionary<string, McpServerConfig>(StringComparer.OrdinalIgnoreCase) { ["server"] = new McpStdioServerConfig { Command = "echo" } };
-        var original = new ResumeSessionConfig { McpServers = servers };
+        var original = new ResumeSessionOptions
+        {
+            Mcp = new SessionMcpOptions
+            {
+                Servers = servers
+            }
+        };
 
         var clone = original.Clone();
 
-        Assert.True(clone.McpServers!.ContainsKey("SERVER"));
+        Assert.True(clone.Mcp.Servers!.ContainsKey("SERVER"));
     }
 
     public static TheoryData<MessageSource?> MessageSources => new()
@@ -372,6 +573,7 @@ public class CloneTests
             AgentMode = AgentMode.Plan,
             Source = source,
             DisplayPrompt = "Display text",
+            ClientTurnId = "host-turn-1",
             RequestHeaders = new Dictionary<string, string> { ["X-Test"] = "original" },
         };
 
@@ -382,6 +584,7 @@ public class CloneTests
         Assert.Equal(original.AgentMode, clone.AgentMode);
         Assert.Equal(original.Source, clone.Source);
         Assert.Equal(original.DisplayPrompt, clone.DisplayPrompt);
+        Assert.Equal(original.ClientTurnId, clone.ClientTurnId);
         Assert.Single(clone.Attachments!);
         Assert.NotSame(original.Attachments, clone.Attachments);
         Assert.Equal(original.RequestHeaders, clone.RequestHeaders);
@@ -411,123 +614,153 @@ public class CloneTests
     [Fact]
     public void Clone_WithNullCollections_ReturnsNullCollections()
     {
-        var original = new SessionConfig();
+        var original = new CreateSessionOptions();
 
         var clone = original.Clone();
 
-        Assert.Null(clone.AvailableTools);
-        Assert.Null(clone.ExcludedTools);
-        Assert.Null(clone.ExcludedBuiltInAgents);
-        Assert.Null(clone.McpServers);
-        Assert.Null(clone.CustomAgents);
-        Assert.Null(clone.SkillDirectories);
-        Assert.Null(clone.InstructionDirectories);
-        Assert.Null(clone.DisabledSkills);
-        Assert.Null(clone.DisabledMcpServers);
-        Assert.Null(clone.SandboxConfig);
-        Assert.Null(clone.Tools);
-        Assert.Null(clone.DefaultAgent);
-        Assert.True(clone.IncludeSubAgentStreamingEvents);
+        Assert.Null(clone.Tools.AvailableTools);
+        Assert.Null(clone.Tools.ExcludedTools);
+        Assert.Null(clone.Agents.ExcludedBuiltInAgents);
+        Assert.Null(clone.Mcp.Servers);
+        Assert.Null(clone.Agents.Definitions);
+        Assert.Null(clone.Skills.Directories);
+        Assert.Null(clone.Instructions.Directories);
+        Assert.Null(clone.Skills.DisabledSkills);
+        Assert.Null(clone.Mcp.DisabledServers);
+        Assert.Null(clone.Permissions.Sandbox);
+        Assert.Null(clone.Tools.Definitions);
+        Assert.Null(clone.Agents.Default);
+        Assert.True(clone.Events.IncludeSubAgentStreamingEvents);
     }
 
     [Fact]
     public void SessionConfig_Clone_CopiesAgentProperty()
     {
-        var original = new SessionConfig
+        var original = new CreateSessionOptions
         {
-            Agent = "test-agent",
-            CustomAgents = [new CustomAgentConfig { Name = "test-agent", Prompt = "You are a test agent." }],
+            Agents = new SessionAgentOptions
+            {
+                Selected = "test-agent",
+                Definitions = [new CustomAgentConfig
+        {
+            Name = "test-agent",
+            Prompt = "You are a test agent."
+        }
+
+        ]
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.Equal("test-agent", clone.Agent);
+        Assert.Equal("test-agent", clone.Agents.Selected);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesAgentProperty()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            Agent = "test-agent",
-            CustomAgents = [new CustomAgentConfig { Name = "test-agent", Prompt = "You are a test agent." }],
+            Agents = new SessionAgentOptions
+            {
+                Selected = "test-agent",
+                Definitions = [new CustomAgentConfig
+        {
+            Name = "test-agent",
+            Prompt = "You are a test agent."
+        }
+
+        ]
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.Equal("test-agent", clone.Agent);
+        Assert.Equal("test-agent", clone.Agents.Selected);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesModeSwitchHandlers()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            OnExitPlanModeRequest = static (_, _) => Task.FromResult(new ExitPlanModeResult()),
-            OnAutoModeSwitchRequest = static (_, _) => Task.FromResult(AutoModeSwitchResponse.No),
+            Interaction = new SessionInteractionOptions
+            {
+                OnExitPlanModeRequest = static (_, _) => Task.FromResult(new ExitPlanModeResult()),
+                OnAutoModeSwitchRequest = static (_, _) => Task.FromResult(AutoModeSwitchResponse.No)
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.Same(original.OnExitPlanModeRequest, clone.OnExitPlanModeRequest);
-        Assert.Same(original.OnAutoModeSwitchRequest, clone.OnAutoModeSwitchRequest);
+        Assert.Same(original.Interaction.OnExitPlanModeRequest, clone.Interaction.OnExitPlanModeRequest);
+        Assert.Same(original.Interaction.OnAutoModeSwitchRequest, clone.Interaction.OnAutoModeSwitchRequest);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesIncludeSubAgentStreamingEvents()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            IncludeSubAgentStreamingEvents = false,
+            Events = new SessionEventOptions
+            {
+                IncludeSubAgentStreamingEvents = false
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.False(clone.IncludeSubAgentStreamingEvents);
+        Assert.False(clone.Events.IncludeSubAgentStreamingEvents);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_PreservesIncludeSubAgentStreamingEventsDefault()
     {
-        var original = new ResumeSessionConfig();
+        var original = new ResumeSessionOptions();
 
         var clone = original.Clone();
 
-        Assert.True(clone.IncludeSubAgentStreamingEvents);
+        Assert.True(clone.Events.IncludeSubAgentStreamingEvents);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesEnableSessionTelemetry()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            EnableSessionTelemetry = false,
+            GitHub = new SessionGitHubOptions
+            {
+                TelemetryEnabled = false
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.False(clone.EnableSessionTelemetry);
+        Assert.False(clone.GitHub.TelemetryEnabled);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesEnableExperimentalMode()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            EnableExperimentalMode = true,
+            Experiments = new SessionExperimentOptions
+            {
+                EnableExperimentalMode = true
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.True(clone.EnableExperimentalMode);
+        Assert.True(clone.Experiments.EnableExperimentalMode);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesContinuePendingWork()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            ContinuePendingWork = true,
+            ContinuePendingWork = true
         };
 
         var clone = original.Clone();
@@ -538,51 +771,69 @@ public class CloneTests
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesReasoningSummary()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            ReasoningSummary = ReasoningSummary.None,
+            Inference = new SessionInferenceOptions
+            {
+                ReasoningSummary = ReasoningSummary.None
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.Equal(original.ReasoningSummary, clone.ReasoningSummary);
+        Assert.Equal(original.Inference.ReasoningSummary, clone.Inference.ReasoningSummary);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesContextTier()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            ContextTier = ContextTier.LongContext,
+            Inference = new SessionInferenceOptions
+            {
+                ContextTier = ContextTier.LongContext
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.Equal(original.ContextTier, clone.ContextTier);
+        Assert.Equal(original.Inference.ContextTier, clone.Inference.ContextTier);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesPluginDirectoriesAndLargeOutput()
     {
         var largeOutput = new LargeToolOutputConfig { Enabled = false, MaxSizeBytes = 4096, OutputDirectory = "/tmp/resume" };
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            PluginDirectories = ["/resume/plugins"],
-            LargeOutput = largeOutput,
-            Memory = new MemoryConfiguration { Enabled = true },
+            Plugins = new SessionPluginOptions
+            {
+                Directories = ["/resume/plugins"]
+            },
+            Tools = new SessionToolOptions
+            {
+                LargeOutput = largeOutput
+            },
+            State = new SessionStateOptions
+            {
+                Memory = new MemoryConfiguration
+                {
+                    Enabled = true
+                }
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.Equal(original.PluginDirectories, clone.PluginDirectories);
-        Assert.Same(original.LargeOutput, clone.LargeOutput);
-        Assert.Same(original.Memory, clone.Memory);
+        Assert.Equal(original.Plugins.Directories, clone.Plugins.Directories);
+        Assert.Same(original.Tools.LargeOutput, clone.Tools.LargeOutput);
+        Assert.Same(original.State.Memory, clone.State.Memory);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_PreservesContinuePendingWorkDefault()
     {
-        var original = new ResumeSessionConfig();
+        var original = new ResumeSessionOptions();
 
         var clone = original.Clone();
 
@@ -592,152 +843,180 @@ public class CloneTests
     [Fact]
     public void SessionConfig_Clone_PreservesEnableSessionTelemetryDefault()
     {
-        var original = new SessionConfig();
+        var original = new CreateSessionOptions();
 
         var clone = original.Clone();
 
-        Assert.Null(clone.EnableSessionTelemetry);
+        Assert.Null(clone.GitHub.TelemetryEnabled);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_PreservesEnableSessionTelemetryDefault()
     {
-        var original = new ResumeSessionConfig();
+        var original = new ResumeSessionOptions();
 
         var clone = original.Clone();
 
-        Assert.Null(clone.EnableSessionTelemetry);
+        Assert.Null(clone.GitHub.TelemetryEnabled);
     }
 
     [Fact]
     public void SessionConfig_Clone_PreservesEnableExperimentalModeDefault()
     {
-        var original = new SessionConfig();
+        var original = new CreateSessionOptions();
 
         var clone = original.Clone();
 
-        Assert.Null(clone.EnableExperimentalMode);
+        Assert.Null(clone.Experiments.EnableExperimentalMode);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_PreservesEnableExperimentalModeDefault()
     {
-        var original = new ResumeSessionConfig();
+        var original = new ResumeSessionOptions();
 
         var clone = original.Clone();
 
-        Assert.Null(clone.EnableExperimentalMode);
+        Assert.Null(clone.Experiments.EnableExperimentalMode);
     }
 
     [Fact]
     public void SessionConfig_Clone_CopiesEnableOnDemandInstructionDiscovery()
     {
-        var original = new SessionConfig
+        var original = new CreateSessionOptions
         {
-            EnableOnDemandInstructionDiscovery = false,
+            Instructions = new CreateSessionInstructionOptions { OnDemandDiscovery = false }
         };
 
         var clone = original.Clone();
 
-        Assert.False(clone.EnableOnDemandInstructionDiscovery);
+        Assert.False(clone.Instructions.OnDemandDiscovery);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesEnableOnDemandInstructionDiscovery()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            EnableOnDemandInstructionDiscovery = true,
+            Instructions = new SessionInstructionOptions
+            {
+                OnDemandDiscovery = true
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.True(clone.EnableOnDemandInstructionDiscovery);
+        Assert.True(clone.Instructions.OnDemandDiscovery);
     }
 
     [Fact]
     public void SessionConfig_Clone_PreservesEnableOnDemandInstructionDiscoveryDefault()
     {
-        var original = new SessionConfig();
+        var original = new CreateSessionOptions();
 
         var clone = original.Clone();
 
-        Assert.Null(clone.EnableOnDemandInstructionDiscovery);
+        Assert.Null(clone.Instructions.OnDemandDiscovery);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_PreservesEnableOnDemandInstructionDiscoveryDefault()
     {
-        var original = new ResumeSessionConfig();
+        var original = new ResumeSessionOptions();
 
         var clone = original.Clone();
 
-        Assert.Null(clone.EnableOnDemandInstructionDiscovery);
+        Assert.Null(clone.Instructions.OnDemandDiscovery);
     }
 
     [Fact]
     public void SessionConfig_Clone_CopiesMcpOAuthTokenStorage()
     {
-        var original = new SessionConfig
+        var original = new CreateSessionOptions
         {
-            McpOAuthTokenStorage = McpOAuthTokenStorageMode.Persistent,
+            Mcp = new SessionMcpOptions
+            {
+                OauthTokenStorage = McpOAuthTokenStorageMode.Persistent
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.Equal(McpOAuthTokenStorageMode.Persistent, clone.McpOAuthTokenStorage);
+        Assert.Equal(McpOAuthTokenStorageMode.Persistent, clone.Mcp.OauthTokenStorage);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesMcpOAuthTokenStorage()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            McpOAuthTokenStorage = McpOAuthTokenStorageMode.Persistent,
+            Mcp = new SessionMcpOptions
+            {
+                OauthTokenStorage = McpOAuthTokenStorageMode.Persistent
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.Equal(McpOAuthTokenStorageMode.Persistent, clone.McpOAuthTokenStorage);
+        Assert.Equal(McpOAuthTokenStorageMode.Persistent, clone.Mcp.OauthTokenStorage);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesSandboxConfig()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            SandboxConfig = new SandboxConfig { Enabled = false, AddCurrentWorkingDirectory = false },
+            Permissions = new SessionPermissionOptions
+            {
+                Sandbox = new SandboxConfig
+                {
+                    Enabled = false,
+                    AddCurrentWorkingDirectory = false
+                }
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.Same(original.SandboxConfig, clone.SandboxConfig);
-        Assert.Null(new ResumeSessionConfig().Clone().SandboxConfig);
+        Assert.Same(original.Permissions.Sandbox, clone.Permissions.Sandbox);
+        Assert.Null(new ResumeSessionOptions().Clone().Permissions.Sandbox);
     }
 
     [Fact]
     public void SessionConfig_Clone_CopiesCapiOptions()
     {
-        var original = new SessionConfig
+        var original = new CreateSessionOptions
         {
-            Capi = new CapiSessionOptions { EnableWebSocketResponses = false },
+            GitHub = new SessionGitHubOptions
+            {
+                Capi = new CapiSessionOptions
+                {
+                    EnableWebSocketResponses = false
+                }
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.Same(original.Capi, clone.Capi);
+        Assert.Same(original.GitHub.Capi, clone.GitHub.Capi);
     }
 
     [Fact]
     public void ResumeSessionConfig_Clone_CopiesCapiOptions()
     {
-        var original = new ResumeSessionConfig
+        var original = new ResumeSessionOptions
         {
-            Capi = new CapiSessionOptions { EnableWebSocketResponses = false },
+            GitHub = new SessionGitHubOptions
+            {
+                Capi = new CapiSessionOptions
+                {
+                    EnableWebSocketResponses = false
+                }
+            }
         };
 
         var clone = original.Clone();
 
-        Assert.Same(original.Capi, clone.Capi);
+        Assert.Same(original.GitHub.Capi, clone.GitHub.Capi);
     }
 }

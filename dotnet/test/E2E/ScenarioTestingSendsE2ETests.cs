@@ -2,8 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -11,7 +11,7 @@ using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class ScenarioTestingSendsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : ScenarioTestingE2ETestBase(fixture, "scenario_testing_sends", output)
@@ -24,10 +24,11 @@ public class ScenarioTestingSendsE2ETests(E2ETestFixture fixture, ITestOutputHel
         var (cliPath, capturePath) = await ScenarioTestingTestCli.CreateAsync(Ctx);
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(
                 path: cliPath,
                 args: ["--capture-file", capturePath, "--behavior", "normal"]),
-            UseLoggedInUser = false,
+            GitHub = new ClientGitHubOptions { UseLoggedInUser = false }
         });
 
         using var activity = new Activity("scenario-client-send");
@@ -35,11 +36,8 @@ public class ScenarioTestingSendsE2ETests(E2ETestFixture fixture, ITestOutputHel
         activity.TraceStateString = "scenario-client=send";
         activity.Start();
 
-        await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            Streaming = true,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { Events = new SessionEventOptions { Streaming = true }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var filePath = Path.Join(Ctx.WorkDir, "scenario-wire-file.txt");
         var directoryPath = Path.Join(Ctx.WorkDir, "scenario-wire-directory");
@@ -142,15 +140,14 @@ public class ScenarioTestingSendsE2ETests(E2ETestFixture fixture, ITestOutputHel
         var (cliPath, capturePath) = await ScenarioTestingTestCli.CreateAsync(Ctx);
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(
                 path: cliPath,
                 args: ["--capture-file", capturePath, "--behavior", "normal"]),
-            UseLoggedInUser = false,
+            GitHub = new ClientGitHubOptions { UseLoggedInUser = false }
         });
-        await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
@@ -179,15 +176,14 @@ public class ScenarioTestingSendsE2ETests(E2ETestFixture fixture, ITestOutputHel
         var (cliPath, capturePath) = await ScenarioTestingTestCli.CreateAsync(Ctx);
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(
                 path: cliPath,
                 args: ["--capture-file", capturePath, "--behavior", "drop-after-send"]),
-            UseLoggedInUser = false,
+            GitHub = new ClientGitHubOptions { UseLoggedInUser = false }
         });
-        await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await Assert.ThrowsAnyAsync<Exception>(() =>
@@ -223,10 +219,8 @@ public class ScenarioTestingSendsE2ETests(E2ETestFixture fixture, ITestOutputHel
         var messages = new List<UserMessageEvent>();
         var messagesChanged = new AsyncTestSignal();
 
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(BlockingTurn, "scenario_send_blocker")],
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(BlockingTurn, "scenario_send_blocker")] } });
         using var subscription = session.On<UserMessageEvent>(message =>
         {
             lock (messages)

@@ -1,15 +1,16 @@
-module github.com/github/copilot-sdk/go
+module github.com/microsoft/copilot-sdk/go/v2
 
 go 1.26.0
 
 require (
+	github.com/go-json-experiment/json v1.27.2
 	github.com/google/jsonschema-go v0.4.3
-	github.com/klauspost/compress v1.20.3
+	github.com/klauspost/compress v1.20.4
 )
 
 require (
 	github.com/coder/websocket v1.8.15
-	github.com/ebitengine/purego v0.11.2
+	github.com/ebitengine/purego v0.11.3
 	github.com/google/uuid v1.6.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0

@@ -29,7 +29,7 @@ Modify the generated `extension.mjs` using `edit` or `create` tools. The file mu
 extensions_reload({})
 ```
 
-This stops all running extensions and re-discovers/re-launches them. New tools are available immediately in the same turn (mid-turn refresh).
+This refreshes discovery and running extensions. [Opted-in dormant extensions](extensions.md#opting-into-request-driven-activation) remain unstarted until requested; their declared tools, canvases, and slash commands are immediately discoverable.
 
 ### Step 4: Verify
 
@@ -54,14 +54,14 @@ Discovery rules:
 - It also scans the user's copilot config extensions directory
 - Only immediate subdirectories are checked (not recursive)
 - Each subdirectory must contain a file named `extension.mjs`, `extension.cjs` or `extension.js`
-- Project extensions shadow user extensions on name collision
+- A project extension and a user extension with the same name do not replace each other: both are discovered, with the IDs `project:<name>` and `user:<name>`, and `inspect` needs the full ID to tell them apart
 
 ---
 
 ## Minimal Skeleton
 
 ```js
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 await joinSession({
     tools: [], // Optional — custom tools
@@ -95,7 +95,7 @@ tools: [
             // Return value: string or ToolResultObject
             //   string → treated as success
             //   { textResultForLlm, resultType } → structured result
-            //     resultType: "success" | "failure" | "rejected" | "denied"
+            //     resultType: "success" | "failure" | "rejected" | "denied" | "timeout"
             return `Result: ${args.arg1}`;
         },
     },
@@ -105,7 +105,7 @@ tools: [
 **Constraints:**
 
 - Tool names must be unique across ALL loaded extensions. Collisions cause the second extension to fail to load.
-- Handler must return a string or `{ textResultForLlm: string, resultType?: string }`.
+- Handler must return a string or `{ textResultForLlm: string, resultType: "success" | "failure" | "rejected" | "denied" | "timeout" }`. `resultType` is required: an object without a recognized `resultType` is not a structured result, and the model receives it serialized as JSON text.
 - Handler receives `(args, invocation)` — the second argument has `sessionId`, `toolCallId`, `toolName`.
 - Use `session.log()` to surface messages to the user. Don't use `console.log()` (stdout is reserved for JSON-RPC).
 
@@ -116,18 +116,22 @@ tools: [
 ```js
 hooks: {
     onUserPromptSubmitted: async (input, invocation) => { ... },
+    onUserPromptTransformed: async (input, invocation) => { ... },
     onPreToolUse: async (input, invocation) => { ... },
+    onPreMcpToolCall: async (input, invocation) => { ... },
     onPostToolUse: async (input, invocation) => { ... },
     onPostToolUseFailure: async (input, invocation) => { ... },
     onSessionStart: async (input, invocation) => { ... },
     onSessionEnd: async (input, invocation) => { ... },
     onErrorOccurred: async (input, invocation) => { ... },
+    onAgentStop: async (input, invocation) => { ... },
     onSubagentStart: async (input, invocation) => { ... },
     onSubagentStop: async (input, invocation) => { ... },
 }
 ```
 
 All hook inputs include `sessionId`, `timestamp` (`Date`) and `workingDirectory`.
+Tool hooks also receive `toolCallId` when the runtime supplies one; correlate a call's hooks with `(input.sessionId, input.toolCallId)`.
 All handlers receive `invocation: { sessionId: string }` as the second argument.
 All handlers may return `void`/`undefined` (no-op) or an output object.
 
@@ -143,9 +147,23 @@ All handlers may return `void`/`undefined` (no-op) or an output object.
 | `decision` | `"block"` | Refuses the prompt: no model turn runs and no user message is recorded |
 | `reason` | `string` | Why the prompt was blocked, carried by the ephemeral `session.warning` (`warningType: "policy_blocked"`) |
 
+### onUserPromptTransformed
+
+Fires after the runtime adds generated context to the submitted prompt, before
+the result is stored in session history or sent to the model. `prompt` is the
+prompt after `onUserPromptSubmitted`; `transformedPrompt` also carries the
+runtime-generated context.
+
+**Input:** `{ prompt: string, transformedPrompt: string, timestamp, workingDirectory }`
+
+**Output (all fields optional):**
+| Field | Type | Effect |
+|-------|------|--------|
+| `modifiedTransformedPrompt` | `string` | Replaces the content stored in session history and sent to the model |
+
 ### onPreToolUse
 
-**Input:** `{ toolName: string, toolArgs: unknown, timestamp, workingDirectory }`
+**Input:** `{ toolCallId?: string, toolName: string, toolArgs: unknown, timestamp, workingDirectory }`
 
 **Output (all fields optional):**
 | Field | Type | Effect |
@@ -155,9 +173,22 @@ All handlers may return `void`/`undefined` (no-op) or an output object.
 | `modifiedArgs` | `unknown` | Replaces the tool arguments |
 | `additionalContext` | `string` | Injected into the conversation |
 
+### onPreMcpToolCall
+
+Fires before a tool call is sent to an MCP server. It controls only the `_meta`
+object sent with the request; to allow, deny or change the call itself, use
+`onPreToolUse`.
+
+**Input:** `{ toolCallId?: string, serverName: string, toolName: string, arguments: unknown, _meta?: Record<string, unknown>, timestamp, workingDirectory }`
+
+**Output (all fields optional):**
+| Field | Type | Effect |
+|-------|------|--------|
+| `metaToUse` | `Record<string, unknown> \| null` | An object becomes the request's `_meta`; `null` omits it, except for the runtime's `com.github.copilot/toolCallId` and `com.github.copilot/turnId` keys; leaving it out keeps the current `_meta` |
+
 ### onPostToolUse
 
-**Input:** `{ toolName: string, toolArgs: unknown, toolResult: ToolResultObject, timestamp, workingDirectory }`
+**Input:** `{ toolCallId?: string, toolName: string, toolArgs: unknown, toolResult: ToolResultObject, timestamp, workingDirectory }`
 
 Fires only when the tool returned a successful result. To observe non-success
 outcomes, register `onPostToolUseFailure` as well.
@@ -170,7 +201,7 @@ outcomes, register `onPostToolUseFailure` as well.
 
 ### onPostToolUseFailure
 
-**Input:** `{ toolName: string, toolArgs: unknown, error: string, timestamp, workingDirectory }`
+**Input:** `{ toolCallId?: string, toolName: string, toolArgs: unknown, error: string, timestamp, workingDirectory }`
 
 Fires after a tool execution whose result was `"failure"`. `onPostToolUse`
 does **not** fire for these outcomes, so register this handler to observe or
@@ -217,6 +248,23 @@ fire it.
 | `errorHandling` | `"retry" \| "skip" \| "abort"` | How to handle the error |
 | `retryCount` | `number` | Max retries (when errorHandling is "retry") |
 | `userNotification` | `string` | Message shown to the user |
+
+### onAgentStop
+
+Fires when the top-level agent reaches a natural terminal stop: it went idle
+without pending work and was not aborted. Sub-agents fire `onSubagentStop`
+instead.
+
+**Input:** `{ stopReason?: string, transcriptPath?: string, stopHookActive?: boolean, timestamp, workingDirectory }`
+
+`stopHookActive` is `true` when this stop follows an earlier `"block"` from this
+hook; check it to avoid blocking indefinitely. The runtime also caps
+consecutive blocks.
+
+**Output (optional):**
+| Field | Type | Effect |
+|-------|------|--------|
+| `decision` and `reason` | `"block"` and `string` | Keep the agent running; `reason` is enqueued as its next user message |
 
 ### onSubagentStart
 
@@ -293,16 +341,16 @@ const unsub = session.on("tool.execution_complete", (event) => {
 
 ### Key Event Types
 
-| Event                     | Key Data Fields                                        |
-| ------------------------- | ------------------------------------------------------ |
-| `assistant.message`       | `content`, `messageId`                                 |
-| `tool.execution_start`    | `toolCallId`, `toolName`, `arguments`                  |
-| `tool.execution_complete` | `toolCallId`, `success`, `result`, `error`             |
-| `user.message`            | `content`, `attachments`, `source`                     |
-| `session.idle`            | `aborted`                                              |
-| `session.error`           | `errorType`, `message`, `stack`                        |
-| `permission.requested`    | `requestId`, `permissionRequest.kind`                  |
-| `session.shutdown`        | `shutdownType`, `totalPremiumRequests`                 |
+| Event                     | Key Data Fields                            |
+| ------------------------- | ------------------------------------------ |
+| `assistant.message`       | `content`, `messageId`                     |
+| `tool.execution_start`    | `toolCallId`, `toolName`, `arguments`      |
+| `tool.execution_complete` | `toolCallId`, `success`, `result`, `error` |
+| `user.message`            | `content`, `attachments`, `source`         |
+| `session.idle`            | `aborted`                                  |
+| `session.error`           | `errorType`, `message`, `stack`            |
+| `permission.requested`    | `requestId`, `permissionRequest.kind`      |
+| `session.shutdown`        | `shutdownType`, `totalPremiumRequests`     |
 
 ### session.workspacePath
 
@@ -321,4 +369,4 @@ Low-level typed RPC access to all session APIs (model, mode, plan, workspace, et
 - **Don't call `session.send()` synchronously from `onUserPromptSubmitted`.** Use `setTimeout(() => session.send(...), 0)` to avoid infinite loops.
 - **Extensions are reloaded on `/clear`.** Any in-memory state is lost between sessions.
 - **The entry file must be `.mjs`, `.cjs` or `.js`.** TypeScript (`.ts`) is not yet supported.
-- **The handler's return value is the tool result.** Returning `undefined` sends an empty success. Throwing sends a failure with the error message.
+- **The handler's return value is the tool result.** Returning `undefined` sends an empty success. Throwing sends a failure, but the model only sees the generic `Tool execution failed`: the thrown message is written to the runtime log and never forwarded, because exceptions can carry secrets or internal details. To tell the model why a call failed, return `{ textResultForLlm: "<explanation>", resultType: "failure" }` instead.

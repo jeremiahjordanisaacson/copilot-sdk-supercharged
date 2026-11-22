@@ -5,12 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestMCPServersE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -20,10 +21,7 @@ func TestMCPServersE2E(t *testing.T) {
 
 		mcpServers := testMCPServers(t, "test-server")
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			MCPServers:          mcpServers,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, MCP: copilot.SessionMCPOptions{Servers: mcpServers}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -65,10 +63,7 @@ func TestMCPServersE2E(t *testing.T) {
 			},
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			MCPServers:          mcpServers,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, MCP: copilot.SessionMCPOptions{Servers: mcpServers}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -84,7 +79,7 @@ func TestMCPServersE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create a session first
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -93,10 +88,7 @@ func TestMCPServersE2E(t *testing.T) {
 		// Resume with MCP servers
 		mcpServers := testMCPServers(t, "test-server")
 
-		session2, err := client.ResumeSessionWithOptions(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			MCPServers:          mcpServers,
-		})
+		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, MCP: copilot.SessionMCPOptions{Servers: mcpServers}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -125,10 +117,7 @@ func TestMCPServersE2E(t *testing.T) {
 			},
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			MCPServers:          mcpServers,
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{MCP: copilot.SessionMCPOptions{Servers: mcpServers}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -157,10 +146,7 @@ func TestMCPServersE2E(t *testing.T) {
 
 		mcpServers := testMCPServers(t, "server1", "server2")
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			MCPServers:          mcpServers,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, MCP: copilot.SessionMCPOptions{Servers: mcpServers}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -176,6 +162,7 @@ func TestMCPServersE2E(t *testing.T) {
 }
 
 func TestCustomAgentsE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -194,10 +181,7 @@ func TestCustomAgentsE2E(t *testing.T) {
 			},
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			CustomAgents:        customAgents,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Agents: copilot.SessionAgentOptions{Definitions: customAgents}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -232,7 +216,7 @@ func TestCustomAgentsE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create a session first
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -253,10 +237,7 @@ func TestCustomAgentsE2E(t *testing.T) {
 			},
 		}
 
-		session2, err := client.ResumeSessionWithOptions(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			CustomAgents:        customAgents,
-		})
+		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Agents: copilot.SessionAgentOptions{Definitions: customAgents}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -292,10 +273,7 @@ func TestCustomAgentsE2E(t *testing.T) {
 			},
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			CustomAgents:        customAgents,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Agents: copilot.SessionAgentOptions{Definitions: customAgents}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -320,10 +298,7 @@ func TestCustomAgentsE2E(t *testing.T) {
 			},
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			CustomAgents:        customAgents,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Agents: copilot.SessionAgentOptions{Definitions: customAgents}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -357,10 +332,7 @@ func TestCustomAgentsE2E(t *testing.T) {
 			},
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			CustomAgents:        customAgents,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Agents: copilot.SessionAgentOptions{Definitions: customAgents}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -374,6 +346,7 @@ func TestCustomAgentsE2E(t *testing.T) {
 }
 
 func TestCombinedConfigurationE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -392,11 +365,7 @@ func TestCombinedConfigurationE2E(t *testing.T) {
 			},
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			MCPServers:          mcpServers,
-			CustomAgents:        customAgents,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, MCP: copilot.SessionMCPOptions{Servers: mcpServers}, Agents: copilot.SessionAgentOptions{Definitions: customAgents}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}

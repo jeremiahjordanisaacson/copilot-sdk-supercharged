@@ -46,10 +46,14 @@ class ConnectionTokenContext:
         )
 
         self._client = CopilotClient(
-            connection=RuntimeConnection.for_tcp(path=self.cli_path, connection_token=self.token),
-            working_directory=self.work_dir,
-            env=self.get_env(),
-            github_token=github_token,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_tcp(
+                path=self.cli_path,
+                connection_token=self.token,
+                working_directory=self.work_dir,
+                env=self.get_env(),
+            ),
+            github={"token": github_token},
         )
 
         # Trigger the spawn + connect handshake so the server is listening.
@@ -116,7 +120,7 @@ class TestConnectionToken:
 
         # Bonus: a fresh session round-trip also exercises the live connection.
         session = await explicit_token_ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         await session.disconnect()
 
@@ -132,7 +136,8 @@ class TestConnectionToken:
         assert port is not None
 
         wrong = CopilotClient(
-            connection=RuntimeConnection.for_uri(f"localhost:{port}", connection_token="wrong")
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_tcp("localhost", port, connection_token="wrong"),
         )
         try:
             with pytest.raises(Exception, match="AUTHENTICATION_FAILED"):
@@ -150,7 +155,9 @@ class TestConnectionToken:
         port = explicit_token_ctx.client.runtime_port
         assert port is not None
 
-        no_token = CopilotClient(connection=RuntimeConnection.for_uri(f"localhost:{port}"))
+        no_token = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", port)
+        )
         try:
             with pytest.raises(Exception, match="AUTHENTICATION_FAILED"):
                 await no_token.start()

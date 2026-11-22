@@ -9,8 +9,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 const (

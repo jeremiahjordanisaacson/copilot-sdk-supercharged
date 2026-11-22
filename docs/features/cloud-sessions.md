@@ -1,6 +1,6 @@
 # Cloud sessions
 
-Cloud sessions run Copilot work on GitHub-hosted compute through Mission Control. Use them when your app should create a session that executes remotely instead of starting a local Copilot CLI session on the user's machine or your server.
+Cloud sessions run Copilot work on GitHub-hosted compute through Mission Control. Use them when your app should create a session that executes remotely instead of running a local Copilot runtime session on the user's machine or your server.
 
 ## Prerequisites
 
@@ -21,20 +21,22 @@ Set the create-session `cloud` option to create a cloud session. You can include
 
 <!-- docs-validate: strict -->
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 await client.start();
 
 const session = await client.createSession({
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
-  cloud: {
-    repository: {
-      owner: "github",
-      name: "copilot-sdk",
-      branch: "main",
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
     },
-  },
+    cloud: {
+        repository: {
+            owner: "github",
+            name: "copilot-sdk",
+            branch: "main",
+        },
+    },
 });
 ```
 
@@ -48,11 +50,10 @@ from copilot import (
     PermissionHandler,
 )
 
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
 await client.start()
 
 session = await client.create_session(
-    on_permission_request=PermissionHandler.approve_all,
     cloud=CloudSessionOptions(
         repository=CloudSessionRepository(
             owner="github",
@@ -60,6 +61,7 @@ session = await client.create_session(
             branch="main",
         )
     ),
+    permissions={"on_request": PermissionHandler.approve_all},
 )
 ```
 
@@ -70,67 +72,74 @@ session = await client.create_session(
 package main
 
 import (
-    "context"
+	"context"
 
-    copilot "github.com/github/copilot-sdk/go"
-    "github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func main() {
-    _ = run(context.Background())
+	_ = run(context.Background())
 }
 
 func run(ctx context.Context) error {
-    client := copilot.NewClient(nil)
-    if err := client.Start(ctx); err != nil {
-        return err
-    }
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+	if err := client.Start(ctx); err != nil {
+		return err
+	}
 
-    session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-        Cloud: &copilot.CloudSessionOptions{
-            Repository: &copilot.CloudSessionRepository{
-                Owner:  "github",
-                Name:   "copilot-sdk",
-                Branch: "main",
-            },
-        },
-        OnPermissionRequest: func(_ copilot.PermissionRequest, _ copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-            return &rpc.PermissionDecisionApproveOnce{}, nil
-        },
-    })
-    _ = session
-    return err
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Cloud: &copilot.CloudSessionOptions{
+
+			Repository: &copilot.CloudSessionRepository{
+				Owner:  "github",
+				Name:   "copilot-sdk",
+				Branch: "main",
+			},
+		},
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+				return &rpc.PermissionDecisionApproveOnce{}, nil
+			},
+		},
+	})
+	_ = session
+	return err
 }
 ```
 <!-- /docs-validate: hidden -->
 
 ```go
-client := copilot.NewClient(nil)
+client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 if err := client.Start(ctx); err != nil {
-    return err
+	return err
 }
 
-session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-    Cloud: &copilot.CloudSessionOptions{
-        Repository: &copilot.CloudSessionRepository{
-            Owner:  "github",
-            Name:   "copilot-sdk",
-            Branch: "main",
-        },
-    },
-    OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-        return &rpc.PermissionDecisionApproveOnce{}, nil
-    },
+session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	Cloud: &copilot.CloudSessionOptions{
+
+		Repository: &copilot.CloudSessionRepository{
+			Owner:  "github",
+			Name:   "copilot-sdk",
+			Branch: "main",
+		},
+	},
+	Permissions: copilot.SessionPermissionOptions{
+		OnRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+			return &rpc.PermissionDecisionApproveOnce{}, nil
+		},
+	},
 })
 _ = session
+
 ```
 
 ### .NET
 
 ```csharp
-await using var client = new CopilotClient();
-
-var session = await client.CreateSessionAsync(new SessionConfig
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
+await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
     Cloud = new CloudSessionOptions
     {
@@ -141,29 +150,34 @@ var session = await client.CreateSessionAsync(new SessionConfig
             Branch = "main",
         },
     },
-    OnPermissionRequest = (req, inv) =>
-        Task.FromResult(PermissionDecision.ApproveOnce()),
+    Permissions = new SessionPermissionOptions
+    {
+        OnRequest = (req, inv) => Task.FromResult(PermissionDecision.ApproveOnce())
+    }
 });
 ```
 
 ### Java
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 
-try (var client = new CopilotClient()) {
-    client.start().get();
+try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
+    client
+            .start()
+            .get();
 
-    var session = client.createSession(
-        new SessionConfig()
-            .setCloud(new CloudSessionOptions()
-                .setRepository(new CloudSessionRepository()
-                    .setOwner("github")
-                    .setName("copilot-sdk")
-                    .setBranch("main")))
-            .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-    ).get();
+    var session = client
+            .createSession(new CreateSessionOptions()
+                    .setCloud(new CloudSessionOptions()
+                            .setRepository(new CloudSessionRepository()
+                                    .setOwner("github")
+                                    .setName("copilot-sdk")
+                                    .setBranch("main")))
+                    .setPermissions(new SessionPermissionOptions()
+                            .setOnRequest(PermissionHandler.APPROVE_ALL)))
+            .get();
 }
 ```
 
@@ -171,83 +185,50 @@ try (var client = new CopilotClient()) {
 
 ```rust
 use std::sync::Arc;
-use github_copilot_sdk::{CloudSessionOptions, CloudSessionRepository, SessionConfig};
-use github_copilot_sdk::handler::ApproveAllHandler;
+use copilot_sdk::{CloudSessionOptions, CloudSessionRepository, CreateSessionOptions};
+use copilot_sdk::handler::ApproveAllHandler;
 
-let session = client.create_session(
-    SessionConfig::default()
-        .with_cloud(CloudSessionOptions::with_repository(
-            CloudSessionRepository::new("github", "copilot-sdk").with_branch("main"),
-        ))
-        .with_permission_handler(Arc::new(ApproveAllHandler)),
-).await?;
+let session = client
+    .create_session(
+        CreateSessionOptions::default()
+            .with_cloud(CloudSessionOptions::with_repository(
+                CloudSessionRepository::new("github", "copilot-sdk").with_branch("main"),
+            ))
+            .with_permissions(|__sdk_group| {
+                __sdk_group.with_on_request(Arc::new(ApproveAllHandler))
+            }),
+    )
+    .await?;
 ```
 
 <!-- tabs:end -->
 
 ## Sending the first prompt
 
-Cloud sessions initialize in two phases: `createSession` resolves as soon as Mission Control has reserved a task, but the remote `copilot-agent` worker takes another second or two to connect and emit `session.start`. If you call `session.send` before that, the runtime refuses the command with `"Remote session is still starting"`, but only logs that error: it is **not raised to your code**, and `session.send` still returns a fresh `messageId`. The prompt is dropped and never reaches the worker.
-
-To send reliably, subscribe to events **before** sending and await the first `session.start` event whose `producer` is `"copilot-agent"`:
+`createSession` resolves only after the remote `copilot-agent` worker has connected and reported `session.start`, so you can call `session.send` as soon as it returns. If the worker does not connect within 60 seconds, `createSession` fails with `Timed out waiting for the remote sandbox to start` instead of returning a session.
 
 <!-- docs-validate: strict -->
-<!-- docs-validate: hidden -->
 ```typescript
-import type { CopilotSession } from "@github/copilot-sdk";
+import { CopilotClient, type CopilotSession } from "copilot-sdk-supercharged";
 
-const session: CopilotSession = await client.createSession({
-  streaming: true,
-  cloud: { repository: { owner: "github", name: "copilot-sdk" } },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
-});
-
-const ready = new Promise<void>((resolve) => {
-  const off = session.on("session.start", (event) => {
-    if (event.data?.producer === "copilot-agent") {
-      off();
-      resolve();
-    }
-  });
-});
-
-await ready;
-await session.send({ prompt: "Summarize the README" });
-```
-<!-- /docs-validate: hidden -->
-
-```typescript
-import { CopilotClient, type CopilotSession } from "@github/copilot-sdk";
-
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 await client.start();
 
 const session: CopilotSession = await client.createSession({
-  streaming: true, // required for assistant.message_delta to fire
-  cloud: { repository: { owner: "github", name: "copilot-sdk" } },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    events: {
+        streaming: true,
+    },
+    cloud: { repository: { owner: "github", name: "copilot-sdk" } },
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 
-// Subscribe BEFORE sending so you don't miss the start event.
-const ready = new Promise<void>((resolve) => {
-  const off = session.on("session.start", (event) => {
-    if (event.data?.producer === "copilot-agent") {
-      off();
-      resolve();
-    }
-  });
-});
-
-await ready;
+// The remote worker has already started, so the first prompt can go out right away.
 await session.send({ prompt: "Summarize the README" });
 ```
 
-A few notes:
-
-* Set `streaming: true` on `createSession` so the runtime emits `assistant.message_delta` events. Without it, the only assistant signal you get is the final `assistant.message` — fine for batch use, but the chat will look frozen if you're rendering a live UI. See [Streaming Events](./streaming-events.md).
-* Only the **first** `session.send` is sensitive to this race. Subsequent sends on the same session work normally because the runtime treats the session as started from its first `session.start` (or `session.resume`) event for the rest of its life.
-* Apply a timeout (e.g. 60 s) around the `ready` promise so a stuck Mission Control provisioning doesn't hang your app forever.
-* The same pattern works in every SDK language — subscribe to `session.start`, check `producer === "copilot-agent"`, then call `send`.
+Set `events.streaming: true` on `createSession` so the runtime emits `assistant.message_delta` events. Without it, the only assistant signal you get is the final `assistant.message` — fine for batch use, but the chat will look frozen if you're rendering a live UI. See [Streaming Events](./streaming-events.md).
 
 ## Accessing the Mission Control URL
 
@@ -258,14 +239,14 @@ Capture the URL by subscribing to `session.info` and filtering by `infoType: "re
 <!-- docs-validate: strict -->
 <!-- docs-validate: hidden -->
 ```typescript
-const session = await client.createSession({
-  cloud: { repository: { owner: "github", name: "copilot-sdk" } },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
-});
+import type { CopilotSession } from "copilot-sdk-supercharged";
+
+declare const session: CopilotSession;
 
 session.on("session.info", (event) => {
   if (event.data?.infoType === "remote" && event.data.url) {
     console.log("Open from web or mobile:", event.data.url);
+    // For example, surface in your UI as a shareable link or QR code.
   }
 });
 ```
@@ -282,7 +263,7 @@ session.on("session.info", (event) => {
 
 The event fires shortly after `session.start`. If your renderer mounts after the event has already fired, persist the URL alongside the session record in your app's state and rehydrate on remount — the runtime does not re-emit `session.info` on its own.
 
-For the same wiring on local sessions promoted via `remote: true`, see [Remote Sessions](./remote-sessions.md).
+For a local session exported to Mission Control, `session.rpc.remote.enable()` returns the URL in its result instead; see [Remote Sessions](./remote-sessions.md).
 
 ## Repository association
 
@@ -302,24 +283,12 @@ Use `branch` when the work should start from a specific branch. If your app is c
 
 The `cloud` option only applies when creating a new session. To resume an existing cloud session, use the standard resume API for the SDK language:
 
-<!-- docs-validate: hidden -->
 <!-- docs-validate: strict -->
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
-
-const client = new CopilotClient();
-await client.start();
-
 const session = await client.resumeSession("session-id", {
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
-});
-void session;
-```
-<!-- /docs-validate: hidden -->
-
-```typescript
-const session = await client.resumeSession("session-id", {
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -329,35 +298,22 @@ Do not pass `cloud` again on resume. The saved session metadata determines that 
 
 Cloud session creation can fail when the user or organization is not entitled to cloud-agent execution or when organization-level policies block the flow. In particular, policies for cloud sandbox can prevent clients from creating the cloud task.
 
-When this happens, the runtime reports a `"policy_blocked"` failure reason for cloud task creation. Treat this as an authorization or policy outcome, not as a transient infrastructure failure.
+When this happens, `createSession` rejects with an error whose message explains the rejection when Mission Control gives a reason, for example `Cloud sandboxes are not enabled. Contact your administrator to enable them.`, and is a generic creation failure when it does not. The error has no separate reason or code that identifies a policy block, so show the message to the user instead of branching on a reason.
 
-In TypeScript, check for the reason before retrying:
+In TypeScript, surface the error message:
 
 <!-- docs-validate: hidden -->
 <!-- docs-validate: strict -->
 ```typescript
-import {
-  CopilotClient,
-  type CloudSessionRepository,
-} from "@github/copilot-sdk";
+import type { CloudSessionRepository } from "copilot-sdk-supercharged";
 
-const client = new CopilotClient();
-await client.start();
-
-const repository: CloudSessionRepository = {
-  owner: "github",
-  name: "copilot-sdk",
-};
+declare const repository: CloudSessionRepository;
 
 try {
-  await client.createSession({
-    cloud: { repository },
-    onPermissionRequest: async () => ({ kind: "approve-once" }),
-  });
+  await client.createSession({ cloud: { repository } });
 } catch (error) {
-  if ((error as { reason?: string }).reason === "policy_blocked") {
-    // Show an admin-facing message or link to org policy settings.
-  }
+  // Show the message to an admin, or link to org policy settings.
+  console.error((error as Error).message);
   throw error;
 }
 ```
@@ -367,14 +323,13 @@ try {
 try {
   await client.createSession({ cloud: { repository } });
 } catch (error) {
-  if ((error as { reason?: string }).reason === "policy_blocked") {
-    // Show an admin-facing message or link to org policy settings.
-  }
+  // Show the message to an admin, or link to org policy settings.
+  console.error((error as Error).message);
   throw error;
 }
 ```
 
-In languages where SDK errors are represented differently, inspect the surfaced error reason or code and handle `"policy_blocked"` explicitly. Retrying without a policy change is not expected to succeed.
+Every SDK language surfaces the failure as its usual request error carrying the same message. For a recognizable policy or entitlement message, retrying without a policy change is not expected to succeed. A generic creation failure does not distinguish an empty-body policy rejection from a transient service failure, so it alone is not enough to rule out a retry.
 
 ## Integration ID and routing
 
@@ -400,7 +355,7 @@ COPILOT_MC_BASE_URL="https://example.com/agents"
 |------------|-----------------|----------------|
 | Execution location | Local machine or your server | GitHub-hosted compute |
 | Mission Control role | Shares a local session to GitHub web/mobile | Creates and routes the hosted session |
-| SDK option | `remote: true` on the client or session | `cloud: { ... }` on create session |
+| SDK option | None; call `session.rpc.remote.enable()` on a running session | `cloud: { ... }` on create session |
 | Resume path | Standard resume | Standard resume |
 | Windows sandbox relation | Unrelated | Unrelated |
 
@@ -410,12 +365,12 @@ Use remote sessions when the session should execute where the SDK runtime is alr
 
 | Symptom | Likely cause | What to check |
 |---------|--------------|---------------|
-| Cloud session creation returns `"policy_blocked"` | Organization policy blocks remote control or view from cloud flows | Check org Copilot policies and user entitlement |
+| Cloud session creation fails with a policy or entitlement message | Organization policy blocks remote control or view from cloud flows | Check org Copilot policies and user entitlement |
 | Session creates without repository context | `cloud.repository` was omitted | Pass `owner`, `name`, and optionally `branch` |
 | Resume ignores a new `cloud` option | `cloud` only applies to new sessions | Resume the existing session normally |
 | Confusion with sandbox settings | Windows sandbox and cloud sessions are separate | Do not use `SANDBOX=true` for cloud execution |
-| `session.send` resolves with a `messageId` but no `assistant.*` events fire and Mission Control shows no prompt | The session.send raced ahead of `session.start` from the remote worker; the runtime swallowed the prompt | Await the first `session.start` event with `producer === "copilot-agent"` before sending. See [Sending the first prompt](#sending-the-first-prompt) |
-| Live UI never updates even though the cloud worker is processing | `streaming` was not set on `createSession`, so only the final `assistant.message` is emitted | Set `streaming: true` on `createSession` and re-launch |
+| `createSession` fails with `Timed out waiting for the remote sandbox to start` | The remote worker did not connect within 60 seconds | Create the session again. See [Sending the first prompt](#sending-the-first-prompt) |
+| Live UI never updates even though the cloud worker is processing | `events.streaming` was not set on `createSession`, so only the final `assistant.message` is emitted | Set `events.streaming: true` on `createSession` and re-launch |
 | Cloud session works but no shareable URL appears in your UI | App never subscribed to `session.info` for the URL | Subscribe to `session.info` and filter `infoType === "remote"`. See [Accessing the Mission Control URL](#accessing-the-mission-control-url) |
 
 ## See also

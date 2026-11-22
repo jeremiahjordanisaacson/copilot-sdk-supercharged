@@ -87,6 +87,9 @@ function isExcluded(relativePath: string): boolean {
         /^tree-sitter.*\.wasm$/.test(topLevel) ||
         /^voice-.*\.js$/.test(topLevel) ||
         fileName === "cli-native.node" ||
+        fileName === "copilot-voice" ||
+        fileName.startsWith("copilot-voice.") ||
+        fileName.startsWith("copilot-voice-assets.") ||
         parts.includes("mediaremote-adapter") ||
         fileName.startsWith("copilot-runtime-bin")
     );
@@ -153,7 +156,7 @@ export function defaultRuntimeCacheRoot(
             : platform === "darwin"
               ? join(home, "Library", "Caches")
               : (environment.XDG_CACHE_HOME ?? join(home, ".cache"));
-    return join(cacheDirectory, "github-copilot-sdk", "runtime");
+    return join(cacheDirectory, "copilot-sdk", "runtime");
 }
 
 export function materializeRuntimeBundle(
@@ -238,7 +241,7 @@ export function getRuntimeReleaseAssetName(version: string, platform: string): s
 }
 
 export function getRuntimePackageName(platform: string): string {
-    return `@github/copilot-sdk-${platform}`;
+    return `@microsoft/copilot-sdk-${platform}`;
 }
 
 export function resolvePackageRoot(
@@ -277,7 +280,7 @@ export async function ensureRuntimeBundle(
     const packageRoot = resolvePackageRoot(packageName, options.packageSearchPaths);
     if (!packageRoot) {
         throw new Error(
-            `Could not resolve ${packageName}. Reinstall @github/copilot-sdk so its platform package is installed.`
+            `Could not resolve ${packageName}. Reinstall @microsoft/copilot-sdk so its platform package is installed.`
         );
     }
     const wrapperName = platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime";
@@ -287,7 +290,7 @@ export async function ensureRuntimeBundle(
         validateRuntimeBundle(wrapper, join(prebuildDir, "runtime.node"));
     } catch (error) {
         throw new Error(
-            `${packageName} is missing required Copilot CLI runtime files. Reinstall @github/copilot-sdk.`,
+            `${packageName} is missing required Copilot CLI runtime files. Reinstall @microsoft/copilot-sdk.`,
             { cause: error }
         );
     }

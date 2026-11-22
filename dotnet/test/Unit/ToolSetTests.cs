@@ -4,7 +4,7 @@
 
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public class ToolSetTests
 {
@@ -86,7 +86,7 @@ public class ToolSetTests
     {
         var ex = Assert.Throws<ArgumentException>(() => new CopilotClient(new CopilotClientOptions
         {
-            Mode = CopilotClientMode.Empty,
+            Mode = CopilotClientMode.Empty
         }));
         Assert.Contains("Empty", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -101,7 +101,7 @@ public class ToolSetTests
             using var client = new CopilotClient(new CopilotClientOptions
             {
                 Mode = CopilotClientMode.Empty,
-                BaseDirectory = dir,
+                Runtime = RuntimeConnection.ForDefault(baseDirectory: dir)
             });
             Assert.NotNull(client);
         }
@@ -112,9 +112,20 @@ public class ToolSetTests
     }
 
     [Fact]
-    public void CopilotClient_Default_Mode_Is_CopilotCli()
+    public void CopilotClient_Mode_Is_Required()
     {
-        using var client = new CopilotClient(new CopilotClientOptions());
+        var mode = typeof(CopilotClientOptions).GetProperty(nameof(CopilotClientOptions.Mode))!;
+        Assert.Contains(mode.GetCustomAttributes(false),
+            attribute => attribute.GetType().Name == "RequiredMemberAttribute");
+        Assert.Throws<ArgumentNullException>(() => new CopilotClient(null!));
+    }
+
+    [Fact]
+    public void CopilotClient_CodingAgent_Mode_And_Clone()
+    {
+        var options = new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent };
+        Assert.Equal(CopilotClientMode.CodingAgent, options.Clone().Mode);
+        using var client = new CopilotClient(options);
         Assert.NotNull(client);
     }
 }

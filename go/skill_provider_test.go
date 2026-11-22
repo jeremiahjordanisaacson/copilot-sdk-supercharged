@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 type testSkillProvider struct {
@@ -87,17 +87,17 @@ func TestSkillProviderSessionPayloads(t *testing.T) {
 			return []byte(`{"sessionId":"` + sessionID + `","workspacePath":"/workspace"}`), nil
 		})
 
-		if _, err := client.CreateSession(t.Context(), &SessionConfig{}); err != nil {
+		if _, err := client.CreateSession(t.Context(), &CreateSessionOptions{}); err != nil {
 			t.Fatalf("CreateSession without provider failed: %v", err)
 		}
-		if _, err := client.ResumeSession(t.Context(), "resume-without-provider", &ResumeSessionConfig{}); err != nil {
+		if _, err := client.ResumeSession(t.Context(), "resume-without-provider", &ResumeSessionOptions{}); err != nil {
 			t.Fatalf("ResumeSession without provider failed: %v", err)
 		}
 		provider := newTestSkillProvider()
-		if _, err := client.CreateSession(t.Context(), &SessionConfig{SkillProvider: provider}); err != nil {
+		if _, err := client.CreateSession(t.Context(), &CreateSessionOptions{Skills: SessionSkillOptions{Provider: provider}}); err != nil {
 			t.Fatalf("CreateSession with provider failed: %v", err)
 		}
-		if _, err := client.ResumeSession(t.Context(), "resume-with-provider", &ResumeSessionConfig{SkillProvider: provider}); err != nil {
+		if _, err := client.ResumeSession(t.Context(), "resume-with-provider", &ResumeSessionOptions{Skills: SessionSkillOptions{Provider: provider}}); err != nil {
 			t.Fatalf("ResumeSession with provider failed: %v", err)
 		}
 
@@ -117,7 +117,7 @@ func TestSkillProviderSessionPayloads(t *testing.T) {
 			client:   rpcClient,
 			RPC:      rpc.NewServerRPC(rpcClient),
 			sessions: make(map[string]*Session),
-			options:  ClientOptions{Mode: ModeEmpty},
+			options:  *(&ClientOptions{Mode: ModeEmpty}).normalize(),
 		}
 
 		createParams := make(chan json.RawMessage, 1)
@@ -130,21 +130,18 @@ func TestSkillProviderSessionPayloads(t *testing.T) {
 			return []byte(`{}`), nil
 		})
 
-		if _, err := client.CreateSession(t.Context(), &SessionConfig{
-			AvailableTools: []string{},
-			SkillProvider:  newTestSkillProvider(),
-		}); err != nil {
+		if _, err := client.CreateSession(t.Context(), &CreateSessionOptions{Tools: SessionToolOptions{AvailableTools: []string{}}, Skills: SessionSkillOptions{Provider: newTestSkillProvider()}}); err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
 		var payload map[string]any
 		if err := json.Unmarshal(<-createParams, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload["enableSkills"] != false {
-			t.Fatalf("enableSkills = %v, want false", payload["enableSkills"])
+		if sessionWireGroup(payload, "skills")["enabled"] != false {
+			t.Fatalf("enableSkills = %v, want false", sessionWireGroup(payload, "skills")["enabled"])
 		}
-		if payload["hasSkillProvider"] != true {
-			t.Fatalf("hasSkillProvider = %v, want true", payload["hasSkillProvider"])
+		if sessionWireGroup(payload, "skills")["hasProvider"] != true {
+			t.Fatalf("hasSkillProvider = %v, want true", sessionWireGroup(payload, "skills")["hasProvider"])
 		}
 	})
 }
@@ -181,10 +178,10 @@ func TestSkillProviderServesEarlyCallbacksDuringOpen(t *testing.T) {
 
 			provider := newTestSkillProvider()
 			if method == "session.create" {
-				if _, err := client.CreateSession(t.Context(), &SessionConfig{SkillProvider: provider}); err != nil {
+				if _, err := client.CreateSession(t.Context(), &CreateSessionOptions{Skills: SessionSkillOptions{Provider: provider}}); err != nil {
 					t.Fatalf("CreateSession failed: %v", err)
 				}
-			} else if _, err := client.ResumeSession(t.Context(), "early-resume", &ResumeSessionConfig{SkillProvider: provider}); err != nil {
+			} else if _, err := client.ResumeSession(t.Context(), "early-resume", &ResumeSessionOptions{Skills: SessionSkillOptions{Provider: provider}}); err != nil {
 				t.Fatalf("ResumeSession failed: %v", err)
 			}
 
@@ -200,10 +197,7 @@ func TestSkillProviderRejectsCloudBeforeConnect(t *testing.T) {
 	provider := newTestSkillProvider()
 	client := &Client{}
 
-	_, err := client.CreateSession(t.Context(), &SessionConfig{
-		Cloud:         &CloudSessionOptions{},
-		SkillProvider: provider,
-	})
+	_, err := client.CreateSession(t.Context(), &CreateSessionOptions{Cloud: &CloudSessionOptions{}, Skills: SessionSkillOptions{Provider: provider}})
 
 	if err == nil || err.Error() != "Skill providers are not supported for cloud sessions." {
 		t.Fatalf("CreateSession error = %v", err)
@@ -476,7 +470,7 @@ func TestSkillProviderTeardown(t *testing.T) {
 	t.Run("connection loss clears provider", func(t *testing.T) {
 		client, server, provider, session := newSkillProviderOpenSession(t, "closed-session")
 
-		client.handleConnectionClose()
+		client.handleConnectionClose(client.client)
 		rpcErr := requestSkillProviderError(t, server, "skillProvider.list", map[string]any{"sessionId": session.SessionID})
 		assertSkillProviderError(t, rpcErr, "No skill provider for session: closed-session")
 		if got := provider.snapshotCalls(); len(got) != 0 {
@@ -493,7 +487,7 @@ func TestSkillProviderTeardown(t *testing.T) {
 			return nil, &jsonrpc2.Error{Code: -32000, Message: "create failed"}
 		})
 
-		if _, err := client.CreateSession(t.Context(), &SessionConfig{SkillProvider: provider}); err == nil {
+		if _, err := client.CreateSession(t.Context(), &CreateSessionOptions{Skills: SessionSkillOptions{Provider: provider}}); err == nil {
 			t.Fatal("CreateSession succeeded unexpectedly")
 		}
 		rpcErr := requestSkillProviderError(t, server, "skillProvider.list", map[string]any{"sessionId": sessionID})
@@ -510,7 +504,7 @@ func TestSkillProviderTeardown(t *testing.T) {
 			return nil, &jsonrpc2.Error{Code: -32000, Message: "resume failed"}
 		})
 
-		if _, err := client.ResumeSession(t.Context(), "failed-resume", &ResumeSessionConfig{SkillProvider: provider}); err == nil {
+		if _, err := client.ResumeSession(t.Context(), "failed-resume", &ResumeSessionOptions{Skills: SessionSkillOptions{Provider: provider}}); err == nil {
 			t.Fatal("ResumeSession succeeded unexpectedly")
 		}
 		rpcErr := requestSkillProviderError(t, server, "skillProvider.list", map[string]any{"sessionId": "failed-resume"})
@@ -536,14 +530,11 @@ func TestSkillProviderResumeRebinding(t *testing.T) {
 		replacement := newTestSkillProvider()
 		replacement.markdown = map[string]string{"review": "replacement"}
 
-		session, err := client.CreateSession(t.Context(), &SessionConfig{
-			SessionID:     "rebind-session",
-			SkillProvider: original,
-		})
+		session, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: "rebind-session", Skills: SessionSkillOptions{Provider: original}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
-		if _, err := client.ResumeSession(t.Context(), session.SessionID, &ResumeSessionConfig{SkillProvider: replacement}); err != nil {
+		if _, err := client.ResumeSession(t.Context(), session.SessionID, &ResumeSessionOptions{Skills: SessionSkillOptions{Provider: replacement}}); err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
 		}
 		raw, rpcErr := server.Request(t.Context(), "skillProvider.read", map[string]any{
@@ -578,7 +569,7 @@ func TestSkillProviderResumeRebinding(t *testing.T) {
 			return []byte(`{"sessionId":"` + sessionID + `"}`), nil
 		})
 
-		if _, err := client.ResumeSession(t.Context(), session.SessionID, &ResumeSessionConfig{}); err != nil {
+		if _, err := client.ResumeSession(t.Context(), session.SessionID, &ResumeSessionOptions{}); err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
 		}
 		rpcErr := requestSkillProviderError(t, server, "skillProvider.list", map[string]any{"sessionId": session.SessionID})
@@ -640,10 +631,7 @@ func newSkillProviderOpenSession(t *testing.T, sessionID string) (*Client, *json
 		return []byte(`{"success":true}`), nil
 	})
 
-	session, err := client.CreateSession(t.Context(), &SessionConfig{
-		SessionID:     sessionID,
-		SkillProvider: provider,
-	})
+	session, err := client.CreateSession(t.Context(), &CreateSessionOptions{SessionID: sessionID, Skills: SessionSkillOptions{Provider: provider}})
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
@@ -688,7 +676,7 @@ func assertSkillProviderFlag(t *testing.T, params json.RawMessage, wantPresent b
 	if err := json.Unmarshal(params, &payload); err != nil {
 		t.Fatalf("failed to decode request params: %v", err)
 	}
-	got, present := payload["hasSkillProvider"]
+	got, present := sessionWireGroup(payload, "skills")["hasProvider"]
 	if !wantPresent {
 		if present {
 			t.Fatalf("hasSkillProvider = %v, want omitted", got)
@@ -698,7 +686,7 @@ func assertSkillProviderFlag(t *testing.T, params json.RawMessage, wantPresent b
 	if got != true {
 		t.Fatalf("hasSkillProvider = %v, want true", got)
 	}
-	if _, present := payload["skillProvider"]; present {
-		t.Fatalf("skillProvider callback was serialized: %v", payload["skillProvider"])
+	if _, present := sessionWireGroup(payload, "skills")["provider"]; present {
+		t.Fatalf("skillProvider callback was serialized: %v", sessionWireGroup(payload, "skills")["provider"])
 	}
 }

@@ -26,10 +26,14 @@ flowchart LR
 | [`onUserPromptSubmitted`](../hooks/user-prompt-submitted.md)        | User sends a message                | Rewrite prompts, add context, filter input |
 | [`onUserPromptTransformed`](../hooks/user-prompt-transformed.md)    | Runtime builds the model prompt     | Inspect or replace model-facing content    |
 | [`onPreToolUse`](../hooks/pre-tool-use.md)                          | Before a tool executes              | Allow / deny / modify the call             |
+| [`onPreMcpToolCall`](../hooks/pre-mcp-tool-call.md)                 | Before an MCP tool call is sent     | Attach or remove MCP request metadata      |
 | [`onPostToolUse`](../hooks/post-tool-use.md)                        | After a tool returns (success only) | Transform results, redact secrets, audit   |
 | [`onPostToolUseFailure`](../hooks/post-tool-use.md#failure-variant) | After a tool returns a failure      | Inject retry guidance, log failures        |
 | [`onSessionEnd`](../hooks/session-lifecycle.md#session-end-hook)         | Session ends                        | Clean up, record metrics                   |
 | [`onErrorOccurred`](../hooks/error-handling.md)                     | An error is raised                  | Custom logging, retry logic, alerts        |
+| [`onAgentStop`](../hooks/session-lifecycle.md#agent-stop-hook)      | Top-level agent naturally stops     | Validate completion or request another turn |
+| [`onSubagentStart`](./fleet-mode.md#lifecycle-hooks)                | Before a sub-agent's first turn     | Prepend context to its prompt              |
+| [`onSubagentStop`](./fleet-mode.md#lifecycle-hooks)                 | After a sub-agent completes a turn  | Request another turn or replace its response |
 
 All hooks are **optional**—register only the ones you need. Returning `null` (or the language equivalent) from any hook tells the SDK to continue with default behavior.
 
@@ -39,9 +43,9 @@ Repository hooks and settings require workspace trust. Ambient user hooks requir
 
 Repository filesystem hooks are separate from the SDK callbacks described in
 this guide. To load them from additional directories during local session
-creation or cold resume, supply `additionalDirectories`; CLI `--add-dir` also participates by default.
+creation or cold resume, supply `filesystem.additionalDirectories`; `--add-dir` launch arguments (for the runtime or the interactive CLI) also participate by default.
 `DISABLE_ADDITIONAL_DIRECTORY_HOOKS=true` restores primary-only scope;
-`enableFileHooks` can enable or disable repository hooks through `session.rpc.options.update`; explicit SDK hook directories and callbacks are independent.
+`hooks.enableRepositoryHooks` can enable or disable repository hooks through `session.rpc.options.update`; explicit SDK hook directories and callbacks are independent.
 
 Discovery uses each accepted directory's containing Git root, or the directory
 itself when it is outside a Git repository. For example, supplying
@@ -61,7 +65,7 @@ authorization.
 
 ## Registering hooks
 
-Callback `hooks` remain separate from file-backed `hookDirectories`. For packaged hook configurations and adjacent resources, see [customization discovery locations](./customization-locations.md).
+Callback `hooks.handlers` remain separate from file-backed `hooks.directories`. For packaged hook configurations and adjacent resources, see [customization discovery locations](./customization-locations.md).
 
 ### Agent-scoped declarative hooks
 
@@ -116,25 +120,29 @@ Pass a `hooks` object when you create (or resume) a session. Every example below
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 await client.start();
 
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async (input, invocation) => {
-      /* ... */
+    hooks: {
+        handlers: {
+            onSessionStart: async (input, invocation) => {
+                /* ... */
+            },
+            onPreToolUse: async (input, invocation) => {
+                /* ... */
+            },
+            onPostToolUse: async (input, invocation) => {
+                /* ... */
+            },
+            // ... add only the hooks you need
+        },
     },
-    onPreToolUse: async (input, invocation) => {
-      /* ... */
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
     },
-    onPostToolUse: async (input, invocation) => {
-      /* ... */
-    },
-    // ... add only the hooks you need
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
 });
 ```
 
@@ -147,27 +155,33 @@ const session = await client.createSession({
 from copilot import CopilotClient
 from copilot.session import PermissionDecisionApproveOnce
 
+
 async def on_session_start(input_data, invocation):
     print(f"Session {invocation['session_id']} started")
     return None
 
+
 async def on_pre_tool_use(input_data, invocation):
     return {"permissionDecision": "allow"}
+
 
 async def on_post_tool_use(input_data, invocation):
     print(f"Tool finished: {input_data['toolName']}")
     return None
 
-client = CopilotClient()
+
+client = CopilotClient(mode="coding-agent")
 await client.start()
 
 session = await client.create_session(
-    on_permission_request=lambda req, inv: PermissionDecisionApproveOnce(),
+    permissions={"on_request": lambda req, inv: PermissionDecisionApproveOnce()},
     hooks={
-        "on_session_start": on_session_start,
-        "on_pre_tool_use":  on_pre_tool_use,
-        "on_post_tool_use": on_post_tool_use,
-        # ... add only the hooks you need
+        "handlers": {
+            "on_session_start": on_session_start,
+            "on_pre_tool_use": on_pre_tool_use,
+            "on_post_tool_use": on_post_tool_use,
+            # ... add only the hooks you need
+        }
     },
 )
 ```
@@ -184,8 +198,8 @@ package main
 
 import (
 	"context"
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func onSessionStart(input copilot.SessionStartHookInput, inv copilot.HookInvocation) (*copilot.SessionStartHookOutput, error) {
@@ -202,16 +216,20 @@ func onPostToolUse(input copilot.PostToolUseHookInput, inv copilot.HookInvocatio
 
 func main() {
 	ctx := context.Background()
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		Hooks: &copilot.SessionHooks{
-			OnSessionStart: onSessionStart,
-			OnPreToolUse:   onPreToolUse,
-			OnPostToolUse:  onPostToolUse,
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Hooks: copilot.SessionHookOptions{
+			Handlers: &copilot.SessionHooks{
+				OnSessionStart: onSessionStart,
+				OnPreToolUse:   onPreToolUse,
+				OnPostToolUse:  onPostToolUse,
+			},
 		},
-		OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-			return &rpc.PermissionDecisionApproveOnce{}, nil
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+				return &rpc.PermissionDecisionApproveOnce{}, nil
+			},
 		},
 	})
 	_ = session
@@ -222,19 +240,24 @@ func main() {
 <!-- /docs-validate: hidden -->
 
 ```go
-client := copilot.NewClient(nil)
+client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
-session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-    Hooks: &copilot.SessionHooks{
-        OnSessionStart: onSessionStart,
-        OnPreToolUse:   onPreToolUse,
-        OnPostToolUse:  onPostToolUse,
-        // ... add only the hooks you need
-    },
-    OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-        return &rpc.PermissionDecisionApproveOnce{}, nil
-    },
+session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	Hooks: copilot.SessionHookOptions{
+		Handlers: &copilot.SessionHooks{
+			OnSessionStart: onSessionStart,
+			OnPreToolUse:   onPreToolUse,
+			OnPostToolUse:  onPostToolUse,
+			// ... add only the hooks you need
+		},
+	},
+	Permissions: copilot.SessionPermissionOptions{
+		OnRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+			return &rpc.PermissionDecisionApproveOnce{}, nil
+		},
+	},
 })
+
 ```
 
 </details>
@@ -245,32 +268,33 @@ session, err := client.CreateSession(ctx, &copilot.SessionConfig{
 <!-- docs-validate: hidden -->
 
 ```csharp
-using GitHub.Copilot;
-using GitHub.Copilot.Rpc;
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
+using Microsoft.Copilot;
+using Microsoft.Copilot.Rpc;
 
 public static class HooksExample
 {
-    static Task<SessionStartHookOutput?> onSessionStart(SessionStartHookInput input, HookInvocation invocation) =>
-        Task.FromResult<SessionStartHookOutput?>(null);
-    static Task<PreToolUseHookOutput?> onPreToolUse(PreToolUseHookInput input, HookInvocation invocation) =>
-        Task.FromResult<PreToolUseHookOutput?>(null);
-    static Task<PostToolUseHookOutput?> onPostToolUse(PostToolUseHookInput input, HookInvocation invocation) =>
-        Task.FromResult<PostToolUseHookOutput?>(null);
-
+    static Task<SessionStartHookOutput?> onSessionStart(SessionStartHookInput input, HookInvocation invocation) => Task.FromResult<SessionStartHookOutput?>(null);
+    static Task<PreToolUseHookOutput?> onPreToolUse(PreToolUseHookInput input, HookInvocation invocation) => Task.FromResult<PreToolUseHookOutput?>(null);
+    static Task<PostToolUseHookOutput?> onPostToolUse(PostToolUseHookInput input, HookInvocation invocation) => Task.FromResult<PostToolUseHookOutput?>(null);
     public static async Task Main()
     {
-        var client = new CopilotClient();
-
-        var session = await client.CreateSessionAsync(new SessionConfig
+        var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+        var session = await client.CreateSessionAsync(new CreateSessionOptions
         {
-            Hooks = new SessionHooks
+            Hooks = new SessionHookOptions
             {
-                OnSessionStart = onSessionStart,
-                OnPreToolUse   = onPreToolUse,
-                OnPostToolUse  = onPostToolUse,
+                Handlers = new SessionHooks
+                {
+                    OnSessionStart = onSessionStart,
+                    OnPreToolUse = onPreToolUse,
+                    OnPostToolUse = onPostToolUse,
+                }
             },
-            OnPermissionRequest = (req, inv) =>
-                Task.FromResult(PermissionDecision.ApproveOnce()),
+            Permissions = new SessionPermissionOptions
+            {
+                OnRequest = (req, inv) => Task.FromResult(PermissionDecision.ApproveOnce())
+            }
         });
     }
 }
@@ -279,19 +303,23 @@ public static class HooksExample
 <!-- /docs-validate: hidden -->
 
 ```csharp
-var client = new CopilotClient();
-
-var session = await client.CreateSessionAsync(new SessionConfig
+#pragma warning disable MCPSDK001 // PermissionDecision is experimental.
+var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    Hooks = new SessionHooks
+    Hooks = new SessionHookOptions
     {
-        OnSessionStart = onSessionStart,
-        OnPreToolUse   = onPreToolUse,
-        OnPostToolUse  = onPostToolUse,
-        // ... add only the hooks you need
+        Handlers = new SessionHooks
+        {
+            OnSessionStart = onSessionStart,
+            OnPreToolUse = onPreToolUse,
+            OnPostToolUse = onPostToolUse, // ... add only the hooks you need
+        }
     },
-    OnPermissionRequest = (req, inv) =>
-        Task.FromResult(PermissionDecision.ApproveOnce()),
+    Permissions = new SessionPermissionOptions
+    {
+        OnRequest = (req, inv) => Task.FromResult(PermissionDecision.ApproveOnce())
+    }
 });
 ```
 
@@ -301,24 +329,31 @@ var session = await client.CreateSessionAsync(new SessionConfig
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.CopilotClient;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
-try (var client = new CopilotClient()) {
-    client.start().get();
+try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
+    client
+            .start()
+            .get();
 
     var hooks = new SessionHooks()
-        .setOnSessionStart((input, inv) -> CompletableFuture.completedFuture(null))
-        .setOnPreToolUse((input, inv) -> CompletableFuture.completedFuture(null))
-        .setOnPostToolUse((input, inv) -> CompletableFuture.completedFuture(null));
-        // ... add only the hooks you need
+            .setOnSessionStart((input, inv) -> CompletableFuture
+                    .completedFuture(null))
+            .setOnPreToolUse((input, inv) -> CompletableFuture
+                    .completedFuture(null))
+            .setOnPostToolUse((input, inv) -> CompletableFuture
+                    .completedFuture(null));
+    // ... add only the hooks you need
 
-    var session = client.createSession(
-        new SessionConfig()
-            .setHooks(hooks)
-            .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-    ).get();
+    var session = client
+            .createSession(new CreateSessionOptions()
+                    .setHooks(new SessionHookOptions()
+                            .setHandlers(hooks))
+                    .setPermissions(new SessionPermissionOptions()
+                            .setOnRequest(PermissionHandler.APPROVE_ALL)))
+            .get();
 }
 ```
 
@@ -340,18 +375,22 @@ Use `onPreToolUse` to build a permission layer that decides which tools the agen
 const READ_ONLY_TOOLS = ["read_file", "glob", "grep", "view"];
 
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input) => {
-      if (!READ_ONLY_TOOLS.includes(input.toolName)) {
-        return {
-          permissionDecision: "deny",
-          permissionDecisionReason: `Only read-only tools are allowed. "${input.toolName}" was blocked.`,
-        };
-      }
-      return { permissionDecision: "allow" };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input) => {
+                if (!READ_ONLY_TOOLS.includes(input.toolName)) {
+                    return {
+                        permissionDecision: "deny",
+                        permissionDecisionReason: `Only read-only tools are allowed. "${input.toolName}" was blocked.`,
+                    };
+                }
+                return { permissionDecision: "allow" };
+            },
+        },
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -366,20 +405,21 @@ from copilot.session import PermissionDecisionApproveOnce
 
 READ_ONLY_TOOLS = ["read_file", "glob", "grep", "view"]
 
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
+
 
 async def on_pre_tool_use(input_data, invocation):
     if input_data["toolName"] not in READ_ONLY_TOOLS:
         return {
             "permissionDecision": "deny",
-            "permissionDecisionReason":
-                f'Only read-only tools are allowed. "{input_data["toolName"]}" was blocked.',
+            "permissionDecisionReason": f'Only read-only tools are allowed. "{input_data["toolName"]}" was blocked.',
         }
     return {"permissionDecision": "allow"}
 
+
 session = await client.create_session(
-    on_permission_request=lambda req, inv: PermissionDecisionApproveOnce(),
-    hooks={"on_pre_tool_use": on_pre_tool_use},
+    permissions={"on_request": lambda req, inv: PermissionDecisionApproveOnce()},
+    hooks={"handlers": {"on_pre_tool_use": on_pre_tool_use}},
 )
 ```
 
@@ -396,30 +436,28 @@ package main
 import (
 	"context"
 	"fmt"
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
 	ctx := context.Background()
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
 
 	readOnlyTools := map[string]bool{"read_file": true, "glob": true, "grep": true, "view": true}
 
-	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-		Hooks: &copilot.SessionHooks{
-			OnPreToolUse: func(input copilot.PreToolUseHookInput, inv copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
-				if !readOnlyTools[input.ToolName] {
-					return &copilot.PreToolUseHookOutput{
-						PermissionDecision:       "deny",
-						PermissionDecisionReason: fmt.Sprintf("Only read-only tools are allowed. %q was blocked.", input.ToolName),
-					}, nil
-				}
-				return &copilot.PreToolUseHookOutput{PermissionDecision: "allow"}, nil
+	session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Hooks: copilot.SessionHookOptions{
+			Handlers: &copilot.SessionHooks{
+				OnPreToolUse: func(input copilot.PreToolUseHookInput, inv copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
+					if !readOnlyTools[input.ToolName] {
+						return &copilot.PreToolUseHookOutput{
+							PermissionDecision:       "deny",
+							PermissionDecisionReason: fmt.Sprintf("Only read-only tools are allowed. %q was blocked.", input.ToolName),
+						}, nil
+					}
+					return &copilot.PreToolUseHookOutput{PermissionDecision: "allow"}, nil
+				},
 			},
-		},
-		OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-			return &rpc.PermissionDecisionApproveOnce{}, nil
 		},
 	})
 	_ = session
@@ -431,19 +469,22 @@ func main() {
 ```go
 readOnlyTools := map[string]bool{"read_file": true, "glob": true, "grep": true, "view": true}
 
-session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-    Hooks: &copilot.SessionHooks{
-        OnPreToolUse: func(input copilot.PreToolUseHookInput, inv copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
-            if !readOnlyTools[input.ToolName] {
-                return &copilot.PreToolUseHookOutput{
-                    PermissionDecision:       "deny",
-                    PermissionDecisionReason: fmt.Sprintf("Only read-only tools are allowed. %q was blocked.", input.ToolName),
-                }, nil
-            }
-            return &copilot.PreToolUseHookOutput{PermissionDecision: "allow"}, nil
-        },
-    },
+session, _ := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	Hooks: copilot.SessionHookOptions{
+		Handlers: &copilot.SessionHooks{
+			OnPreToolUse: func(input copilot.PreToolUseHookInput, inv copilot.HookInvocation) (*copilot.PreToolUseHookOutput, error) {
+				if !readOnlyTools[input.ToolName] {
+					return &copilot.PreToolUseHookOutput{
+						PermissionDecision:       "deny",
+						PermissionDecisionReason: fmt.Sprintf("Only read-only tools are allowed. %q was blocked.", input.ToolName),
+					}, nil
+				}
+				return &copilot.PreToolUseHookOutput{PermissionDecision: "allow"}, nil
+			},
+		},
+	},
 })
+
 ```
 
 </details>
@@ -451,68 +492,38 @@ session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
 <details>
 <summary><strong>.NET</strong></summary>
 
-<!-- docs-validate: hidden -->
-
 ```csharp
-using GitHub.Copilot;
-using GitHub.Copilot.Rpc;
+var readOnlyTools = new HashSet<string>
 
-public static class PermissionControlExample
 {
-    public static async Task Main()
+    "read_file",
+    "glob",
+    "grep",
+    "view"
+};
+var session = await client.CreateSessionAsync(new CreateSessionOptions
+{
+    Hooks = new SessionHookOptions
     {
-        await using var client = new CopilotClient();
-
-        var readOnlyTools = new HashSet<string> { "read_file", "glob", "grep", "view" };
-
-        var session = await client.CreateSessionAsync(new SessionConfig
+        Handlers = new SessionHooks
         {
-            Hooks = new SessionHooks
+            OnPreToolUse = (input, invocation) =>
             {
-                OnPreToolUse = (input, invocation) =>
+                if (!readOnlyTools.Contains(input.ToolName))
                 {
-                    if (!readOnlyTools.Contains(input.ToolName))
+                    return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput
                     {
-                        return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput
-                        {
-                            PermissionDecision = "deny",
-                            PermissionDecisionReason = $"Only read-only tools are allowed. \"{input.ToolName}\" was blocked.",
-                        });
-                    }
-                    return Task.FromResult<PreToolUseHookOutput?>(
-                        new PreToolUseHookOutput { PermissionDecision = "allow" });
-                },
-            },
-            OnPermissionRequest = (req, inv) =>
-                Task.FromResult(PermissionDecision.ApproveOnce()),
-        });
-    }
-}
-```
-
-<!-- /docs-validate: hidden -->
-
-```csharp
-var readOnlyTools = new HashSet<string> { "read_file", "glob", "grep", "view" };
-
-var session = await client.CreateSessionAsync(new SessionConfig
-{
-    Hooks = new SessionHooks
-    {
-        OnPreToolUse = (input, invocation) =>
-        {
-            if (!readOnlyTools.Contains(input.ToolName))
-            {
+                        PermissionDecision = "deny",
+                        PermissionDecisionReason = $"Only read-only tools are allowed. \"{input.ToolName}\" was blocked.",
+                    });
+                }
                 return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput
                 {
-                    PermissionDecision = "deny",
-                    PermissionDecisionReason = $"Only read-only tools are allowed. \"{input.ToolName}\" was blocked.",
+                    PermissionDecision = "allow"
                 });
-            }
-            return Task.FromResult<PreToolUseHookOutput?>(
-                new PreToolUseHookOutput { PermissionDecision = "allow" });
-        },
-    },
+            },
+        }
+    }
 });
 ```
 
@@ -526,28 +537,38 @@ var session = await client.CreateSessionAsync(new SessionConfig
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
-import com.github.copilot.rpc.PermissionHandler;
-import com.github.copilot.rpc.SessionConfig;
-import com.github.copilot.rpc.SessionHooks;
-import com.github.copilot.rpc.PreToolUseHookOutput;
-var readOnlyTools = Set.of("read_file", "glob", "grep", "view");
+import com.microsoft.copilot.rpc.PermissionHandler;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
+import com.microsoft.copilot.rpc.SessionHooks;
+import com.microsoft.copilot.rpc.PreToolUseHookOutput;
+import com.microsoft.copilot.rpc.SessionHookOptions;
+import com.microsoft.copilot.rpc.SessionPermissionOptions;
+
+var readOnlyTools = Set
+        .of("read_file", "glob", "grep", "view");
 
 var hooks = new SessionHooks()
-    .setOnPreToolUse((input, invocation) -> {
-        if (!readOnlyTools.contains(input.getToolName())) {
-            return CompletableFuture.completedFuture(
-                PreToolUseHookOutput.deny(
-                    "Only read-only tools are allowed. \"" + input.getToolName() + "\" was blocked.")
-            );
-        }
-        return CompletableFuture.completedFuture(PreToolUseHookOutput.allow());
-    });
+        .setOnPreToolUse((input, invocation) -> {
+            if (!readOnlyTools
+                    .contains(input
+                            .getToolName())) {
+                return CompletableFuture
+                        .completedFuture(PreToolUseHookOutput
+                                .deny("Only read-only tools are allowed. \"" + input
+                                        .getToolName() + "\" was blocked."));
+            }
+            return CompletableFuture
+                    .completedFuture(PreToolUseHookOutput
+                            .allow());
+        });
 
-var session = client.createSession(
-    new SessionConfig()
-        .setHooks(hooks)
-        .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-).get();
+var session = client
+        .createSession(new CreateSessionOptions()
+                .setHooks(new SessionHookOptions()
+                        .setHandlers(hooks))
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL)))
+        .get();
 ```
 
 </details>
@@ -558,23 +579,27 @@ var session = client.createSession(
 const ALLOWED_DIRS = ["/home/user/projects", "/tmp"];
 
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input) => {
-      if (["read_file", "write_file", "edit"].includes(input.toolName)) {
-        const filePath = (input.toolArgs as { path: string }).path;
-        const allowed = ALLOWED_DIRS.some((dir) => filePath.startsWith(dir));
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input) => {
+                if (["read_file", "write_file", "edit"].includes(input.toolName)) {
+                    const filePath = (input.toolArgs as { path: string }).path;
+                    const allowed = ALLOWED_DIRS.some((dir) => filePath.startsWith(dir));
 
-        if (!allowed) {
-          return {
-            permissionDecision: "deny",
-            permissionDecisionReason: `Access to "${filePath}" is outside the allowed directories.`,
-          };
-        }
-      }
-      return { permissionDecision: "allow" };
+                    if (!allowed) {
+                        return {
+                            permissionDecision: "deny",
+                            permissionDecisionReason: `Access to "${filePath}" is outside the allowed directories.`,
+                        };
+                    }
+                }
+                return { permissionDecision: "allow" };
+            },
+        },
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -584,15 +609,19 @@ const session = await client.createSession({
 const DESTRUCTIVE_TOOLS = ["delete_file", "shell", "bash"];
 
 const session = await client.createSession({
-  hooks: {
-    onPreToolUse: async (input) => {
-      if (DESTRUCTIVE_TOOLS.includes(input.toolName)) {
-        return { permissionDecision: "ask" };
-      }
-      return { permissionDecision: "allow" };
+    hooks: {
+        handlers: {
+            onPreToolUse: async (input) => {
+                if (DESTRUCTIVE_TOOLS.includes(input.toolName)) {
+                    return { permissionDecision: "ask" };
+                }
+                return { permissionDecision: "allow" };
+            },
+        },
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -609,72 +638,76 @@ Combine `onPreToolUse`, `onPostToolUse`, and the session lifecycle hooks to buil
 
 ```typescript
 interface AuditEntry {
-  timestamp: Date;
-  sessionId: string;
-  event: string;
-  toolName?: string;
-  toolArgs?: unknown;
-  toolResult?: unknown;
-  prompt?: string;
+    timestamp: Date;
+    sessionId: string;
+    event: string;
+    toolName?: string;
+    toolArgs?: unknown;
+    toolResult?: unknown;
+    prompt?: string;
 }
 
 const auditLog: AuditEntry[] = [];
 
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async (input, invocation) => {
-      auditLog.push({
-        timestamp: input.timestamp,
-        sessionId: invocation.sessionId,
-        event: "session_start",
-      });
-      return null;
-    },
-    onUserPromptSubmitted: async (input, invocation) => {
-      auditLog.push({
-        timestamp: input.timestamp,
-        sessionId: invocation.sessionId,
-        event: "user_prompt",
-        prompt: input.prompt,
-      });
-      return null;
-    },
-    onPreToolUse: async (input, invocation) => {
-      auditLog.push({
-        timestamp: input.timestamp,
-        sessionId: invocation.sessionId,
-        event: "tool_call",
-        toolName: input.toolName,
-        toolArgs: input.toolArgs,
-      });
-      return { permissionDecision: "allow" };
-    },
-    onPostToolUse: async (input, invocation) => {
-      auditLog.push({
-        timestamp: input.timestamp,
-        sessionId: invocation.sessionId,
-        event: "tool_result",
-        toolName: input.toolName,
-        toolResult: input.toolResult,
-      });
-      return null;
-    },
-    onSessionEnd: async (input, invocation) => {
-      auditLog.push({
-        timestamp: input.timestamp,
-        sessionId: invocation.sessionId,
-        event: "session_end",
-      });
+    hooks: {
+        handlers: {
+            onSessionStart: async (input, invocation) => {
+                auditLog.push({
+                    timestamp: input.timestamp,
+                    sessionId: invocation.sessionId,
+                    event: "session_start",
+                });
+                return null;
+            },
+            onUserPromptSubmitted: async (input, invocation) => {
+                auditLog.push({
+                    timestamp: input.timestamp,
+                    sessionId: invocation.sessionId,
+                    event: "user_prompt",
+                    prompt: input.prompt,
+                });
+                return null;
+            },
+            onPreToolUse: async (input, invocation) => {
+                auditLog.push({
+                    timestamp: input.timestamp,
+                    sessionId: invocation.sessionId,
+                    event: "tool_call",
+                    toolName: input.toolName,
+                    toolArgs: input.toolArgs,
+                });
+                return { permissionDecision: "allow" };
+            },
+            onPostToolUse: async (input, invocation) => {
+                auditLog.push({
+                    timestamp: input.timestamp,
+                    sessionId: invocation.sessionId,
+                    event: "tool_result",
+                    toolName: input.toolName,
+                    toolResult: input.toolResult,
+                });
+                return null;
+            },
+            onSessionEnd: async (input, invocation) => {
+                auditLog.push({
+                    timestamp: input.timestamp,
+                    sessionId: invocation.sessionId,
+                    event: "session_end",
+                });
 
-      // Persist the log — swap this with your own storage backend
-      await fs.promises.writeFile(
-        `audit-${invocation.sessionId}.json`,
-        JSON.stringify(auditLog, null, 2),
-      );
-      return null;
+                // Persist the log — swap this with your own storage backend
+                await fs.promises.writeFile(
+                    `audit-${invocation.sessionId}.json`,
+                    JSON.stringify(auditLog, null, 2),
+                );
+                return null;
+            },
+        },
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -691,61 +724,79 @@ from copilot.session import PermissionDecisionApproveOnce
 
 audit_log = []
 
+
 async def on_session_start(input_data, invocation):
-    audit_log.append({
-        "timestamp": input_data["timestamp"].isoformat(),
-        "session_id": invocation["session_id"],
-        "event": "session_start",
-    })
+    audit_log.append(
+        {
+            "timestamp": input_data["timestamp"].isoformat(),
+            "session_id": invocation["session_id"],
+            "event": "session_start",
+        }
+    )
     return None
+
 
 async def on_user_prompt_submitted(input_data, invocation):
-    audit_log.append({
-        "timestamp": input_data["timestamp"].isoformat(),
-        "session_id": invocation["session_id"],
-        "event": "user_prompt",
-        "prompt": input_data["prompt"],
-    })
+    audit_log.append(
+        {
+            "timestamp": input_data["timestamp"].isoformat(),
+            "session_id": invocation["session_id"],
+            "event": "user_prompt",
+            "prompt": input_data["prompt"],
+        }
+    )
     return None
+
 
 async def on_pre_tool_use(input_data, invocation):
-    audit_log.append({
-        "timestamp": input_data["timestamp"].isoformat(),
-        "session_id": invocation["session_id"],
-        "event": "tool_call",
-        "tool_name": input_data["toolName"],
-        "tool_args": input_data["toolArgs"],
-    })
+    audit_log.append(
+        {
+            "timestamp": input_data["timestamp"].isoformat(),
+            "session_id": invocation["session_id"],
+            "event": "tool_call",
+            "tool_name": input_data["toolName"],
+            "tool_args": input_data["toolArgs"],
+        }
+    )
     return {"permissionDecision": "allow"}
 
+
 async def on_post_tool_use(input_data, invocation):
-    audit_log.append({
-        "timestamp": input_data["timestamp"].isoformat(),
-        "session_id": invocation["session_id"],
-        "event": "tool_result",
-        "tool_name": input_data["toolName"],
-        "tool_result": input_data["toolResult"],
-    })
+    audit_log.append(
+        {
+            "timestamp": input_data["timestamp"].isoformat(),
+            "session_id": invocation["session_id"],
+            "event": "tool_result",
+            "tool_name": input_data["toolName"],
+            "tool_result": input_data["toolResult"],
+        }
+    )
     return None
 
+
 async def on_session_end(input_data, invocation):
-    audit_log.append({
-        "timestamp": input_data["timestamp"].isoformat(),
-        "session_id": invocation["session_id"],
-        "event": "session_end",
-    })
+    audit_log.append(
+        {
+            "timestamp": input_data["timestamp"].isoformat(),
+            "session_id": invocation["session_id"],
+            "event": "session_end",
+        }
+    )
     async with aiofiles.open(f"audit-{invocation['session_id']}.json", "w") as f:
         await f.write(json.dumps(audit_log, indent=2))
     return None
 
+
 session = await client.create_session(
-    on_permission_request=lambda req, inv: PermissionDecisionApproveOnce(),
+    permissions={"on_request": lambda req, inv: PermissionDecisionApproveOnce()},
     hooks={
-        "on_session_start": on_session_start,
-        "on_user_prompt_submitted": on_user_prompt_submitted,
-        "on_pre_tool_use": on_pre_tool_use,
-        "on_post_tool_use": on_post_tool_use,
-        "on_session_end": on_session_end,
+        "handlers": {
+            "on_session_start": on_session_start,
+            "on_user_prompt_submitted": on_user_prompt_submitted,
+            "on_pre_tool_use": on_pre_tool_use,
+            "on_post_tool_use": on_post_tool_use,
+            "on_session_end": on_session_end,
+        }
     },
 )
 ```
@@ -755,26 +806,32 @@ session = await client.create_session(
 ### Redact secrets from tool results
 
 ```typescript
-const SECRET_PATTERNS = [
-  /(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[\w\-\.]+["']?/gi,
-];
+const SECRET_PATTERNS = [/(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[\w\-\.]+["']?/gi];
+
+const redact = (text: string) =>
+    SECRET_PATTERNS.reduce((result, pattern) => result.replace(pattern, "[REDACTED]"), text);
 
 const session = await client.createSession({
-  hooks: {
-    onPostToolUse: async (input) => {
-      if (typeof input.toolResult !== "string") return null;
+    hooks: {
+        handlers: {
+            onPostToolUse: async (input) => {
+                const { textResultForLlm, sessionLog } = input.toolResult;
+                const redacted = {
+                    ...input.toolResult,
+                    textResultForLlm: redact(textResultForLlm),
+                    sessionLog: sessionLog && redact(sessionLog),
+                };
 
-      let redacted = input.toolResult;
-      for (const pattern of SECRET_PATTERNS) {
-        redacted = redacted.replace(pattern, "[REDACTED]");
-      }
-
-      return redacted !== input.toolResult
-        ? { modifiedResult: redacted }
-        : null;
+                return redacted.textResultForLlm !== textResultForLlm ||
+                    redacted.sessionLog !== sessionLog
+                    ? { modifiedResult: redacted }
+                    : null;
+            },
+        },
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -791,23 +848,27 @@ Hooks fire in your application's process, so you can trigger any side-effect—d
 import notifier from "node-notifier"; // npm install node-notifier
 
 const session = await client.createSession({
-  hooks: {
-    onSessionEnd: async (input, invocation) => {
-      notifier.notify({
-        title: "Copilot Session Complete",
-        message: `Session ${invocation.sessionId.slice(0, 8)} finished (${input.reason}).`,
-      });
-      return null;
+    hooks: {
+        handlers: {
+            onSessionEnd: async (input, invocation) => {
+                notifier.notify({
+                    title: "Copilot Session Complete",
+                    message: `Session ${invocation.sessionId.slice(0, 8)} finished (${input.reason}).`,
+                });
+                return null;
+            },
+            onErrorOccurred: async (input) => {
+                notifier.notify({
+                    title: "Copilot Error",
+                    message: input.error.slice(0, 200),
+                });
+                return null;
+            },
+        },
     },
-    onErrorOccurred: async (input) => {
-      notifier.notify({
-        title: "Copilot Error",
-        message: input.error.slice(0, 200),
-      });
-      return null;
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
 });
 ```
 
@@ -821,29 +882,40 @@ import subprocess
 from copilot import CopilotClient
 from copilot.session import PermissionDecisionApproveOnce
 
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
+
 
 async def on_session_end(input_data, invocation):
     sid = invocation["session_id"][:8]
     reason = input_data["reason"]
-    subprocess.Popen([
-        "notify-send", "Copilot Session Complete",
-        f"Session {sid} finished ({reason}).",
-    ])
+    subprocess.Popen(
+        [
+            "notify-send",
+            "Copilot Session Complete",
+            f"Session {sid} finished ({reason}).",
+        ]
+    )
     return None
+
 
 async def on_error_occurred(input_data, invocation):
-    subprocess.Popen([
-        "notify-send", "Copilot Error",
-        input_data["error"][:200],
-    ])
+    subprocess.Popen(
+        [
+            "notify-send",
+            "Copilot Error",
+            input_data["error"][:200],
+        ]
+    )
     return None
 
+
 session = await client.create_session(
-    on_permission_request=lambda req, inv: PermissionDecisionApproveOnce(),
+    permissions={"on_request": lambda req, inv: PermissionDecisionApproveOnce()},
     hooks={
-        "on_session_end": on_session_end,
-        "on_error_occurred": on_error_occurred,
+        "handlers": {
+            "on_session_end": on_session_end,
+            "on_error_occurred": on_error_occurred,
+        }
     },
 )
 ```
@@ -856,18 +928,22 @@ session = await client.create_session(
 import { exec } from "node:child_process";
 
 const session = await client.createSession({
-  hooks: {
-    onPostToolUse: async (input) => {
-      // macOS: play a system sound after every tool call
-      exec("afplay /System/Library/Sounds/Pop.aiff");
-      return null;
+    hooks: {
+        handlers: {
+            onPostToolUse: async (input) => {
+                // macOS: play a system sound after every tool call
+                exec("afplay /System/Library/Sounds/Pop.aiff");
+                return null;
+            },
+            onErrorOccurred: async () => {
+                exec("afplay /System/Library/Sounds/Basso.aiff");
+                return null;
+            },
+        },
     },
-    onErrorOccurred: async () => {
-      exec("afplay /System/Library/Sounds/Basso.aiff");
-      return null;
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
 });
 ```
 
@@ -877,21 +953,25 @@ const session = await client.createSession({
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL!;
 
 const session = await client.createSession({
-  hooks: {
-    onErrorOccurred: async (input, invocation) => {
-      if (!input.recoverable) {
-        await fetch(SLACK_WEBHOOK_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: `🚨 Unrecoverable error in session \`${invocation.sessionId.slice(0, 8)}\`:\n\`\`\`${input.error}\`\`\``,
-          }),
-        });
-      }
-      return null;
+    hooks: {
+        handlers: {
+            onErrorOccurred: async (input, invocation) => {
+                if (!input.recoverable) {
+                    await fetch(SLACK_WEBHOOK_URL, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            text: `🚨 Unrecoverable error in session \`${invocation.sessionId.slice(0, 8)}\`:\n\`\`\`${input.error}\`\`\``,
+                        }),
+                    });
+                }
+                return null;
+            },
+        },
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -903,21 +983,23 @@ Use `onSessionStart` and `onUserPromptSubmitted` to automatically inject context
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async (input) => {
-      const pkg = JSON.parse(
-        await fs.promises.readFile("package.json", "utf-8"),
-      );
-      return {
-        additionalContext: [
-          `Project: ${pkg.name} v${pkg.version}`,
-          `Node: ${process.version}`,
-          `Working directory: ${input.workingDirectory}`,
-        ].join("\n"),
-      };
+    hooks: {
+        handlers: {
+            onSessionStart: async (input) => {
+                const pkg = JSON.parse(await fs.promises.readFile("package.json", "utf-8"));
+                return {
+                    additionalContext: [
+                        `Project: ${pkg.name} v${pkg.version}`,
+                        `Node: ${process.version}`,
+                        `Working directory: ${input.workingDirectory}`,
+                    ].join("\n"),
+                };
+            },
+        },
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -925,25 +1007,29 @@ const session = await client.createSession({
 
 ```typescript
 const SHORTCUTS: Record<string, string> = {
-  "/fix": "Find and fix all errors in the current file",
-  "/test": "Write comprehensive unit tests for this code",
-  "/explain": "Explain this code in detail",
-  "/refactor": "Refactor this code to improve readability",
+    "/fix": "Find and fix all errors in the current file",
+    "/test": "Write comprehensive unit tests for this code",
+    "/explain": "Explain this code in detail",
+    "/refactor": "Refactor this code to improve readability",
 };
 
 const session = await client.createSession({
-  hooks: {
-    onUserPromptSubmitted: async (input) => {
-      for (const [shortcut, expansion] of Object.entries(SHORTCUTS)) {
-        if (input.prompt.startsWith(shortcut)) {
-          const rest = input.prompt.slice(shortcut.length).trim();
-          return { modifiedPrompt: rest ? `${expansion}: ${rest}` : expansion };
-        }
-      }
-      return null;
+    hooks: {
+        handlers: {
+            onUserPromptSubmitted: async (input) => {
+                for (const [shortcut, expansion] of Object.entries(SHORTCUTS)) {
+                    if (input.prompt.startsWith(shortcut)) {
+                        const rest = input.prompt.slice(shortcut.length).trim();
+                        return { modifiedPrompt: rest ? `${expansion}: ${rest}` : expansion };
+                    }
+                }
+                return null;
+            },
+        },
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -955,19 +1041,23 @@ The `onErrorOccurred` hook gives you a chance to react to failures—whether tha
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onErrorOccurred: async (input) => {
-      if (input.errorContext === "model_call" && input.recoverable) {
-        return {
-          errorHandling: "retry",
-          retryCount: 3,
-          userNotification: "Temporary model issue — retrying…",
-        };
-      }
-      return null;
+    hooks: {
+        handlers: {
+            onErrorOccurred: async (input) => {
+                if (input.errorContext === "model_call" && input.recoverable) {
+                    return {
+                        errorHandling: "retry",
+                        retryCount: 3,
+                        userNotification: "Temporary model issue — retrying…",
+                    };
+                }
+                return null;
+            },
+        },
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -975,20 +1065,24 @@ const session = await client.createSession({
 
 ```typescript
 const FRIENDLY_MESSAGES: Record<string, string> = {
-  model_call: "The AI model is temporarily unavailable. Please try again.",
-  tool_execution: "A tool encountered an error. Check inputs and try again.",
-  system: "A system error occurred. Please try again later.",
+    model_call: "The AI model is temporarily unavailable. Please try again.",
+    tool_execution: "A tool encountered an error. Check inputs and try again.",
+    system: "A system error occurred. Please try again later.",
 };
 
 const session = await client.createSession({
-  hooks: {
-    onErrorOccurred: async (input) => {
-      return {
-        userNotification: FRIENDLY_MESSAGES[input.errorContext] ?? input.error,
-      };
+    hooks: {
+        handlers: {
+            onErrorOccurred: async (input) => {
+                return {
+                    userNotification: FRIENDLY_MESSAGES[input.errorContext] ?? input.error,
+                };
+            },
+        },
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -1000,45 +1094,45 @@ Track how long sessions run, how many tools are invoked, and why sessions end—
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-const metrics = new Map<
-  string,
-  { start: Date; toolCalls: number; prompts: number }
->();
+const metrics = new Map<string, { start: Date; toolCalls: number; prompts: number }>();
 
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async (input, invocation) => {
-      metrics.set(invocation.sessionId, {
-        start: input.timestamp,
-        toolCalls: 0,
-        prompts: 0,
-      });
-      return null;
-    },
-    onUserPromptSubmitted: async (_input, invocation) => {
-      metrics.get(invocation.sessionId)!.prompts++;
-      return null;
-    },
-    onPreToolUse: async (_input, invocation) => {
-      metrics.get(invocation.sessionId)!.toolCalls++;
-      return { permissionDecision: "allow" };
-    },
-    onSessionEnd: async (input, invocation) => {
-      const m = metrics.get(invocation.sessionId)!;
-      const durationSec =
-        (input.timestamp.getTime() - m.start.getTime()) / 1000;
+    hooks: {
+        handlers: {
+            onSessionStart: async (input, invocation) => {
+                metrics.set(invocation.sessionId, {
+                    start: input.timestamp,
+                    toolCalls: 0,
+                    prompts: 0,
+                });
+                return null;
+            },
+            onUserPromptSubmitted: async (_input, invocation) => {
+                metrics.get(invocation.sessionId)!.prompts++;
+                return null;
+            },
+            onPreToolUse: async (_input, invocation) => {
+                metrics.get(invocation.sessionId)!.toolCalls++;
+                return { permissionDecision: "allow" };
+            },
+            onSessionEnd: async (input, invocation) => {
+                const m = metrics.get(invocation.sessionId)!;
+                const durationSec = (input.timestamp.getTime() - m.start.getTime()) / 1000;
 
-      console.log(
-        `Session ${invocation.sessionId.slice(0, 8)}: ` +
-          `${durationSec.toFixed(1)}s, ${m.prompts} prompts, ` +
-          `${m.toolCalls} tool calls, ended: ${input.reason}`,
-      );
+                console.log(
+                    `Session ${invocation.sessionId.slice(0, 8)}: ` +
+                        `${durationSec.toFixed(1)}s, ${m.prompts} prompts, ` +
+                        `${m.toolCalls} tool calls, ended: ${input.reason}`,
+                );
 
-      metrics.delete(invocation.sessionId);
-      return null;
+                metrics.delete(invocation.sessionId);
+                return null;
+            },
+        },
     },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
+    },
 });
 ```
 
@@ -1053,7 +1147,8 @@ from copilot.session import PermissionDecisionApproveOnce
 
 session_metrics = {}
 
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
+
 
 async def on_session_start(input_data, invocation):
     session_metrics[invocation["session_id"]] = {
@@ -1063,13 +1158,16 @@ async def on_session_start(input_data, invocation):
     }
     return None
 
+
 async def on_user_prompt_submitted(input_data, invocation):
     session_metrics[invocation["session_id"]]["prompts"] += 1
     return None
 
+
 async def on_pre_tool_use(input_data, invocation):
     session_metrics[invocation["session_id"]]["tool_calls"] += 1
     return {"permissionDecision": "allow"}
+
 
 async def on_session_end(input_data, invocation):
     m = session_metrics.pop(invocation["session_id"])
@@ -1081,13 +1179,16 @@ async def on_session_end(input_data, invocation):
     )
     return None
 
+
 session = await client.create_session(
-    on_permission_request=lambda req, inv: PermissionDecisionApproveOnce(),
+    permissions={"on_request": lambda req, inv: PermissionDecisionApproveOnce()},
     hooks={
-        "on_session_start": on_session_start,
-        "on_user_prompt_submitted": on_user_prompt_submitted,
-        "on_pre_tool_use": on_pre_tool_use,
-        "on_session_end": on_session_end,
+        "handlers": {
+            "on_session_start": on_session_start,
+            "on_user_prompt_submitted": on_user_prompt_submitted,
+            "on_pre_tool_use": on_pre_tool_use,
+            "on_session_end": on_session_end,
+        }
     },
 )
 ```
@@ -1100,34 +1201,38 @@ Hooks compose naturally. A single `hooks` object can handle permissions **and** 
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onSessionStart: async (input) => {
-      console.log(`[audit] session started in ${input.workingDirectory}`);
-      return { additionalContext: "Project uses TypeScript and Vitest." };
+    hooks: {
+        handlers: {
+            onSessionStart: async (input) => {
+                console.log(`[audit] session started in ${input.workingDirectory}`);
+                return { additionalContext: "Project uses TypeScript and Vitest." };
+            },
+            onPreToolUse: async (input) => {
+                console.log(`[audit] tool requested: ${input.toolName}`);
+                if (input.toolName === "shell") {
+                    return { permissionDecision: "ask" };
+                }
+                return { permissionDecision: "allow" };
+            },
+            onPostToolUse: async (input) => {
+                console.log(`[audit] tool completed: ${input.toolName}`);
+                return null;
+            },
+            onErrorOccurred: async (input) => {
+                console.error(`[alert] ${input.errorContext}: ${input.error}`);
+                return null;
+            },
+            onSessionEnd: async (input, invocation) => {
+                console.log(
+                    `[audit] session ${invocation.sessionId.slice(0, 8)} ended: ${input.reason}`,
+                );
+                return null;
+            },
+        },
     },
-    onPreToolUse: async (input) => {
-      console.log(`[audit] tool requested: ${input.toolName}`);
-      if (input.toolName === "shell") {
-        return { permissionDecision: "ask" };
-      }
-      return { permissionDecision: "allow" };
+    permissions: {
+        onRequest: async () => ({ kind: "approve-once" }),
     },
-    onPostToolUse: async (input) => {
-      console.log(`[audit] tool completed: ${input.toolName}`);
-      return null;
-    },
-    onErrorOccurred: async (input) => {
-      console.error(`[alert] ${input.errorContext}: ${input.error}`);
-      return null;
-    },
-    onSessionEnd: async (input, invocation) => {
-      console.log(
-        `[audit] session ${invocation.sessionId.slice(0, 8)} ended: ${input.reason}`,
-      );
-      return null;
-    },
-  },
-  onPermissionRequest: async () => ({ kind: "approve-once" }),
 });
 ```
 
@@ -1151,6 +1256,7 @@ For full type definitions, input/output field tables, and additional examples fo
 
 * [Hooks Overview](../hooks/hooks-overview.md)
 * [Pre-Tool Use](../hooks/pre-tool-use.md)
+* [Pre-MCP Tool Call](../hooks/pre-mcp-tool-call.md)
 * [Post-Tool Use](../hooks/post-tool-use.md)
 * [User Prompt Submitted](../hooks/user-prompt-submitted.md)
 * [User Prompt Transformed](../hooks/user-prompt-transformed.md)

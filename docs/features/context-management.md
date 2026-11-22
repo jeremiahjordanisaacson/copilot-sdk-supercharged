@@ -13,28 +13,31 @@ A successful context-clearing tool should be terminal. Otherwise, the agent loop
 
 <!-- docs-validate: strict -->
 ```typescript
-import { approveAll, CopilotClient, defineTool } from "@github/copilot-sdk";
-import type { CopilotSession } from "@github/copilot-sdk";
+import { approveAll, CopilotClient, defineTool } from "copilot-sdk-supercharged";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 import { z } from "zod";
 
-const client = new CopilotClient();
+const client = new CopilotClient({ mode: "coding-agent" });
 let session: CopilotSession;
 
 session = await client.createSession({
-  onPermissionRequest: approveAll,
-  tools: [
-    defineTool("clear_context", {
-      description: "Clear the conversation and start a fresh context window",
-      parameters: z.object({ prompt: z.string() }),
-      isTerminal: true,
-      defer: "never",
-      handler: async ({ prompt }) => {
-        const { messagesCleared } =
-          await session.rpc.history.clearContext({ prompt });
-        return `Cleared ${messagesCleared} messages.`;
-      },
-    }),
-  ],
+    permissions: {
+        onRequest: approveAll,
+    },
+    tools: {
+        definitions: [
+            defineTool("clear_context", {
+                description: "Clear the conversation and start a fresh context window",
+                parameters: z.object({ prompt: z.string() }),
+                isTerminal: true,
+                defer: "never",
+                handler: async ({ prompt }) => {
+                    const { messagesCleared } = await session.rpc.history.clearContext({ prompt });
+                    return `Cleared ${messagesCleared} messages.`;
+                },
+            }),
+        ],
+    },
 });
 ```
 

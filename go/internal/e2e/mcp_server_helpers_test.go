@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func testMCPServers(t *testing.T, serverNames ...string) map[string]copilot.MCPServerConfig {
@@ -41,7 +41,7 @@ func waitForMCPServerStatus(t *testing.T, session *copilot.Session, serverName s
 func waitForMCPServerStatusResult(ctx context.Context, session *copilot.Session, serverName string, expectedStatus rpc.MCPServerStatus, timeout time.Duration) error {
 	var lastStatus string
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	for {
 		result, err := session.RPC.MCP.List(ctx)
 		if err != nil {
 			lastStatus = err.Error()
@@ -57,6 +57,9 @@ func waitForMCPServerStatusResult(ctx context.Context, session *copilot.Session,
 				lastStatus = string(server.Status)
 				break
 			}
+		}
+		if !time.Now().Before(deadline) {
+			break
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

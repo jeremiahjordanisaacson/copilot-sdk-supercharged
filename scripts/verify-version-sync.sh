@@ -78,10 +78,10 @@ fi
 # ── .NET .csproj ─────────────────────────────────────────────────────────
 # .NET and Java use upstream-managed versioning (0.0.0-dev, beta-java etc.)
 # so we skip them in version sync — they follow upstream's release cadence.
-if [ -f "dotnet/src/GitHub.Copilot.SDK.csproj" ]; then
+if [ -f "dotnet/src/Microsoft.Copilot.SDK.csproj" ]; then
     DOTNET_VER=$(python3 -c "
 import re
-with open('dotnet/src/GitHub.Copilot.SDK.csproj') as f:
+with open('dotnet/src/Microsoft.Copilot.SDK.csproj') as f:
     m = re.search(r'<Version>(.+?)</Version>', f.read())
     print(m.group(1) if m else 'NOT_SET')
 " 2>/dev/null || echo "NOT_SET")

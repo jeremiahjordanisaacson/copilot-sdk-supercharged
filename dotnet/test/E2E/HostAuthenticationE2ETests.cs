@@ -2,18 +2,24 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 using System.Text.Json;
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
-public sealed class HostAuthenticationE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
-    : E2ETestBase(fixture, "host_authentication", output, replayOnly: true)
+public sealed class HostAuthenticationE2ETests : E2ETestBase
 {
+    private readonly ITestOutputHelper _output;
+
+    public HostAuthenticationE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
+        : base(fixture, "host_authentication", output, replayOnly: true) => _output = output;
+
+    private sealed record IssuedCredential(string Token, DateTimeOffset Expiry, AhpAuthenticationResult Result);
+
     private sealed class HostAuthenticationTheoryAttribute : TheoryAttribute
     {
         public HostAuthenticationTheoryAttribute()
@@ -28,7 +34,13 @@ public sealed class HostAuthenticationE2ETests(E2ETestFixture fixture, ITestOutp
         var environment = Ctx.GetEnvironment();
         foreach (var key in new[] { "GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN", "COPILOT_HMAC_KEY", "CAPI_HMAC_KEY" })
             environment[key] = "";
-        return Ctx.CreateClient(new() { UseLoggedInUser = false }, autoInjectGitHubToken: false, environment: environment);
+        // These cases prove auth without ambient credentials, which are process-wide.
+        return Ctx.CreateClient(new()
+        {
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(),
+            GitHub = new ClientGitHubOptions { UseLoggedInUser = false }
+        }, autoInjectGitHubToken: false, environment: environment);
     }
 
     private static AhpHostAuthentication.Custom Custom(
@@ -71,15 +83,17 @@ public sealed class HostAuthenticationE2ETests(E2ETestFixture fixture, ITestOutp
         await using (var host = await owner.StartAhpHostAsync(new()
         {
             Authentication = policy,
+            Workspace = Ctx.WorkDir,
             LocalServer = new() { Token = "independent-listener-secret" },
             AllowCreatingNewSessions = true,
             CreateSession = async request =>
             {
                 creates++;
                 AssertAdmission(request.Authentication);
-                request.Config.Provider = provider;
+                request.Config.Inference = ByokTestOptions.Inference(provider, request.Config.Inference);
+                (request.Config.GitHub.Capi ??= new()).Enabled = false;
                 request.Config.Model = "local-model";
-                request.Config.OnPermissionRequest = PermissionHandler.ApproveAll;
+                request.Config.Permissions.OnRequest = PermissionHandler.ApproveAll;
                 return original = await Ctx.CreateSessionAsync(owner, request.Config);
             }
         }))
@@ -104,15 +118,17 @@ public sealed class HostAuthenticationE2ETests(E2ETestFixture fixture, ITestOutp
         await using (var host = await replacement.StartAhpHostAsync(new()
         {
             Authentication = policy,
+            Workspace = Ctx.WorkDir,
             LocalServer = new(),
             ResumeSession = async request =>
             {
                 resumes++;
                 AssertAdmission(request.Authentication);
                 Assert.Equal(original!.SessionId, request.SessionId);
-                request.Config.Provider = provider;
+                request.Config.Inference = ByokTestOptions.Inference(provider, request.Config.Inference);
+                (request.Config.GitHub.Capi ??= new()).Enabled = false;
                 request.Config.Model = "local-model";
-                request.Config.OnPermissionRequest = PermissionHandler.ApproveAll;
+                request.Config.Permissions.OnRequest = PermissionHandler.ApproveAll;
                 return resumed = await Ctx.ResumeSessionAsync(replacement, request.SessionId, request.Config);
             }
         }))
@@ -187,24 +203,59 @@ public sealed class HostAuthenticationE2ETests(E2ETestFixture fixture, ITestOutp
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var late = new TaskCompletionSource<AhpAuthenticationResult?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var validations = 0;
+        IssuedCredential? issued = null;
+        var attempts = 1;
+        var before = 0;
+        IssuedCredential CheckCredential(string token)
+        {
+            Assert.Equal(before + 1, Volatile.Read(ref validations));
+            var credential = Assert.IsType<IssuedCredential>(Volatile.Read(ref issued));
+            Assert.Equal(token, credential.Token);
+            Assert.Equal("application-owner", credential.Result.Identity);
+            Assert.Equal(credential.Expiry.ToString("O"), credential.Result.ExpiresAt);
+            return credential;
+        }
+        bool RetryExpiredError(string error)
+        {
+            if (error is not
+                ("RPC error -32603: internal error: application authentication failed" or
+                "RPC error -32007: authentication required for https://copilot.github.com/hosting/authentication"))
+                return false;
+            if (CheckCredential("admission").Expiry > DateTimeOffset.UtcNow) return false;
+            _output.WriteLine($"Retrying initial authentication with an already-expired fixture credential: {error}");
+            before = Volatile.Read(ref validations);
+            Volatile.Write(ref issued, null);
+            attempts++;
+            return true;
+        }
         await using var host = await owner.StartAhpHostAsync(new()
         {
             LocalServer = new(),
-            Authentication = Custom((_, cancellation) =>
+            Authentication = Custom((token, cancellation) =>
             {
-                validations++;
+                Interlocked.Increment(ref validations);
                 cancellation.Register(() => cancelled.TrySetResult());
                 entered.TrySetResult(cancellation);
-                return dispose ? late.Task : Task.FromResult<AhpAuthenticationResult?>(new(
-                    "application-owner", DateTimeOffset.UtcNow.AddSeconds(validations == 1 ? 2 : 60).ToString("O")));
+                if (dispose) return late.Task;
+                Assert.True(token is "admission" or "renewed", $"Unexpected fixture token: {token}");
+                var expiry = DateTimeOffset.UtcNow.AddSeconds(token == "renewed" ? 60 : 2);
+                var result = new AhpAuthenticationResult("application-owner", expiry.ToString("O"));
+                var reply = Task.FromResult<AhpAuthenticationResult?>(result);
+                Volatile.Write(ref issued, new(token, expiry, result));
+                return reply;
             })
         });
         await using var ahp = await AhpTestClient.StartAsync(authentication: true);
         await ConnectAsync(ahp, host);
-        var authentication = ahp.RequestAsync(new() { ["op"] = "authenticate", ["token"] = "admission" });
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var authentication = ahp.RequestAsync(
+            new() { ["op"] = "authenticate", ["token"] = "admission" },
+            retryExpiredError: dispose ? null : RetryExpiredError);
         if (dispose)
         {
+            await Task.WhenAny(entered.Task, authentication);
+            if (!entered.Task.IsCompleted) await authentication;
+            Assert.True(entered.Task.IsCompleted, "Authentication completed without invoking its validator");
+            await entered.Task;
             await host.DisposeAsync();
             await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(10));
             await Assert.ThrowsAsync<InvalidOperationException>(() => authentication);
@@ -213,10 +264,14 @@ public sealed class HostAuthenticationE2ETests(E2ETestFixture fixture, ITestOutp
         else
         {
             await authentication;
+            CheckCredential("admission");
             await ahp.RequestAsync(new() { ["op"] = "expired" });
             await Assert.ThrowsAsync<InvalidOperationException>(() => ahp.RequestAsync(new() { ["op"] = "create", ["workDir"] = Ctx.WorkDir }));
+            before = Volatile.Read(ref validations);
+            Volatile.Write(ref issued, null);
             await ahp.RequestAsync(new() { ["op"] = "authenticate", ["token"] = "renewed" });
-            Assert.Equal(2, validations);
+            CheckCredential("renewed");
+            Assert.Equal(attempts + 1, Volatile.Read(ref validations));
         }
     }
 }

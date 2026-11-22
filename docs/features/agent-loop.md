@@ -1,24 +1,24 @@
 # The agent loop
 
-How the Copilot CLI processes a user message end-to-end: from prompt to `session.idle`.
+How the Copilot runtime processes a user message end-to-end: from prompt to `session.idle`.
 
 ## Architecture
 
 ```mermaid
 graph LR
     App["Your App"] -->|send prompt| SDK["SDK Session"]
-    SDK -->|JSON-RPC| CLI["Copilot CLI"]
-    CLI -->|API calls| LLM["LLM"]
-    LLM -->|response| CLI
-    CLI -->|events| SDK
+    SDK -->|JSON-RPC| Runtime["Copilot runtime"]
+    Runtime -->|API calls| LLM["LLM"]
+    LLM -->|response| Runtime
+    Runtime -->|events| SDK
     SDK -->|events| App
 ```
 
-The **SDK** is a transport layer—it sends your prompt to the **Copilot CLI** over JSON-RPC and surfaces events back to your app. The **CLI** is the orchestrator that runs the agentic tool-use loop, making one or more LLM API calls until the task is done.
+The **SDK** is a transport layer—it sends your prompt to the **Copilot runtime** over JSON-RPC and surfaces events back to your app. The **runtime** is the orchestrator that runs the agentic tool-use loop, making one or more LLM API calls until the task is done.
 
 ## The tool-use loop
 
-When you call `session.send({ prompt })`, the CLI enters a loop:
+When you call `session.send({ prompt })`, the runtime enters a loop:
 
 ```mermaid
 flowchart TD
@@ -36,16 +36,70 @@ flowchart TD
 
 The model sees the **full conversation history** on each call—system prompt, user message, and all prior tool calls and results.
 
-**Key insight:** Each iteration of this loop is exactly one LLM API call, visible as one `assistant.turn_start` / `assistant.turn_end` pair in the event log. There are no hidden calls.
+**Key insight:** Each iteration of this loop is exactly one LLM API call, visible as one `assistant.turn_start` / `assistant.turn_end` pair in the event log. The loop makes no hidden calls; for model calls the runtime makes outside it, see [Counting LLM calls](#counting-llm-calls).
+
+## Multiple tool calls
+
+Session creation and resume accept it in their inference options:
+`inference.allowMultipleToolCalls` in TypeScript, `Inference.AllowMultipleToolCalls`
+in Go and .NET, `inference={"allow_multiple_tool_calls": ...}` in Python,
+`SessionInferenceOptions.setAllowMultipleToolCalls` through `setInference` in Java,
+and `SessionInferenceOptions::with_allow_multiple_tool_calls` through `with_inference`
+in Rust. Omitted or `true` preserves the default: the model can request multiple
+tools in one response and the runtime can execute their handlers concurrently.
+
+Set it to `false` to ask the provider for at most one tool call per response.
+The runtime sends OpenAI's `parallel_tool_calls: false` or Anthropic's
+`disable_parallel_tool_use: true`. This is a provider hint, not an execution
+guarantee; some compatible providers do not support it. If the provider returns
+multiple calls anyway, the runtime handles all of them using its existing
+execution policy. It does not discard calls, serialize handlers, or rewrite
+system instructions. Applications that require serialized access to a resource
+must coordinate that access in their handlers.
+
+Subagents inherit the preference. Omission on a resident resume preserves the
+current value; after a cold resume, supply it again. Changing it on resume can
+invalidate the provider's prompt cache. There is no separate runtime execution
+mode or live-update option.
+
+## Tool side-effect hints
+
+Custom tools can declare an optional idempotent hint, mirroring MCP's
+`idempotentHint`: repeating a call with the same arguments has no additional
+effect beyond the first call. A tool with no side effects is idempotent, so a
+read-only tool should set it too. The runtime's programmatic tool calling uses
+it to decide whether a call whose outcome was lost can be safely repeated. It
+does not affect permission checks. Leave it unset unless it is true.
+
+| SDK | Idempotent |
+|---|---|
+| Node.js | `idempotent` |
+| Python | `idempotent` |
+| Go | `Idempotent` |
+| .NET | `CopilotToolOptions.Idempotent` |
+| Java | `ToolDefinition.idempotent(true)` or `@CopilotTool(idempotent = true)` |
+| Rust | `with_idempotent(true)` |
 
 ## Turns—what they are
 
 A **turn** is a single LLM API call and its consequences:
 
-1. The CLI sends the conversation history to the LLM
+1. The runtime sends the conversation history to the LLM
 1. The LLM responds (possibly with tool requests)
-1. If tools were requested, the CLI executes them
+1. If tools were requested, the runtime executes them
 1. `assistant.turn_end` is emitted
+
+On a cold resume with `continuePendingWork: true`, unresumable tools receive
+interrupted results without replay. Their original turn closes once all its
+tool calls settle. Only interrupted `ask_user`, journaled elicitation and
+existing resumable work continue the model. Recorded input requests are
+completed to dismiss old prompts; older sessions lack IDs for correlated
+completion. Other uncertain tool effects keep their no-replay behavior.
+`continuePendingWork: false` does not start this recovery loop.
+Input correlations belong to a particular tool execution, even when a provider
+reuses tool-call IDs. The runtime persists that execution's start before
+publishing its correlated input request. Recovery reads only unresolved
+executions' correlations; settled executions do not add filesystem reads to resume.
 
 A single user message typically results in **multiple turns**. For example, a question like "how does X work in this codebase?" might produce:
 
@@ -73,7 +127,7 @@ flowchart TD
         t1s --> t1m --> t1ts --> t1tc --> t1e
     end
 
-    subgraph Turn2 ["Turn 2 — auto-triggered by CLI"]
+    subgraph Turn2 ["Turn 2 — auto-triggered by runtime"]
         t2s["assistant.turn_start"]
         t2m["assistant.message (toolRequests)"]
         t2ts["tool.execution_start (edit_file)"]
@@ -99,11 +153,11 @@ flowchart TD
 | Actor | Responsibility |
 |-------|---------------|
 | **Your app** | Sends the initial prompt via `session.send()` |
-| **Copilot CLI** | Runs the tool-use loop—executes tools and feeds results back to the LLM for the next turn |
+| **Copilot runtime** | Runs the tool-use loop—executes tools and feeds results back to the LLM for the next turn |
 | **LLM** | Decides whether to request tools (continue looping) or produce a final response (stop) |
 | **SDK** | Passes events through; does not control the loop |
 
-The CLI is purely mechanical: "model asked for tools → execute → call model again." The **model** is the decision-maker for when to stop.
+The runtime is purely mechanical: "model asked for tools → execute → call model again." The **model** is the decision-maker for when to stop.
 
 ## `session.idle` vs `session.task_complete`
 
@@ -136,11 +190,11 @@ session.on("session.task_complete", (event) => {
 });
 ```
 
-### Autopilot mode: the CLI nudges for `task_complete`
+### Autopilot mode: the runtime nudges for `task_complete`
 
-In **autopilot mode** (headless/autonomous operation), the CLI actively tracks whether the model has called `task_complete`. If the tool-use loop ends without it, the CLI injects a synthetic user message nudging the model:
+In **autopilot mode** (autonomous operation), the runtime actively tracks whether the model has called `task_complete`. If the tool-use loop ends without it, the runtime injects a synthetic user message nudging the model:
 
-> *"You have not yet marked the task as complete using the task_complete tool. If you were planning, stop planning and start implementing. You aren't done until you have fully completed the task."*
+> *"You have not yet marked the task as complete using the task_complete tool. If you were planning changes the user asked for, stop planning and start implementing. You aren't done until you have fully completed the task."*
 
 This effectively restarts the tool-use loop—the model sees the nudge as a new user message and continues working. The nudge also instructs the model **not** to call `task_complete` prematurely:
 
@@ -148,19 +202,23 @@ This effectively restarts the tool-use loop—the model sees the nudge as a new 
 * Don't call it if you hit an error—try to resolve it
 * Don't call it if there are remaining steps—complete them first
 
+The one exception is a request that only asked for a review, analysis or recommendation: once that has been delivered, the nudge tells the model to call `task_complete` rather than start a follow-up it offered.
+
 This creates a **two-level completion mechanism** in autopilot:
-1. The model calls `task_complete` with a summary → CLI emits `session.task_complete` → done
-1. The model stops without calling it → CLI nudges → model continues or calls `task_complete`
+1. The model calls `task_complete` with a summary → runtime emits `session.task_complete` → done
+1. The model stops without calling it → runtime nudges → model continues or calls `task_complete`
+
+Completing or pausing an autopilot objective leaves the session in autopilot mode by default, matching the interactive CLI. The objective still completes or pauses, and the run can become idle; keeping the mode selected does not keep working on a finished objective. To opt into automatic restoration to interactive mode, call `session.rpc.autopilotObjective.setStayInAutopilot({ value: false })`. To switch mode immediately, call `session.rpc.mode.set({ mode: "interactive" })`.
 
 ### Why `task_complete` might not appear
 
-In **interactive mode** (normal chat), the CLI does not nudge for `task_complete`. The model may skip it entirely. Common reasons:
+In **interactive mode** (normal chat), the runtime does not nudge for `task_complete`. The model may skip it entirely. Common reasons:
 
 * **Conversational Q&A**: The model answers a question and simply stops—there's no discrete "task" to complete
 * **Model discretion**: The model produces a final text response without calling the task-complete signal
 * **Interrupted sessions**: The session ends before the model reaches a completion point
 
-The CLI emits `session.idle` regardless, because it's a mechanical signal (the loop ended), not a semantic one (the model thinks it's done).
+The runtime emits `session.idle` regardless, because it's a mechanical signal (the loop ended), not a semantic one (the model thinks it's done).
 
 ### Which should you use?
 
@@ -172,7 +230,7 @@ The CLI emits `session.idle` regardless, because it's a mechanical signal (the l
 
 ## Counting LLM calls
 
-The number of `assistant.turn_start` / `assistant.turn_end` pairs in the event log equals the total number of LLM API calls made. There are no hidden calls for planning, evaluation, or completion checking.
+Each `assistant.turn_start` / `assistant.turn_end` pair in the event log is one LLM API call made by the tool-use loop, and the loop makes no hidden calls for planning, evaluation, or completion checking. Model calls the runtime makes outside the loop don't get a turn pair, so the number of pairs is not always the total number of LLM API calls. Compaction is one such call: when the runtime summarizes the conversation history, the summarizer's call emits no turn events and reports its token usage in the `compactionTokensUsed` field of `session.compaction_complete`.
 
 To inspect turn count for a session:
 
@@ -182,6 +240,6 @@ const turns = (await session.getEvents()).filter((event) => event.type === "assi
 
 ## Further reading
 
-* [Streaming Events Reference](./streaming-events.md): Full field-level reference for every event type
+* [Streaming Events Reference](./streaming-events.md): Field-level reference for the event types applications most often handle
 * [Session Persistence](./session-persistence.md): How sessions are saved and resumed
 * [Hooks](./hooks.md): Intercepting events in the loop (permissions, tools)

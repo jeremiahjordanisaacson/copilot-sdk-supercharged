@@ -1,12 +1,13 @@
-﻿/*---------------------------------------------------------------------------------------------
+/*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>Raw bytes and the authoritative total file byte length captured by the same read.</summary>
 public sealed class SessionFsByteRange
@@ -29,8 +30,9 @@ public interface ISessionFsReadFileRangeProvider
     /// <param name="offset">Zero-based byte offset from 0 through 9007199254740991.</param>
     /// <param name="length">Maximum bytes from 0 through 9007199254740991. Null reads through EOF; zero returns only byte length.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The requested bytes and authoritative total file byte length.</returns>
-    Task<SessionFsByteRange> ReadFileRangeAsync(string path, long offset, long? length, CancellationToken cancellationToken);
+    /// <returns>The requested bytes and authoritative total file byte length. The caller owns the result.
+    /// The returned bytes must remain valid and unchanged; do not use pooled backing storage.</returns>
+    Task<SessionFsByteRange> ReadFileRangeAsync(string path, long offset, long? length, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -89,13 +91,13 @@ public interface ISessionFsSqliteProvider
         SessionFsSqliteQueryType queryType,
         string query,
         IDictionary<string, object?>? bindParams,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Checks whether the per-session SQLite database already exists, without creating it.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<bool> ExistsAsync(CancellationToken cancellationToken);
+    Task<bool> ExistsAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>Optional interface for providers that support exact binary file reads and writes.</summary>
@@ -104,14 +106,15 @@ public interface ISessionFsBinaryProvider
     /// <summary>Reads exact bytes of a file in the session filesystem.</summary>
     /// <param name="path">Path to read.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<byte[]> ReadFileBytesAsync(string path, CancellationToken cancellationToken);
+    /// <returns>A non-pooled array containing the file bytes. Ownership transfers to the caller.</returns>
+    Task<byte[]> ReadFileBytesAsync(string path, CancellationToken cancellationToken = default);
 
     /// <summary>Writes exact bytes of a file in the session filesystem.</summary>
     /// <param name="path">Path to write.</param>
     /// <param name="content">Exact file bytes.</param>
     /// <param name="mode">Optional POSIX-style permission mode.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task WriteFileBytesAsync(string path, ReadOnlyMemory<byte> content, int? mode, CancellationToken cancellationToken);
+    Task WriteFileBytesAsync(string path, ReadOnlyMemory<byte> content, int? mode, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -131,7 +134,7 @@ public interface ISessionFsSqliteTransactionProvider
     /// </exception>
     Task<IList<SessionFsSqliteResult>> TransactionAsync(
         IList<SessionFsSqliteStatement> statements,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -188,66 +191,82 @@ public abstract class SessionFsProvider : ISessionFsReadFileRangeHandler
     private const int MaxBinaryBytes = (64 * 1024 * 1024 - 1024) / 4 * 3;
     private const int MaxBinaryContentLength = (MaxBinaryBytes + 2) / 3 * 4;
 
+    private readonly bool _usesDefaultReadBytesHandler;
+    private readonly bool _usesDefaultReadRangeHandler;
+
+    /// <summary>Initializes a session filesystem provider.</summary>
+    protected SessionFsProvider()
+    {
+        // A subclass can reimplement either generated handler interface. Only bypass the
+        // interface call when it would have dispatched to this class's implementation.
+        Func<SessionFsReadFileBytesRequest, CancellationToken, Task<SessionFsReadFileBytesResult>> readBytes =
+            ((ISessionFsHandler)this).ReadFileBytesAsync;
+        Func<SessionFsReadFileRangeRequest, CancellationToken, Task<SessionFsReadFileRangeResult>> readRange =
+            ((ISessionFsReadFileRangeHandler)this).ReadFileRangeAsync;
+        _usesDefaultReadBytesHandler = readBytes.Method.DeclaringType == typeof(SessionFsProvider);
+        _usesDefaultReadRangeHandler = readRange.Method.DeclaringType == typeof(SessionFsProvider);
+    }
+
     /// <summary>Reads the full content of a file. Throw if the file does not exist.</summary>
     /// <param name="path">Absolute or relative path in the provider's filesystem namespace.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The file content as a UTF-8 string.</returns>
-    protected abstract Task<string> ReadFileAsync(string path, CancellationToken cancellationToken);
+    protected abstract Task<string> ReadFileAsync(string path, CancellationToken cancellationToken = default);
 
     /// <summary>Writes content to a file, creating it (and parent directories) if needed. Throw <see cref="SessionFsWriteException"/> if a failed write changed the target.</summary>
     /// <param name="path">Absolute or relative path in the provider's filesystem namespace.</param>
     /// <param name="content">Content to write.</param>
     /// <param name="mode">Optional POSIX-style permission mode. Null means use OS default.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    protected abstract Task WriteFileAsync(string path, string content, int? mode, CancellationToken cancellationToken);
+    protected abstract Task WriteFileAsync(string path, string content, int? mode, CancellationToken cancellationToken = default);
 
     /// <summary>Appends content to a file, creating it (and parent directories) if needed.</summary>
     /// <param name="path">Absolute or relative path in the provider's filesystem namespace.</param>
     /// <param name="content">Content to append.</param>
     /// <param name="mode">Optional POSIX-style permission mode. Null means use OS default.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    protected abstract Task AppendFileAsync(string path, string content, int? mode, CancellationToken cancellationToken);
+    protected abstract Task AppendFileAsync(string path, string content, int? mode, CancellationToken cancellationToken = default);
 
     /// <summary>Checks whether a path exists.</summary>
     /// <param name="path">Absolute or relative path in the provider's filesystem namespace.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns><c>true</c> if the path exists, <c>false</c> otherwise.</returns>
-    protected abstract Task<bool> ExistsAsync(string path, CancellationToken cancellationToken);
+    protected abstract Task<bool> ExistsAsync(string path, CancellationToken cancellationToken = default);
 
     /// <summary>Gets metadata about a file or directory. Throw if the path does not exist.</summary>
     /// <param name="path">Absolute or relative path in the provider's filesystem namespace.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    protected abstract Task<SessionFsStatResult> StatAsync(string path, CancellationToken cancellationToken);
+    protected abstract Task<SessionFsStatResult> StatAsync(string path, CancellationToken cancellationToken = default);
 
     /// <summary>Creates a directory. If <paramref name="recursive"/> is true, creates parent directories as needed.</summary>
     /// <param name="path">Absolute or relative path in the provider's filesystem namespace.</param>
     /// <param name="recursive">Whether to create parent directories.</param>
     /// <param name="mode">Optional POSIX-style permission mode (e.g., 0x1FF for 0777). Null means use OS default.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    protected abstract Task MakeDirectoryAsync(string path, bool recursive, int? mode, CancellationToken cancellationToken);
+    protected abstract Task MakeDirectoryAsync(string path, bool recursive, int? mode, CancellationToken cancellationToken = default);
 
     /// <summary>Lists entry names in a directory. Throw if the directory does not exist.</summary>
     /// <param name="path">Absolute or relative path in the provider's filesystem namespace.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    protected abstract Task<IList<string>> ReadDirectoryAsync(string path, CancellationToken cancellationToken);
+    protected abstract Task<IList<string>> ReadDirectoryAsync(string path, CancellationToken cancellationToken = default);
 
     /// <summary>Lists entries with type info in a directory. Throw if the directory does not exist.</summary>
     /// <param name="path">Absolute or relative path in the provider's filesystem namespace.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    protected abstract Task<IList<SessionFsReaddirWithTypesEntry>> ReadDirectoryWithTypesAsync(string path, CancellationToken cancellationToken);
+    protected abstract Task<IList<SessionFsReaddirWithTypesEntry>> ReadDirectoryWithTypesAsync(string path, CancellationToken cancellationToken = default);
 
     /// <summary>Removes a file or directory. Throw if the path does not exist (unless <paramref name="force"/> is true).</summary>
     /// <param name="path">Absolute or relative path in the provider's filesystem namespace.</param>
     /// <param name="recursive">Whether to remove directory contents recursively.</param>
     /// <param name="force">If true, do not throw when the path does not exist.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    protected abstract Task RemoveAsync(string path, bool recursive, bool force, CancellationToken cancellationToken);
+    protected abstract Task RemoveAsync(string path, bool recursive, bool force, CancellationToken cancellationToken = default);
 
     /// <summary>Renames/moves a file or directory.</summary>
     /// <param name="src">Absolute or relative source path in the provider's filesystem namespace.</param>
     /// <param name="dest">Absolute or relative destination path in the provider's filesystem namespace.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    protected abstract Task RenameAsync(string src, string dest, CancellationToken cancellationToken);
+    protected abstract Task RenameAsync(string src, string dest, CancellationToken cancellationToken = default);
 
     // ---- ISessionFsHandler implementation (private, handles error mapping) ----
 
@@ -266,7 +285,58 @@ public abstract class SessionFsProvider : ISessionFsReadFileRangeHandler
         }
     }
 
-    async Task<SessionFsReadFileBytesResult> ISessionFsHandler.ReadFileBytesAsync(SessionFsReadFileBytesRequest request, CancellationToken cancellationToken)
+    // Replace just these two generated registrations on the SDK connection. The generated
+    // DTOs and interfaces remain the fallback for custom handlers and direct callers.
+    internal static void RegisterByteReadHandlers(JsonRpc rpc, Func<string, ClientSessionApiHandlers> getHandlers)
+    {
+        rpc.SetLocalRpcMethod("sessionFs.readFileBytes", (Func<SessionFsReadFileBytesRequest, CancellationToken, ValueTask<object>>)(async (request, cancellationToken) =>
+        {
+            var handler = getHandlers(request.SessionId).SessionFs
+                ?? throw new InvalidOperationException($"No sessionFs handler registered for session: {request.SessionId}");
+            if (handler is SessionFsProvider { _usesDefaultReadBytesHandler: true } provider)
+            {
+                return await provider.ReadFileBytesCoreAsync<object>(request,
+                    static bytes => new ByteReadResponse(bytes),
+                    static error => new SessionFsReadFileBytesResult { Error = error }, cancellationToken).ConfigureAwait(false);
+            }
+            return await handler.ReadFileBytesAsync(request, cancellationToken).ConfigureAwait(false);
+        }), singleObjectParam: true);
+
+        rpc.SetLocalRpcMethod("sessionFs.readFileRange", (Func<SessionFsReadFileRangeRequest, CancellationToken, ValueTask<object>>)(async (request, cancellationToken) =>
+        {
+            var handler = getHandlers(request.SessionId).SessionFs
+                ?? throw new InvalidOperationException($"No sessionFs handler registered for session: {request.SessionId}");
+            if (handler is not ISessionFsReadFileRangeHandler rangeHandler)
+                throw new NotSupportedException("Optional client handler sessionFs.readFileRange is not implemented");
+            if (handler is SessionFsProvider { _usesDefaultReadRangeHandler: true } provider)
+            {
+                return await provider.ReadFileRangeCoreAsync<object>(request,
+                    // The runtime validates the returned range at the receiving boundary.
+                    static (_, range) => new ByteReadResponse(range.Content, range.ByteLength),
+                    static error => new SessionFsReadFileRangeResult { Error = error }, cancellationToken).ConfigureAwait(false);
+            }
+            return await rangeHandler.ReadFileRangeAsync(request, cancellationToken).ConfigureAwait(false);
+        }), singleObjectParam: true);
+    }
+
+    // System.Text.Json's ReadOnlyMemory<byte> converter writes base64 directly to the UTF-8 writer.
+    internal sealed class ByteReadResponse(ReadOnlyMemory<byte> content, long? byteLength = null)
+    {
+        [JsonPropertyName("byteLength")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public long? ByteLength { get; } = byteLength;
+
+        [JsonPropertyName("content")]
+        public ReadOnlyMemory<byte> Content { get; } = content;
+    }
+
+    Task<SessionFsReadFileBytesResult> ISessionFsHandler.ReadFileBytesAsync(SessionFsReadFileBytesRequest request, CancellationToken cancellationToken)
+        => ReadFileBytesCoreAsync(request,
+            static bytes => new SessionFsReadFileBytesResult { Content = Convert.ToBase64String(bytes) },
+            static error => new SessionFsReadFileBytesResult { Error = error }, cancellationToken);
+
+    private async Task<T> ReadFileBytesCoreAsync<T>(SessionFsReadFileBytesRequest request,
+        Func<byte[], T> success, Func<SessionFsError, T> failure, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -279,25 +349,48 @@ public abstract class SessionFsProvider : ISessionFsReadFileRangeHandler
             var bytes = await provider.ReadFileBytesAsync(request.Path, cancellationToken).ConfigureAwait(false);
             if (bytes.Length > MaxBinaryBytes)
             {
-                return new SessionFsReadFileBytesResult
+                return failure(new SessionFsError
                 {
-                    Content = string.Empty,
-                    Error = new SessionFsError
-                    {
-                        Code = SessionFsErrorCode.UNKNOWN,
-                        Message = "sessionFs.readFileBytes content exceeds the binary read limit"
-                    }
-                };
+                    Code = SessionFsErrorCode.UNKNOWN,
+                    Message = "sessionFs.readFileBytes content exceeds the binary read limit"
+                });
             }
-            return new SessionFsReadFileBytesResult { Content = Convert.ToBase64String(bytes) };
+            return success(bytes);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new SessionFsReadFileBytesResult { Content = string.Empty, Error = ToSessionFsError(ex) };
+            return failure(ToSessionFsError(ex));
         }
     }
 
-    async Task<SessionFsReadFileRangeResult> ISessionFsReadFileRangeHandler.ReadFileRangeAsync(SessionFsReadFileRangeRequest request, CancellationToken cancellationToken)
+    Task<SessionFsReadFileRangeResult> ISessionFsReadFileRangeHandler.ReadFileRangeAsync(SessionFsReadFileRangeRequest request, CancellationToken cancellationToken)
+        => ReadFileRangeCoreAsync(request, CreateRangeResult,
+            static error => new SessionFsReadFileRangeResult { Error = error }, cancellationToken);
+
+    private static SessionFsReadFileRangeResult CreateRangeResult(SessionFsReadFileRangeRequest request, SessionFsByteRange range)
+    {
+        if (range.ByteLength is < 0 or > 9_007_199_254_740_991L)
+        {
+            throw new InvalidOperationException("SessionFs byte length must be a non-negative safe integer.");
+        }
+        var available = Math.Max(0, range.ByteLength - request.Offset);
+        if (range.Content.Length != Math.Min(available, request.Length ?? available))
+        {
+            throw new InvalidOperationException("SessionFs returned an incorrect byte range length.");
+        }
+        return new SessionFsReadFileRangeResult
+        {
+#if NET
+            Content = Convert.ToBase64String(range.Content.Span),
+#else
+            Content = Convert.ToBase64String(range.Content.ToArray()),
+#endif
+            ByteLength = range.ByteLength,
+        };
+    }
+
+    private async Task<T> ReadFileRangeCoreAsync<T>(SessionFsReadFileRangeRequest request,
+        Func<SessionFsReadFileRangeRequest, SessionFsByteRange, T> success, Func<SessionFsError, T> failure, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         try
@@ -314,28 +407,11 @@ public abstract class SessionFsProvider : ISessionFsReadFileRangeHandler
             }
             var result = await provider.ReadFileRangeAsync(
                 request.Path, request.Offset, request.Length, cancellationToken).ConfigureAwait(false);
-            if (result.ByteLength is < 0 or > 9_007_199_254_740_991L)
-            {
-                throw new InvalidOperationException("SessionFs byte length must be a non-negative safe integer.");
-            }
-            var available = Math.Max(0, result.ByteLength - request.Offset);
-            if (result.Content.Length != Math.Min(available, request.Length ?? available))
-            {
-                throw new InvalidOperationException("SessionFs returned an incorrect byte range length.");
-            }
-            return new SessionFsReadFileRangeResult
-            {
-#if NETSTANDARD2_0
-                Content = Convert.ToBase64String(result.Content.ToArray()),
-#else
-                Content = Convert.ToBase64String(result.Content.Span),
-#endif
-                ByteLength = result.ByteLength,
-            };
+            return success(request, result);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new SessionFsReadFileRangeResult { Content = string.Empty, ByteLength = 0, Error = ToSessionFsError(ex) };
+            return failure(ToSessionFsError(ex));
         }
     }
 
@@ -638,8 +714,9 @@ public abstract class SessionFsProvider : ISessionFsReadFileRangeHandler
         return new SessionFsError { Code = code, Message = ex.Message };
     }
 
+    // ADO.NET readers (including Microsoft.Data.Sqlite) return SQL NULL as DBNull.Value.
     private static JsonElement ToJsonElement(object? value) =>
-        CopilotClient.ToJsonElementForWire(value) ?? JsonElement.Parse("null");
+        CopilotClient.ToJsonElementForWire(value is DBNull ? null : value) ?? JsonElement.Parse("null");
 
     private static object? JsonElementToValue(JsonElement element) => element.ValueKind switch
     {

@@ -14,12 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestScenarioTestingCloudE2E(t *testing.T) {
+	t.Parallel()
 	t.Run("notifies steerability before first send", func(t *testing.T) {
 		var mu sync.Mutex
 		var events []copilot.SessionEvent
@@ -88,29 +89,25 @@ func TestScenarioTestingCloudE2E(t *testing.T) {
 		fixture := newAssignedCloudSessionFixture(t)
 		defer fixture.Close()
 
-		client := copilot.NewClient(&copilot.ClientOptions{
-			Connection: copilot.URIConnection{URL: fixture.URL()},
-		})
+		client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.TCPConnection{Host: "127.0.0.1", Port: fixture.Port()}})
 		if err := client.Start(t.Context()); err != nil {
 			t.Fatalf("Start failed: %v", err)
 		}
 		defer client.Stop()
 
 		firstEvent := make(chan copilot.SessionEvent, 1)
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Cloud: &copilot.CloudSessionOptions{
-				Repository: &copilot.CloudSessionRepository{
-					Owner:  "github",
-					Name:   "copilot-sdk",
-					Branch: "main",
-				},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Cloud: &copilot.CloudSessionOptions{
+			Repository: &copilot.CloudSessionRepository{
+				Owner:  "github",
+				Name:   "copilot-sdk",
+				Branch: "main",
 			},
-			OnEvent: func(event copilot.SessionEvent) {
-				select {
-				case firstEvent <- event:
-				default:
-				}
-			},
+		}, Events: copilot.SessionEventOptions{OnEvent: func(event copilot.SessionEvent) {
+			select {
+			case firstEvent <- event:
+			default:
+			}
+		}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -312,8 +309,8 @@ func newAssignedCloudSessionFixture(t *testing.T) *assignedCloudSessionFixture {
 	return f
 }
 
-func (f *assignedCloudSessionFixture) URL() string {
-	return "http://" + f.listener.Addr().String()
+func (f *assignedCloudSessionFixture) Port() int {
+	return f.listener.Addr().(*net.TCPAddr).Port
 }
 
 func (f *assignedCloudSessionFixture) CreateRequest() map[string]any {
@@ -364,7 +361,7 @@ func (f *assignedCloudSessionFixture) serve() {
 				"id":      request.ID,
 				"result": map[string]any{
 					"ok":              true,
-					"protocolVersion": 3,
+					"protocolVersion": 4,
 					"version":         "fake",
 				},
 			}); err != nil {

@@ -2,15 +2,15 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using System.Diagnostics;
 using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
-using RpcExtension = GitHub.Copilot.Rpc.Extension;
+using RpcExtension = Microsoft.Copilot.Rpc.Extension;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : ScenarioTestingE2ETestBase(fixture, "scenario_testing_js_extension_bridge", output)
@@ -23,9 +23,9 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
         var fixture = await CreateExtensionFixtureAsync();
         await using var client = CreateExtensionClient(fixture, CopilotClientMode.Empty);
         var config = CreateSessionConfig(fixture.ProjectDirectory);
-        config.AvailableTools = new ToolSet();
-        config.EnableSessionStore = false;
-        config.SkipCustomInstructions = true;
+        config.Tools.AvailableTools = new ToolSet();
+        config.State.EnableCrossSessionStore = false;
+        config.Instructions.SkipCustomInstructions = true;
 
         await using var session = await Ctx.CreateSessionAsync(client, config);
 
@@ -62,9 +62,7 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
         Assert.Equal("updated", action.Result!.Value.GetProperty("value").GetString());
 
         await session.Rpc.Canvas.CloseAsync("standalone-canvas-1");
-        await WaitForTraceAsync(fixture.TraceFile, "close");
-
-        var trace = ReadTrace(fixture.TraceFile);
+        var trace = await WaitForTraceAsync(fixture.TraceFile, "close");
         var joined = trace.Where(entry => GetKind(entry) == "joined").ToList();
         Assert.NotEmpty(joined);
         Assert.All(joined, entry =>
@@ -96,8 +94,7 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
         Assert.Equal("object", canvas.InputSchema!.Value.GetProperty("type").GetString());
         Assert.Equal(["set-value", "continue", "fail"], canvas.Actions!.Select(action => action.Name));
 
-        await WaitForTraceAsync(fixture.TraceFile, "joined");
-        var joined = ReadTrace(fixture.TraceFile)
+        var joined = (await WaitForTraceAsync(fixture.TraceFile, "joined"))
             .Where(entry => GetKind(entry) == "joined")
             .ToList();
         Assert.NotEmpty(joined);
@@ -154,9 +151,7 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
         Assert.Equal("after", action.Result!.Value.GetProperty("value").GetString());
 
         await session.Rpc.Canvas.CloseAsync("js-scenario-canvas-1");
-        await WaitForTraceAsync(fixture.TraceFile, "close");
-
-        var trace = ReadTrace(fixture.TraceFile);
+        var trace = await WaitForTraceAsync(fixture.TraceFile, "close");
         var open = Assert.Single(trace, entry => GetKind(entry) == "open");
         AssertBridgeContext(open, session.SessionId, fixture.ExtensionId, "js-scenario-canvas-1");
         Assert.Equal("before", open.GetProperty("input").GetProperty("value").GetString());
@@ -191,22 +186,22 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
             extensionId: fixture.ExtensionId,
             input: new Dictionary<string, object> { ["value"] = "before" });
 
-        var exception = await Assert.ThrowsAsync<IOException>(() =>
+        var exception = await Assert.ThrowsAsync<RemoteRpcException>(() =>
             session.Rpc.Canvas.Action.InvokeAsync(
                 instanceId: "js-scenario-canvas-error",
                 actionName: "fail",
                 input: new Dictionary<string, object>()));
 
         Assert.Contains("The JavaScript canvas action failed.", exception.Message, StringComparison.Ordinal);
-        await WaitForTraceAsync(fixture.TraceFile, "error");
-        var error = Assert.Single(ReadTrace(fixture.TraceFile), entry => GetKind(entry) == "error");
+        var trace = await WaitForTraceAsync(fixture.TraceFile, "error");
+        var error = Assert.Single(trace, entry => GetKind(entry) == "error");
         Assert.Equal("js_canvas_failed", error.GetProperty("code").GetString());
         Assert.Equal("The JavaScript canvas action failed.", error.GetProperty("message").GetString());
     }
 
     private CopilotClient CreateExtensionClient(
         ExtensionFixture fixture,
-        CopilotClientMode mode = CopilotClientMode.CopilotCli)
+        CopilotClientMode mode = CopilotClientMode.CodingAgent)
     {
         var environment = Ctx.GetEnvironment();
         environment["COPILOT_CLI_ENABLED_FEATURE_FLAGS"] = "EXTENSIONS";
@@ -217,19 +212,24 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
             options: new CopilotClientOptions
             {
                 Mode = mode,
-                BaseDirectory = mode == CopilotClientMode.Empty ? Ctx.HomeDir : null,
-                Connection = RuntimeConnection.ForStdio(
-                    args: ["--yolo"]),
+                Runtime = RuntimeConnection.ForSpawnedStdio(
+                    args: ["--yolo"], baseDirectory: mode == CopilotClientMode.Empty ? Ctx.HomeDir : null)
             },
             environment: environment);
     }
 
-    private static SessionConfig CreateSessionConfig(string workingDirectory) => new()
+    private static CreateSessionOptions CreateSessionConfig(string workingDirectory) => new()
     {
-        EnableConfigDiscovery = true,
-        RequestExtensions = true,
         WorkingDirectory = workingDirectory,
-        OnPermissionRequest = PermissionHandler.ApproveAll,
+        EnableConfigDiscovery = true,
+        Extensions = new SessionExtensionOptions
+        {
+            Enabled = true
+        },
+        Permissions = new SessionPermissionOptions
+        {
+            OnRequest = PermissionHandler.ApproveAll
+        }
     };
 
     private async Task<ExtensionFixture> CreateExtensionFixtureAsync(
@@ -321,7 +321,7 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
                         input);
                     return true;
                 }
-                catch (IOException exception)
+                catch (RemoteRpcException exception)
                     when (exception.Message.Contains("is not registered", StringComparison.OrdinalIgnoreCase))
                 {
                     return false;
@@ -333,43 +333,36 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
         return opened!;
     }
 
-    private static async Task WaitForTraceAsync(string traceFile, string kind)
+    private static async Task<List<JsonElement>> WaitForTraceAsync(string traceFile, string kind)
     {
+        List<JsonElement> trace = [];
         await TestHelper.WaitForConditionAsync(
-            () => Task.FromResult(
-                File.Exists(traceFile)
-                && ReadTrace(traceFile).Any(entry => GetKind(entry) == kind)),
+            () =>
+            {
+                trace = ReadTrace(traceFile);
+                return Task.FromResult(trace.Any(entry => GetKind(entry) == kind));
+            },
             timeout: ExtensionTimeout,
             pollInterval: TimeSpan.FromMilliseconds(100),
+            transientExceptionFilter: exception => exception is IOException or JsonException,
             timeoutMessage: $"Timed out waiting for extension trace entry '{kind}'.");
+        return trace;
     }
 
     private static List<JsonElement> ReadTrace(string traceFile)
     {
-        for (var attempt = 0; ; attempt++)
+        if (!File.Exists(traceFile))
         {
-            if (!File.Exists(traceFile))
-            {
-                return [];
-            }
-
-            try
-            {
-                return File.ReadAllLines(traceFile)
-                    .Where(line => !string.IsNullOrWhiteSpace(line))
-                    .Select(line =>
-                    {
-                        using var document = JsonDocument.Parse(line);
-                        return document.RootElement.Clone();
-                    })
-                    .ToList();
-            }
-            catch (Exception exception)
-                when (attempt < 9 && exception is IOException or JsonException)
-            {
-                Thread.Sleep(20);
-            }
+            return [];
         }
+        return File.ReadAllLines(traceFile)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Select(line =>
+            {
+                using var document = JsonDocument.Parse(line);
+                return document.RootElement.Clone();
+            })
+            .ToList();
     }
 
     private static string GetKind(JsonElement entry) => entry.GetProperty("kind").GetString()!;
@@ -442,7 +435,7 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
 
     private const string ExtensionScript = """
         import { appendFileSync } from "node:fs";
-        import { CanvasError, createCanvas, joinSession } from "@github/copilot-sdk/extension";
+        import { CanvasError, createCanvas, joinSession } from "@microsoft/copilot-sdk/extension";
 
         const traceFile = process.env.SCENARIO_EXTENSION_TRACE_FILE;
         const workingDirectory = process.env.SCENARIO_EXTENSION_WORKING_DIRECTORY;
@@ -518,8 +511,8 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
         try {
           session = await joinSession({
             workingDirectory,
-            tools: [],
-            canvases: [canvas]
+            tools: { definitions: [] },
+            canvases: { definitions: [canvas] }
           });
           console.error("[sdk-extension-test] joined");
 

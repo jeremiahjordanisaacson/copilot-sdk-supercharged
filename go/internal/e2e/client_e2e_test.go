@@ -4,20 +4,55 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
+func TestClientStdioOverrideWithCustomEnv(t *testing.T) {
+	t.Setenv("COPILOT_SDK_DEFAULT_CONNECTION", "stdio")
+	cliPath := testharness.CLIPath()
+	if cliPath == "" {
+		t.Fatal("CLI not found. Run 'npm install' in the nodejs directory first.")
+	}
+
+	connection := copilot.ForDefault(&copilot.OwnedRuntimeOptions{BaseDirectory: t.TempDir()})
+	stdio, ok := connection.(copilot.SpawnedStdioConnection)
+	if !ok {
+		t.Fatalf("Expected stdio override, got %T", connection)
+	}
+	stdio.Env = []string{"COPILOT_CLI_PATH=" + cliPath}
+	client := copilot.NewClient(&copilot.ClientOptions{
+		Mode:    copilot.ModeCodingAgent,
+		Runtime: stdio,
+	})
+	t.Cleanup(func() { client.ForceStop() })
+
+	if err := client.Start(t.Context()); err != nil {
+		t.Fatalf("Failed to start client: %v", err)
+	}
+
+	pong, err := client.Ping(t.Context(), "custom environment")
+	if err != nil {
+		t.Fatalf("Failed to ping: %v", err)
+	}
+	if pong.Message != "pong: custom environment" {
+		t.Errorf("Expected subprocess response, got %q", pong.Message)
+	}
+
+	if err := client.Stop(); err != nil {
+		t.Errorf("Expected no errors on stop, got %v", err)
+	}
+}
+
 func TestClientE2E(t *testing.T) {
+	t.Parallel()
 	cliPath := testharness.CLIPath()
 	if cliPath == "" {
 		t.Fatal("CLI not found. Run 'npm install' in the nodejs directory first.")
 	}
 
 	t.Run("should start and connect to server using stdio", func(t *testing.T) {
-		client := copilot.NewClient(&copilot.ClientOptions{
-			Connection: copilot.StdioConnection{Path: cliPath},
-		})
+		client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedStdioConnection{Path: cliPath}})
 		t.Cleanup(func() { client.ForceStop() })
 
 		if err := client.Start(t.Context()); err != nil {
@@ -43,9 +78,7 @@ func TestClientE2E(t *testing.T) {
 	})
 
 	t.Run("should start and connect to server using tcp", func(t *testing.T) {
-		client := copilot.NewClient(&copilot.ClientOptions{
-			Connection: copilot.TCPConnection{Path: cliPath},
-		})
+		client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedTCPConnection{Path: cliPath}})
 		t.Cleanup(func() { client.ForceStop() })
 
 		if err := client.Start(t.Context()); err != nil {
@@ -71,14 +104,10 @@ func TestClientE2E(t *testing.T) {
 	})
 
 	t.Run("should return errors on failed cleanup", func(t *testing.T) {
-		client := copilot.NewClient(&copilot.ClientOptions{
-			Connection: copilot.StdioConnection{Path: cliPath},
-		})
+		client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedStdioConnection{Path: cliPath}})
 		t.Cleanup(func() { client.ForceStop() })
 
-		_, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		_, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -93,14 +122,10 @@ func TestClientE2E(t *testing.T) {
 	})
 
 	t.Run("should forceStop without cleanup", func(t *testing.T) {
-		client := copilot.NewClient(&copilot.ClientOptions{
-			Connection: copilot.StdioConnection{Path: cliPath},
-		})
+		client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedStdioConnection{Path: cliPath}})
 		t.Cleanup(func() { client.ForceStop() })
 
-		_, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		_, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -109,9 +134,7 @@ func TestClientE2E(t *testing.T) {
 	})
 
 	t.Run("should get status with version and protocol info", func(t *testing.T) {
-		client := copilot.NewClient(&copilot.ClientOptions{
-			Connection: copilot.StdioConnection{Path: cliPath},
-		})
+		client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedStdioConnection{Path: cliPath}})
 		t.Cleanup(func() { client.ForceStop() })
 
 		if err := client.Start(t.Context()); err != nil {
@@ -135,9 +158,7 @@ func TestClientE2E(t *testing.T) {
 	})
 
 	t.Run("should get auth status", func(t *testing.T) {
-		client := copilot.NewClient(&copilot.ClientOptions{
-			Connection: copilot.StdioConnection{Path: cliPath},
-		})
+		client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedStdioConnection{Path: cliPath}})
 		t.Cleanup(func() { client.ForceStop() })
 
 		if err := client.Start(t.Context()); err != nil {
@@ -171,16 +192,17 @@ func TestClientE2E(t *testing.T) {
 			{"default", "", "", "https://github.com"},
 		} {
 			t.Run(testCase.name, func(t *testing.T) {
-				if testharness.RunInIsolatedProcess(t) {
-					return
-				}
 				ctx := testharness.NewTestContext(t)
 				ctx.ConfigureWithoutSnapshot(t)
 				client := ctx.NewClient(func(options *copilot.ClientOptions) {
-					options.Env = append(options.Env,
-						"COPILOT_GH_HOST="+testCase.copilotHost,
-						"GH_HOST="+testCase.ghHost,
-					)
+					// This exercises process-environment precedence, not embedded configuration.
+					options.Runtime = copilot.SpawnedStdioConnection{
+						Path: ctx.CLIPath,
+						Env: append(ctx.Env(),
+							"COPILOT_GH_HOST="+testCase.copilotHost,
+							"GH_HOST="+testCase.ghHost,
+						),
+					}
 				})
 				t.Cleanup(func() { client.ForceStop() })
 
@@ -202,9 +224,9 @@ func TestClientE2E(t *testing.T) {
 	})
 
 	t.Run("should list models when authenticated", func(t *testing.T) {
-		client := copilot.NewClient(&copilot.ClientOptions{
-			Connection: copilot.StdioConnection{Path: cliPath},
-		})
+		ctx := testharness.NewTestContext(t)
+		ctx.ConfigureWithoutSnapshot(t)
+		client := ctx.NewClient()
 		t.Cleanup(func() { client.ForceStop() })
 
 		if err := client.Start(t.Context()); err != nil {
@@ -217,9 +239,7 @@ func TestClientE2E(t *testing.T) {
 		}
 
 		if !authStatus.IsAuthenticated {
-			// Skip if not authenticated - models.list requires auth
-			client.Stop()
-			return
+			t.Fatalf("Expected authenticated status, got %+v", authStatus)
 		}
 
 		models, err := client.ListModels(t.Context())
@@ -227,25 +247,27 @@ func TestClientE2E(t *testing.T) {
 			t.Fatalf("Failed to list models: %v", err)
 		}
 
-		if len(models) > 0 {
-			model := models[0]
-			if model.ID == "" {
-				t.Error("Expected model.ID to be non-empty")
-			}
-			if model.Name == "" {
-				t.Error("Expected model.Name to be non-empty")
-			}
+		if len(models) == 0 {
+			t.Fatal("Expected at least one model from the replay proxy")
+		}
+		model := models[0]
+		if model.ID == "" {
+			t.Error("Expected model.ID to be non-empty")
+		}
+		if model.Name == "" {
+			t.Error("Expected model.Name to be non-empty")
 		}
 
-		client.Stop()
+		if err := client.Stop(); err != nil {
+			t.Errorf("Expected no errors on stop, got %v", err)
+		}
 	})
 
 	t.Run("should report error when CLI fails to start", func(t *testing.T) {
-		client := copilot.NewClient(&copilot.ClientOptions{
-			Connection: copilot.StdioConnection{
-				Path: cliPath,
-				Args: []string{"--nonexistent-flag-for-testing"},
-			},
+		client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent, Runtime: copilot.SpawnedStdioConnection{
+			Path: cliPath,
+			Args: []string{"--nonexistent-flag-for-testing"},
+		},
 		})
 		t.Cleanup(func() { client.ForceStop() })
 

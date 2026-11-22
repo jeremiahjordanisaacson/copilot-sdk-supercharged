@@ -9,7 +9,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading.Channels;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>
 /// Hosts the Copilot runtime in-process by loading the Rust cdylib (<c>runtime.node</c>)
@@ -213,7 +213,7 @@ internal sealed partial class FfiRuntimeHost : IDisposable
 
     private static byte[]? BuildEnvJson(IReadOnlyDictionary<string, string>? environment)
     {
-        if (environment is null || environment.Count == 0)
+        if (environment is null)
         {
             return null;
         }
@@ -729,7 +729,7 @@ internal sealed partial class FfiRuntimeHost : IDisposable
 
         public void Complete() => _channel.Writer.TryComplete();
 
-#if !NETSTANDARD2_0
+#if NET
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             return await ReadCoreAsync(buffer, cancellationToken).ConfigureAwait(false);
@@ -758,7 +758,7 @@ internal sealed partial class FfiRuntimeHost : IDisposable
 
             var n = Math.Min(buffer.Length, _leftover.Length);
             _leftover.Span.Slice(0, n).CopyTo(buffer.Span);
-            _leftover = _leftover.Slice(n);
+            _leftover = n == _leftover.Length ? default : _leftover.Slice(n);
             return n;
         }
 
@@ -795,7 +795,7 @@ internal sealed partial class FfiRuntimeHost : IDisposable
 
         public override void Write(byte[] buffer, int offset, int count) => WriteFrame(buffer.AsSpan(offset, count));
 
-#if !NETSTANDARD2_0
+#if NET
         public override void Write(ReadOnlySpan<byte> buffer) => WriteFrame(buffer);
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)

@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-namespace GitHub.Copilot.Test.Harness;
+namespace Microsoft.Copilot.Test.Harness;
 
 internal sealed class AsyncTestSignal
 {
@@ -48,6 +48,10 @@ internal sealed class AsyncTestSignal
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
+                if (condition())
+                {
+                    return;
+                }
                 throw new TimeoutException(timeoutMessage ?? "Timed out waiting for the signalled test condition.");
             }
         }

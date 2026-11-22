@@ -7,7 +7,7 @@ using System.ComponentModel;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 /// <summary>
 /// Verifies that <see cref="CopilotSession.AbortAsync"/> cleanly interrupts an active
@@ -20,7 +20,7 @@ public class AbortE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     [Fact]
     public async Task Should_Abort_During_Active_Streaming()
     {
-        var session = await CreateSessionAsync(new SessionConfig { Streaming = true });
+        var session = await CreateSessionAsync(new CreateSessionOptions { Events = new SessionEventOptions { Streaming = true } });
 
         var firstDeltaReceived = new TaskCompletionSource<AssistantMessageDeltaEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
         var allEvents = new List<SessionEvent>();
@@ -85,11 +85,8 @@ public class AbortE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         var toolStarted = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseTool = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(SlowTool, "slow_analysis")],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(SlowTool, "slow_analysis")] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         // Fire-and-forget
         _ = session.SendAsync(new MessageOptions

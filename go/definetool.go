@@ -5,9 +5,13 @@
 package copilot
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -47,7 +51,7 @@ func createTypedHandler[T any, U any](handler func(T, ToolInvocation) (U, error)
 
 		// Convert arguments to typed struct via JSON round-trip
 		// Arguments is already map[string]any from JSON-RPC parsing
-		jsonBytes, err := json.Marshal(inv.Arguments)
+		jsonBytes, err := json.Marshal(argumentsForTypedHandler(inv))
 		if err != nil {
 			return ToolResult{}, fmt.Errorf("failed to marshal arguments: %w", err)
 		}
@@ -63,6 +67,99 @@ func createTypedHandler[T any, U any](handler func(T, ToolInvocation) (U, error)
 
 		return normalizeResult(result)
 	}
+}
+
+// argumentsForTypedHandler returns the value a typed handler's parameters are
+// decoded from. Arguments holds every JSON number as a float64, which rounds
+// integers beyond 2^53, so an integer the runtime sent that fits an int64 or a
+// uint64 is taken from the original JSON instead. Every other value, including
+// an integer-valued float such as 5.0, is the one Arguments holds. Arguments
+// is used unchanged when the original JSON is absent, as when the invocation
+// was built by the caller, or when the caller replaced or edited Arguments or
+// any object or array in it.
+func argumentsForTypedHandler(inv ToolInvocation) any {
+	if len(inv.rawArguments) == 0 || !sameContainers(inv.deliveredContainers, inv.Arguments) {
+		return inv.Arguments
+	}
+	var decoded any
+	if err := json.Unmarshal(inv.rawArguments, &decoded); err != nil || !reflect.DeepEqual(decoded, inv.Arguments) {
+		return inv.Arguments
+	}
+	decoder := json.NewDecoder(bytes.NewReader(inv.rawArguments))
+	decoder.UseNumber()
+	var numbers any
+	if err := decoder.Decode(&numbers); err != nil {
+		return inv.Arguments
+	}
+	return keepExactIntegers(numbers)
+}
+
+// argumentContainers returns every object and array in arguments in a fixed
+// order, the values a caller can replace or reorder without changing what a
+// float64 comparison sees.
+func argumentContainers(arguments any) []any {
+	var containers []any
+	var walk func(any)
+	walk = func(value any) {
+		switch value := value.(type) {
+		case map[string]any:
+			containers = append(containers, value)
+			for _, key := range slices.Sorted(maps.Keys(value)) {
+				walk(value[key])
+			}
+		case []any:
+			containers = append(containers, value)
+			for _, item := range value {
+				walk(item)
+			}
+		}
+	}
+	walk(arguments)
+	return containers
+}
+
+// sameContainers reports whether arguments holds the objects and arrays in
+// delivered, each at the same position, compared by identity. Holding
+// delivered keeps those values alive, so a replacement cannot reuse one of
+// their addresses.
+func sameContainers(delivered []any, arguments any) bool {
+	current := argumentContainers(arguments)
+	if len(current) != len(delivered) {
+		return false
+	}
+	for i, container := range current {
+		if reflect.ValueOf(container).Pointer() != reflect.ValueOf(delivered[i]).Pointer() {
+			return false
+		}
+	}
+	return true
+}
+
+// keepExactIntegers replaces each json.Number in value with the float64 the
+// standard decoder would have produced, except integers that fit an int64 or
+// a uint64, which keep their original digits.
+func keepExactIntegers(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		for key, item := range value {
+			value[key] = keepExactIntegers(item)
+		}
+	case []any:
+		for i, item := range value {
+			value[i] = keepExactIntegers(item)
+		}
+	case json.Number:
+		if _, err := strconv.ParseInt(value.String(), 10, 64); err == nil {
+			return value
+		}
+		if _, err := strconv.ParseUint(value.String(), 10, 64); err == nil {
+			return value
+		}
+		// The standard decoder already accepted this number, so it parses.
+		number, _ := value.Float64()
+		return number
+	}
+	return value
 }
 
 // normalizeResult converts any value to a ToolResult.

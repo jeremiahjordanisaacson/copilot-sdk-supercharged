@@ -3,12 +3,13 @@ import gc
 import threading
 import time
 import weakref
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from copilot import CopilotClient, RuntimeConnection
 from copilot._ffi_runtime_host import FfiRuntimeHost
+from copilot._jsonrpc import JsonRpcClient, ProcessExitedError
 
 
 class _TestLibrary:
@@ -163,6 +164,60 @@ def test_ui_actions_are_synchronous_connection_scoped_and_reject_after_disposal(
 
 
 @pytest.mark.asyncio
+async def test_graceful_stop_settles_pending_rpc():
+    written = threading.Event()
+
+    class Library(_OpeningLibrary):
+        def connection_write(self, *_args: object) -> bool:
+            written.set()
+            return True
+
+    library = Library(connection_id=21)
+    library.allow_close = True
+    with (
+        patch("copilot._ffi_runtime_host._load_library", return_value=library),
+        patch.object(CopilotClient, "_resolve_inprocess_runtime", return_value="test-runtime"),
+    ):
+        host = FfiRuntimeHost("test-runtime", None)
+        client = CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_inprocess())
+    rpc = JsonRpcClient(host.process)
+    runtime = Mock(shutdown=AsyncMock())
+    pending = None
+    try:
+        host.start_blocking()
+        rpc.start()
+        client._ffi_host = host
+        client._process = host.process
+        client._client = rpc
+        client._rpc = Mock(runtime=runtime)
+        client._state = "connected"
+        pending = asyncio.create_task(rpc.request("test.pending"))
+        assert await asyncio.to_thread(written.wait, 5), "Request was not written to the host"
+        assert not pending.done()
+
+        await client.stop()
+        settled = asyncio.Event()
+        asyncio.get_running_loop().call_soon(settled.set)
+        await settled.wait()
+
+        assert client._state == "disconnected"
+        assert library.shutdown_calls == 1
+        runtime.shutdown.assert_awaited_once()
+        assert pending.done(), "Client stopped its native host but left the RPC request pending"
+        with pytest.raises(ProcessExitedError):
+            await pending
+        assert rpc.pending_requests == {}
+        await client.stop()
+        assert library.shutdown_calls == 1
+    finally:
+        if pending is not None:
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        await asyncio.to_thread(host.dispose)
+        await rpc.stop()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("method", ["stop", "force_stop"])
 async def test_client_shutdown_keeps_event_loop_responsive_until_native_cleanup_finishes(method):
     loop = asyncio.get_running_loop()
@@ -184,7 +239,9 @@ async def test_client_shutdown_keeps_event_loop_responsive_until_native_cleanup_
     host._connection_id = 21
     host._outbound_callback = object()
 
-    client = CopilotClient(connection=RuntimeConnection.for_stdio(path="copilot"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path="copilot")
+    )
     client._ffi_host = host
     client._process = host.process
     client._state = "connected"

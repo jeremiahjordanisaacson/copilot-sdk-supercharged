@@ -7,14 +7,15 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 const suspendTimeout = 60 * time.Second
 
 func TestSuspendE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 
 	t.Run("should suspend idle session without throwing", func(t *testing.T) {
@@ -23,9 +24,7 @@ func TestSuspendE2E(t *testing.T) {
 		client := ctx.NewClient()
 		t.Cleanup(func() { client.ForceStop() })
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -48,16 +47,14 @@ func TestSuspendE2E(t *testing.T) {
 	t.Run("should allow resume and continue conversation after suspend", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		_, cliURL := startTCPServer(t, ctx)
+		_, serverPort := startTCPServer(t, ctx)
 
 		client1 := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+			opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 		})
 		t.Cleanup(func() { client1.ForceStop() })
 
-		session1, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session1, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -75,13 +72,11 @@ func TestSuspendE2E(t *testing.T) {
 		client1.ForceStop()
 
 		client2 := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Connection = copilot.URIConnection{URL: cliURL, ConnectionToken: sharedTCPToken}
+			opts.Runtime = copilot.TCPConnection{Host: "localhost", Port: serverPort, ConnectionToken: sharedTCPToken}
 		})
 		t.Cleanup(func() { client2.ForceStop() })
 
-		session2, err := client2.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session2, err := client2.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -118,15 +113,13 @@ func TestSuspendE2E(t *testing.T) {
 				return "SHOULD_NOT_RUN_" + params.Value, nil
 			})
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Tools: []copilot.Tool{tool},
-			OnPermissionRequest: func(request copilot.PermissionRequest, _ copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
-				select {
-				case permissionRequested <- request:
-				default:
-				}
-				return <-releasePermission, nil
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{tool}}, Permissions: copilot.SessionPermissionOptions{OnRequest: func(request copilot.PermissionRequest, _ copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+			select {
+			case permissionRequested <- request:
+			default:
+			}
+			return <-releasePermission, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -189,10 +182,7 @@ func TestSuspendE2E(t *testing.T) {
 				return <-releaseTool, nil
 			})
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Tools:               []copilot.Tool{tool},
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{tool}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}

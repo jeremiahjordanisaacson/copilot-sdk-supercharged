@@ -2,22 +2,23 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "session", output)
 {
     [Fact]
     public async Task ShouldCreateAndDisconnectSessions()
     {
-        var session = await CreateSessionAsync(new SessionConfig { Model = "claude-sonnet-5" });
+        var session = await CreateSessionAsync(new CreateSessionOptions { Model = "claude-sonnet-5" });
 
         Assert.Matches(@"^[a-f0-9-]+$", session.SessionId);
 
@@ -25,10 +26,14 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         Assert.NotEmpty(messages);
         var startEvent = Assert.IsType<SessionStartEvent>(messages[0]);
         Assert.Equal(session.SessionId, startEvent.Data.SessionId);
+        var rawEvents = await session.GetRawEventsAsync();
+        Assert.Equal(JsonValueKind.Null, rawEvents[0].GetProperty("parentId").ValueKind);
+        Assert.Equal("session.start", rawEvents[0].GetProperty("type").GetString());
 
         await session.DisposeAsync();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(() => session.GetEventsAsync());
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => session.GetRawEventsAsync());
     }
 
     [Fact]
@@ -49,7 +54,7 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     public async Task Should_Create_A_Session_With_Appended_SystemMessage_Config()
     {
         var systemMessageSuffix = "End each response with the phrase 'Have a nice day!'";
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
             SystemMessage = new SystemMessageConfig { Mode = SystemMessageMode.Append, Content = systemMessageSuffix }
         });
@@ -72,7 +77,7 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     public async Task Should_Create_A_Session_With_Replaced_SystemMessage_Config()
     {
         var testSystemMessage = "You are an assistant called Testy McTestface. Reply succinctly.";
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
             SystemMessage = new SystemMessageConfig { Mode = SystemMessageMode.Replace, Content = testSystemMessage }
         });
@@ -94,7 +99,7 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     {
         var customTone = "Respond in a warm, professional tone. Be thorough in explanations.";
         var appendedContent = "Always mention quarterly earnings.";
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
             SystemMessage = new SystemMessageConfig
             {
@@ -126,10 +131,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     [Fact]
     public async Task Should_Create_A_Session_With_AvailableTools()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            AvailableTools = ["view", "edit"]
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { AvailableTools = ["view", "edit"] } });
 
         try
         {
@@ -150,10 +153,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     [Fact]
     public async Task Should_Create_A_Session_With_ExcludedTools()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            ExcludedTools = ["view"]
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { ExcludedTools = ["view"] } });
 
         try
         {
@@ -174,20 +175,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     [Fact]
     public async Task Should_Create_A_Session_With_DefaultAgent_ExcludedTools()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools =
-            [
-                AIFunctionFactory.Create(
-                    (string input) => "SECRET",
-                    "secret_tool",
-                    "A secret tool hidden from the default agent"),
-            ],
-            DefaultAgent = new DefaultAgentConfig
-            {
-                ExcludedTools = ["secret_tool"],
-            },
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create((string input) => "SECRET", "secret_tool", "A secret tool hidden from the default agent"),] }, Agents = new SessionAgentOptions { Default = new DefaultAgentConfig { ExcludedTools = ["secret_tool"], } } });
 
         try
         {
@@ -206,15 +195,16 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     [Fact]
     public async Task Should_Create_Session_With_Custom_Tool()
     {
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Tools =
-            [
-                AIFunctionFactory.Create(async ([Description("Key")] string key) => {
-                    await Task.Yield();
-                    return key == "ALPHA" ? 54321 : 0;
-                }, "get_secret_number", "Gets the secret number"),
-            ]
+            Tools = new SessionToolOptions
+            {
+                Definitions = [AIFunctionFactory.Create(async ([Description("Key")] string key) =>
+{
+    await Task.Yield();
+    return key == "ALPHA" ? 54321 : 0;
+}, "get_secret_number", "Gets the secret number"), ]
+            }
         });
 
         var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions { Prompt = "What is the secret number for key ALPHA?" });
@@ -229,10 +219,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         var sessionId = session1.SessionId;
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            Ctx.ResumeSessionAsync(Client, sessionId, new ResumeSessionConfig
-            {
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-            }));
+            Ctx.ResumeSessionAsync(Client, sessionId, new ResumeSessionOptions
+            { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } }));
         Assert.Contains(sessionId, exception.Message);
     }
 
@@ -247,11 +235,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         Assert.Contains("2", answer!.Data.Content ?? string.Empty);
 
         using var newClient = Ctx.CreateClient();
-        var session2 = await Ctx.ResumeSessionAsync(newClient, sessionId, new ResumeSessionConfig
-        {
-            ContinuePendingWork = true,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session2 = await Ctx.ResumeSessionAsync(newClient, sessionId, new ResumeSessionOptions
+        { ContinuePendingWork = true, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         Assert.Equal(sessionId, session2.SessionId);
 
         var messages = await session2.GetEventsAsync();
@@ -271,11 +256,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         static Task<McpAuthResult?> CancelMcpAuthAsync(McpAuthContext request)
             => Task.FromResult<McpAuthResult?>(McpAuthResult.Cancel());
 
-        await using var session1 = await CreateSessionAsync(new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            OnMcpAuthRequest = CancelMcpAuthAsync,
-        });
+        await using var session1 = await CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Mcp = new SessionMcpOptions { OnAuthRequest = CancelMcpAuthAsync } });
         var sessionId = session1.SessionId;
 
         var answer = await session1.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
@@ -283,11 +265,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         Assert.Contains("2", answer!.Data.Content ?? string.Empty);
 
         using var newClient = Ctx.CreateClient();
-        await using var session2 = await Ctx.ResumeSessionAsync(newClient, sessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            OnMcpAuthRequest = CancelMcpAuthAsync,
-        });
+        await using var session2 = await Ctx.ResumeSessionAsync(newClient, sessionId, new ResumeSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Mcp = new SessionMcpOptions { OnAuthRequest = CancelMcpAuthAsync } });
 
         Assert.Equal(sessionId, session2.SessionId);
     }
@@ -301,11 +280,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         var sessionId = $"e2e-cold-resume-{Guid.NewGuid()}";
 
         var client1 = isolatedCtx.CreateClient();
-        var session1 = await isolatedCtx.CreateSessionAsync(client1, new SessionConfig
-        {
-            SessionId = sessionId,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session1 = await isolatedCtx.CreateSessionAsync(client1, new CreateSessionOptions
+        { SessionId = sessionId, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         Assert.Equal(sessionId, session1.SessionId);
 
         var answer = await session1.SendAndWaitAsync(new MessageOptions
@@ -319,10 +295,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         await client1.ForceStopAsync();
 
         var client2 = isolatedCtx.CreateClient();
-        var session2 = await isolatedCtx.ResumeSessionAsync(client2, sessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session2 = await isolatedCtx.ResumeSessionAsync(client2, sessionId, new ResumeSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         Assert.Equal(sessionId, session2.SessionId);
 
         var answer2 = await session2.SendAndWaitAsync(new MessageOptions
@@ -339,7 +313,7 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     [Fact]
     public async Task Should_Throw_Error_When_Resuming_Non_Existent_Session()
     {
-        await Assert.ThrowsAsync<IOException>(() =>
+        await Assert.ThrowsAsync<RemoteRpcException>(() =>
             ResumeSessionAsync("non-existent-session-id"));
     }
 
@@ -353,8 +327,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     internal static async Task AssertAbortAndRecoveryAsync(CopilotSession session, TimeSpan timeout)
     {
         // Set up wait for tool execution to start BEFORE sending
-        var toolStartTask = TestHelper.GetNextEventOfTypeAsync<ToolExecutionStartEvent>(session, timeout);
-        var sessionIdleTask = TestHelper.GetNextEventOfTypeAsync<SessionIdleEvent>(session, timeout);
+        using var toolStartTask = TestHelper.ObserveEvent<ToolExecutionStartEvent>(session);
+        using var sessionIdleTask = TestHelper.ObserveEvent<SessionIdleEvent>(session);
 
         // Send a message that will take some time to process
         await session.SendAsync(new MessageOptions
@@ -363,11 +337,11 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         });
 
         // Wait for tool execution to start
-        await toolStartTask;
+        await toolStartTask.Task.WaitAsync(timeout);
 
         // Abort the session
         await session.AbortAsync();
-        await sessionIdleTask;
+        await sessionIdleTask.Task.WaitAsync(timeout);
 
         // The session should still be alive and usable after abort
         var messages = await session.GetEventsAsync();
@@ -391,17 +365,21 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         var earlyEvents = new List<SessionEvent>();
         var earlyEventsLock = new object();
         var sessionStartReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnEvent = evt =>
+            Events = new SessionEventOptions
             {
-                lock (earlyEventsLock)
-                {
-                    earlyEvents.Add(evt);
-                }
-                if (evt is SessionStartEvent)
-                    sessionStartReceived.TrySetResult(true);
-            },
+                OnEvent = evt =>
+        {
+            lock (earlyEventsLock)
+            {
+                earlyEvents.Add(evt);
+            }
+
+            if (evt is SessionStartEvent)
+                sessionStartReceived.TrySetResult(true);
+        }
+            }
         });
 
         // session.start is dispatched asynchronously via the event channel.
@@ -483,11 +461,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
             "pending_work_resume", "should_continue_pending_external_tool_request_after_resume", replayOnly: true);
         var toolStarted = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseTool = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(BlockingTool, "resume_external_tool")],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(BlockingTool, "resume_external_tool")] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         var events = new ConcurrentQueue<string>();
         AssistantMessageEvent? message = null;
 
@@ -546,16 +521,14 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
             if (evt is SessionIdleEvent)
             {
                 idleEntered.TrySetResult();
-                if (!releaseIdle.Wait(TimeSpan.FromSeconds(30)))
-                {
-                    return;
-                }
+                releaseIdle.Wait();
                 idleHandlerFinished = true;
             }
             events.Enqueue(evt.Type);
         });
 
-        var pending = session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 2+2?" });
+        var pending = session.SendAndWaitAsync(
+            new MessageOptions { Prompt = "What is 2+2?" }, Timeout.InfiniteTimeSpan);
         try
         {
             await idleEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
@@ -566,7 +539,7 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         {
             releaseIdle.Set();
         }
-        var response = await pending;
+        var response = await pending.WaitAsync(TimeSpan.FromSeconds(60));
 
         Assert.True(idleHandlerFinished, "The earlier idle listener must finish before SendAndWaitAsync returns");
         Assert.NotNull(response);
@@ -601,7 +574,15 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         if (ourSession.Context != null)
         {
             Assert.False(string.IsNullOrEmpty(ourSession.Context.WorkingDirectory), "Expected context.WorkingDirectory to be non-empty when context is present");
+
+            var sameDirectorySessions = await Client.ListSessionsAsync(
+                new SessionListFilter { WorkingDirectory = ourSession.Context.WorkingDirectory });
+            Assert.Contains(sameDirectorySessions, s => s.SessionId == session.SessionId);
         }
+
+        var otherDirectorySessions = await Client.ListSessionsAsync(
+            new SessionListFilter { WorkingDirectory = Path.Join(Ctx.WorkDir, "other-project") });
+        Assert.DoesNotContain(otherDirectorySessions, s => s.SessionId == session.SessionId);
     }
 
     [Fact]
@@ -685,7 +666,7 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     public async Task Should_Create_Session_With_Custom_Config_Dir()
     {
         var customConfigDir = Path.Join(Ctx.HomeDir, "custom-config");
-        var session = await CreateSessionAsync(new SessionConfig { ConfigDirectory = customConfigDir });
+        var session = await CreateSessionAsync(new CreateSessionOptions { ConfigDirectory = customConfigDir });
 
         Assert.Matches(@"^[a-f0-9-]+$", session.SessionId);
 
@@ -815,7 +796,7 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         var client = Ctx.CreateClient();
         var session = await Ctx.CreateSessionAsync(
             client,
-            new SessionConfig { OnPermissionRequest = PermissionHandler.ApproveAll });
+            new CreateSessionOptions { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         var disposed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         session.On<SessionEvent>(evt =>
@@ -1032,15 +1013,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     [Trait(E2ETestTraits.Backend, E2ETestTraits.SelfConfiguredBackend)]
     public async Task Should_Create_Session_With_Custom_Provider()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Provider = new ProviderConfig
-            {
-                Type = "openai",
-                BaseUrl = "https://api.openai.com/v1",
-                ApiKey = "fake-key",
-            },
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "claude-sonnet-5", Inference = ByokTestOptions.Inference(new ProviderConfig { Type = "openai", BaseUrl = "https://api.openai.com/v1", ApiKey = "fake-key", }, new SessionInferenceOptions { }) });
 
         Assert.False(string.IsNullOrEmpty(session.SessionId));
 
@@ -1058,19 +1032,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
     [Trait(E2ETestTraits.Backend, E2ETestTraits.SelfConfiguredBackend)]
     public async Task Should_Create_Session_With_Azure_Provider()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Provider = new ProviderConfig
-            {
-                Type = "azure",
-                BaseUrl = "https://my-resource.openai.azure.com",
-                ApiKey = "fake-key",
-                Azure = new AzureOptions
-                {
-                    ApiVersion = "2024-02-15-preview",
-                },
-            },
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "claude-sonnet-5", Inference = ByokTestOptions.Inference(new ProviderConfig { Type = "azure", BaseUrl = "https://my-resource.openai.azure.com", ApiKey = "fake-key", Azure = new AzureOptions { ApiVersion = "2024-02-15-preview", }, }, new SessionInferenceOptions { }) });
 
         Assert.False(string.IsNullOrEmpty(session.SessionId));
 
@@ -1092,15 +1055,8 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         var sessionId = session.SessionId;
         await SuspendAndUntrackSessionForResumeAsync(session);
 
-        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
-        {
-            Provider = new ProviderConfig
-            {
-                Type = "openai",
-                BaseUrl = "https://api.openai.com/v1",
-                ApiKey = "fake-key",
-            },
-        });
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Inference = ByokTestOptions.Inference(new ProviderConfig { Type = "openai", BaseUrl = "https://api.openai.com/v1", ApiKey = "fake-key", }, new SessionInferenceOptions { }) });
 
         Assert.Equal(sessionId, session2.SessionId);
 

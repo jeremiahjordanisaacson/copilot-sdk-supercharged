@@ -29,7 +29,7 @@ class TestSessionTodosChanged:
         self, ctx: E2ETestContext
     ):
         async with await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
+            permissions={"on_request": PermissionHandler.approve_all}
         ) as session:
             todos_changed = get_next_event_of_type(session, "session.todos_changed", timeout=120.0)
             try:

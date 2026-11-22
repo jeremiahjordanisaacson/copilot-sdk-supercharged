@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.ComponentModel;
 using System.Text.Json;
@@ -10,7 +10,7 @@ using System.Text.Json.Serialization;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public partial class ToolResultsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "tool_results", output)
 {
@@ -23,11 +23,8 @@ public partial class ToolResultsE2ETests(E2ETestFixture fixture, ITestOutputHelp
     [Fact]
     public async Task Should_Handle_Structured_ToolResultObject_From_Custom_Tool()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(GetWeather, "get_weather", serializerOptions: ToolResultsJsonContext.Default.Options)],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(GetWeather, "get_weather", serializerOptions: ToolResultsJsonContext.Default.Options)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
@@ -49,11 +46,8 @@ public partial class ToolResultsE2ETests(E2ETestFixture fixture, ITestOutputHelp
     [Fact]
     public async Task Should_Handle_Tool_Result_With_Failure_ResultType()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(CheckStatus, "check_status", serializerOptions: ToolResultsJsonContext.Default.Options)],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(CheckStatus, "check_status", serializerOptions: ToolResultsJsonContext.Default.Options)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
@@ -76,11 +70,8 @@ public partial class ToolResultsE2ETests(E2ETestFixture fixture, ITestOutputHelp
     [Fact]
     public async Task Should_Preserve_ToolTelemetry_And_Not_Stringify_Structured_Results_For_LLM()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(AnalyzeCode, "analyze_code", serializerOptions: ToolResultsJsonContext.Default.Options)],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(AnalyzeCode, "analyze_code", serializerOptions: ToolResultsJsonContext.Default.Options)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
@@ -122,11 +113,8 @@ public partial class ToolResultsE2ETests(E2ETestFixture fixture, ITestOutputHelp
         var toolExecutionComplete = new TaskCompletionSource<ToolExecutionCompleteEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
         var toolHandlerCalled = false;
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(AttemptDeploy, "deploy_service", serializerOptions: ToolResultsJsonContext.Default.Options)],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(AttemptDeploy, "deploy_service", serializerOptions: ToolResultsJsonContext.Default.Options)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         session.On<SessionEvent>(evt =>
         {
@@ -172,11 +160,8 @@ public partial class ToolResultsE2ETests(E2ETestFixture fixture, ITestOutputHelp
         var toolExecutionComplete = new TaskCompletionSource<ToolExecutionCompleteEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
         var toolHandlerCalled = false;
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Tools = [AIFunctionFactory.Create(AccessSecret, "access_secret", serializerOptions: ToolResultsJsonContext.Default.Options)],
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(AccessSecret, "access_secret", serializerOptions: ToolResultsJsonContext.Default.Options)] }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         session.On<SessionEvent>(evt =>
         {

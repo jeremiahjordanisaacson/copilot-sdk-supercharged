@@ -13,7 +13,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
-    {name = "GitHub", email = "opensource@github.com"}
+    {name = "Microsoft", email = "opensource@github.com"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -36,20 +36,55 @@ Repository = "https://github.com/github/copilot-sdk"
 
 [project.optional-dependencies]
 telemetry = [
-    "opentelemetry-api>=1.45.1",
+    "opentelemetry-api>=1.45.2",
 ]
 
 [dependency-groups]
 dev = [
-    "ruff==0.17.2",
-    "ty>=0.0.2,<0.0.92",
+    "ruff==0.17.4",
+    "ty>=0.0.2,<0.0.100",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-timeout>=2.0.0",
     "pytest-xdist>=3.6.0",
     "websockets>=12.0",
-    "opentelemetry-sdk>=1.45.1",
+    "opentelemetry-sdk>=1.45.2",
 ]
+
+# Published metadata for these exact releases; wheel metadata URLs are unavailable.
+[[tool.uv.dependency-metadata]]
+name = "opentelemetry-api"
+version = "1.45.2"
+requires-python = ">=3.10"
+requires-dist = ["typing-extensions>=4.5.0"]
+
+[[tool.uv.dependency-metadata]]
+name = "opentelemetry-sdk"
+version = "1.45.2"
+requires-python = ">=3.10"
+provides-extras = ["file-configuration"]
+requires-dist = [
+    "opentelemetry-api==1.45.2",
+    "opentelemetry-semantic-conventions==0.66b2",
+    "typing-extensions>=4.5.0",
+    "opentelemetry-configuration==0.66b2 ; extra == 'file-configuration'",
+]
+
+[[tool.uv.dependency-metadata]]
+name = "opentelemetry-semantic-conventions"
+version = "0.66b2"
+requires-python = ">=3.10"
+requires-dist = ["opentelemetry-api==1.45.2", "typing-extensions>=4.5.0"]
+
+[[tool.uv.dependency-metadata]]
+name = "ruff"
+version = "0.17.4"
+requires-python = ">=3.7"
+
+[[tool.uv.dependency-metadata]]
+name = "ty"
+version = "0.0.99"
+requires-python = ">=3.8"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -59,8 +94,8 @@ include = ["copilot*"]
 line-length = 100
 target-version = "py311"
 exclude = [
-    "generated",
-    "copilot/generated",
+    "_generated",
+    "copilot/_generated",
 ]
 
 [tool.ruff.lint]
@@ -82,8 +117,8 @@ invalid-argument-type = "warn"
 
 [tool.ty.src]
 exclude = [
-    "generated",
-    "copilot/generated",
+    "_generated",
+    "copilot/_generated",
     "copilot/test_*.py",
 ]
 

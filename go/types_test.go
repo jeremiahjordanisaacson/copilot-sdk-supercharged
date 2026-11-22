@@ -1,11 +1,87 @@
 package copilot
 
 import (
+	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
+
+func TestPersistedLocalModelOptionsPreserveOpaqueNumbers(t *testing.T) {
+	provider := `{"name":"local","type":"winml","baseUrl":"model.gguf","localModel":{"device":"gpu","seed":9007199254740993,"future":[null,true,-9007199254740995,1.234567890123456789]}}`
+	model := `{"id":"model","provider":"local","autoLocal":{"source":"azureml","revision":9007199254740993,"future":[null,true,-9007199254740995,1.234567890123456789]},"metadata":{"autoLocal":{"source":"azureml","revision":9007199254740993},"future":[null,true,-9007199254740995,1.234567890123456789]}}`
+	decode := func(data []byte) map[string]any {
+		t.Helper()
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		var value map[string]any
+		if err := decoder.Decode(&value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	for _, test := range []struct {
+		name  string
+		input string
+		value any
+		field string
+	}{
+		{"session provider", provider, &NamedProviderConfig{}, "localModel"},
+		{"session model", model, &ProviderModelConfig{}, "autoLocal"},
+		{"session model metadata", model, &ProviderModelConfig{}, "metadata"},
+		{"RPC provider", provider, &rpc.NamedProviderConfig{}, "localModel"},
+		{"RPC model", model, &rpc.ProviderModelConfig{}, "autoLocal"},
+		{"RPC model metadata", model, &rpc.ProviderModelConfig{}, "metadata"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := json.Unmarshal([]byte(test.input), test.value); err != nil {
+				t.Fatal(err)
+			}
+			data, err := json.Marshal(test.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, got := decode([]byte(test.input))[test.field], decode(data)[test.field]
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s changed:\ngot: %#v\nwant: %#v\nwire: %s", test.field, got, want, data)
+			}
+		})
+	}
+}
+
+func TestLocalModelProviderConfigurationRoundTrip(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		input string
+		value any
+		field string
+	}{
+		{"provider", `{"name":"local","type":"winml","baseUrl":"model.gguf","localModel":{"device":"gpu","future":[1,true]}}`, &NamedProviderConfig{}, "localModel"},
+		{"model", `{"id":"model","provider":"local","autoLocal":{"source":"azureml","future":[1,true]}}`, &ProviderModelConfig{}, "autoLocal"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := json.Unmarshal([]byte(test.input), test.value); err != nil {
+				t.Fatal(err)
+			}
+			data, err := json.Marshal(test.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var expected, actual map[string]any
+			if err := json.Unmarshal([]byte(test.input), &expected); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &actual); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(actual[test.field], expected[test.field]) {
+				t.Fatalf("%s changed: expected %#v, got %#v", test.field, expected[test.field], actual[test.field])
+			}
+		})
+	}
+}
 
 func TestMemoryConfiguration_Mode(t *testing.T) {
 	for _, test := range []struct {
@@ -592,5 +668,19 @@ func TestElicitationResult_JSONOmitsNilContent(t *testing.T) {
 
 	if _, present := decoded["content"]; present {
 		t.Errorf("expected content to be omitted for nil map, got %v", decoded["content"])
+	}
+}
+
+func TestSessionMetadata_JSONReadsClientNames(t *testing.T) {
+	var metadata SessionMetadata
+	data := `{"sessionId":"session-1","startTime":"2026-01-01T00:00:00Z","modifiedTime":"2026-01-02T00:00:00Z","isRemote":false,"clientName":"github/cli","lastClientName":"vscode"}`
+	if err := json.Unmarshal([]byte(data), &metadata); err != nil {
+		t.Fatalf("failed to unmarshal SessionMetadata: %v", err)
+	}
+	if metadata.ClientName == nil || *metadata.ClientName != "github/cli" {
+		t.Errorf("expected client name github/cli, got %v", metadata.ClientName)
+	}
+	if metadata.LastClientName == nil || *metadata.LastClientName != "vscode" {
+		t.Errorf("expected last client name vscode, got %v", metadata.LastClientName)
 	}
 }

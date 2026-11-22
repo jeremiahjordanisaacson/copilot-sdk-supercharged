@@ -25,8 +25,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="module")
 class TestAbort:
     async def test_should_abort_during_active_streaming(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            streaming=True,
+            permissions={"on_request": PermissionHandler.approve_all}, events={"streaming": True}
         )
 
         events = []
@@ -88,35 +87,36 @@ class TestAbort:
             value = (invocation.arguments or {}).get("value", "")
             if not tool_started.done():
                 tool_started.set_result(value)
-            result = await asyncio.wait_for(release_tool, timeout=60.0)
+            result = await release_tool
             return ToolResult(text_result_for_llm=str(result))
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[
-                Tool(
-                    name="slow_analysis",
-                    description="A slow analysis tool that blocks until released",
-                    parameters={
-                        "type": "object",
-                        "properties": {
-                            "value": {"type": "string", "description": "Value to analyze"}
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={
+                "definitions": [
+                    Tool(
+                        name="slow_analysis",
+                        description="A slow analysis tool that blocks until released",
+                        parameters={
+                            "type": "object",
+                            "properties": {
+                                "value": {"type": "string", "description": "Value to analyze"}
+                            },
+                            "required": ["value"],
                         },
-                        "required": ["value"],
-                    },
-                    handler=slow_tool_handler,
-                )
-            ],
+                        handler=slow_tool_handler,
+                    )
+                ]
+            },
         )
 
+        send_task = asyncio.create_task(
+            session.send("Use slow_analysis with value 'test_abort'. Wait for the result.")
+        )
         try:
-            # Fire-and-forget
-            asyncio.ensure_future(
-                session.send("Use slow_analysis with value 'test_abort'. Wait for the result.")
-            )
-
             tool_value = await asyncio.wait_for(tool_started, timeout=60.0)
             assert tool_value == "test_abort"
+            await asyncio.wait_for(send_task, timeout=60.0)
 
             # Abort while the tool is running
             await session.abort()
@@ -146,4 +146,6 @@ class TestAbort:
         finally:
             if not release_tool.done():
                 release_tool.set_result("CLEANUP")
+            send_task.cancel()
+            await asyncio.gather(send_task, return_exceptions=True)
             await session.disconnect()

@@ -8,12 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 // Mirrors dotnet/test/TelemetryExportTests.cs (snapshot category "telemetry").
 func TestTelemetryE2E(t *testing.T) {
+	t.Parallel()
 	testharness.SkipIfInProcess(t, "telemetry configuration is not honored in-process")
 	t.Run("should export file telemetry for sdk interactions", func(t *testing.T) {
 		ctx := testharness.NewTestContext(t)
@@ -26,7 +27,7 @@ func TestTelemetryE2E(t *testing.T) {
 		prompt := fmt.Sprintf("Use the %s tool with value '%s', then respond with TELEMETRY_E2E_DONE.", toolName, marker)
 
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Telemetry = &copilot.TelemetryConfig{
+			opts.Observability.Telemetry = &copilot.TelemetryConfig{
 				FilePath:       telemetryPath,
 				ExporterType:   "file",
 				SourceName:     sourceName,
@@ -43,10 +44,7 @@ func TestTelemetryE2E(t *testing.T) {
 				return params.Value, nil
 			})
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Tools:               []copilot.Tool{echoTool},
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{echoTool}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -189,15 +187,13 @@ func TestTelemetryE2E(t *testing.T) {
 			t.Fatalf("WriteFile failed: %v", err)
 		}
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-			opts.Telemetry = &copilot.TelemetryConfig{
+			opts.Observability.Telemetry = &copilot.TelemetryConfig{
 				FilePath: telemetryPath, ExporterType: "file", SourceName: sourceName,
 				CaptureContent: copilot.Bool(true),
 			}
 		})
 		t.Cleanup(func() { client.ForceStop() })
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -450,6 +446,7 @@ func findSpanWithOperation(spans []map[string]any, op string) map[string]any {
 // (helpers are unexported), so it is tested in go/telemetry_test.go and is
 // intentionally not duplicated here.
 func TestTelemetryConfigUnit(t *testing.T) {
+	t.Parallel()
 	t.Run("default values are zero", func(t *testing.T) {
 		// Mirrors: TelemetryConfig_DefaultValues_AreNull
 		var cfg copilot.TelemetryConfig
@@ -505,9 +502,9 @@ func TestTelemetryConfigUnit(t *testing.T) {
 
 	t.Run("client options telemetry defaults to nil", func(t *testing.T) {
 		// Mirrors: CopilotClientOptions_Telemetry_DefaultsToNull
-		opts := copilot.ClientOptions{}
-		if opts.Telemetry != nil {
-			t.Errorf("Expected ClientOptions.Telemetry to be nil by default, got %v", opts.Telemetry)
+		opts := copilot.ClientOptions{Mode: copilot.ModeCodingAgent}
+		if opts.Observability.Telemetry != nil {
+			t.Errorf("Expected ClientOptions.Telemetry to be nil by default, got %v", opts.Observability.Telemetry)
 		}
 	})
 }

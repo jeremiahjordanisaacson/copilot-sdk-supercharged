@@ -32,7 +32,7 @@ async def _wait_for_session_lock_release(ctx: E2ETestContext, session_id: str) -
 class TestStreamingFidelity:
     async def test_should_produce_delta_events_when_streaming_is_enabled(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, streaming=True
+            permissions={"on_request": PermissionHandler.approve_all}, events={"streaming": True}
         )
 
         events = []
@@ -64,7 +64,7 @@ class TestStreamingFidelity:
 
     async def test_should_not_produce_deltas_when_streaming_is_disabled(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, streaming=False
+            permissions={"on_request": PermissionHandler.approve_all}, events={"streaming": False}
         )
 
         events = []
@@ -85,7 +85,7 @@ class TestStreamingFidelity:
 
     async def test_should_produce_deltas_after_session_resume(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, streaming=False
+            permissions={"on_request": PermissionHandler.approve_all}, events={"streaming": False}
         )
         session_id = session.session_id
         await session.send_and_wait("What is 3 + 6?")
@@ -98,17 +98,18 @@ class TestStreamingFidelity:
             "fake-token-for-e2e-tests" if os.environ.get("GITHUB_ACTIONS") == "true" else None
         )
         new_client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=github_token,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+            ),
+            github={"token": github_token},
         )
 
         try:
             session2 = await new_client.resume_session(
                 session_id,
-                on_permission_request=PermissionHandler.approve_all,
-                streaming=True,
+                permissions={"on_request": PermissionHandler.approve_all},
+                events={"streaming": True},
             )
             events = []
             session2.on(lambda event: events.append(event))
@@ -140,7 +141,7 @@ class TestStreamingFidelity:
         )
         # Create and complete a turn with streaming enabled
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, streaming=True
+            permissions={"on_request": PermissionHandler.approve_all}, events={"streaming": True}
         )
         await session.send_and_wait("What is 3 + 6?")
         session_id = session.session_id
@@ -150,16 +151,17 @@ class TestStreamingFidelity:
 
         # Resume with streaming disabled
         new_client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-            working_directory=ctx.work_dir,
-            env=ctx.get_env(),
-            github_token=github_token,
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+            ),
+            github={"token": github_token},
         )
         try:
             session2 = await new_client.resume_session(
                 session_id,
-                on_permission_request=PermissionHandler.approve_all,
-                streaming=False,
+                permissions={"on_request": PermissionHandler.approve_all},
+                events={"streaming": False},
             )
             events = []
             session2.on(lambda event: events.append(event))
@@ -189,10 +191,10 @@ class TestStreamingFidelity:
                 "should_emit_streaming_deltas_with_reasoning_effort_configured",
             )
             session = await isolated_ctx.client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
                 model="gpt-5.4",
-                streaming=True,
-                reasoning_effort="high",
+                permissions={"on_request": PermissionHandler.approve_all},
+                events={"streaming": True},
+                inference={"reasoning_effort": "high"},
             )
 
             events = []

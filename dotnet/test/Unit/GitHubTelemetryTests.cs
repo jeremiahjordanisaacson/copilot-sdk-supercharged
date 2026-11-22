@@ -2,18 +2,18 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using Xunit;
 
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
-#pragma warning disable GHCP001 // GitHub telemetry forwarding is experimental.
+#pragma warning disable MCPSDK001 // GitHub telemetry forwarding is experimental.
 
 public sealed class GitHubTelemetryTests
 {
@@ -23,7 +23,7 @@ public sealed class GitHubTelemetryTests
         var property = typeof(CopilotClientOptions).GetProperty(nameof(CopilotClientOptions.Entra))!;
         var attribute = Assert.Single(property.GetCustomAttributes(
             typeof(System.Diagnostics.CodeAnalysis.ExperimentalAttribute), inherit: false));
-        Assert.Equal("GHCP001",
+        Assert.Equal("MCPSDK001",
             ((System.Diagnostics.CodeAnalysis.ExperimentalAttribute)attribute).DiagnosticId);
     }
 
@@ -33,8 +33,9 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
-            Entra = new EntraAuthOptions { ClientId = "host-entra-client", MatsAppName = "TestHost" },
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+            Entra = new EntraAuthOptions { ClientId = "host-entra-client", MatsAppName = "TestHost", OneAuthApplicationId = "host-native-descriptor" },
         });
         await client.StartAsync();
 
@@ -42,6 +43,7 @@ public sealed class GitHubTelemetryTests
             ?? throw new InvalidOperationException("connect was not captured.");
         Assert.Equal("host-entra-client", parameters.GetProperty("entra").GetProperty("clientId").GetString());
         Assert.Equal("TestHost", parameters.GetProperty("entra").GetProperty("matsAppName").GetString());
+        Assert.Equal("host-native-descriptor", parameters.GetProperty("entra").GetProperty("oneAuthApplicationId").GetString());
     }
 
     [Theory]
@@ -52,8 +54,9 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
-            BuiltinPluginDirectories = useEmpty ? [] : null,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+            Plugins = new ClientPluginOptions { BuiltinDirectories = useEmpty ? [] : null }
         });
 
         await client.StartAsync();
@@ -72,8 +75,9 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
-            BuiltinPluginDirectories = paths,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+            Plugins = new ClientPluginOptions { BuiltinDirectories = paths }
         });
 
         await client.StartAsync();
@@ -92,7 +96,8 @@ public sealed class GitHubTelemetryTests
     {
         var exception = Assert.Throws<ArgumentException>(() => new CopilotClient(new CopilotClientOptions
         {
-            BuiltinPluginDirectories = ["plugins/core"],
+            Mode = CopilotClientMode.CodingAgent,
+            Plugins = new ClientPluginOptions { BuiltinDirectories = ["plugins/core"] }
         }));
 
         Assert.Contains("absolute paths", exception.Message);
@@ -104,15 +109,16 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
-            OnGitHubTelemetry = _ => Task.CompletedTask,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+            GitHub = new ClientGitHubOptions { OnTelemetry = _ => Task.CompletedTask }
         });
         await client.StartAsync();
 
-        await client.CreateSessionAsync(new SessionConfig { OnPermissionRequest = PermissionHandler.ApproveAll });
+        await client.CreateSessionAsync(new CreateSessionOptions { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var createParams = server.LastCreateParams ?? throw new InvalidOperationException("session.create was not captured.");
-        Assert.True(createParams.TryGetProperty("enableGitHubTelemetryForwarding", out var flag));
+        Assert.True(createParams.GetProperty("github").TryGetProperty("telemetryForwarding", out var flag));
         Assert.True(flag.GetBoolean());
     }
 
@@ -122,15 +128,16 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
-            OnGitHubTelemetry = _ => Task.CompletedTask,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+            GitHub = new ClientGitHubOptions { OnTelemetry = _ => Task.CompletedTask }
         });
         await client.StartAsync();
 
-        await client.ResumeSessionAsync("session-1", new ResumeSessionConfig { OnPermissionRequest = PermissionHandler.ApproveAll });
+        await client.ResumeSessionAsync("session-1", new ResumeSessionOptions { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var resumeParams = server.LastResumeParams ?? throw new InvalidOperationException("session.resume was not captured.");
-        Assert.True(resumeParams.TryGetProperty("enableGitHubTelemetryForwarding", out var flag));
+        Assert.True(resumeParams.GetProperty("github").TryGetProperty("telemetryForwarding", out var flag));
         Assert.True(flag.GetBoolean());
     }
 
@@ -140,8 +147,9 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
-            OnGitHubTelemetry = _ => Task.CompletedTask,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+            GitHub = new ClientGitHubOptions { OnTelemetry = _ => Task.CompletedTask }
         });
         await client.StartAsync();
 
@@ -156,7 +164,8 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         await client.StartAsync();
 
@@ -176,14 +185,15 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
             ClientInfo = new CopilotClientInfo
             {
                 ApplicationName = "acme-developer-portal",
                 ApplicationVersion = "2.4.0",
                 IntegrationName = "copilot-assistant",
                 IntegrationVersion = "1.5.0",
-            },
+            }
         });
         await client.StartAsync();
 
@@ -201,7 +211,8 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         await client.StartAsync();
 
@@ -217,8 +228,9 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
-            ClientInfo = new CopilotClientInfo { ApplicationName = "example-app", ApplicationVersion = "" },
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+            ClientInfo = new CopilotClientInfo { ApplicationName = "example-app", ApplicationVersion = "" }
         });
         await client.StartAsync();
 
@@ -236,14 +248,15 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
             ClientInfo = new CopilotClientInfo
             {
                 ApplicationName = "",
                 ApplicationVersion = "",
                 IntegrationName = "",
                 IntegrationVersion = "",
-            },
+            }
         });
         await client.StartAsync();
 
@@ -259,14 +272,15 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         await client.StartAsync();
 
-        await client.CreateSessionAsync(new SessionConfig { OnPermissionRequest = PermissionHandler.ApproveAll });
+        await client.CreateSessionAsync(new CreateSessionOptions { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var createParams = server.LastCreateParams ?? throw new InvalidOperationException("session.create was not captured.");
-        var optedIn = createParams.TryGetProperty("enableGitHubTelemetryForwarding", out var flag)
+        var optedIn = createParams.GetProperty("github").TryGetProperty("telemetryForwarding", out var flag)
             && flag.ValueKind == JsonValueKind.True;
         Assert.False(optedIn);
     }
@@ -279,12 +293,16 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
-            OnGitHubTelemetry = notification =>
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+            GitHub = new ClientGitHubOptions
+            {
+                OnTelemetry = notification =>
             {
                 received.TrySetResult(notification);
                 return Task.CompletedTask;
-            },
+            }
+            }
         });
         await client.StartAsync();
 
@@ -318,12 +336,16 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
-            OnGitHubTelemetry = notification =>
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+            GitHub = new ClientGitHubOptions
+            {
+                OnTelemetry = notification =>
             {
                 received.TrySetResult(notification);
                 return Task.CompletedTask;
-            },
+            }
+            }
         });
         await client.StartAsync();
 
@@ -366,19 +388,16 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
             Mode = CopilotClientMode.Empty,
-            BaseDirectory = Path.GetTempPath(),
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         await client.StartAsync();
 
-        await client.CreateSessionAsync(new SessionConfig
-        {
-            AvailableTools = new ToolSet().AddBuiltIn(BuiltInTools.Isolated).ToList(),
-        });
+        await client.CreateSessionAsync(new CreateSessionOptions
+        { Tools = new SessionToolOptions { AvailableTools = new ToolSet().AddBuiltIn(BuiltInTools.Isolated).ToList() } });
 
         var createParams = server.LastCreateParams ?? throw new InvalidOperationException("session.create was not captured.");
-        Assert.True(createParams.TryGetProperty("isExperimentalMode", out var flag));
+        Assert.True(createParams.GetProperty("experiments").TryGetProperty("enableExperimentalMode", out var flag));
         Assert.False(flag.GetBoolean());
     }
 
@@ -388,19 +407,16 @@ public sealed class GitHubTelemetryTests
         await using var server = await FakeTelemetryServer.StartAsync();
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url),
             Mode = CopilotClientMode.Empty,
-            BaseDirectory = Path.GetTempPath(),
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
         await client.StartAsync();
 
-        await client.ResumeSessionAsync("session-1", new ResumeSessionConfig
-        {
-            AvailableTools = new ToolSet().AddBuiltIn(BuiltInTools.Isolated).ToList(),
-        });
+        await client.ResumeSessionAsync("session-1", new ResumeSessionOptions
+        { Tools = new SessionToolOptions { AvailableTools = new ToolSet().AddBuiltIn(BuiltInTools.Isolated).ToList() } });
 
         var resumeParams = server.LastResumeParams ?? throw new InvalidOperationException("session.resume was not captured.");
-        Assert.True(resumeParams.TryGetProperty("isExperimentalMode", out var flag));
+        Assert.True(resumeParams.GetProperty("experiments").TryGetProperty("enableExperimentalMode", out var flag));
         Assert.False(flag.GetBoolean());
     }
 
@@ -418,14 +434,8 @@ public sealed class GitHubTelemetryTests
             _serverTask = RunAsync();
         }
 
-        public string Url
-        {
-            get
-            {
-                var endpoint = (IPEndPoint)_listener.LocalEndpoint;
-                return $"http://127.0.0.1:{endpoint.Port}";
-            }
-        }
+        public string Host => ((IPEndPoint)_listener.LocalEndpoint).Address.ToString();
+        public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
 
         public JsonElement? LastCreateParams { get; private set; }
 
@@ -445,6 +455,9 @@ public sealed class GitHubTelemetryTests
         }
 
         public async Task SendGitHubTelemetryEventAsync(Dictionary<string, object?> notificationParams)
+            => await SendNotificationAsync("gitHubTelemetry.event", notificationParams);
+
+        public async Task SendNotificationAsync(string method, Dictionary<string, object?> notificationParams)
         {
             var stream = await _connected.Task.WaitAsync(_cts.Token);
 
@@ -454,7 +467,7 @@ public sealed class GitHubTelemetryTests
             await WriteMessageAsync(stream, new Dictionary<string, object?>
             {
                 ["jsonrpc"] = "2.0",
-                ["method"] = "gitHubTelemetry.event",
+                ["method"] = method,
                 ["params"] = notificationParams,
             }, _cts.Token);
         }
@@ -525,6 +538,7 @@ public sealed class GitHubTelemetryTests
                 "session.detach" => new Dictionary<string, object?> { ["success"] = true },
                 "session.options.update" => new Dictionary<string, object?> { ["success"] = true },
                 "runtime.shutdown" => new Dictionary<string, object?>(),
+                "ping" => new Dictionary<string, object?> { ["message"] = "callback", ["timestamp"] = "2026-01-01T00:00:00Z" },
                 _ => throw new InvalidOperationException($"Unexpected RPC method '{method}'."),
             };
 
@@ -542,7 +556,7 @@ public sealed class GitHubTelemetryTests
             return new Dictionary<string, object?>
             {
                 ["ok"] = true,
-                ["protocolVersion"] = 3,
+                ["protocolVersion"] = 4,
                 ["version"] = "test",
             };
         }
@@ -702,5 +716,5 @@ public sealed class GitHubTelemetryTests
     }
 }
 
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 #endif

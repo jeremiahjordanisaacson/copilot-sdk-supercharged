@@ -5,9 +5,9 @@ E2E coverage for ``CopilotClient`` configuration options exposed via
 Mirrors ``dotnet/test/ClientOptionsTests.cs``. The two CliUrl-conflict tests
 (``Should_Throw_When_GitHubToken_Used_With_CliUrl`` and
 ``Should_Throw_When_UseLoggedInUser_Used_With_CliUrl``) have no Python
-equivalent because Python's ``RuntimeConnection.for_uri(...)`` does not accept
+equivalent because Python's ``RuntimeConnection.for_tcp(...)`` does not accept
 ``github_token`` / ``use_logged_in_user`` fields at all (those live on
-``CopilotClientOptions``, but a Uri-connected runtime ignores them), so the
+``CopilotClientOptions``, but a TCP-connected runtime ignores them), so the
 conflict cannot be expressed in code and the configurations are therefore
 intentionally omitted.
 """
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 
 import pytest
@@ -32,8 +33,8 @@ from copilot import (
     OpenCanvasInstance,
     RuntimeConnection,
 )
-from copilot.rpc import PingRequest
 from copilot.session import PermissionHandler
+from e2e.testharness.provider_options import byok_inference
 
 from .testharness import DEFAULT_GITHUB_TOKEN, E2ETestContext
 
@@ -48,35 +49,35 @@ def _make_options(
     connection_token: str | None = None,
     cli_path: str | None = None,
     cli_args: list[str] | None = None,
+    working_directory: str | None = None,
+    env: dict[str, str] | None = None,
+    base_directory: str | None = None,
+    session_idle_timeout_seconds: int | None = None,
     **overrides,
 ) -> dict[str, object]:
     """Build CopilotClient kwargs pre-populated for the test harness."""
+    process_options = {
+        "path": cli_path if cli_path is not None else ctx.cli_path,
+        "args": tuple(cli_args or []),
+        "working_directory": ctx.work_dir if working_directory is None else working_directory,
+        "env": ctx.get_env() if env is None else env,
+        "base_directory": base_directory,
+        "session_idle_timeout_seconds": session_idle_timeout_seconds,
+    }
     if use_tcp:
-        connection: RuntimeConnection = RuntimeConnection.for_tcp(
+        connection: RuntimeConnection = RuntimeConnection.for_spawned_tcp(
             port=port,
             connection_token=connection_token,
-            path=cli_path if cli_path is not None else ctx.cli_path,
-            args=tuple(cli_args or []),
+            **process_options,
         )
     else:
-        connection = RuntimeConnection.for_stdio(
-            path=cli_path if cli_path is not None else ctx.cli_path,
-            args=tuple(cli_args or []),
-        )
+        connection = RuntimeConnection.for_spawned_stdio(**process_options)
     base: dict[str, object] = {
-        "connection": connection,
-        "working_directory": ctx.work_dir,
-        "env": ctx.get_env(),
-        "github_token": DEFAULT_GITHUB_TOKEN,
+        "runtime": connection,
+        "github": {"token": DEFAULT_GITHUB_TOKEN, **overrides.pop("github", {})},
     }
     base.update(overrides)
     return base
-
-
-def _get_available_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 # ------------------- A scriptable fake CLI to capture process options -------------------
@@ -157,11 +158,11 @@ function handleMessage(message) {
   requests.push({ method: message.method, params: message.params });
   saveCapture();
   if (message.method === "connect") {
-    writeResponse(message.id, { ok: true, protocolVersion: 3, version: "fake" });
+    writeResponse(message.id, { ok: true, protocolVersion: 4, version: "fake" });
     return;
   }
   if (message.method === "ping") {
-    writeResponse(message.id, { message: "pong", protocolVersion: 3, timestamp: Date.now() });
+    writeResponse(message.id, { message: "pong", protocolVersion: 4, timestamp: Date.now() });
     return;
   }
   if (message.method === "registerExtensionLaunchProvider") {
@@ -228,17 +229,22 @@ def _get_captured_request(capture_path: str, method: str) -> dict:
 
 
 class TestClientOptions:
-    async def test_should_listen_on_configured_tcp_port(self, ctx: E2ETestContext):
-        port = _get_available_port()
-        client = CopilotClient(**_make_options(ctx, use_tcp=True, port=port))
-        try:
-            await client.start()
-            assert client.runtime_port == port
-
-            response = await client.rpc.ping(PingRequest(message="fixed-port"))
-            assert "pong" in response.message
-        finally:
-            await client.stop()
+    async def test_should_fail_when_configured_tcp_port_is_in_use(self, ctx: E2ETestContext):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            client = CopilotClient(
+                mode="coding-agent", **_make_options(ctx, use_tcp=True, port=port)
+            )
+            try:
+                message = f"failed to bind TCP server at 127.0.0.1:{port}:"
+                with pytest.raises(RuntimeError, match=re.escape(message)):
+                    await client.start()
+            finally:
+                await client.force_stop()
 
     async def test_should_use_client_cwd_for_default_workingdirectory(self, ctx: E2ETestContext):
         client_cwd = os.path.join(ctx.work_dir, "client-cwd")
@@ -246,10 +252,12 @@ class TestClientOptions:
         with open(os.path.join(client_cwd, "marker.txt"), "w") as f:
             f.write("I am in the client cwd")
 
-        client = CopilotClient(**_make_options(ctx, working_directory=client_cwd))
+        client = CopilotClient(
+            mode="coding-agent", **_make_options(ctx, working_directory=client_cwd)
+        )
         try:
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all}
             )
             try:
                 message = await session.send_and_wait(
@@ -261,7 +269,10 @@ class TestClientOptions:
         finally:
             await client.stop()
 
-    async def test_should_propagate_process_options_to_spawned_cli(self, ctx: E2ETestContext):
+    @pytest.mark.parametrize("log_level", [None, "info", "debug"])
+    async def test_should_propagate_process_options_to_spawned_cli(
+        self, ctx: E2ETestContext, log_level
+    ):
         cli_path = os.path.join(ctx.work_dir, "fake-cli.js")
         capture_path = os.path.join(ctx.work_dir, "fake-cli-capture.json")
         telemetry_path = os.path.join(ctx.work_dir, "telemetry.jsonl")
@@ -271,6 +282,7 @@ class TestClientOptions:
             f.write(FAKE_STDIO_CLI_SCRIPT)
 
         client = CopilotClient(
+            mode="coding-agent",
             **_make_options(
                 ctx,
                 cli_path=cli_path,
@@ -281,18 +293,19 @@ class TestClientOptions:
                     "COPILOT_HOME": copilot_home_from_env,
                     "COPILOT_RUNTIME_PROCESS_FILE_LOGGING": "0",
                 },
-                github_token="process-option-token",
-                log_level="debug",
+                github={"token": "process-option-token", "use_logged_in_user": False},
                 session_idle_timeout_seconds=17,
-                telemetry={
-                    "otlp_endpoint": "http://127.0.0.1:4318",
-                    "otlp_protocol": "http/protobuf",
-                    "file_path": telemetry_path,
-                    "exporter_type": "file",
-                    "source_name": "python-sdk-e2e",
-                    "capture_content": True,
+                observability={
+                    "log_level": log_level,
+                    "telemetry": {
+                        "otlp_endpoint": "http://127.0.0.1:4318",
+                        "otlp_protocol": "http/protobuf",
+                        "file_path": telemetry_path,
+                        "exporter_type": "file",
+                        "source_name": "python-sdk-e2e",
+                        "capture_content": True,
+                    },
                 },
-                use_logged_in_user=False,
             ),
         )
         try:
@@ -304,7 +317,10 @@ class TestClientOptions:
             args = capture["args"]
             env = capture["env"]
 
-            _assert_arg_value(args, "--log-level", "debug")
+            if log_level is None:
+                assert "--log-level" not in args
+            else:
+                _assert_arg_value(args, "--log-level", log_level)
             assert "--stdio" in args
             _assert_arg_value(args, "--auth-token-env", "COPILOT_SDK_AUTH_TOKEN")
             assert "--no-auto-login" in args
@@ -323,11 +339,11 @@ class TestClientOptions:
             assert env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] == "true"
 
             session = await client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
+                permissions={"on_request": PermissionHandler.approve_all},
                 enable_config_discovery=True,
-                enable_on_demand_instruction_discovery=True,
-                include_sub_agent_streaming_events=False,
-                custom_agents_local_only=False,
+                instructions={"on_demand_discovery": True},
+                events={"include_sub_agent_streaming_events": False},
+                agents={"local_discovery_only": False},
             )
             session_id = session.session_id
             try:
@@ -338,16 +354,16 @@ class TestClientOptions:
                 )
                 params = create_request["params"]
                 assert params["enableConfigDiscovery"] is True
-                assert params["enableOnDemandInstructionDiscovery"] is True
-                assert params["includeSubAgentStreamingEvents"] is False
-                assert params["customAgentsLocalOnly"] is False
+                assert params["instructions"]["onDemandDiscovery"] is True
+                assert params["events"]["includeSubAgentStreamingEvents"] is False
+                assert params["agents"]["localDiscoveryOnly"] is False
             finally:
                 await session.disconnect()
 
             resumed = await client.resume_session(
                 session_id,
-                on_permission_request=PermissionHandler.approve_all,
-                custom_agents_local_only=False,
+                permissions={"on_request": PermissionHandler.approve_all},
+                agents={"local_discovery_only": False},
             )
             try:
                 with open(capture_path) as f:
@@ -355,7 +371,7 @@ class TestClientOptions:
                 resume_request = next(
                     r for r in capture["requests"] if r["method"] == "session.resume"
                 )
-                assert resume_request["params"]["customAgentsLocalOnly"] is False
+                assert resume_request["params"]["agents"]["localDiscoveryOnly"] is False
             finally:
                 await resumed.disconnect()
         finally:
@@ -387,14 +403,14 @@ class TestClientOptions:
 
         provider = RecordingProvider()
         client = CopilotClient(
+            mode="coding-agent",
             **_make_options(
                 ctx,
                 cli_path=cli_path,
                 cli_args=["--capture-file", capture_path],
-                extension_launch_provider=provider,
-                github_token=None,
-                use_logged_in_user=False,
-            )
+                extensions={"launch_provider": provider},
+                github={"token": None, "use_logged_in_user": False},
+            ),
         )
         try:
             await client.start()
@@ -440,21 +456,21 @@ class TestClientOptions:
                 mode="empty",
                 base_directory=ctx.work_dir,
                 env={**ctx.get_env(), "COPILOT_RUNTIME_PROCESS_FILE_LOGGING": "0"},
-                use_logged_in_user=False,
-            ),
+                github={"use_logged_in_user": False},
+            )
         )
         try:
             session = await client.create_session(
-                available_tools=["builtin:ask_user"],
-                on_permission_request=PermissionHandler.approve_all,
+                tools={"available_tools": ["builtin:ask_user"]},
+                permissions={"on_request": PermissionHandler.approve_all},
             )
             session_id = session.session_id
             await session.disconnect()
 
             resumed = await client.resume_session(
                 session_id,
-                available_tools=["builtin:ask_user"],
-                on_permission_request=PermissionHandler.approve_all,
+                tools={"available_tools": ["builtin:ask_user"]},
+                permissions={"on_request": PermissionHandler.approve_all},
             )
             try:
                 with open(capture_path) as f:
@@ -466,8 +482,8 @@ class TestClientOptions:
                 resume_request = next(
                     r for r in capture["requests"] if r["method"] == "session.resume"
                 )
-                assert create_request["params"]["customAgentsLocalOnly"] is True
-                assert resume_request["params"]["customAgentsLocalOnly"] is True
+                assert create_request["params"]["agents"]["localDiscoveryOnly"] is True
+                assert resume_request["params"]["agents"]["localDiscoveryOnly"] is True
             finally:
                 await resumed.disconnect()
         finally:
@@ -488,12 +504,13 @@ class TestClientOptions:
             f.write(FAKE_STDIO_CLI_SCRIPT)
 
         client = CopilotClient(
+            mode="coding-agent",
             **_make_options(
                 ctx,
                 cli_path=cli_path,
                 cli_args=["--capture-file", capture_path],
-                use_logged_in_user=False,
-            )
+                github={"use_logged_in_user": False},
+            ),
         )
         try:
             await client.start()
@@ -501,42 +518,6 @@ class TestClientOptions:
                 name="python named at create",
                 client_name="advanced-create-client",
                 model="claude-sonnet-5",
-                reasoning_effort="medium",
-                reasoning_summary="detailed",
-                context_tier="long_context",
-                enable_citations=True,
-                enable_file_hooks=True,
-                capi={"enable_web_socket_responses": False},
-                mcp_oauth_token_storage="persistent",
-                custom_agents=[
-                    {
-                        "name": "agent-one",
-                        "display_name": "Agent One",
-                        "description": "Handles agent-one tasks.",
-                        "prompt": "Be agent one.",
-                        "tools": ["view"],
-                        "infer": True,
-                        "skills": ["create-skill"],
-                        "model": "claude-haiku-4.5",
-                    }
-                ],
-                default_agent={"excluded_tools": ["edit"]},
-                agent="agent-one",
-                skill_directories=["skills-create"],
-                disabled_skills=["disabled-create-skill"],
-                plugin_directories=["plugins-create"],
-                infinite_sessions={
-                    "enabled": False,
-                    "background_compaction_threshold": 0.5,
-                    "buffer_exhaustion_threshold": 0.9,
-                },
-                large_output={
-                    "enabled": True,
-                    "max_size_bytes": 4096,
-                    "output_directory": output_directory,
-                },
-                memory={"enabled": True},
-                github_token="session-create-token",
                 cloud=CloudSessionOptions(
                     repository=CloudSessionRepository(
                         owner="github",
@@ -544,80 +525,131 @@ class TestClientOptions:
                         branch="main",
                     )
                 ),
-                enable_mcp_apps=True,
-                request_canvas_renderer=True,
-                request_extensions=True,
-                extension_sdk_path="custom-extension-sdk",
-                extension_info=ExtensionInfo(
-                    source="python-sdk-tests",
-                    name="advanced-create-extension",
-                ),
-                canvases=[
-                    CanvasDeclaration(
-                        id="advanced-create-canvas",
-                        display_name="Advanced Create Canvas",
-                        description="Covers create-time canvas options.",
-                    )
-                ],
-                providers=[
-                    {
-                        "name": "create-provider",
-                        "type": "openai",
-                        "wire_api": "responses",
-                        "base_url": "https://create-provider.example.test/v1",
-                        "api_key": "create-provider-key",
-                        "headers": {"X-Create-Provider": "yes"},
+                inference={
+                    "reasoning_effort": "medium",
+                    "reasoning_summary": "detailed",
+                    "context_tier": "long_context",
+                    "enable_citations": True,
+                    "providers": [
+                        {
+                            "name": "create-provider",
+                            "type": "openai",
+                            "wire_api": "responses",
+                            "base_url": "https://create-provider.example.test/v1",
+                            "api_key": "create-provider-key",
+                            "headers": {"X-Create-Provider": "yes"},
+                        }
+                    ],
+                    "models": [
+                        {
+                            "provider": "create-provider",
+                            "id": "create-model",
+                            "name": "Create Model",
+                            "model_id": "claude-sonnet-5",
+                            "wire_model": "create-wire-model",
+                            "max_context_window_tokens": 12_000,
+                            "max_prompt_tokens": 10_000,
+                            "max_output_tokens": 2_000,
+                        }
+                    ],
+                },
+                hooks={"enable_repository_hooks": True},
+                github={
+                    "capi": {"enable_web_socket_responses": False},
+                    "token": "session-create-token",
+                },
+                agents={
+                    "definitions": [
+                        {
+                            "name": "agent-one",
+                            "display_name": "Agent One",
+                            "description": "Handles agent-one tasks.",
+                            "prompt": "Be agent one.",
+                            "tools": ["view"],
+                            "infer": True,
+                            "skills": ["create-skill"],
+                            "model": "claude-haiku-4.5",
+                        }
+                    ],
+                    "default": {"excluded_tools": ["edit"]},
+                    "selected": "agent-one",
+                },
+                skills={
+                    "directories": ["skills-create"],
+                    "disabled_skills": ["disabled-create-skill"],
+                },
+                plugins={"directories": ["plugins-create"]},
+                state={
+                    "infinite_sessions": {
+                        "enabled": False,
+                        "background_compaction_threshold": 0.5,
+                        "buffer_exhaustion_threshold": 0.9,
+                    },
+                    "memory": {"enabled": True},
+                },
+                tools={
+                    "large_output": {
+                        "enabled": True,
+                        "max_size_bytes": 4096,
+                        "output_directory": output_directory,
                     }
-                ],
-                models=[
-                    {
-                        "provider": "create-provider",
-                        "id": "create-model",
-                        "name": "Create Model",
-                        "model_id": "claude-sonnet-5",
-                        "wire_model": "create-wire-model",
-                        "max_context_window_tokens": 12_000,
-                        "max_prompt_tokens": 10_000,
-                        "max_output_tokens": 2_000,
-                    }
-                ],
-                on_permission_request=PermissionHandler.approve_all,
+                },
+                canvases={
+                    "request_renderer": True,
+                    "definitions": [
+                        CanvasDeclaration(
+                            id="advanced-create-canvas",
+                            display_name="Advanced Create Canvas",
+                            description="Covers create-time canvas options.",
+                        )
+                    ],
+                },
+                extensions={
+                    "enabled": True,
+                    "sdk_path": "custom-extension-sdk",
+                    "identity": ExtensionInfo(
+                        source="python-sdk-tests",
+                        name="advanced-create-extension",
+                    ),
+                },
+                permissions={"on_request": PermissionHandler.approve_all},
+                mcp={"oauth_token_storage": "persistent", "enable_apps": True},
             )
             try:
                 params = _get_captured_request(capture_path, "session.create")
                 assert params["name"] == "python named at create"
                 assert params["clientName"] == "advanced-create-client"
                 assert params["model"] == "claude-sonnet-5"
-                assert params["reasoningEffort"] == "medium"
-                assert params["reasoningSummary"] == "detailed"
-                assert params["contextTier"] == "long_context"
-                assert params["enableCitations"] is True
-                assert params["enableFileHooks"] is True
-                assert params["capi"]["enableWebSocketResponses"] is False
-                assert params["mcpOAuthTokenStorage"] == "persistent"
-                assert params["agent"] == "agent-one"
-                assert params["defaultAgent"]["excludedTools"][0] == "edit"
-                assert params["customAgents"][0]["name"] == "agent-one"
-                assert params["pluginDirectories"][0] == "plugins-create"
-                assert params["disabledSkills"][0] == "disabled-create-skill"
-                assert params["infiniteSessions"]["enabled"] is False
-                assert params["largeOutput"]["enabled"] is True
-                assert params["largeOutput"]["maxSizeBytes"] == 4096
-                assert params["largeOutput"]["outputDir"] == output_directory
-                assert params["memory"]["enabled"] is True
-                assert params["gitHubToken"] == "session-create-token"
+                assert params["inference"]["reasoningEffort"] == "medium"
+                assert params["inference"]["reasoningSummary"] == "detailed"
+                assert params["inference"]["contextTier"] == "long_context"
+                assert params["inference"]["enableCitations"] is True
+                assert params["hooks"]["enableRepositoryHooks"] is True
+                assert params["github"]["capi"]["enableWebSocketResponses"] is False
+                assert params["mcp"]["oauthTokenStorage"] == "persistent"
+                assert params["agents"]["selected"] == "agent-one"
+                assert params["agents"]["default"]["excludedTools"][0] == "edit"
+                assert params["agents"]["definitions"][0]["name"] == "agent-one"
+                assert params["plugins"]["directories"][0] == "plugins-create"
+                assert params["skills"]["disabledSkills"][0] == "disabled-create-skill"
+                assert params["state"]["infiniteSessions"]["enabled"] is False
+                assert params["tools"]["largeOutput"]["enabled"] is True
+                assert params["tools"]["largeOutput"]["maxSizeBytes"] == 4096
+                assert params["tools"]["largeOutput"]["outputDir"] == output_directory
+                assert params["state"]["memory"]["enabled"] is True
+                assert params["github"]["token"] == "session-create-token"
                 assert "remoteSession" not in params
                 assert params["cloud"]["repository"]["owner"] == "github"
-                assert params["requestMcpApps"] is True
-                assert params["requestCanvasRenderer"] is True
-                assert params["requestExtensions"] is True
-                assert params["extensionSdkPath"] == "custom-extension-sdk"
-                assert params["extensionInfo"]["name"] == "advanced-create-extension"
-                assert params["canvases"][0]["id"] == "advanced-create-canvas"
-                assert params["providers"][0]["name"] == "create-provider"
-                assert params["providers"][0]["wireApi"] == "responses"
-                assert params["models"][0]["id"] == "create-model"
-                assert params["models"][0]["maxContextWindowTokens"] == 12_000
+                assert params["mcp"]["enableApps"] is True
+                assert params["canvases"]["requestRenderer"] is True
+                assert params["extensions"]["enabled"] is True
+                assert params["extensions"]["sdkPath"] == "custom-extension-sdk"
+                assert params["extensions"]["identity"]["name"] == "advanced-create-extension"
+                assert params["canvases"]["definitions"][0]["id"] == "advanced-create-canvas"
+                assert params["inference"]["providers"][0]["name"] == "create-provider"
+                assert params["inference"]["providers"][0]["wireApi"] == "responses"
+                assert params["inference"]["models"][0]["id"] == "create-model"
+                assert params["inference"]["models"][0]["maxContextWindowTokens"] == 12_000
             finally:
                 await session.disconnect()
         finally:
@@ -634,35 +666,47 @@ class TestClientOptions:
             f.write(FAKE_STDIO_CLI_SCRIPT)
 
         client = CopilotClient(
+            mode="coding-agent",
             **_make_options(
                 ctx,
                 cli_path=cli_path,
                 cli_args=["--capture-file", capture_path],
-                use_logged_in_user=False,
-            )
+                github={"use_logged_in_user": False},
+            ),
         )
         try:
             await client.start()
             session = await client.create_session(
                 model="claude-sonnet-5",
-                provider={
-                    "type": "azure",
-                    "wire_api": "responses",
-                    "transport": "http",
-                    "base_url": "https://azure-provider.example.test/openai",
-                    "api_key": "provider-api-key",
-                    "bearer_token": "provider-bearer-token",
-                    "azure": {"api_version": "2024-02-15-preview"},
-                    "headers": {"X-Provider-Wire": "yes"},
-                    "model_id": "claude-sonnet-5",
-                    "wire_model": "azure-deployment",
-                    "max_prompt_tokens": 8192,
-                    "max_output_tokens": 1024,
+                inference={
+                    **byok_inference(
+                        {
+                            "type": "azure",
+                            "wire_api": "responses",
+                            "transport": "http",
+                            "base_url": "https://azure-provider.example.test/openai",
+                            "api_key": "provider-api-key",
+                            "bearer_token": "provider-bearer-token",
+                            "azure": {"api_version": "2024-02-15-preview"},
+                            "headers": {"X-Provider-Wire": "yes"},
+                            "model_id": "claude-sonnet-5",
+                            "wire_model": "azure-deployment",
+                            "max_prompt_tokens": 8192,
+                            "max_output_tokens": 1024,
+                        },
+                        "claude-sonnet-5",
+                    )
                 },
-                on_permission_request=PermissionHandler.approve_all,
+                github={"capi": {"enabled": False}},
+                permissions={"on_request": PermissionHandler.approve_all},
             )
             try:
-                provider = _get_captured_request(capture_path, "session.create")["provider"]
+                provider = _get_captured_request(capture_path, "session.create")["inference"][
+                    "providers"
+                ][0]
+                model = _get_captured_request(capture_path, "session.create")["inference"][
+                    "models"
+                ][0]
                 assert provider["type"] == "azure"
                 assert provider["wireApi"] == "responses"
                 assert provider["transport"] == "http"
@@ -671,10 +715,10 @@ class TestClientOptions:
                 assert provider["bearerToken"] == "provider-bearer-token"
                 assert provider["azure"]["apiVersion"] == "2024-02-15-preview"
                 assert provider["headers"]["X-Provider-Wire"] == "yes"
-                assert provider["modelId"] == "claude-sonnet-5"
-                assert provider["wireModel"] == "azure-deployment"
-                assert provider["maxPromptTokens"] == 8192
-                assert provider["maxOutputTokens"] == 1024
+                assert model["modelId"] == "claude-sonnet-5"
+                assert model["wireModel"] == "azure-deployment"
+                assert model["maxPromptTokens"] == 8192
+                assert model["maxOutputTokens"] == 1024
             finally:
                 await session.disconnect()
         finally:
@@ -692,12 +736,13 @@ class TestClientOptions:
             f.write(FAKE_STDIO_CLI_SCRIPT)
 
         client = CopilotClient(
+            mode="coding-agent",
             **_make_options(
                 ctx,
                 cli_path=cli_path,
                 cli_args=["--capture-file", capture_path],
-                use_logged_in_user=False,
-            )
+                github={"use_logged_in_user": False},
+            ),
         )
         try:
             await client.start()
@@ -705,52 +750,58 @@ class TestClientOptions:
                 "advanced-resume-session",
                 client_name="advanced-resume-client",
                 model="claude-haiku-4.5",
-                reasoning_effort="low",
-                reasoning_summary="none",
-                context_tier="default",
                 continue_pending_work=True,
-                enable_file_hooks=True,
-                mcp_oauth_token_storage="persistent",
-                plugin_directories=["plugins-resume"],
-                large_output={
-                    "enabled": False,
-                    "max_size_bytes": 2048,
-                    "output_directory": output_directory,
+                inference={
+                    "reasoning_effort": "low",
+                    "reasoning_summary": "none",
+                    "context_tier": "default",
                 },
-                memory={"enabled": False},
-                open_canvases=[
-                    OpenCanvasInstance(
-                        canvas_id="resume-canvas",
-                        extension_id="python-sdk-tests/resume-extension",
-                        extension_name="Resume Extension",
-                        instance_id="resume-canvas-1",
-                        input={"start": 41},
-                        status="ready",
-                        title="Resume Canvas",
-                        url="https://example.com/resume-canvas",
-                    )
-                ],
-                on_permission_request=PermissionHandler.approve_all,
+                hooks={"enable_repository_hooks": True},
+                plugins={"directories": ["plugins-resume"]},
+                tools={
+                    "large_output": {
+                        "enabled": False,
+                        "max_size_bytes": 2048,
+                        "output_directory": output_directory,
+                    }
+                },
+                state={"memory": {"enabled": False}},
+                canvases={
+                    "open": [
+                        OpenCanvasInstance(
+                            canvas_id="resume-canvas",
+                            extension_id="python-sdk-tests/resume-extension",
+                            extension_name="Resume Extension",
+                            instance_id="resume-canvas-1",
+                            input={"start": 41},
+                            status="ready",
+                            title="Resume Canvas",
+                            url="https://example.com/resume-canvas",
+                        )
+                    ]
+                },
+                permissions={"on_request": PermissionHandler.approve_all},
+                mcp={"oauth_token_storage": "persistent"},
             )
             try:
                 params = _get_captured_request(capture_path, "session.resume")
                 assert params["sessionId"] == "advanced-resume-session"
                 assert params["clientName"] == "advanced-resume-client"
                 assert params["model"] == "claude-haiku-4.5"
-                assert params["reasoningEffort"] == "low"
-                assert params["reasoningSummary"] == "none"
-                assert params["contextTier"] == "default"
+                assert params["inference"]["reasoningEffort"] == "low"
+                assert params["inference"]["reasoningSummary"] == "none"
+                assert params["inference"]["contextTier"] == "default"
                 assert params["continuePendingWork"] is True
-                assert params["enableFileHooks"] is True
-                assert params["mcpOAuthTokenStorage"] == "persistent"
-                assert params["pluginDirectories"][0] == "plugins-resume"
-                assert params["largeOutput"]["enabled"] is False
-                assert params["largeOutput"]["maxSizeBytes"] == 2048
-                assert params["largeOutput"]["outputDir"] == output_directory
-                assert params["memory"]["enabled"] is False
+                assert params["hooks"]["enableRepositoryHooks"] is True
+                assert params["mcp"]["oauthTokenStorage"] == "persistent"
+                assert params["plugins"]["directories"][0] == "plugins-resume"
+                assert params["tools"]["largeOutput"]["enabled"] is False
+                assert params["tools"]["largeOutput"]["maxSizeBytes"] == 2048
+                assert params["tools"]["largeOutput"]["outputDir"] == output_directory
+                assert params["state"]["memory"]["enabled"] is False
                 assert "remoteSession" not in params
 
-                open_canvas = params["openCanvases"][0]
+                open_canvas = params["canvases"]["open"][0]
                 assert open_canvas["canvasId"] == "resume-canvas"
                 assert open_canvas["extensionId"] == "python-sdk-tests/resume-extension"
                 assert open_canvas["extensionName"] == "Resume Extension"

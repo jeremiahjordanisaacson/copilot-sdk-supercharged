@@ -2,8 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.Logging;
 using System.Data;
 using System.Diagnostics;
@@ -11,7 +11,7 @@ using System.Reflection;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test;
+namespace Microsoft.Copilot.Test;
 
 public abstract class E2ETestBase : IClassFixture<E2ETestFixture>, IAsyncLifetime
 {
@@ -69,7 +69,6 @@ public abstract class E2ETestBase : IClassFixture<E2ETestFixture>, IAsyncLifetim
 
     public async Task InitializeAsync()
     {
-        Ctx.PrepareForTest();
         await Ctx.CleanupAfterTestAsync();
         await Ctx.ConfigureForTestAsync(_snapshotCategory, _testName, _replayOnly);
     }
@@ -130,10 +129,10 @@ public abstract class E2ETestBase : IClassFixture<E2ETestFixture>, IAsyncLifetim
     /// Creates a session with a default config that approves all permissions.
     /// Convenience wrapper for E2E tests.
     /// </summary>
-    protected Task<CopilotSession> CreateSessionAsync(SessionConfig? config = null)
+    protected Task<CopilotSession> CreateSessionAsync(CreateSessionOptions? config = null)
     {
-        config ??= new SessionConfig();
-        config.OnPermissionRequest ??= PermissionHandler.ApproveAll;
+        config ??= new CreateSessionOptions();
+        config.Permissions.OnRequest ??= PermissionHandler.ApproveAll;
         return Ctx.CreateSessionAsync(Client, config);
     }
 
@@ -141,10 +140,10 @@ public abstract class E2ETestBase : IClassFixture<E2ETestFixture>, IAsyncLifetim
     /// Resumes a session with a default config that approves all permissions.
     /// Convenience wrapper for E2E tests.
     /// </summary>
-    protected async Task<CopilotSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig? config = null)
+    protected async Task<CopilotSession> ResumeSessionAsync(string sessionId, ResumeSessionOptions? config = null)
     {
-        config ??= new ResumeSessionConfig();
-        config.OnPermissionRequest ??= PermissionHandler.ApproveAll;
+        config ??= new ResumeSessionOptions();
+        config.Permissions.OnRequest ??= PermissionHandler.ApproveAll;
 
         CopilotClient client;
         if (E2ETestContext.UsesInProcessTransport)
@@ -159,7 +158,8 @@ public abstract class E2ETestBase : IClassFixture<E2ETestFixture>, IAsyncLifetim
 
             client = Ctx.CreateClient(options: new CopilotClientOptions
             {
-                Connection = RuntimeConnection.ForUri($"localhost:{port}", connectionToken: E2ETestFixture.SharedTcpConnectionToken),
+                Mode = CopilotClientMode.CodingAgent,
+                Runtime = RuntimeConnection.ForTcp("localhost", port, connectionToken: E2ETestFixture.SharedTcpConnectionToken)
             });
         }
 
@@ -190,18 +190,8 @@ public abstract class E2ETestBase : IClassFixture<E2ETestFixture>, IAsyncLifetim
         return exchange.Request.Tools?.Select(t => t.Function.Name).ToList() ?? [];
     }
 
-    protected async Task<List<ParsedHttpExchange>> WaitForExchangesAsync(int minimumCount = 1)
-    {
-        List<ParsedHttpExchange> exchanges = [];
-        await TestHelper.WaitForConditionAsync(
-            async () =>
-            {
-                exchanges = await Ctx.GetExchangesAsync();
-                return exchanges.Count >= minimumCount;
-            },
-            timeoutMessage: $"Timed out waiting for {minimumCount} chat completion request(s)");
-        return exchanges;
-    }
+    protected Task<List<ParsedHttpExchange>> WaitForExchangesAsync(int minimumCount = 1)
+        => TestHelper.WaitForExchangesAsync(Ctx.GetExchangesAsync, minimumCount);
 
     protected async Task<List<ParsedHttpExchange>> SendAndWaitForExchangesAsync(
         CopilotSession session,

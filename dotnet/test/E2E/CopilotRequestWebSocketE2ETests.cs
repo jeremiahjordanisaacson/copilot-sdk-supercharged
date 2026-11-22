@@ -2,20 +2,20 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
-#pragma warning disable GHCP001 // The LLM inference surface is intentionally experimental.
+#pragma warning disable MCPSDK001 // The LLM inference surface is intentionally experimental.
 
 /// <summary>
 /// Drives a full agent turn over the WebSocket inference transport through a
@@ -51,15 +51,14 @@ public class CopilotRequestWebSocketE2ETests(E2ETestFixture fixture, ITestOutput
 
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(),
-            RequestHandler = handler,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(),
+            Models = new ClientModelOptions { RequestHandler = handler }
         }, environment: env);
         await client.StartAsync();
 
-        var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         string content;
         try

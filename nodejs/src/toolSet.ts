@@ -3,7 +3,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 /**
- * Builder for the {@link SessionConfigBase.availableTools} list using
+ * Builder for the {@link SessionOptionsBase.tools.availableTools} list using
  * source-qualified filter patterns (`builtin:*`, `mcp:<name>`, `custom:*`, etc.).
  *
  * See plan: client-level Mode = "empty" with explicit tool selection.
@@ -31,7 +31,7 @@ function validateName(kind: "builtin" | "mcp" | "custom", name: string): void {
 
 /**
  * Builder that produces a list of source-qualified tool filter strings for
- * {@link SessionConfigBase.availableTools}.
+ * {@link SessionOptionsBase.tools.availableTools}.
  *
  * Tools are classified by the runtime at registration time (not from name
  * parsing), so `addBuiltIn("foo")` matches only tools the runtime registered
@@ -44,10 +44,11 @@ function validateName(kind: "builtin" | "mcp" | "custom", name: string): void {
  *     .addBuiltIn(BuiltInTools.Isolated)
  *     .addMcp("*")
  *     .addCustom("*");
- *
+ *  *
  * const session = await client.createSession({
- *     availableTools: tools,
- *     // ...
+ * tools: {
+ * availableTools: tools
+ * }
  * });
  * ```
  */
@@ -102,7 +103,7 @@ export class ToolSet {
 
     /**
      * Returns a defensive copy of the accumulated filter strings, suitable for
-     * passing as {@link SessionConfigBase.availableTools}.
+     * passing as {@link SessionOptionsBase.tools.availableTools}.
      */
     toArray(): string[] {
         return [...this.items];

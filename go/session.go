@@ -7,13 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 // toolSearchToolName is the fixed name of the runtime's built-in tool-search
@@ -37,8 +38,8 @@ type sessionHandler struct {
 //
 // Example usage:
 //
-//	session, err := client.CreateSession(copilot.SessionConfig{
-//	    Model: "gpt-4",
+//	session, err := client.CreateSession(copilot.sessionOptions{
+//	    Model: "gpt-5.4",
 //	})
 //	if err != nil {
 //	    log.Fatal(err)
@@ -59,55 +60,63 @@ type sessionHandler struct {
 //	})
 type Session struct {
 	// SessionID is the unique identifier for this session.
-	SessionID                   string
-	workspacePath               string
-	transcriptRecovery          *TranscriptRecoveryReport
-	client                      *jsonrpc2.Client
-	clientSessionAPIs           *rpc.ClientSessionAPIHandlers
-	handlers                    []*sessionHandler
-	nextHandlerID               uint64
-	handlerMutex                sync.RWMutex
-	gracefulRetirement          bool
-	toolHandlers                map[string]ToolHandler
-	toolHandlersM               sync.RWMutex
-	setToolsOnce                sync.Once
-	setToolsGate                chan struct{}
-	pendingExternalTools        map[string]*pendingExternalTool
-	pendingExternalToolsM       sync.Mutex
-	externalToolsClosed         bool
-	permissionHandler           permissionHandlerFunc
-	permissionMux               sync.RWMutex
-	managedSettings             bool
-	mcpAuthHandler              MCPAuthHandler
-	mcpAuthRefreshHandler       MCPAuthRuntimeRefreshHandler
-	mcpAuthMu                   sync.RWMutex
-	userInputHandler            UserInputHandler
-	userInputMux                sync.RWMutex
-	exitPlanModeHandler         ExitPlanModeRequestHandler
-	exitPlanModeMu              sync.RWMutex
-	autoModeSwitchHandler       AutoModeSwitchRequestHandler
-	autoModeSwitchMu            sync.RWMutex
-	hooks                       *SessionHooks
-	hooksMux                    sync.RWMutex
-	transformCallbacks          map[string]SectionTransformFn
-	transformMu                 sync.Mutex
-	commandHandlers             map[string]CommandHandler
-	commandHandlersMu           sync.RWMutex
-	elicitationHandler          ElicitationHandler
-	elicitationMu               sync.RWMutex
-	canvasHandler               CanvasHandler
-	canvasMu                    sync.RWMutex
-	skillProvider               SkillProvider
-	skillProviderMu             sync.RWMutex
-	bearerTokenProviders        map[string]BearerTokenProvider
-	bearerTokenMu               sync.RWMutex
-	releaseGitHubTokenProvider  func()
-	gitHubTokenProviderMu       sync.Mutex
-	gitHubTokenProviderReleased bool
-	openCanvases                []rpc.OpenCanvasInstance
-	openCanvasesMu              sync.RWMutex
-	capabilities                SessionCapabilities
-	capabilitiesMu              sync.RWMutex
+	SessionID                          string
+	workspacePath                      string
+	transcriptRecovery                 *TranscriptRecoveryReport
+	permissionModeResult               *rpc.PermissionsSetModeResult
+	client                             *jsonrpc2.Client
+	clientSessionAPIs                  *rpc.ClientSessionAPIHandlers
+	handlers                           []*sessionHandler
+	nextHandlerID                      uint64
+	handlerMutex                       sync.RWMutex
+	gracefulRetirement                 bool
+	toolHandlers                       map[string]ToolHandler
+	toolHandlersM                      sync.RWMutex
+	setToolsOnce                       sync.Once
+	setToolsGate                       chan struct{}
+	pendingExternalTools               map[string]*pendingExternalTool
+	pendingExternalToolsM              sync.Mutex
+	externalToolsClosed                bool
+	permissionHandler                  permissionHandlerFunc
+	permissionMux                      sync.RWMutex
+	managedSettings                    bool
+	mcpAuthHandler                     MCPAuthHandler
+	mcpAuthRefreshHandler              MCPAuthRuntimeRefreshHandler
+	mcpAuthMu                          sync.RWMutex
+	userInputHandler                   AttributedUserInputHandler
+	userInputMux                       sync.RWMutex
+	shellAuthenticationHandler         ShellAuthenticationHandler
+	pendingShellAuthenticationRequests map[string]context.CancelFunc
+	shellAuthenticationMux             sync.RWMutex
+	exitPlanModeHandler                AttributedExitPlanModeRequestHandler
+	exitPlanModeMu                     sync.RWMutex
+	autoModeSwitchHandler              AutoModeSwitchRequestHandler
+	autoModeRecoveryEnabled            bool
+	autoModeSwitchMu                   sync.RWMutex
+	hooks                              *SessionHooks
+	hooksMux                           sync.RWMutex
+	transformCallbacks                 map[string]SectionTransformFn
+	transformMu                        sync.Mutex
+	commandHandlers                    map[string]CommandHandler
+	commandHandlersMu                  sync.RWMutex
+	elicitationHandler                 AttributedElicitationHandler
+	elicitationMu                      sync.RWMutex
+	canvasHandler                      CanvasHandler
+	canvasMu                           sync.RWMutex
+	skillProvider                      SkillProvider
+	skillProviderMu                    sync.RWMutex
+	memoryStore                        func(context.Context, StoredMemory) error
+	memoryStoreMu                      sync.RWMutex
+	bearerTokenProviders               map[string]BearerTokenProvider
+	bearerTokenMu                      sync.RWMutex
+	releaseGitHubTokenProvider         func()
+	releaseFromClient                  func()
+	gitHubTokenProviderMu              sync.Mutex
+	gitHubTokenProviderReleased        bool
+	openCanvases                       []rpc.OpenCanvasInstance
+	openCanvasesMu                     sync.RWMutex
+	capabilities                       SessionCapabilities
+	capabilitiesMu                     sync.RWMutex
 
 	// eventCh serializes user event handler dispatch. dispatchEvent enqueues;
 	// a single goroutine (processEvents) dequeues and invokes handlers in FIFO order.
@@ -121,6 +130,7 @@ type Session struct {
 	eventBacklog             []SessionEvent
 	eventBacklogActive       bool
 	closeOnce                sync.Once
+	detached                 atomic.Bool
 	completionRPCUnsupported atomic.Bool
 
 	// RPC provides typed session-scoped RPC methods.
@@ -148,6 +158,22 @@ func (s *Session) TranscriptRecovery() *TranscriptRecoveryReport {
 	report := *s.transcriptRecovery
 	report.InvalidLineNumbers = append([]int(nil), report.InvalidLineNumbers...)
 	return &report
+}
+
+// PermissionModeResult reports the outcome of the PermissionMode requested when
+// the session was created or resumed: whether it was applied, and the
+// authoritative mode the session started in. It returns nil when no mode was
+// requested. The returned value is independent of session state.
+func (s *Session) PermissionModeResult() *rpc.PermissionsSetModeResult {
+	if s.permissionModeResult == nil {
+		return nil
+	}
+	result := *s.permissionModeResult
+	if result.Reason != nil {
+		reason := *result.Reason
+		result.Reason = &reason
+	}
+	return &result
 }
 
 // OpenCanvases returns the open-canvas snapshot last reported by the runtime.
@@ -252,6 +278,24 @@ func (s *Session) clearSkillProvider() {
 	s.skillProviderMu.Unlock()
 }
 
+func (s *Session) registerMemoryStore(store func(context.Context, StoredMemory) error) {
+	s.memoryStoreMu.Lock()
+	defer s.memoryStoreMu.Unlock()
+	s.memoryStore = store
+}
+
+func (s *Session) getMemoryStore() func(context.Context, StoredMemory) error {
+	s.memoryStoreMu.RLock()
+	defer s.memoryStoreMu.RUnlock()
+	return s.memoryStore
+}
+
+func (s *Session) clearMemoryStore() {
+	s.memoryStoreMu.Lock()
+	s.memoryStore = nil
+	s.memoryStoreMu.Unlock()
+}
+
 // registerBearerTokenProviders installs per-provider [BearerTokenProvider] callbacks
 // for BYOK providers configured with managed-identity / on-demand bearer-token
 // auth, keyed by provider name.
@@ -346,7 +390,27 @@ func (a *canvasClientSessionAdapter) Invoke(request *rpc.CanvasProviderInvokeAct
 	if actionErr != nil {
 		return nil, canvasResultError(actionErr)
 	}
-	return result, nil
+	return canvasActionResult(result), nil
+}
+
+// canvasActionResult gives a ToolResult returned by OnAction the ResultType
+// default a tool handler's result gets. Without a ResultType, the model would
+// get the whole value as JSON text and none of its images.
+func canvasActionResult(result any) any {
+	var toolResult ToolResult
+	switch r := result.(type) {
+	case ToolResult:
+		toolResult = r
+	case *ToolResult:
+		if r == nil {
+			return result
+		}
+		toolResult = *r
+	default:
+		return result
+	}
+	toolResult.ResultType = toolResultTypeOrDefault(toolResult)
+	return toolResult
 }
 
 func (a *canvasClientSessionAdapter) Open(request *rpc.CanvasProviderOpenRequest) (*rpc.CanvasProviderOpenResult, error) {
@@ -375,7 +439,7 @@ func (a *canvasClientSessionAdapter) resolveHandler(sessionID string) (CanvasHan
 	if handler == nil {
 		return nil, canvasJSONRPCError(NewCanvasError(
 			"canvas_handler_unset",
-			"No CanvasHandler installed on this session; install one via SessionConfig.CanvasHandler before creating the session.",
+			"No CanvasHandler installed on this session; install one via sessionOptions.CanvasHandler before creating the session.",
 		))
 	}
 	return handler, nil
@@ -492,6 +556,7 @@ func (s *Session) createSendRequest(ctx context.Context, options MessageOptions)
 		Prompt:         options.Prompt,
 		Source:         options.Source,
 		DisplayPrompt:  options.DisplayPrompt,
+		ClientTurnID:   options.ClientTurnID,
 		Attachments:    options.Attachments,
 		Mode:           options.Mode,
 		AgentMode:      options.AgentMode,
@@ -918,6 +983,21 @@ func (s *Session) On(handler SessionEventHandler) func() {
 }
 
 func (s *Session) on(handler SessionEventHandler, prepend bool) func() {
+	return s.onWithPermissionEnvelope(legacyPermissionEventHandler(handler), prepend)
+}
+
+// OnWithPermissionEnvelope subscribes to lossless permission events.
+// Permission requests use *PermissionRequestedDataWithEnvelope; other data types
+// match On. Dispatch order and unsubscribe behavior are identical to On.
+func (s *Session) OnWithPermissionEnvelope(handler SessionEventHandler) func() {
+	return s.onWithPermissionEnvelope(handler, false)
+}
+
+func (s *Session) onWithPermissionEnvelope(handler SessionEventHandler, prepend bool) func() {
+	return s.registerEventHandler(handler, prepend)
+}
+
+func (s *Session) registerEventHandler(handler SessionEventHandler, prepend bool) func() {
 	s.handlerMutex.Lock()
 	defer s.handlerMutex.Unlock()
 
@@ -1001,6 +1081,7 @@ type permissionHandlerFunc func(
 	invocation PermissionInvocation,
 	promptRequest rpc.PermissionPromptRequest,
 	assistedApprovalAssessment rpc.AssistedApprovalAssessment,
+	envelope *PermissionRequestEnvelope,
 ) (rpc.PermissionDecision, error)
 
 // registerPermissionHandler registers a permission handler for this session.
@@ -1021,6 +1102,7 @@ func (s *Session) registerPermissionHandler(handler PermissionHandlerFunc) {
 		invocation PermissionInvocation,
 		_ rpc.PermissionPromptRequest,
 		_ rpc.AssistedApprovalAssessment,
+		_ *PermissionRequestEnvelope,
 	) (rpc.PermissionDecision, error) {
 		return handler(request, invocation)
 	}
@@ -1037,8 +1119,33 @@ func (s *Session) registerPermissionHandlerWithPrompt(handler PermissionHandlerW
 		invocation PermissionInvocation,
 		promptRequest rpc.PermissionPromptRequest,
 		assistedApprovalAssessment rpc.AssistedApprovalAssessment,
+		_ *PermissionRequestEnvelope,
 	) (rpc.PermissionDecision, error) {
 		return handler(request, PermissionHandlerInvocation{
+			PermissionInvocation:       invocation,
+			AssistedApprovalAssessment: assistedApprovalAssessment,
+			PromptRequest:              promptRequest,
+		})
+	}
+}
+
+func (s *Session) registerPermissionHandlerWithEnvelope(handler PermissionHandlerWithEnvelopeFunc) {
+	if handler == nil {
+		return
+	}
+	s.permissionMux.Lock()
+	defer s.permissionMux.Unlock()
+	s.permissionHandler = func(
+		request PermissionRequest,
+		invocation PermissionInvocation,
+		promptRequest rpc.PermissionPromptRequest,
+		assistedApprovalAssessment rpc.AssistedApprovalAssessment,
+		envelope *PermissionRequestEnvelope,
+	) (rpc.PermissionDecision, error) {
+		if envelope == nil {
+			envelope = &PermissionRequestEnvelope{Request: request}
+		}
+		return handler(envelope, PermissionHandlerInvocation{
 			PermissionInvocation:       invocation,
 			AssistedApprovalAssessment: assistedApprovalAssessment,
 			PromptRequest:              promptRequest,
@@ -1060,13 +1167,31 @@ func (s *Session) getPermissionHandler() permissionHandlerFunc {
 //
 // This method is internal and typically called when creating a session.
 func (s *Session) registerUserInputHandler(handler UserInputHandler) {
+	s.registerAttributedUserInputHandler(userInputHandlerFor(handler, nil))
+}
+
+// registerAttributedUserInputHandler registers a user input handler whose
+// answers can say who answered.
+func (s *Session) registerAttributedUserInputHandler(handler AttributedUserInputHandler) {
 	s.userInputMux.Lock()
 	defer s.userInputMux.Unlock()
 	s.userInputHandler = handler
 }
 
+// userInputHandlerFor returns the handler a config selects: the attributed
+// handler when set, otherwise the plain handler, whose answers carry no label.
+func userInputHandlerFor(plain UserInputHandler, attributed AttributedUserInputHandler) AttributedUserInputHandler {
+	if attributed != nil || plain == nil {
+		return attributed
+	}
+	return func(request UserInputRequest, invocation UserInputInvocation) (AttributedUserInputResponse, error) {
+		response, err := plain(request, invocation)
+		return AttributedUserInputResponse{UserInputResponse: response}, err
+	}
+}
+
 // getUserInputHandler returns the currently registered user input handler, or nil.
-func (s *Session) getUserInputHandler() UserInputHandler {
+func (s *Session) getUserInputHandler() AttributedUserInputHandler {
 	s.userInputMux.RLock()
 	defer s.userInputMux.RUnlock()
 	return s.userInputHandler
@@ -1074,11 +1199,11 @@ func (s *Session) getUserInputHandler() UserInputHandler {
 
 // handleUserInputRequest handles a user input request from the Copilot CLI.
 // This is an internal method called by the SDK when the CLI requests user input.
-func (s *Session) handleUserInputRequest(request UserInputRequest) (UserInputResponse, error) {
+func (s *Session) handleUserInputRequest(request UserInputRequest) (AttributedUserInputResponse, error) {
 	handler := s.getUserInputHandler()
 
 	if handler == nil {
-		return UserInputResponse{}, fmt.Errorf("no user input handler registered")
+		return AttributedUserInputResponse{}, fmt.Errorf("no user input handler registered")
 	}
 
 	invocation := UserInputInvocation{
@@ -1088,33 +1213,139 @@ func (s *Session) handleUserInputRequest(request UserInputRequest) (UserInputRes
 	return handler(request, invocation)
 }
 
+// registerShellAuthenticationHandler registers the handler for passwords and other
+// answers that shell commands run by the agent ask for.
+//
+// This method is internal and typically called when creating a session.
+func (s *Session) registerShellAuthenticationHandler(handler ShellAuthenticationHandler) {
+	s.shellAuthenticationMux.Lock()
+	defer s.shellAuthenticationMux.Unlock()
+	s.shellAuthenticationHandler = handler
+}
+
+// shellAuthenticationHandlerPanic reports a shell authentication handler that panicked. It
+// keeps no panic value, which could contain the answer.
+type shellAuthenticationHandlerPanic struct{}
+
+func (shellAuthenticationHandlerPanic) Error() string { return "shell authentication handler panicked" }
+
+// handleShellAuthenticationRequest asks the registered handler for a secret. Any
+// failure, a response that isn't an accept, or ctx ending first cancels the
+// prompt, so the program that asked fails instead of receiving a wrong value.
+// Never logs the answer.
+func (s *Session) handleShellAuthenticationRequest(ctx context.Context, request ShellAuthenticationRequest) ShellAuthenticationResponse {
+	cancelled := ShellAuthenticationResponse{Action: ShellAuthenticationActionCancel}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.shellAuthenticationMux.Lock()
+	handler := s.shellAuthenticationHandler
+	if handler == nil || ctx.Err() != nil {
+		s.shellAuthenticationMux.Unlock()
+		return cancelled
+	}
+	if _, ok := s.pendingShellAuthenticationRequests[request.RequestID]; ok {
+		s.shellAuthenticationMux.Unlock()
+		return cancelled
+	}
+	if s.pendingShellAuthenticationRequests == nil {
+		s.pendingShellAuthenticationRequests = make(map[string]context.CancelFunc)
+	}
+	s.pendingShellAuthenticationRequests[request.RequestID] = cancel
+	s.shellAuthenticationMux.Unlock()
+	defer func() {
+		s.shellAuthenticationMux.Lock()
+		delete(s.pendingShellAuthenticationRequests, request.RequestID)
+		s.shellAuthenticationMux.Unlock()
+	}()
+
+	type answer struct {
+		response ShellAuthenticationResponse
+		err      error
+	}
+	answered := make(chan answer, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				answered <- answer{err: shellAuthenticationHandlerPanic{}}
+			}
+		}()
+		response, err := handler(request, ShellAuthenticationInvocation{SessionID: s.SessionID, Context: ctx})
+		answered <- answer{response: response, err: err}
+	}()
+	// A handler that never returns after its prompt closes must not keep the
+	// request open.
+	select {
+	case result := <-answered:
+		// Returning ctx's error after the prompt closed is how a handler stops,
+		// not a failure. The error's text could contain the answer, so only its
+		// type is logged.
+		if result.err != nil && (ctx.Err() == nil || !errors.Is(result.err, context.Canceled)) {
+			log.Printf("shell authentication handler failed: session_id=%s request_id=%s error_type=%T", s.SessionID, request.RequestID, result.err)
+		}
+		if result.err != nil || ctx.Err() != nil || result.response.Action != ShellAuthenticationActionAccept {
+			return cancelled
+		}
+		return ShellAuthenticationResponse{Action: ShellAuthenticationActionAccept, Value: result.response.Value}
+	case <-ctx.Done():
+		return cancelled
+	}
+}
+
+// cancelPendingShellAuthenticationRequests closes every secret prompt this session waits on.
+func (s *Session) cancelPendingShellAuthenticationRequests() {
+	s.shellAuthenticationMux.Lock()
+	pending := s.pendingShellAuthenticationRequests
+	s.pendingShellAuthenticationRequests = nil
+	s.shellAuthenticationMux.Unlock()
+	for _, cancel := range pending {
+		cancel()
+	}
+}
+
 func (s *Session) registerExitPlanModeHandler(handler ExitPlanModeRequestHandler) {
+	s.registerAttributedExitPlanModeHandler(exitPlanModeHandlerFor(handler, nil))
+}
+
+func (s *Session) registerAttributedExitPlanModeHandler(handler AttributedExitPlanModeRequestHandler) {
 	s.exitPlanModeMu.Lock()
 	defer s.exitPlanModeMu.Unlock()
 	s.exitPlanModeHandler = handler
 }
 
-func (s *Session) handleExitPlanModeRequest(request ExitPlanModeRequest) (ExitPlanModeResult, error) {
+// exitPlanModeHandlerFor returns the handler a config selects: the attributed
+// handler when set, otherwise the plain handler, whose results carry no label.
+func exitPlanModeHandlerFor(plain ExitPlanModeRequestHandler, attributed AttributedExitPlanModeRequestHandler) AttributedExitPlanModeRequestHandler {
+	if attributed != nil || plain == nil {
+		return attributed
+	}
+	return func(request ExitPlanModeRequest, invocation ExitPlanModeInvocation) (AttributedExitPlanModeResult, error) {
+		result, err := plain(request, invocation)
+		return AttributedExitPlanModeResult{ExitPlanModeResult: result}, err
+	}
+}
+
+func (s *Session) handleExitPlanModeRequest(request ExitPlanModeRequest) (AttributedExitPlanModeResult, error) {
 	s.exitPlanModeMu.RLock()
 	select {
 	case <-s.eventDone:
 		s.exitPlanModeMu.RUnlock()
-		return ExitPlanModeResult{}, errors.New("session closed before exit-plan-mode request")
+		return AttributedExitPlanModeResult{}, errors.New("session closed before exit-plan-mode request")
 	default:
 	}
 	handler := s.exitPlanModeHandler
 	s.exitPlanModeMu.RUnlock()
 	if handler == nil {
-		return ExitPlanModeResult{Approved: true}, nil
+		return AttributedExitPlanModeResult{ExitPlanModeResult: ExitPlanModeResult{Approved: true}}, nil
 	}
 
 	return handler(request, ExitPlanModeInvocation{SessionID: s.SessionID})
 }
 
-func (s *Session) registerAutoModeSwitchHandler(handler AutoModeSwitchRequestHandler) {
+func (s *Session) registerAutoModeSwitchHandler(handler AutoModeSwitchRequestHandler, recovery bool) {
 	s.autoModeSwitchMu.Lock()
 	defer s.autoModeSwitchMu.Unlock()
 	s.autoModeSwitchHandler = handler
+	s.autoModeRecoveryEnabled = recovery
 }
 
 func (s *Session) handleAutoModeSwitchRequest(request AutoModeSwitchRequest) (AutoModeSwitchResponse, error) {
@@ -1126,7 +1357,11 @@ func (s *Session) handleAutoModeSwitchRequest(request AutoModeSwitchRequest) (Au
 	default:
 	}
 	handler := s.autoModeSwitchHandler
+	recoveryEnabled := s.autoModeRecoveryEnabled
 	s.autoModeSwitchMu.RUnlock()
+	if request.AutoModeRecovery != nil && !recoveryEnabled {
+		return "", errors.New("no recovery-aware Auto switch handler registered")
+	}
 	if handler == nil {
 		return AutoModeSwitchResponseNo, nil
 	}
@@ -1196,7 +1431,13 @@ func (s *Session) handleHooksInvoke(hookType string, rawInput json.RawMessage) (
 		if err := json.Unmarshal(rawInput, &input); err != nil {
 			return nil, fmt.Errorf("invalid hook input: %w", err)
 		}
-		return hooks.OnPostToolUse(input, invocation)
+		output, err := hooks.OnPostToolUse(input, invocation)
+		if err != nil || output == nil {
+			return output, err
+		}
+		withDefault := *output
+		withDefault.ModifiedResult = postToolUseModifiedResult(output.ModifiedResult, input.ToolResult)
+		return &withDefault, nil
 
 	case "postToolUseFailure":
 		if hooks.OnPostToolUseFailure == nil {
@@ -1418,13 +1659,31 @@ func callCommandHandler(handler CommandHandler, cmdCtx CommandContext) (err erro
 
 // registerElicitationHandler registers an elicitation handler for this session.
 func (s *Session) registerElicitationHandler(handler ElicitationHandler) {
+	s.registerAttributedElicitationHandler(elicitationHandlerFor(handler, nil))
+}
+
+// registerAttributedElicitationHandler registers an elicitation handler whose
+// results can say who answered.
+func (s *Session) registerAttributedElicitationHandler(handler AttributedElicitationHandler) {
 	s.elicitationMu.Lock()
 	defer s.elicitationMu.Unlock()
 	s.elicitationHandler = handler
 }
 
+// elicitationHandlerFor returns the handler a config selects: the attributed
+// handler when set, otherwise the plain handler, whose results carry no label.
+func elicitationHandlerFor(plain ElicitationHandler, attributed AttributedElicitationHandler) AttributedElicitationHandler {
+	if attributed != nil || plain == nil {
+		return attributed
+	}
+	return func(ctx ElicitationContext) (AttributedElicitationResult, error) {
+		result, err := plain(ctx)
+		return AttributedElicitationResult{ElicitationResult: result}, err
+	}
+}
+
 // getElicitationHandler returns the currently registered elicitation handler, or nil.
-func (s *Session) getElicitationHandler() ElicitationHandler {
+func (s *Session) getElicitationHandler() AttributedElicitationHandler {
 	s.elicitationMu.RLock()
 	defer s.elicitationMu.RUnlock()
 	return s.elicitationHandler
@@ -1447,7 +1706,7 @@ func (s *Session) handleMCPAuthRequest(request MCPAuthRequest, runtimeRefreshSup
 	handler, refreshHandler := s.getMCPAuthHandlers()
 	if handler == nil && refreshHandler == nil {
 		log.Printf(
-			"Received MCP OAuth request without a registered MCP auth handler. SessionId=%s, RequestId=%s",
+			"Received MCP OAuth request without a registered MCP auth handler. SessionID=%s, RequestId=%s",
 			s.SessionID,
 			request.RequestID,
 		)
@@ -1466,7 +1725,7 @@ func (s *Session) handleMCPAuthRequest(request MCPAuthRequest, runtimeRefreshSup
 	}
 	if err != nil {
 		log.Printf(
-			"MCP OAuth handler failed. SessionId=%s, RequestId=%s, Error=%v",
+			"MCP OAuth handler failed. SessionID=%s, RequestId=%s, Error=%v",
 			s.SessionID,
 			request.RequestID,
 			err,
@@ -1544,12 +1803,13 @@ func (s *Session) handleElicitationRequest(elicitCtx ElicitationContext, request
 			Action:  result.Action,
 			Content: rpcContent,
 		},
+		DecisionContext: result.DecisionContext,
 	})
 }
 
 // callElicitationHandler runs an elicitation handler and returns a panic as an
 // error, so the request is cancelled instead of the panic ending the process.
-func callElicitationHandler(handler ElicitationHandler, elicitCtx ElicitationContext) (result ElicitationResult, err error) {
+func callElicitationHandler(handler AttributedElicitationHandler, elicitCtx ElicitationContext) (result AttributedElicitationResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("elicitation handler panic: %v", r)
@@ -1626,17 +1886,17 @@ func (s *Session) Capabilities() SessionCapabilities {
 func (s *Session) setCapabilities(caps *SessionCapabilities) {
 	s.capabilitiesMu.Lock()
 	defer s.capabilitiesMu.Unlock()
-	if caps != nil {
-		s.capabilities = *caps
-	} else {
-		s.capabilities = SessionCapabilities{}
+	s.capabilities = SessionCapabilities{}
+	if caps != nil && caps.UI != nil {
+		ui := *caps.UI
+		s.capabilities.UI = &ui
 	}
 }
 
 // applyUICapabilitiesChange applies a capabilities.changed payload, which names
 // only the capabilities that changed: anything it leaves out keeps its value.
 func (s *Session) applyUICapabilitiesChange(changed *CapabilitiesChangedUI) {
-	if changed.Elicitation == nil && changed.MCPApps == nil {
+	if changed.Elicitation == nil && changed.MCPApps == nil && changed.AutoModeRecovery == nil {
 		return
 	}
 	s.capabilitiesMu.Lock()
@@ -1650,6 +1910,9 @@ func (s *Session) applyUICapabilitiesChange(changed *CapabilitiesChangedUI) {
 	}
 	if changed.MCPApps != nil {
 		ui.MCPApps = *changed.MCPApps
+	}
+	if changed.AutoModeRecovery != nil {
+		ui.AutoModeRecovery = *changed.AutoModeRecovery
 	}
 	s.capabilities.UI = &ui
 }
@@ -1896,14 +2159,18 @@ func fromRPCElicitationRequestedSchema(schema *rpc.ElicitationRequestedSchema) *
 	}
 }
 
-// dispatchEvent enqueues an event for delivery to user handlers and fires
+// dispatchEventWithPermissionEnvelope enqueues an event for delivery to user handlers and fires
 // broadcast handlers concurrently.
 //
 // Broadcast work (tool calls, permission requests) is fired in a separate
 // goroutine so it does not block the JSON-RPC read loop. User event handlers
 // are delivered by a single consumer goroutine (processEvents), guaranteeing
 // serial, FIFO dispatch without blocking the read loop.
-func (s *Session) dispatchEvent(event SessionEvent) {
+func (s *Session) dispatchEventWithPermissionEnvelope(event SessionEvent, envelope *PermissionRequestEnvelope, sdkHasHandler *bool, toolArguments json.RawMessage) {
+	subscriberEvent := event
+	if data, ok := event.Data.(*PermissionRequestedDataWithEnvelope); ok {
+		event.Data = data.PermissionRequestedData
+	}
 	s.updateOpenCanvasesFromEvent(event)
 
 	broadcastHandled := false
@@ -1919,17 +2186,19 @@ func (s *Session) dispatchEvent(event SessionEvent) {
 		if event.AgentID != nil {
 			agentID = *event.AgentID
 		}
-		s.startExternalTool(data, agentID)
+		if sdkHasHandler == nil || *sdkHasHandler {
+			s.startExternalTool(data, agentID, toolArguments)
+		}
 		broadcastHandled = true
 	case *ExternalToolCompletedData:
 		s.cancelExternalTool(data.RequestID)
 		broadcastHandled = true
 	}
 	if !broadcastHandled {
-		go s.handleBroadcastEvent(event)
+		go s.handleBroadcastEvent(event, envelope)
 	}
 
-	s.enqueueEvent(event)
+	s.enqueueEvent(subscriberEvent)
 }
 
 // enqueueEvent hands event to processEvents without blocking the caller, which
@@ -2052,6 +2321,7 @@ func (s *Session) retireEventProcessing(graceful bool) {
 		s.handlerMutex.Unlock()
 
 		s.clearSkillProvider()
+		s.clearMemoryStore()
 		s.releaseGitHubTokenProviderRegistration()
 
 		s.toolHandlersM.Lock()
@@ -2071,12 +2341,18 @@ func (s *Session) retireEventProcessing(graceful bool) {
 		s.userInputHandler = nil
 		s.userInputMux.Unlock()
 
+		s.shellAuthenticationMux.Lock()
+		s.shellAuthenticationHandler = nil
+		s.shellAuthenticationMux.Unlock()
+		s.cancelPendingShellAuthenticationRequests()
+
 		s.exitPlanModeMu.Lock()
 		s.exitPlanModeHandler = nil
 		s.exitPlanModeMu.Unlock()
 
 		s.autoModeSwitchMu.Lock()
 		s.autoModeSwitchHandler = nil
+		s.autoModeRecoveryEnabled = false
 		s.autoModeSwitchMu.Unlock()
 
 		s.hooksMux.Lock()
@@ -2112,7 +2388,7 @@ func (s *Session) retireEventProcessing(graceful bool) {
 // Handlers are executed in their own goroutine (not the JSON-RPC read loop or the
 // event consumer loop) so that a stalled handler does not block event delivery or
 // cause RPC deadlocks.
-func (s *Session) handleBroadcastEvent(event SessionEvent) {
+func (s *Session) handleBroadcastEvent(event SessionEvent, envelope *PermissionRequestEnvelope) {
 	switch d := event.Data.(type) {
 	case *PermissionRequestedData:
 		if d.ResolvedByHook != nil && *d.ResolvedByHook {
@@ -2127,6 +2403,8 @@ func (s *Session) handleBroadcastEvent(event SessionEvent) {
 			d.PermissionRequest,
 			d.PromptRequest,
 			d.AssistedApprovalAssessment,
+			envelope,
+			d.ProgramToolCallID,
 			handler,
 		)
 
@@ -2187,7 +2465,7 @@ func (s *Session) handleBroadcastEvent(event SessionEvent) {
 	}
 }
 
-func (s *Session) startExternalTool(data *ExternalToolRequestedData, agentID string) {
+func (s *Session) startExternalTool(data *ExternalToolRequestedData, agentID string, rawArguments json.RawMessage) {
 	handler, ok := s.getToolHandler(data.ToolName)
 	if !ok {
 		return
@@ -2221,7 +2499,13 @@ func (s *Session) startExternalTool(data *ExternalToolRequestedData, agentID str
 	s.pendingExternalTools[data.RequestID] = pending
 	s.pendingExternalToolsM.Unlock()
 
-	go s.executeToolAndRespond(data.RequestID, data.ToolName, data.ToolCallID, agentID, data.Arguments, handler, pending)
+	// Record the delivered objects and arrays here, before the tool goroutine
+	// starts and before subscribers receive the same Arguments to edit.
+	var deliveredContainers []any
+	if len(rawArguments) > 0 {
+		deliveredContainers = argumentContainers(data.Arguments)
+	}
+	go s.executeToolAndRespond(data.RequestID, data.ToolName, data.ToolCallID, agentID, data.Arguments, rawArguments, deliveredContainers, handler, pending)
 }
 
 func (s *Session) cancelExternalTool(requestID string) {
@@ -2245,6 +2529,12 @@ func (s *Session) cancelPendingExternalTools() {
 	}
 }
 
+func (s *Session) externalToolsAreClosed() bool {
+	s.pendingExternalToolsM.Lock()
+	defer s.pendingExternalToolsM.Unlock()
+	return s.externalToolsClosed
+}
+
 func (s *Session) claimExternalTool(requestID string, pending *pendingExternalTool) bool {
 	s.pendingExternalToolsM.Lock()
 	defer s.pendingExternalToolsM.Unlock()
@@ -2255,8 +2545,78 @@ func (s *Session) claimExternalTool(requestID string, pending *pendingExternalTo
 	return true
 }
 
+// encodeToolTelemetry encodes each telemetry value once, so the request carries
+// exactly the bytes that were checked. An empty map is returned unchanged to
+// keep the field omitted.
+func encodeToolTelemetry(telemetry map[string]any) (map[string]any, error) {
+	if len(telemetry) == 0 {
+		return telemetry, nil
+	}
+	// Sorted key order is the order encoding/json encodes a map in.
+	keys := make([]string, 0, len(telemetry))
+	for key := range telemetry {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	encoded := make(map[string]any, len(telemetry))
+	for _, key := range keys {
+		data, err := json.Marshal(telemetry[key])
+		if err != nil {
+			return nil, err
+		}
+		encoded[key] = json.RawMessage(data)
+	}
+	return encoded, nil
+}
+
+// toolResultTypeOrDefault returns result.ResultType, or "failure" when it is
+// unset and result.Error is set, or "success" when both are unset.
+func toolResultTypeOrDefault(result ToolResult) string {
+	if result.ResultType != "" {
+		return result.ResultType
+	}
+	if result.Error != "" {
+		return "failure"
+	}
+	return "success"
+}
+
+// postToolUseModifiedResult gives a ToolResult returned as a postToolUse
+// hook's ModifiedResult the ResultType the tool's result already has, or
+// "success" when it has none, the default a tool handler's result gets when
+// neither ResultType nor Error is set. The runtime applies the modified
+// result over the tool's result field by field, so an empty ResultType would
+// record a successful call as failed, and a hard-coded "success" would
+// overwrite a failure an earlier postToolUse hook set. current is the tool
+// result the runtime passed to this hook. Every other value is returned as it
+// is.
+func postToolUseModifiedResult(result any, current any) any {
+	var toolResult ToolResult
+	switch r := result.(type) {
+	case ToolResult:
+		toolResult = r
+	case *ToolResult:
+		if r == nil {
+			return result
+		}
+		toolResult = *r
+	default:
+		return result
+	}
+	if toolResult.ResultType != "" || toolResult.Error != "" {
+		return result
+	}
+	toolResult.ResultType = "success"
+	if fields, ok := current.(map[string]any); ok {
+		if resultType, ok := fields["resultType"].(string); ok && resultType != "" {
+			toolResult.ResultType = resultType
+		}
+	}
+	return toolResult
+}
+
 // executeToolAndRespond executes a tool handler and sends the result back via RPC.
-func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID string, arguments any, handler ToolHandler, pending *pendingExternalTool) {
+func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID string, arguments any, rawArguments json.RawMessage, deliveredContainers []any, handler ToolHandler, pending *pendingExternalTool) {
 	ctx := pending.ctx
 	defer func() {
 		s.pendingExternalToolsM.Lock()
@@ -2272,7 +2632,7 @@ func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID
 				return
 			}
 			errMsg := fmt.Sprintf("tool panic: %v", r)
-			s.RPC.Tools.HandlePendingToolCall(ctx, &rpc.HandlePendingToolCallRequest{
+			s.sendToolResponse(ctx, toolName, &rpc.HandlePendingToolCallRequest{
 				RequestID: requestID,
 				Error:     &errMsg,
 			})
@@ -2287,7 +2647,9 @@ func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID
 		TraceContext: ctx,
 		AgentID:      agentID,
 		RequestID:    requestID,
+		rawArguments: rawArguments,
 	}
+	invocation.deliveredContainers = deliveredContainers
 
 	// The built-in tool-search tool receives a snapshot of the session's
 	// currently initialized tools so an override can filter the live catalog
@@ -2309,28 +2671,39 @@ func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID
 	}
 	if err != nil {
 		errMsg := err.Error()
-		s.RPC.Tools.HandlePendingToolCall(ctx, &rpc.HandlePendingToolCallRequest{
+		if errMsg == "" {
+			// An empty error reads as no error, so the call would count as a success.
+			errMsg = fmt.Sprintf("%T", err)
+		}
+		s.sendToolResponse(ctx, toolName, &rpc.HandlePendingToolCallRequest{
 			RequestID: requestID,
 			Error:     &errMsg,
 		})
 		return
 	}
 
-	// Default ResultType to "success" when unset, or "failure" when there's an error.
-	effectiveResultType := result.ResultType
-	if effectiveResultType == "" {
-		if result.Error != "" {
-			effectiveResultType = "failure"
-		} else {
-			effectiveResultType = "success"
-		}
+	// Telemetry that cannot be encoded as JSON would stop the result from being
+	// sent at all, leaving the call unanswered, so answer it with the error.
+	// Each value is encoded once here and the encoded bytes are sent, so a
+	// json.Marshaler that is not repeatable cannot succeed now and fail later.
+	telemetry, err := encodeToolTelemetry(result.ToolTelemetry)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to serialize tool telemetry: %v", err)
+		s.sendToolResponse(ctx, toolName, &rpc.HandlePendingToolCallRequest{
+			RequestID: requestID,
+			Error:     &errMsg,
+		})
+		return
 	}
 
+	effectiveResultType := toolResultTypeOrDefault(result)
+
 	rpcResult := &rpc.ExternalToolTextResultForLlm{
-		TextResultForLlm: result.TextResultForLLM,
-		ToolTelemetry:    result.ToolTelemetry,
-		ResultType:       &effectiveResultType,
-		ToolReferences:   result.ToolReferences,
+		TextResultForLlm:          result.TextResultForLLM,
+		ToolTelemetry:             telemetry,
+		ResultType:                &effectiveResultType,
+		ToolReferences:            result.ToolReferences,
+		SkipLargeOutputProcessing: result.SkipLargeOutputProcessing,
 	}
 	if result.Error != "" {
 		rpcResult.Error = &result.Error
@@ -2349,9 +2722,32 @@ func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID
 		}
 		rpcResult.BinaryResultsForLlm = append(rpcResult.BinaryResultsForLlm, entry)
 	}
-	s.RPC.Tools.HandlePendingToolCall(ctx, &rpc.HandlePendingToolCallRequest{
+	s.sendToolResponse(ctx, toolName, &rpc.HandlePendingToolCallRequest{
 		RequestID: requestID,
 		Result:    rpcResult,
+	})
+}
+
+func (s *Session) sendToolResponse(ctx context.Context, toolName string, response *rpc.HandlePendingToolCallRequest) {
+	requestID := response.RequestID
+	_, err := s.RPC.Tools.HandlePendingToolCall(ctx, response)
+	if err == nil || ctx.Err() != nil || s.externalToolsAreClosed() {
+		return
+	}
+	// The handler finished but its result never reached the runtime, which is
+	// still waiting on the call. This invocation already owns the request, so
+	// report the failure and answer the call with it. A claimed request is no
+	// longer in the pending map, so Disconnect cannot cancel ctx; the closed
+	// flag is what tells this path the session is shutting down.
+	log.Printf("external tool result delivery failed: session_id=%s request_id=%s tool=%s error=%v", s.SessionID, requestID, toolName, err)
+	errMsg := err.Error()
+	if errMsg == "" {
+		// An empty error reads as no error, so the call would count as a success.
+		errMsg = fmt.Sprintf("%T", err)
+	}
+	s.RPC.Tools.HandlePendingToolCall(ctx, &rpc.HandlePendingToolCallRequest{
+		RequestID: requestID,
+		Error:     &errMsg,
 	})
 }
 
@@ -2361,6 +2757,8 @@ func (s *Session) executePermissionAndRespond(
 	permissionRequest PermissionRequest,
 	promptRequest rpc.PermissionPromptRequest,
 	assistedApprovalAssessment rpc.AssistedApprovalAssessment,
+	envelope *PermissionRequestEnvelope,
+	programToolCallID *string,
 	handler permissionHandlerFunc,
 ) {
 	defer func() {
@@ -2375,6 +2773,7 @@ func (s *Session) executePermissionAndRespond(
 	invocation := PermissionInvocation{
 		SessionID:              s.SessionID,
 		ManagedSettingsEnabled: s.managedSettings,
+		ProgramToolCallID:      programToolCallID,
 	}
 
 	decision, err := handler(
@@ -2382,6 +2781,7 @@ func (s *Session) executePermissionAndRespond(
 		invocation,
 		promptRequest,
 		assistedApprovalAssessment,
+		envelope,
 	)
 	if err != nil {
 		log.Printf("permission handler failed: session_id=%s request_id=%s error=%v", s.SessionID, requestID, err)
@@ -2419,6 +2819,7 @@ func (s *Session) executePermissionAndRespond(
 }
 
 // GetEvents retrieves all events from this session's history.
+// For lossless JSON, including task-analytics retries, use GetRawEvents instead.
 //
 // This returns the complete conversation history including user messages,
 // assistant responses, tool executions, and other session events in
@@ -2452,6 +2853,24 @@ func (s *Session) GetEvents(ctx context.Context) ([]SessionEvent, error) {
 	return response.Events, nil
 }
 
+// GetRawEvents retrieves session history without projecting it into typed events.
+// It preserves timestamp strings, explicit nulls, and unknown fields. Use
+// rpc.SessionEventsAsTrajectory to pass the result to task analytics unchanged.
+func (s *Session) GetRawEvents(ctx context.Context) ([]json.RawMessage, error) {
+	result, err := s.client.Request(ctx, "session.getMessages", sessionGetMessagesRequest{SessionID: s.SessionID})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get events: %w", err)
+	}
+
+	var response struct {
+		Events []json.RawMessage `json:"events"`
+	}
+	if err := json.Unmarshal(result, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal get events response: %w", err)
+	}
+	return response.Events, nil
+}
+
 // Disconnect closes this session and releases all in-memory resources (event
 // handlers, tool handlers, permission handlers).
 //
@@ -2475,9 +2894,25 @@ func (s *Session) GetEvents(ctx context.Context) ([]SessionEvent, error) {
 //	    log.Printf("Failed to disconnect session: %v", err)
 //	}
 func (s *Session) Disconnect() error {
+	return s.disconnect(context.Background())
+}
+
+// disconnect sends session.detach under ctx; [Client.Stop] bounds it so an
+// unresponsive runtime cannot keep Stop from shutting the runtime down.
+func (s *Session) disconnect(ctx context.Context) error {
 	s.clearSkillProvider()
 	s.cancelPendingExternalTools()
-	result, err := s.client.Request(context.Background(), "session.detach", sessionDetachRequest{SessionID: s.SessionID})
+	err := s.detachRuntime(ctx)
+
+	// Local cleanup always runs, even if the detach RPC failed, so callers
+	// don't leak in-memory resources (event goroutines, registered
+	// providers/handlers) just because the runtime couldn't be reached.
+	s.retireEventProcessing(true)
+	return err
+}
+
+func (s *Session) detachRuntime(ctx context.Context) error {
+	result, err := s.client.Request(ctx, "session.detach", sessionDetachRequest{SessionID: s.SessionID})
 	if err == nil {
 		var response sessionDetachResponse
 		if decodeErr := json.Unmarshal(result, &response); decodeErr != nil {
@@ -2490,13 +2925,14 @@ func (s *Session) Disconnect() error {
 		}
 	}
 
-	// Local cleanup always runs, even if the detach RPC failed, so callers
-	// don't leak in-memory resources (event goroutines, registered
-	// providers/handlers) just because the runtime couldn't be reached.
-	s.retireEventProcessing(true)
-
 	if err != nil {
 		return fmt.Errorf("failed to disconnect session: %w", err)
+	}
+	// A detached session needs no further routing, so the client stops
+	// tracking it. A failed detach stays tracked so [Client.Stop] retries it.
+	s.detached.Store(true)
+	if s.releaseFromClient != nil {
+		s.releaseFromClient()
 	}
 	return nil
 }
@@ -2577,6 +3013,9 @@ type SetModelOptions struct {
 	// "auto". Use [Session.SetAutoTier] to change the preference without
 	// changing the selected model.
 	//
+	// For Copilot Fusion, prefer FusionTier. The balance, hydrafusion and
+	// hydrafusion-max identifiers it replaces remain accepted but are deprecated.
+	//
 	// Experimental: AutoTier is part of an experimental Auto routing surface and
 	// may change or be removed.
 	AutoTier *AutoTier
@@ -2586,6 +3025,16 @@ type SetModelOptions struct {
 	// Experimental: ResetAutoTier is part of an experimental Auto routing surface
 	// and may change or be removed.
 	ResetAutoTier bool
+	// FusionTier stages a Copilot Fusion tier atomically with selecting the
+	// "fusion" or "auto" model, matching the CLI's --fusion-tier. The runtime
+	// resolves the tier to the Auto routing preference it stands for and stages
+	// it exactly like AutoTier. It is mutually exclusive with AutoTier and
+	// ResetAutoTier. Use [Session.SetFusionTier] to change the tier without
+	// changing the selected model.
+	//
+	// Experimental: FusionTier is part of an experimental Auto routing surface
+	// and may change or be removed.
+	FusionTier *FusionTier
 }
 
 // SetModel changes the model for this session.
@@ -2599,12 +3048,20 @@ type SetModelOptions struct {
 //	if err := session.SetModel(context.Background(), "claude-sonnet-4.6", &SetModelOptions{ReasoningEffort: new("high")}); err != nil {
 //	    log.Printf("Failed to set model: %v", err)
 //	}
+//	// Like `copilot --model fusion --fusion-tier high`.
+//	if err := session.SetModel(context.Background(), "fusion", &SetModelOptions{FusionTier: new(FusionTierHigh)}); err != nil {
+//	    log.Printf("Failed to set model: %v", err)
+//	}
 func (s *Session) SetModel(ctx context.Context, model string, opts *SetModelOptions) error {
 	params := &rpc.ModelSwitchToRequest{ModelID: model}
 	if opts != nil {
 		if opts.AutoTier != nil && opts.ResetAutoTier {
 			return errors.New("failed to set model: AutoTier and ResetAutoTier are mutually exclusive")
 		}
+		if opts.FusionTier != nil && (opts.AutoTier != nil || opts.ResetAutoTier) {
+			return errors.New("failed to set model: FusionTier cannot be combined with AutoTier or ResetAutoTier")
+		}
+		params.FusionTier = opts.FusionTier
 		params.ReasoningEffort = opts.ReasoningEffort
 		params.ReasoningSummary = opts.ReasoningSummary
 		params.ContextTier = opts.ContextTier
@@ -2638,14 +3095,22 @@ func (s *Session) setToolsSemaphore() chan struct{} {
 	return s.setToolsGate
 }
 
-func toolDefinitionsForSetTools(tools []Tool) []rpc.ProtocolExternalToolDefinition {
-	definitions := make([]rpc.ProtocolExternalToolDefinition, 0, len(tools))
+type sdkToolDefinition struct {
+	rpc.ProtocolExternalToolDefinition
+	HasHandler bool `json:"hasHandler"`
+}
+
+func toolDefinitionsForWire(tools []Tool) []sdkToolDefinition {
+	definitions := make([]sdkToolDefinition, 0, len(tools))
 	for _, tool := range tools {
-		definition := rpc.ProtocolExternalToolDefinition{
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  tool.Parameters,
-			Metadata:    tool.Metadata,
+		definition := sdkToolDefinition{
+			ProtocolExternalToolDefinition: rpc.ProtocolExternalToolDefinition{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Parameters:  tool.Parameters,
+				Metadata:    tool.Metadata,
+			},
+			HasHandler: tool.Handler != nil,
 		}
 		if tool.OverridesBuiltInTool {
 			definition.OverridesBuiltInTool = &tool.OverridesBuiltInTool
@@ -2655,6 +3120,9 @@ func toolDefinitionsForSetTools(tools []Tool) []rpc.ProtocolExternalToolDefiniti
 		}
 		if tool.IsTerminal {
 			definition.IsTerminal = &tool.IsTerminal
+		}
+		if tool.Idempotent {
+			definition.Idempotent = &tool.Idempotent
 		}
 		if tool.Defer != "" {
 			deferPolicy := rpc.ProtocolExternalToolDefer(tool.Defer)
@@ -2694,15 +3162,16 @@ func toolDefinitionsForSetTools(tools []Tool) []rpc.ProtocolExternalToolDefiniti
 //
 // The agent sees the new tools from its next model request, which can fall
 // within a turn in progress. A model request already in flight was made with the
-// previous tools, so the agent can still call a tool you removed. This session
-// doesn't answer that call, and it can stay pending until the turn is aborted. If
-// a running turn might still call a tool you remove, replace tools while the
+// previous tools, so the agent can still call a tool you removed. If no connected
+// client supplies a tool with that name any more, the call fails with an error
+// that tells the agent the tool is no longer available, and the turn continues.
+// If you don't want the agent to see that failure, replace tools while the
 // session is idle.
 //
 // Experimental: SetTools wraps the experimental session.tools.set RPC and may
 // change or be removed.
 func (s *Session) SetTools(ctx context.Context, tools []Tool) error {
-	definitions := toolDefinitionsForSetTools(tools)
+	definitions := toolDefinitionsForWire(tools)
 	handlers := buildToolHandlerMap(tools)
 
 	gate := s.setToolsSemaphore()
@@ -2721,9 +3190,14 @@ func (s *Session) SetTools(ctx context.Context, tools []Tool) error {
 	go func() {
 		defer func() { gate <- struct{}{} }()
 
-		_, err := s.RPC.Tools.Set(context.WithoutCancel(ctx), &rpc.ToolsSetRequest{
-			Tools: definitions,
+		raw, err := s.client.Request(context.WithoutCancel(ctx), "session.tools.set", map[string]any{
+			"sessionId": s.SessionID,
+			"tools":     definitions,
 		})
+		if err == nil {
+			var result rpc.ToolsSetResult
+			err = json.Unmarshal(raw, &result)
+		}
 		if err != nil {
 			done <- fmt.Errorf("failed to set tools: %w", err)
 			return
@@ -2755,6 +3229,9 @@ func (s *Session) SetTools(ctx context.Context, tools []Tool) error {
 //
 // Pass nil to return to the provider's default Auto routing.
 //
+// For Copilot Fusion, prefer [Session.SetFusionTier]. The balance, hydrafusion and
+// hydrafusion-max identifiers it replaces remain accepted but are deprecated.
+//
 // Experimental: SetAutoTier is part of an experimental Auto routing surface and
 // may change or be removed.
 //
@@ -2769,6 +3246,32 @@ func (s *Session) SetAutoTier(ctx context.Context, autoTier *AutoTier) (*rpc.Mod
 	result, err := s.RPC.Model.SwitchAutoTier(ctx, &rpc.ModelSwitchAutoTierRequest{AutoTier: autoTier})
 	if err != nil {
 		return nil, fmt.Errorf("failed to set auto tier: %w", err)
+	}
+
+	return result, nil
+}
+
+// SetFusionTier changes the Copilot Fusion tier without changing the selected model,
+// naming the tier as the CLI's --fusion-tier does.
+//
+// The runtime resolves the tier to the Auto routing preference it stands for and then
+// handles the request exactly like [Session.SetAutoTier]: it takes effect on a later
+// user turn that uses the "fusion" or "auto" model. To return to the provider's default
+// routing, call SetAutoTier with nil.
+//
+// Experimental: SetFusionTier is part of an experimental Auto routing surface and
+// may change or be removed.
+//
+// Example:
+//
+//	result, err := session.SetFusionTier(context.Background(), copilot.FusionTierMax)
+//	if err != nil {
+//	    log.Printf("Failed to set Fusion tier: %v", err)
+//	}
+func (s *Session) SetFusionTier(ctx context.Context, fusionTier FusionTier) (*rpc.ModelSwitchAutoTierResult, error) {
+	result, err := s.RPC.Model.SwitchFusionTier(ctx, &rpc.ModelSwitchFusionTierRequest{FusionTier: fusionTier})
+	if err != nil {
+		return nil, fmt.Errorf("failed to set Fusion tier: %w", err)
 	}
 
 	return result, nil

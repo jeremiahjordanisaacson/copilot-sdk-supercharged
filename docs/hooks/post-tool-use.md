@@ -23,7 +23,7 @@ import type {
   PostToolUseHookInput,
   HookInvocation,
   PostToolUseHookOutput,
-} from "@github/copilot-sdk";
+} from "copilot-sdk-supercharged";
 type PostToolUseHandler = (
   input: PostToolUseHookInput,
   invocation: HookInvocation,
@@ -48,12 +48,16 @@ type PostToolUseHandler = (
 
 ```python
 from copilot.session import PostToolUseHookInput, PostToolUseHookOutput
+from copilot.session import PostToolUseHandler as SdkPostToolUseHandler
 from typing import Callable, Awaitable
 
 PostToolUseHandler = Callable[
     [PostToolUseHookInput, dict[str, str]],
     Awaitable[PostToolUseHookOutput | None]
 ]
+
+def check(handler: PostToolUseHandler) -> SdkPostToolUseHandler:
+    return handler
 ```
 
 <!-- /docs-validate: hidden -->
@@ -75,12 +79,21 @@ PostToolUseHandler = Callable[
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
+
+// Aliases let the signature below use the package's own type names.
+type (
+    PostToolUseHookInput  = copilot.PostToolUseHookInput
+    HookInvocation        = copilot.HookInvocation
+    PostToolUseHookOutput = copilot.PostToolUseHookOutput
+)
 
 type PostToolUseHandler func(
-    input copilot.PostToolUseHookInput,
-    invocation copilot.HookInvocation,
-) (*copilot.PostToolUseHookOutput, error)
+    input PostToolUseHookInput,
+    invocation HookInvocation,
+) (*PostToolUseHookOutput, error)
+
+var _ = copilot.PostToolUseHandler(PostToolUseHandler(nil))
 
 func main() {}
 ```
@@ -102,11 +115,17 @@ type PostToolUseHandler func(
 <!-- docs-validate: hidden -->
 
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 public delegate Task<PostToolUseHookOutput?> PostToolUseHandler(
     PostToolUseHookInput input,
     HookInvocation invocation);
+
+static class PostToolUseHandlerCheck
+{
+    static SessionHooks Check(PostToolUseHandler handler) =>
+        new() { OnPostToolUse = handler.Invoke };
+}
 ```
 
 <!-- /docs-validate: hidden -->
@@ -124,12 +143,28 @@ public delegate Task<PostToolUseHookOutput?> PostToolUseHandler(
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 public class PostToolUseSignature {
-    PostToolUseHandler handler = (PostToolUseHookInput input, HookInvocation invocation) ->
-        CompletableFuture.completedFuture(null);
+    static class Documented {
+        @FunctionalInterface
+        public interface PostToolUseHandler {
+            CompletableFuture<PostToolUseHookOutput> handle(
+                PostToolUseHookInput input,
+                HookInvocation invocation);
+        }
+    }
+
+    // The documented interface and the SDK's accept each other's implementations.
+    static PostToolUseHandler toSdk(Documented.PostToolUseHandler documented) {
+        return documented::handle;
+    }
+
+    static Documented.PostToolUseHandler fromSdk(PostToolUseHandler sdk) {
+        return sdk::handle;
+    }
+
     public static void main(String[] args) {}
 }
 ```
@@ -185,14 +220,16 @@ Return `null` or `undefined` to pass through the result unchanged. Otherwise, re
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onPostToolUse: async (input, invocation) => {
-      console.log(`[${invocation.sessionId}] Tool: ${input.toolName}`);
-      console.log(`  Args: ${JSON.stringify(input.toolArgs)}`);
-      console.log(`  Result: ${JSON.stringify(input.toolResult)}`);
-      return null; // Pass through unchanged
+    hooks: {
+        handlers: {
+            onPostToolUse: async (input, invocation) => {
+                console.log(`[${invocation.sessionId}] Tool: ${input.toolName}`);
+                console.log(`  Args: ${JSON.stringify(input.toolArgs)}`);
+                console.log(`  Result: ${JSON.stringify(input.toolResult)}`);
+                return null; // Pass through unchanged
+            },
+        },
     },
-  },
 });
 ```
 
@@ -205,7 +242,8 @@ const session = await client.createSession({
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
+
 
 async def on_post_tool_use(input_data, invocation):
     print(f"[{invocation['session_id']}] Tool: {input_data['toolName']}")
@@ -213,7 +251,11 @@ async def on_post_tool_use(input_data, invocation):
     print(f"  Result: {input_data['toolResult']}")
     return None  # Pass through unchanged
 
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={"on_post_tool_use": on_post_tool_use})
+
+session = await client.create_session(
+    permissions={"on_request": PermissionHandler.approve_all},
+    hooks={"handlers": {"on_post_tool_use": on_post_tool_use}},
+)
 ```
 
 </details>
@@ -229,19 +271,20 @@ package main
 import (
 	"context"
 	"fmt"
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
-	client := copilot.NewClient(nil)
-	session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		Hooks: &copilot.SessionHooks{
-			OnPostToolUse: func(input copilot.PostToolUseHookInput, inv copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
-				fmt.Printf("[%s] Tool: %s\n", inv.SessionID, input.ToolName)
-				fmt.Printf("  Args: %v\n", input.ToolArgs)
-				fmt.Printf("  Result: %v\n", input.ToolResult)
-				return nil, nil
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+	session, _ := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+		Hooks: copilot.SessionHookOptions{
+			Handlers: &copilot.SessionHooks{
+				OnPostToolUse: func(input copilot.PostToolUseHookInput, inv copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
+					fmt.Printf("[%s] Tool: %s\n", inv.SessionID, input.ToolName)
+					fmt.Printf("  Args: %v\n", input.ToolArgs)
+					fmt.Printf("  Result: %v\n", input.ToolResult)
+					return nil, nil
+				},
 			},
 		},
 	})
@@ -252,16 +295,19 @@ func main() {
 <!-- /docs-validate: hidden -->
 
 ```go
-session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
-    Hooks: &copilot.SessionHooks{
-        OnPostToolUse: func(input copilot.PostToolUseHookInput, inv copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
-            fmt.Printf("[%s] Tool: %s\n", inv.SessionID, input.ToolName)
-            fmt.Printf("  Args: %v\n", input.ToolArgs)
-            fmt.Printf("  Result: %v\n", input.ToolResult)
-            return nil, nil
-        },
-    },
+session, _ := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+	Hooks: copilot.SessionHookOptions{
+		Handlers: &copilot.SessionHooks{
+			OnPostToolUse: func(input copilot.PostToolUseHookInput, inv copilot.HookInvocation) (*copilot.PostToolUseHookOutput, error) {
+				fmt.Printf("[%s] Tool: %s\n", inv.SessionID, input.ToolName)
+				fmt.Printf("  Args: %v\n", input.ToolArgs)
+				fmt.Printf("  Result: %v\n", input.ToolResult)
+				return nil, nil
+			},
+		},
+	},
 })
+
 ```
 
 </details>
@@ -269,48 +315,22 @@ session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
 <details>
 <summary><strong>.NET</strong></summary>
 
-<!-- docs-validate: hidden -->
-
 ```csharp
-using GitHub.Copilot;
-
-public static class PostToolUseExample
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    public static async Task Main()
+    Hooks = new SessionHookOptions
     {
-        await using var client = new CopilotClient();
-        var session = await client.CreateSessionAsync(new SessionConfig
+        Handlers = new SessionHooks
         {
-            Hooks = new SessionHooks
+            OnPostToolUse = (input, invocation) =>
             {
-                OnPostToolUse = (input, invocation) =>
-                {
-                    Console.WriteLine($"[{invocation.SessionId}] Tool: {input.ToolName}");
-                    Console.WriteLine($"  Args: {input.ToolArgs}");
-                    Console.WriteLine($"  Result: {input.ToolResult}");
-                    return Task.FromResult<PostToolUseHookOutput?>(null);
-                },
+                Console.WriteLine($"[{invocation.SessionId}] Tool: {input.ToolName}");
+                Console.WriteLine($"  Args: {input.ToolArgs}");
+                Console.WriteLine($"  Result: {input.ToolResult}");
+                return Task.FromResult<PostToolUseHookOutput?>(null);
             },
-        });
+        }
     }
-}
-```
-
-<!-- /docs-validate: hidden -->
-
-```csharp
-var session = await client.CreateSessionAsync(new SessionConfig
-{
-    Hooks = new SessionHooks
-    {
-        OnPostToolUse = (input, invocation) =>
-        {
-            Console.WriteLine($"[{invocation.SessionId}] Tool: {input.ToolName}");
-            Console.WriteLine($"  Args: {input.ToolArgs}");
-            Console.WriteLine($"  Result: {input.ToolResult}");
-            return Task.FromResult<PostToolUseHookOutput?>(null);
-        },
-    },
 });
 ```
 
@@ -321,49 +341,71 @@ var session = await client.CreateSessionAsync(new SessionConfig
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.*;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 public class PostToolUseExample {
     public static void main(String[] args) throws Exception {
-        try (var client = new CopilotClient()) {
+        try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
             var hooks = new SessionHooks()
-                .setOnPostToolUse((input, invocation) -> {
-                    System.out.println("[" + invocation.getSessionId() + "] Tool: " + input.getToolName());
-                    System.out.println("  Args: " + input.getToolArgs());
-                    System.out.println("  Result: " + input.getToolResult());
-                    return CompletableFuture.completedFuture(null);
-                });
+                    .setOnPostToolUse((input, invocation) -> {
+                        System.out
+                                .println("[" + invocation
+                                        .getSessionId() + "] Tool: "
+                                        + input
+                                                .getToolName());
+                        System.out
+                                .println("  Args: " + input
+                                        .getToolArgs());
+                        System.out
+                                .println("  Result: " + input
+                                        .getToolResult());
+                        return CompletableFuture
+                                .completedFuture(null);
+                    });
 
-            var session = client.createSession(
-                new SessionConfig()
-                    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                    .setHooks(hooks)
-            ).get();
+            var session = client
+                    .createSession(new CreateSessionOptions()
+                            .setPermissions(new SessionPermissionOptions()
+                                    .setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setHooks(new SessionHookOptions()
+                                    .setHandlers(hooks)))
+                    .get();
         }
     }
 }
 ```
 <!-- /docs-validate: hidden -->
 ```java
-import com.github.copilot.*;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 var hooks = new SessionHooks()
-    .setOnPostToolUse((input, invocation) -> {
-        System.out.println("[" + invocation.getSessionId() + "] Tool: " + input.getToolName());
-        System.out.println("  Args: " + input.getToolArgs());
-        System.out.println("  Result: " + input.getToolResult());
-        return CompletableFuture.completedFuture(null);
-    });
+        .setOnPostToolUse((input, invocation) -> {
+            System.out
+                    .println("[" + invocation
+                            .getSessionId() + "] Tool: "
+                            + input
+                                    .getToolName());
+            System.out
+                    .println("  Args: " + input
+                            .getToolArgs());
+            System.out
+                    .println("  Result: " + input
+                            .getToolResult());
+            return CompletableFuture
+                    .completedFuture(null);
+        });
 
-var session = client.createSession(
-    new SessionConfig()
-        .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-        .setHooks(hooks)
-).get();
+var session = client
+        .createSession(new CreateSessionOptions()
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL))
+                .setHooks(new SessionHookOptions()
+                        .setHandlers(hooks)))
+        .get();
 ```
 
 </details>
@@ -372,27 +414,35 @@ var session = client.createSession(
 
 ```typescript
 const SENSITIVE_PATTERNS = [
-  /api[_-]?key["\s:=]+["']?[\w-]+["']?/gi,
-  /password["\s:=]+["']?[\w-]+["']?/gi,
-  /secret["\s:=]+["']?[\w-]+["']?/gi,
+    /api[_-]?key["\s:=]+["']?[\w-]+["']?/gi,
+    /password["\s:=]+["']?[\w-]+["']?/gi,
+    /secret["\s:=]+["']?[\w-]+["']?/gi,
 ];
 
-const session = await client.createSession({
-  hooks: {
-    onPostToolUse: async (input) => {
-      if (typeof input.toolResult === "string") {
-        let redacted = input.toolResult;
-        for (const pattern of SENSITIVE_PATTERNS) {
-          redacted = redacted.replace(pattern, "[REDACTED]");
-        }
+const redact = (text: string) =>
+    SENSITIVE_PATTERNS.reduce((result, pattern) => result.replace(pattern, "[REDACTED]"), text);
 
-        if (redacted !== input.toolResult) {
-          return { modifiedResult: redacted };
-        }
-      }
-      return null;
+const session = await client.createSession({
+    hooks: {
+        handlers: {
+            onPostToolUse: async (input) => {
+                const { textResultForLlm, sessionLog } = input.toolResult;
+                const redacted = {
+                    ...input.toolResult,
+                    textResultForLlm: redact(textResultForLlm),
+                    sessionLog: sessionLog && redact(sessionLog),
+                };
+
+                if (
+                    redacted.textResultForLlm !== textResultForLlm ||
+                    redacted.sessionLog !== sessionLog
+                ) {
+                    return { modifiedResult: redacted };
+                }
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -402,23 +452,24 @@ const session = await client.createSession({
 const MAX_RESULT_LENGTH = 10000;
 
 const session = await client.createSession({
-  hooks: {
-    onPostToolUse: async (input) => {
-      const resultStr = JSON.stringify(input.toolResult);
+    hooks: {
+        handlers: {
+            onPostToolUse: async (input) => {
+                const text = input.toolResult.textResultForLlm;
 
-      if (resultStr.length > MAX_RESULT_LENGTH) {
-        return {
-          modifiedResult: {
-            truncated: true,
-            originalLength: resultStr.length,
-            content: resultStr.substring(0, MAX_RESULT_LENGTH) + "...",
-          },
-          additionalContext: `Note: Result was truncated from ${resultStr.length} to ${MAX_RESULT_LENGTH} characters.`,
-        };
-      }
-      return null;
+                if (text.length > MAX_RESULT_LENGTH) {
+                    return {
+                        modifiedResult: {
+                            ...input.toolResult,
+                            textResultForLlm: text.substring(0, MAX_RESULT_LENGTH) + "...",
+                        },
+                        additionalContext: `Note: Result was truncated from ${text.length} to ${MAX_RESULT_LENGTH} characters.`,
+                    };
+                }
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -426,27 +477,29 @@ const session = await client.createSession({
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onPostToolUse: async (input) => {
-      // If a file read returned an error, add helpful context
-      if (input.toolName === "read_file" && input.toolResult?.error) {
-        return {
-          additionalContext:
-            "Tip: If the file doesn't exist, consider creating it or checking the path.",
-        };
-      }
+    hooks: {
+        handlers: {
+            onPostToolUse: async (input) => {
+                // If a file read returned an error, add helpful context
+                if (input.toolName === "read_file" && input.toolResult?.error) {
+                    return {
+                        additionalContext:
+                            "Tip: If the file doesn't exist, consider creating it or checking the path.",
+                    };
+                }
 
-      // If shell command failed, add debugging hint
-      if (input.toolName === "shell" && input.toolResult?.exitCode !== 0) {
-        return {
-          additionalContext:
-            "The command failed. Check if required dependencies are installed.",
-        };
-      }
+                // If shell command failed, add debugging hint
+                if (input.toolName === "shell" && input.toolResult?.exitCode !== 0) {
+                    return {
+                        additionalContext:
+                            "The command failed. Check if required dependencies are installed.",
+                    };
+                }
 
-      return null;
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -454,21 +507,23 @@ const session = await client.createSession({
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onPostToolUse: async (input) => {
-      if (input.toolResult?.error && input.toolResult?.stack) {
-        // Remove internal stack trace details
-        return {
-          modifiedResult: {
-            error: input.toolResult.error,
-            // Keep only first 3 lines of stack
-            stack: input.toolResult.stack.split("\n").slice(0, 3).join("\n"),
-          },
-        };
-      }
-      return null;
+    hooks: {
+        handlers: {
+            onPostToolUse: async (input) => {
+                if (input.toolResult?.error && input.toolResult?.stack) {
+                    // Remove internal stack trace details
+                    return {
+                        modifiedResult: {
+                            error: input.toolResult.error,
+                            // Keep only first 3 lines of stack
+                            stack: input.toolResult.stack.split("\n").slice(0, 3).join("\n"),
+                        },
+                    };
+                }
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -476,34 +531,36 @@ const session = await client.createSession({
 
 ```typescript
 interface AuditEntry {
-  timestamp: Date;
-  sessionId: string;
-  toolName: string;
-  args: unknown;
-  result: unknown;
-  success: boolean;
+    timestamp: Date;
+    sessionId: string;
+    toolName: string;
+    args: unknown;
+    result: unknown;
+    success: boolean;
 }
 
 const auditLog: AuditEntry[] = [];
 
 const session = await client.createSession({
-  hooks: {
-    onPostToolUse: async (input, invocation) => {
-      auditLog.push({
-        timestamp: input.timestamp,
-        sessionId: invocation.sessionId,
-        toolName: input.toolName,
-        args: input.toolArgs,
-        result: input.toolResult,
-        success: !input.toolResult?.error,
-      });
+    hooks: {
+        handlers: {
+            onPostToolUse: async (input, invocation) => {
+                auditLog.push({
+                    timestamp: input.timestamp,
+                    sessionId: invocation.sessionId,
+                    toolName: input.toolName,
+                    args: input.toolArgs,
+                    result: input.toolResult,
+                    success: !input.toolResult?.error,
+                });
 
-      // Optionally persist to database/file
-      await saveAuditLog(auditLog);
+                // Optionally persist to database/file
+                await saveAuditLog(auditLog);
 
-      return null;
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -513,24 +570,26 @@ const session = await client.createSession({
 const NOISY_TOOLS = ["list_directory", "search_codebase"];
 
 const session = await client.createSession({
-  hooks: {
-    onPostToolUse: async (input) => {
-      if (NOISY_TOOLS.includes(input.toolName)) {
-        // Summarize instead of showing full result
-        const items = Array.isArray(input.toolResult)
-          ? input.toolResult
-          : input.toolResult?.items || [];
+    hooks: {
+        handlers: {
+            onPostToolUse: async (input) => {
+                if (NOISY_TOOLS.includes(input.toolName)) {
+                    // Summarize instead of showing full result
+                    const items = Array.isArray(input.toolResult)
+                        ? input.toolResult
+                        : input.toolResult?.items || [];
 
-        return {
-          modifiedResult: {
-            summary: `Found ${items.length} items`,
-            firstFew: items.slice(0, 5),
-          },
-        };
-      }
-      return null;
+                    return {
+                        modifiedResult: {
+                            summary: `Found ${items.length} items`,
+                            firstFew: items.slice(0, 5),
+                        },
+                    };
+                }
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 

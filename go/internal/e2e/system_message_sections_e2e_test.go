@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 func TestSystemMessageSectionsE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -19,17 +20,15 @@ func TestSystemMessageSectionsE2E(t *testing.T) {
 	t.Run("should_use_replaced_identity_section_in_response", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SystemMessage: &copilot.SystemMessageConfig{
-				Mode: "customize",
-				Sections: map[string]copilot.SectionOverride{
-					"identity": {
-						Action:  copilot.SectionActionReplace,
-						Content: "You are a helpful gardening assistant called Botanica. You only answer questions about plants and gardening.",
-					},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SystemMessage: &copilot.SystemMessageConfig{
+			Mode: "customize",
+			Sections: map[string]copilot.SectionOverride{
+				"identity": {
+					Action:  copilot.SectionActionReplace,
+					Content: "You are a helpful gardening assistant called Botanica. You only answer questions about plants and gardening.",
 				},
 			},
+		},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -59,17 +58,15 @@ func TestSystemMessageSectionsE2E(t *testing.T) {
 	t.Run("should_use_replaced_preamble_section_in_response", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SystemMessage: &copilot.SystemMessageConfig{
-				Mode: "customize",
-				Sections: map[string]copilot.SectionOverride{
-					copilot.SectionPreamble: {
-						Action:  copilot.SectionActionReplace,
-						Content: "You are a helpful gardening assistant called Botanica. You only answer questions about plants and gardening.",
-					},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SystemMessage: &copilot.SystemMessageConfig{
+			Mode: "customize",
+			Sections: map[string]copilot.SectionOverride{
+				copilot.SectionPreamble: {
+					Action:  copilot.SectionActionReplace,
+					Content: "You are a helpful gardening assistant called Botanica. You only answer questions about plants and gardening.",
 				},
 			},
+		},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)

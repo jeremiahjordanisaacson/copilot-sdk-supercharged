@@ -3,11 +3,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CopilotClient } from "./client.js";
+import { normalizeSessionOptions } from "./optionsCompatibility.js";
 import type { CopilotSession } from "./session.js";
 import {
     defaultJoinSessionPermissionHandler,
-    type PermissionHandler,
-    type ResumeSessionConfig,
+    type ResumeSessionOptions,
+    type SessionExtensionOptions,
+    type SessionSkillOptions,
+    type SessionToolOptions,
 } from "./types.js";
 import type { WorkflowHandle } from "./workflow.js";
 
@@ -22,11 +25,10 @@ export {
     type CanvasOptions,
 } from "./canvas.js";
 
-export type JoinSessionConfig = Omit<
-    ResumeSessionConfig,
-    "onPermissionRequest" | "extensionSdkPath" | "skillProvider" | "imageGeneration"
-> & {
-    onPermissionRequest?: PermissionHandler;
+export type JoinSessionOptions = Omit<ResumeSessionOptions, "extensions" | "skills" | "tools"> & {
+    extensions?: Omit<SessionExtensionOptions, "sdkPath">;
+    skills?: Omit<SessionSkillOptions, "provider">;
+    tools?: Omit<SessionToolOptions, "imageGeneration">;
     /**
      * Names of sensitive environment variables this extension needs, such as
      * `"GITHUB_TOKEN"`.
@@ -66,6 +68,17 @@ export type JoinSessionConfig = Omit<
 };
 
 export type { ExtensionInfo } from "./types.js";
+
+/** A joined session with HTTP transport owned by the extension's connection. */
+export interface JoinedSession extends CopilotSession {
+    /**
+     * Create, send, read, and cancel HTTP requests through the shared runtime transport.
+     *
+     * @experimental These methods may change or be removed in future SDK or CLI releases.
+     */
+    readonly fetch: CopilotClient["rpc"]["fetch"];
+}
+
 export {
     defineWorkflow,
     WorkflowResumeError,
@@ -79,6 +92,7 @@ export {
     type WorkflowContext,
     type WorkflowDefinition,
     type WorkflowHandle,
+    type WorkflowAgentReference,
     type JsonValue,
     type WorkflowJsonSchema,
     type WorkflowLimits,
@@ -109,12 +123,13 @@ export {
  *
  * @example
  * ```typescript
- * import { joinSession } from "@github/copilot-sdk/extension";
+ * import { joinSession } from "@microsoft/copilot-sdk/extension";
  *
- * const session = await joinSession({ tools: [myTool] });
+ * const session = await joinSession({ tools: { definitions: [myTool] } });
  * ```
  */
-export async function joinSession(config: JoinSessionConfig = {}): Promise<CopilotSession> {
+export async function joinSession(config: JoinSessionOptions = {}): Promise<JoinedSession> {
+    config = normalizeSessionOptions(config);
     const sessionId = process.env.SESSION_ID;
     if (!sessionId) {
         throw new Error(
@@ -122,39 +137,46 @@ export async function joinSession(config: JoinSessionConfig = {}): Promise<Copil
         );
     }
 
-    const client = new CopilotClient({ _internalConnection: { kind: "parent-process" } });
+    const client = new CopilotClient({
+        mode: "coding-agent",
+        _internalConnection: { kind: "parent-process" },
+    });
 
-    // Strip `extensionSdkPath` at runtime even though `JoinSessionConfig` omits it
+    // Strip owner-only options even though JoinSessionOptions omits them
     // at the type level — untyped (JS) callers can still slip it through, and
     // honoring it here would be misleading since the extension subprocess has
     // already been forked by the host with the SDK the host chose. Skill
     // providers belong to the session's owning client, and the CLI rejects them
     // from extensions.
-    const {
-        extensionSdkPath: _stripped,
-        skillProvider: _strippedSkillProvider,
-        imageGeneration: _strippedImageGeneration,
-        workflows,
-        requestedEnvironmentVariables,
-        ...rest
-    } = config as JoinSessionConfig & {
-        extensionSdkPath?: string;
-        skillProvider?: unknown;
-        imageGeneration?: unknown;
-    };
+    const { workflows, requestedEnvironmentVariables, ...rest } = config;
+    const { sdkPath: _stripped, ...extensions } = (config.extensions ??
+        {}) as SessionExtensionOptions;
+    const { provider: _strippedSkillProvider, ...skills } = (config.skills ??
+        {}) as SessionSkillOptions;
+    const { imageGeneration: _strippedImageGeneration, ...tools } = (config.tools ??
+        {}) as SessionToolOptions;
     void _stripped;
     void _strippedSkillProvider;
     // Image generation consent belongs to the session owner, not joining extensions.
     void _strippedImageGeneration;
 
-    return client.resumeSessionForExtension(
+    const session = await client.resumeSessionForExtension(
         sessionId,
         {
             ...rest,
-            onPermissionRequest: config.onPermissionRequest ?? defaultJoinSessionPermissionHandler,
+            extensions,
+            skills,
+            tools,
+            permissions: {
+                ...rest.permissions,
+                onRequest: config.permissions?.onRequest ?? defaultJoinSessionPermissionHandler,
+            },
             suppressResumeEvent: config.suppressResumeEvent ?? true,
         },
         { workflows },
         requestedEnvironmentVariables?.length ? { requestedEnvironmentVariables } : undefined
     );
+    return Object.defineProperty(session, "fetch", {
+        get: () => client.rpc.fetch,
+    }) as JoinedSession;
 }

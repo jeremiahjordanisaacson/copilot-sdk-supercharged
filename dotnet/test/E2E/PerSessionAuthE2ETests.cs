@@ -2,11 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 [Trait(E2ETestTraits.Backend, E2ETestTraits.CapiOnly)]
 public class PerSessionAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "per-session-auth", output)
@@ -17,13 +17,9 @@ public class PerSessionAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper ou
     /// </summary>
     private CopilotClient CreateAuthTestClient()
     {
-        var env = new Dictionary<string, string>(Ctx.GetEnvironment())
-        {
-            ["COPILOT_DEBUG_GITHUB_API_URL"] = Ctx.ProxyUrl,
-        };
         // Disable the harness's auto-injected client token so the per-session
         // auth tests validate only session-scoped tokens.
-        return Ctx.CreateClient(environment: env, autoInjectGitHubToken: false);
+        return Ctx.CreateClient(autoInjectGitHubToken: false);
     }
 
     private CopilotClient CreateNoAuthTestClient()
@@ -33,7 +29,10 @@ public class PerSessionAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper ou
 
         return Ctx.CreateClient(options: new CopilotClientOptions
         {
-            UseLoggedInUser = false,
+            Mode = CopilotClientMode.CodingAgent,
+            // Clearing ambient credential aliases requires an isolated child environment.
+            Runtime = RuntimeConnection.ForSpawnedStdio(),
+            GitHub = new ClientGitHubOptions { UseLoggedInUser = false }
         }, autoInjectGitHubToken: false, environment: env);
     }
 
@@ -75,11 +74,8 @@ public class PerSessionAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper ou
     {
         await SetupCopilotUsersAsync();
 
-        await using var session = await Ctx.CreateSessionAsync(AuthClient, new SessionConfig
-        {
-            GitHubToken = "token-alice",
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var session = await Ctx.CreateSessionAsync(AuthClient, new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Token = "token-alice" }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var status = await session.Rpc.GitHubAuth.GetStatusAsync();
         Assert.True(status.IsAuthenticated);
@@ -91,17 +87,11 @@ public class PerSessionAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper ou
     {
         await SetupCopilotUsersAsync();
 
-        await using var sessionA = await Ctx.CreateSessionAsync(AuthClient, new SessionConfig
-        {
-            GitHubToken = "token-alice",
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var sessionA = await Ctx.CreateSessionAsync(AuthClient, new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Token = "token-alice" }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
-        await using var sessionB = await Ctx.CreateSessionAsync(AuthClient, new SessionConfig
-        {
-            GitHubToken = "token-bob",
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var sessionB = await Ctx.CreateSessionAsync(AuthClient, new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Token = "token-bob" }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var statusA = await sessionA.Rpc.GitHubAuth.GetStatusAsync();
         Assert.True(statusA.IsAuthenticated);
@@ -117,10 +107,8 @@ public class PerSessionAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper ou
     {
         var noAuthClient = CreateNoAuthTestClient();
 
-        await using var session = await Ctx.CreateSessionAsync(noAuthClient, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var session = await Ctx.CreateSessionAsync(noAuthClient, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var status = await session.Rpc.GitHubAuth.GetStatusAsync();
         // Without a per-session GitHub token, there is no per-session identity.
@@ -132,11 +120,8 @@ public class PerSessionAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper ou
     {
         await SetupCopilotUsersAsync();
 
-        var ex = await Assert.ThrowsAnyAsync<Exception>(() => Ctx.CreateSessionAsync(AuthClient, new SessionConfig
-        {
-            GitHubToken = "invalid-token",
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        }));
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => Ctx.CreateSessionAsync(AuthClient, new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Token = "invalid-token" }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } }));
         Assert.Contains("401 Unauthorized", ex.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 }

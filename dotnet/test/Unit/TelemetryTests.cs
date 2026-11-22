@@ -6,7 +6,7 @@ using System.Diagnostics;
 using System.Reflection;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public class TelemetryTests
 {
@@ -47,9 +47,9 @@ public class TelemetryTests
     [Fact]
     public void CopilotClientOptions_Telemetry_DefaultsToNull()
     {
-        var options = new CopilotClientOptions();
+        var options = new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent };
 
-        Assert.Null(options.Telemetry);
+        Assert.Null(options.Observability.Telemetry);
     }
 
     [Fact]
@@ -61,10 +61,10 @@ public class TelemetryTests
             ExporterType = "otlp-http"
         };
 
-        var options = new CopilotClientOptions { Telemetry = telemetry };
+        var options = new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Observability = new ClientObservabilityOptions { Telemetry = telemetry } };
         var clone = options.Clone();
 
-        Assert.Same(telemetry, clone.Telemetry);
+        Assert.Same(telemetry, clone.Observability.Telemetry);
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public class TelemetryTests
 
     private static T InvokeTelemetryHelper<T>(string name, params object?[] args)
     {
-        var helperType = typeof(CopilotClient).Assembly.GetType("GitHub.Copilot.TelemetryHelpers", throwOnError: true)!;
+        var helperType = typeof(CopilotClient).Assembly.GetType("Microsoft.Copilot.TelemetryHelpers", throwOnError: true)!;
         var method = helperType.GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!;
         return (T)method.Invoke(null, args)!;
     }

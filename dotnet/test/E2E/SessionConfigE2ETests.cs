@@ -1,15 +1,17 @@
-﻿/*---------------------------------------------------------------------------------------------
+/*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "session_config", output)
@@ -29,14 +31,8 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         await File.WriteAllBytesAsync(Path.Join(Ctx.WorkDir, "test.png"), Png1X1);
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Model = "claude-sonnet-5",
-            ModelCapabilities = new ModelCapabilitiesOverride
-            {
-                Supports = new ModelCapabilitiesOverrideSupports { Vision = false },
-            },
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Model = "claude-sonnet-5", Inference = new SessionInferenceOptions { Capabilities = new ModelCapabilitiesOverride { Supports = new ModelCapabilitiesOverrideSupports { Vision = false }, } } });
 
         // Turn 1: vision off — no image_url expected
         await session.SendAndWaitAsync(new MessageOptions { Prompt = ViewImagePrompt });
@@ -72,14 +68,8 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         await File.WriteAllBytesAsync(Path.Join(Ctx.WorkDir, "test.png"), Png1X1);
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Model = "claude-sonnet-5",
-            ModelCapabilities = new ModelCapabilitiesOverride
-            {
-                Supports = new ModelCapabilitiesOverrideSupports { Vision = true },
-            },
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Model = "claude-sonnet-5", Inference = new SessionInferenceOptions { Capabilities = new ModelCapabilitiesOverride { Supports = new ModelCapabilitiesOverrideSupports { Vision = true }, } } });
 
         // Turn 1: vision on — image_url expected
         await session.SendAndWaitAsync(new MessageOptions { Prompt = ViewImagePrompt });
@@ -112,9 +102,9 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         var requestedSessionId = Guid.NewGuid().ToString();
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            SessionId = requestedSessionId,
+            SessionId = requestedSessionId
         });
 
         Assert.Equal(requestedSessionId, session.SessionId);
@@ -132,15 +122,11 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         const string reasoningModelId = "custom-reasoning-model";
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Model = reasoningModelId,
-            Provider = CreateProxyProvider("create-reasoning"),
-            ReasoningEffort = "high",
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = reasoningModelId, Inference = ByokTestOptions.Inference(CreateProxyProvider("create-reasoning"), new SessionInferenceOptions { ReasoningEffort = "high" }, reasoningModelId) });
 
         var startEvent = Assert.Single((await session.GetEventsAsync()).OfType<SessionStartEvent>());
-        Assert.Equal(reasoningModelId, startEvent.Data.SelectedModel);
+        Assert.Equal($"byok/{reasoningModelId}", startEvent.Data.SelectedModel);
         Assert.Equal("high", startEvent.Data.ReasoningEffort);
 
         await session.DisposeAsync();
@@ -155,15 +141,11 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         const string reasoningModelId = "custom-reasoning-model";
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Model = reasoningModelId,
-            Provider = CreateProxyProvider($"reasoning-{effort}"),
-            ReasoningEffort = effort,
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = reasoningModelId, Inference = ByokTestOptions.Inference(CreateProxyProvider($"reasoning-{effort}"), new SessionInferenceOptions { ReasoningEffort = effort }, reasoningModelId) });
 
         var startEvent = Assert.Single((await session.GetEventsAsync()).OfType<SessionStartEvent>());
-        Assert.Equal(reasoningModelId, startEvent.Data.SelectedModel);
+        Assert.Equal($"byok/{reasoningModelId}", startEvent.Data.SelectedModel);
         Assert.Equal(effort, startEvent.Data.ReasoningEffort);
 
         await session.DisposeAsync();
@@ -177,15 +159,11 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var sessionId = originalSession.SessionId;
         await SuspendAndUntrackSessionForResumeAsync(originalSession);
         const string reasoningModelId = "custom-reasoning-model";
-        var resumedSession = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
-        {
-            Model = reasoningModelId,
-            Provider = CreateProxyProvider("resume-reasoning"),
-            ReasoningEffort = "high",
-        });
+        var resumedSession = await ResumeSessionAsync(sessionId, new ResumeSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = reasoningModelId, Inference = ByokTestOptions.Inference(CreateProxyProvider("resume-reasoning"), new SessionInferenceOptions { ReasoningEffort = "high" }, reasoningModelId) });
 
         var resumeEvent = Assert.Single((await resumedSession.GetEventsAsync()).OfType<SessionResumeEvent>());
-        Assert.Equal(reasoningModelId, resumeEvent.Data.SelectedModel);
+        Assert.Equal($"byok/{reasoningModelId}", resumeEvent.Data.SelectedModel);
         Assert.Equal("high", resumeEvent.Data.ReasoningEffort);
 
         await resumedSession.DisposeAsync();
@@ -197,9 +175,9 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     [Trait(E2ETestTraits.Backend, E2ETestTraits.CapiOnly)]
     public async Task Should_Forward_ClientName_In_UserAgent()
     {
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            ClientName = ClientName,
+            ClientName = ClientName
         });
 
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
@@ -214,11 +192,8 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     [Trait(E2ETestTraits.Backend, E2ETestTraits.SelfConfiguredBackend)]
     public async Task Should_Forward_Custom_Provider_Headers_On_Create()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Model = "claude-sonnet-5",
-            Provider = CreateProxyProvider("create-provider-header"),
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "claude-sonnet-5", Inference = ByokTestOptions.Inference(CreateProxyProvider("create-provider-header"), new SessionInferenceOptions { }) });
 
         var message = await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
         Assert.Contains("2", message?.Data.Content ?? string.Empty);
@@ -238,11 +213,8 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var sessionId = session1.SessionId;
         await SuspendAndUntrackSessionForResumeAsync(session1);
 
-        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
-        {
-            Model = "claude-sonnet-5",
-            Provider = CreateProxyProvider("resume-provider-header"),
-        });
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "claude-sonnet-5", Inference = ByokTestOptions.Inference(CreateProxyProvider("resume-provider-header"), new SessionInferenceOptions { }) });
 
         var message = await session2.SendAndWaitAsync(new MessageOptions { Prompt = "What is 2+2?" });
         Assert.Contains("4", message?.Data.Content ?? string.Empty);
@@ -259,24 +231,14 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     public async Task Should_Forward_Provider_Wire_Model()
     {
         // Verifies that ProviderConfig.WireModel overrides the model name sent to
-        // the provider API, while SessionConfig.Model still drives runtime
+        // the provider API, while CreateSessionOptions.Model still drives runtime
         // configuration lookup (capabilities, prompts, reasoning behavior).
         // MaxOutputTokens is also set here to confirm the SDK accepts it without
         // serialization errors; the CLI does not echo it as `max_tokens` on the
         // OpenAI-style wire request, so we don't assert on it directly (see unit
         // tests for serialization coverage).
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Model = "claude-sonnet-5",
-            Provider = new ProviderConfig
-            {
-                Type = "openai",
-                BaseUrl = Ctx.ProxyUrl,
-                ApiKey = "test-provider-key",
-                WireModel = "test-wire-model",
-                MaxOutputTokens = 1024,
-            },
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "claude-sonnet-5", Inference = ByokTestOptions.Inference(new ProviderConfig { Type = "openai", BaseUrl = Ctx.ProxyUrl, ApiKey = "test-provider-key", WireModel = "test-wire-model", MaxOutputTokens = 1024, }, new SessionInferenceOptions { }) });
 
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
 
@@ -290,19 +252,9 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     [Trait(E2ETestTraits.Backend, E2ETestTraits.SelfConfiguredBackend)]
     public async Task Should_Use_Provider_Model_Id_As_Wire_Model()
     {
-        // ProviderConfig.ModelId drives both the runtime resolved model AND the wire model
-        // when WireModel is not specified. Here SessionConfig.Model is intentionally omitted
-        // so that ModelId is the only model source.
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Provider = new ProviderConfig
-            {
-                Type = "openai",
-                BaseUrl = Ctx.ProxyUrl,
-                ApiKey = "test-provider-key",
-                ModelId = "claude-sonnet-5",
-            },
-        });
+        // A registered model's ModelId is the wire model when WireModel is omitted.
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "claude-sonnet-5", Inference = ByokTestOptions.Inference(new ProviderConfig { Type = "openai", BaseUrl = Ctx.ProxyUrl, ApiKey = "test-provider-key", ModelId = "claude-sonnet-5", }, new SessionInferenceOptions { }) });
 
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
 
@@ -319,9 +271,9 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Directory.CreateDirectory(subDir);
         await File.WriteAllTextAsync(Path.Join(subDir, "marker.txt"), "I am in the subdirectory");
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            WorkingDirectory = subDir,
+            WorkingDirectory = subDir
         });
 
         var message = await session.SendAndWaitAsync(new MessageOptions
@@ -345,9 +297,9 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var sessionId = session1.SessionId;
         await SuspendAndUntrackSessionForResumeAsync(session1);
 
-        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
+        await using var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionOptions
         {
-            WorkingDirectory = subDir,
+            WorkingDirectory = subDir
         });
 
         var message = await session2.SendAndWaitAsync(new MessageOptions
@@ -357,7 +309,13 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
         Assert.Contains("resume working directory", message?.Data.Content ?? string.Empty);
 
-        await session2.DisposeAsync();
+        await SuspendAndUntrackSessionForResumeAsync(session2);
+        var omittedWorkingDirectory = new ResumeSessionOptions();
+        await using var session3 = await ResumeSessionAsync(sessionId, omittedWorkingDirectory);
+
+        Assert.Null(omittedWorkingDirectory.WorkingDirectory);
+        var resumeEvent = (await session3.GetEventsAsync()).OfType<SessionResumeEvent>().Last();
+        Assert.Equal(subDir, resumeEvent.Data.Context?.Cwd);
     }
 
     [Fact]
@@ -368,13 +326,13 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         await SuspendAndUntrackSessionForResumeAsync(session1);
 
         var resumeInstruction = "End the response with RESUME_SYSTEM_MESSAGE_SENTINEL.";
-        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionOptions
         {
             SystemMessage = new SystemMessageConfig
             {
                 Mode = SystemMessageMode.Append,
                 Content = resumeInstruction,
-            },
+            }
         });
 
         var message = await session2.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
@@ -399,10 +357,10 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             Path.Join(instructionFilesDir, "extra.instructions.md"),
             $"Always include {sentinel}.");
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
             WorkingDirectory = projectDir,
-            InstructionDirectories = [instructionDir],
+            Instructions = new CreateSessionInstructionOptions { Directories = [instructionDir] }
         });
 
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
@@ -426,17 +384,14 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             Path.Join(instructionFilesDir, "extra.instructions.md"),
             $"Always include {sentinel}.");
 
-        await using var session1 = await CreateSessionAsync(new SessionConfig
+        await using var session1 = await CreateSessionAsync(new CreateSessionOptions
         {
-            WorkingDirectory = projectDir,
+            WorkingDirectory = projectDir
         });
         var sessionId = session1.SessionId;
         await SuspendAndUntrackSessionForResumeAsync(session1);
-        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
-        {
-            WorkingDirectory = projectDir,
-            InstructionDirectories = [instructionDir],
-        });
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionOptions
+        { WorkingDirectory = projectDir, Instructions = new SessionInstructionOptions { Directories = [instructionDir] } });
 
         await session2.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
 
@@ -453,10 +408,8 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var sessionId = session1.SessionId;
         await SuspendAndUntrackSessionForResumeAsync(session1);
 
-        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
-        {
-            AvailableTools = ["view"],
-        });
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionOptions
+        { Tools = new SessionToolOptions { AvailableTools = ["view"] } });
 
         try
         {
@@ -474,21 +427,24 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     [Fact]
     public async Task Should_Apply_Session_Limits_On_Create()
     {
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            SessionLimits = new SessionLimitsConfig
+            Execution = new SessionExecutionOptions
             {
-                MaxAiCredits = 30,
-            },
+                Limits = new SessionLimitsConfig
+                {
+                    MaxAiCredits = 30,
+                }
+            }
         });
 
         try
         {
-            var exchange = await SendAndGetNextExchangeAsync(
+            await SendAndGetNextExchangeAsync(
                 session,
                 "Acknowledge the current session limits.");
 
-            AssertSessionLimitsStatus(exchange, "30 AI credits");
+            await AssertSessionLimitsAppliedAsync(session, 30);
         }
         finally
         {
@@ -502,21 +458,24 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         await using var session1 = await CreateSessionAsync();
         var sessionId = session1.SessionId;
         await SuspendAndUntrackSessionForResumeAsync(session1);
-        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionOptions
         {
-            SessionLimits = new SessionLimitsConfig
+            Execution = new SessionExecutionOptions
             {
-                MaxAiCredits = 30,
-            },
+                Limits = new SessionLimitsConfig
+                {
+                    MaxAiCredits = 30,
+                }
+            }
         });
 
         try
         {
-            var exchange = await SendAndGetNextExchangeAsync(
+            await SendAndGetNextExchangeAsync(
                 session2,
                 "Acknowledge the current session limits.");
 
-            AssertSessionLimitsStatus(exchange, "30 AI credits");
+            await AssertSessionLimitsAppliedAsync(session2, 30);
         }
         finally
         {
@@ -534,22 +493,20 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         try
         {
             var baselineExchange = await SendAndGetNextExchangeAsync(baselineSession, prompt);
-            Assert.Contains(excludedAgent, GetTaskAgentTypes(baselineExchange));
+            Assert.Contains(excludedAgent, await GetTaskAgentTypesAsync(baselineExchange));
         }
         finally
         {
             await baselineSession.DisposeAsync();
         }
 
-        var excludedSession = await CreateSessionAsync(new SessionConfig
-        {
-            ExcludedBuiltInAgents = [excludedAgent],
-        });
+        var excludedSession = await CreateSessionAsync(new CreateSessionOptions
+        { Agents = new SessionAgentOptions { ExcludedBuiltInAgents = [excludedAgent] } });
 
         try
         {
             var excludedExchange = await SendAndGetNextExchangeAsync(excludedSession, prompt);
-            var agentTypes = GetTaskAgentTypes(excludedExchange);
+            var agentTypes = await GetTaskAgentTypesAsync(excludedExchange);
 
             Assert.NotEmpty(agentTypes);
             Assert.DoesNotContain(excludedAgent, agentTypes);
@@ -568,15 +525,13 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         await using var session1 = await CreateSessionAsync();
         var sessionId = session1.SessionId;
         await SuspendAndUntrackSessionForResumeAsync(session1);
-        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
-        {
-            ExcludedBuiltInAgents = [excludedAgent],
-        });
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionOptions
+        { Agents = new SessionAgentOptions { ExcludedBuiltInAgents = [excludedAgent] } });
 
         try
         {
             var exchange = await SendAndGetNextExchangeAsync(session2, "What is 1+1?");
-            var agentTypes = GetTaskAgentTypes(exchange);
+            var agentTypes = await GetTaskAgentTypesAsync(exchange);
 
             Assert.NotEmpty(agentTypes);
             Assert.DoesNotContain(excludedAgent, agentTypes);
@@ -595,13 +550,8 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         await using var client = CreateClientWithRequestHandler(handler);
         await client.StartAsync();
 
-        var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Model = "claude-sonnet-5",
-            EnableCitations = true,
-            Provider = CreateAnthropicProvider(),
-        });
+        var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "claude-sonnet-5", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Inference = ByokTestOptions.Inference(CreateAnthropicProvider(), new SessionInferenceOptions { EnableCitations = true }) });
 
         try
         {
@@ -627,28 +577,22 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var handler = new RecordingRequestHandler();
         await using var client = CreateClientWithRequestHandler(
             handler,
-            RuntimeConnection.ForTcp(connectionToken: connectionToken));
+            RuntimeConnection.ForSpawnedTcp(connectionToken: connectionToken));
         await client.StartAsync();
 
-        var session1 = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        var session1 = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         var sessionId = session1.SessionId;
         var port = client.RuntimePort
             ?? throw new InvalidOperationException("The handler-backed E2E client must use TCP transport to support multi-client resume.");
         await using var resumeClient = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri($"localhost:{port}", connectionToken: connectionToken),
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp("localhost", port, connectionToken: connectionToken)
         });
 
-        var session2 = await Ctx.ResumeSessionAsync(resumeClient, sessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Model = "claude-sonnet-5",
-            EnableCitations = true,
-            Provider = CreateAnthropicProvider(),
-        });
+        var session2 = await Ctx.ResumeSessionAsync(resumeClient, sessionId, new ResumeSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "claude-sonnet-5", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Inference = ByokTestOptions.Inference(CreateAnthropicProvider(), new SessionInferenceOptions { EnableCitations = true }) });
 
         try
         {
@@ -674,14 +618,8 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         // Per the TS test (session_config.e2e.test.ts), this only verifies that a
         // session can be created with a custom provider config and that disconnect
         // is allowed to fail since the fake provider URL won't be reachable.
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            Provider = new ProviderConfig
-            {
-                BaseUrl = "https://api.example.com/v1",
-                ApiKey = "test-key",
-            },
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "claude-sonnet-5", Inference = ByokTestOptions.Inference(new ProviderConfig { BaseUrl = "https://api.example.com/v1", ApiKey = "test-key", }, new SessionInferenceOptions { }) });
 
         Assert.Matches(@"^[a-f0-9-]+$", session.SessionId);
 
@@ -771,8 +709,9 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         return Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = connection ?? RuntimeConnection.ForStdio(),
-            RequestHandler = handler,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = connection ?? RuntimeConnection.ForSpawnedStdio(),
+            Models = new ClientModelOptions { RequestHandler = handler }
         });
     }
 
@@ -786,20 +725,14 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         return exchanges[existingCount];
     }
 
-    private static void AssertSessionLimitsStatus(ParsedHttpExchange exchange, string expectedRemaining)
+    private static async Task AssertSessionLimitsAppliedAsync(CopilotSession session, double maxAiCredits)
     {
-        var message = exchange.Request.Messages.SingleOrDefault(m =>
-            m.Role == "user"
-            && m.StringContent?.Contains("<session_limits_status>", StringComparison.Ordinal) == true);
-
-        Assert.NotNull(message);
-        Assert.Contains($"Remaining session limits: {expectedRemaining}.", message!.StringContent);
-        Assert.Contains(
-            "Be frugal; avoid optional exploration and unnecessary tool calls.",
-            message.StringContent);
+        var metadata = await session.Rpc.Metadata.SnapshotAsync();
+        Assert.NotNull(metadata.SessionLimits);
+        Assert.Equal<double?>(maxAiCredits, metadata.SessionLimits!.MaxAiCredits);
     }
 
-    private static IReadOnlyList<string> GetTaskAgentTypes(ParsedHttpExchange exchange)
+    private async Task<IReadOnlyList<string>> GetTaskAgentTypesAsync(ParsedHttpExchange exchange)
     {
         var taskTool = Assert.Single(
             exchange.Request.Tools ?? [],
@@ -807,12 +740,54 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var parameters = taskTool.Function.Parameters;
 
         Assert.NotNull(parameters);
-        var enumValues = parameters!.Value
+        var agentType = parameters!.Value
             .GetProperty("properties")
-            .GetProperty("agent_type")
-            .GetProperty("enum");
+            .GetProperty("agent_type");
+        if (Environment.GetEnvironmentVariable("COPILOT_EXP_COPILOT_CLI_STABLE_PROMPT_PREFIX") != "true")
+        {
+            var enumValues = agentType.GetProperty("enum");
+            return [.. enumValues.EnumerateArray().Select(value => value.GetString()).OfType<string>()];
+        }
 
-        return [.. enumValues.EnumerateArray().Select(value => value.GetString()).OfType<string>()];
+        // Under the stable prompt prefix the agents state note lists the agents.
+        Assert.Equal("string", agentType.GetProperty("type").GetString());
+        Assert.False(agentType.TryGetProperty("enum", out _));
+
+        // Normalized exchanges omit runtime reminders; inspect the actual provider request.
+        using var client = new HttpClient();
+        using var requests = JsonDocument.Parse(await client.GetStringAsync($"{Ctx.ProxyUrl}/requests"));
+        var inference = requests.RootElement.EnumerateArray()
+            .Where(request => RecordingRequestHandler.IsInferenceUrl(request.GetProperty("url").GetString()!))
+            .ToList();
+        Assert.NotEmpty(inference);
+        using var body = JsonDocument.Parse(inference[^1].GetProperty("body").GetString()!);
+        var messages = body.RootElement.TryGetProperty("messages", out var chatMessages)
+            ? chatMessages
+            : body.RootElement.GetProperty("input");
+        foreach (var message in messages.EnumerateArray().Reverse())
+        {
+            if (!message.TryGetProperty("role", out var role) || role.GetString() != "user")
+            {
+                continue;
+            }
+            var content = message.GetProperty("content");
+            var text = content.ValueKind == JsonValueKind.String
+                ? content.GetString()!
+                : string.Concat(content.EnumerateArray()
+                    .Where(part => part.TryGetProperty("text", out _))
+                    .Select(part => part.GetProperty("text").GetString()));
+            if (!text.Contains("<system_reminder>\n<agents>\n", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            var catalog = Regex.Match(text, @"<available_agents>\n([\s\S]*?)\n</available_agents>");
+            Assert.True(catalog.Success, "Expected available agents in state note");
+            return [.. Regex.Matches(catalog.Groups[1].Value, @"^- \*\*([^*]+)\*\*:", RegexOptions.Multiline)
+                .Cast<Match>()
+                .Select(match => match.Groups[1].Value)];
+        }
+        Assert.Fail("Expected agents state note in the latest provider request");
+        return [];
     }
 
     private static AttachmentBlob CreatePdfAttachment()

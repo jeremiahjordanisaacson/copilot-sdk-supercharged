@@ -2,8 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
@@ -11,7 +11,7 @@ using System.Text.Json.Serialization;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "permissions", output)
 {
@@ -28,24 +28,29 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         var readPermissionRequestReceived = new TaskCompletionSource<PermissionRequestRead>(TaskCreationOptions.RunContinuationsAsynchronously);
         var writePermissionRequestReceived = new TaskCompletionSource<PermissionRequestWrite>(TaskCreationOptions.RunContinuationsAsynchronously);
         CopilotSession? session = null;
-        session = await CreateSessionAsync(new SessionConfig
+        session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = (request, invocation) =>
+            Permissions = new SessionPermissionOptions
             {
-                lock (permissionRequestsLock)
-                {
-                    permissionRequests.Add(request);
-                }
-                Assert.Equal(session!.SessionId, invocation.SessionId);
-                if (request is PermissionRequestRead readRequest)
-                {
-                    readPermissionRequestReceived.TrySetResult(readRequest);
-                }
-                else if (request is PermissionRequestWrite writeRequest)
-                {
-                    writePermissionRequestReceived.TrySetResult(writeRequest);
-                }
-                return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
+                OnRequest = (request, invocation) =>
+        {
+            lock (permissionRequestsLock)
+            {
+                permissionRequests.Add(request);
+            }
+
+            Assert.Equal(session!.SessionId, invocation.SessionId);
+            if (request is PermissionRequestRead readRequest)
+            {
+                readPermissionRequestReceived.TrySetResult(readRequest);
+            }
+            else if (request is PermissionRequestWrite writeRequest)
+            {
+                writePermissionRequestReceived.TrySetResult(writeRequest);
+            }
+
+            return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
+        }
             }
         });
 
@@ -84,11 +89,14 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
     [Fact]
     public async Task Should_Deny_Permission_When_Handler_Returns_Denied()
     {
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = (request, invocation) =>
+            Permissions = new SessionPermissionOptions
             {
-                return Task.FromResult<PermissionDecision>(PermissionDecision.Reject());
+                OnRequest = (request, invocation) =>
+        {
+            return Task.FromResult<PermissionDecision>(PermissionDecision.Reject());
+        }
             }
         });
 
@@ -129,11 +137,8 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
     [Fact]
     public async Task Should_Deny_Tool_Operations_When_Handler_Explicitly_Denies()
     {
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            OnPermissionRequest = (_, _) =>
-                Task.FromResult<PermissionDecision>(PermissionDecision.UserNotAvailable())
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = (_, _) => Task.FromResult<PermissionDecision>(PermissionDecision.UserNotAvailable()) } });
         var permissionDenied = false;
 
         session.On<SessionEvent>(evt =>
@@ -157,7 +162,7 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
     [Fact]
     public async Task Should_Work_With_Approve_All_Permission_Handler()
     {
-        var session = await CreateSessionAsync(new SessionConfig());
+        var session = await CreateSessionAsync(new CreateSessionOptions());
         await AssertApproveAllPermissionHandlerAsync(session, TimeSpan.FromSeconds(120));
     }
 
@@ -182,27 +187,22 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         var toolCalls = 0;
         string? permissionToolCallId = null;
         CopilotSession? session = null;
-        session = await CreateSessionAsync(new SessionConfig
+        session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Tools =
-            [
-                AIFunctionFactory.Create(
-                    Echo,
-                    toolName,
-                    "Returns the result for the asynchronous permission test.",
-                    serializerOptions: PermissionJsonContext.Default.Options),
-            ],
-            AvailableTools = [toolName],
-            OnPermissionRequest = async (request, invocation) =>
+            Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(Echo, toolName, "Returns the result for the asynchronous permission test.", serializerOptions: PermissionJsonContext.Default.Options),], AvailableTools = [toolName] },
+            Permissions = new SessionPermissionOptions
             {
-                var customToolRequest = Assert.IsType<PermissionRequestCustomTool>(request);
-                Assert.Equal(toolName, customToolRequest.ToolName);
-                Assert.Equal(session!.SessionId, invocation.SessionId);
-                Assert.False(string.IsNullOrWhiteSpace(customToolRequest.ToolCallId));
-                permissionToolCallId = customToolRequest.ToolCallId;
-                await Task.Yield();
-                permissionRequestReceived = true;
-                return PermissionDecision.ApproveOnce();
+                OnRequest = async (request, invocation) =>
+        {
+            var customToolRequest = Assert.IsType<PermissionRequestCustomTool>(request);
+            Assert.Equal(toolName, customToolRequest.ToolName);
+            Assert.Equal(session!.SessionId, invocation.SessionId);
+            Assert.False(string.IsNullOrWhiteSpace(customToolRequest.ToolCallId));
+            permissionToolCallId = customToolRequest.ToolCallId;
+            await Task.Yield();
+            permissionRequestReceived = true;
+            return PermissionDecision.ApproveOnce();
+        }
             }
         });
 
@@ -237,7 +237,11 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
     [Fact]
     public async Task Should_Resume_Session_With_Permission_Handler()
     {
-        var permissionRequestReceived = false;
+        await Ctx.ConfigureForTestAsync("permissions", "Should_Resume_Session_With_Permission_Handler_Dotnet");
+
+        PermissionRequestWrite? writePermissionRequest = null;
+        var testFilePath = Path.Combine(Ctx.WorkDir, "test.txt");
+        await File.WriteAllTextAsync(testFilePath, "original content");
 
         // Create session without permission handler
         var session1 = await CreateSessionAsync();
@@ -246,21 +250,35 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         await session1.DisposeAsync();
 
         // Resume with permission handler
-        var session2 = await Ctx.ResumeSessionAsync(Client, sessionId, new ResumeSessionConfig
+        var session2 = await Ctx.ResumeSessionAsync(Client, sessionId, new ResumeSessionOptions
         {
-            OnPermissionRequest = (request, invocation) =>
+            Permissions = new SessionPermissionOptions
             {
-                permissionRequestReceived = true;
-                return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
+                OnRequest = (request, invocation) =>
+                {
+                    Assert.Equal(sessionId, invocation.SessionId);
+                    if (request is PermissionRequestWrite write)
+                    {
+                        writePermissionRequest = write;
+                    }
+                    return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
+                }
             }
         });
 
         await session2.SendAndWaitAsync(new MessageOptions
         {
-            Prompt = "Run 'echo resumed' for me"
+            Prompt = "Edit test.txt and replace 'original' with 'modified'"
         });
 
-        Assert.True(permissionRequestReceived, "Permission request should have been received");
+        Assert.NotNull(writePermissionRequest);
+        Assert.False(string.IsNullOrWhiteSpace(writePermissionRequest.ToolCallId));
+        await WaitForPersistedEventsAsync(
+            session2,
+            events => events.OfType<ToolExecutionCompleteEvent>().Any(evt =>
+                evt.Data.Success && evt.Data.ToolCallId == writePermissionRequest.ToolCallId),
+            "Timed out waiting for persisted successful completion of the approved write.");
+        Assert.Equal("modified content", await File.ReadAllTextAsync(testFilePath));
         await session2.DisposeAsync();
     }
 
@@ -269,12 +287,15 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
     {
         var permissionRequestReceived =
             new TaskCompletionSource<PermissionRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = (request, invocation) =>
+            Permissions = new SessionPermissionOptions
             {
-                permissionRequestReceived.TrySetResult(request);
-                throw new InvalidOperationException("Handler error");
+                OnRequest = (request, invocation) =>
+        {
+            permissionRequestReceived.TrySetResult(request);
+            throw new InvalidOperationException("Handler error");
+        }
             }
         });
 
@@ -312,19 +333,14 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
     [Fact]
     public async Task Should_Deny_Tool_Operations_When_Handler_Explicitly_Denies_After_Resume()
     {
-        var session1 = await CreateSessionAsync(new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll
-        });
+        var session1 = await CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         var sessionId = session1.SessionId;
         await session1.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
         await session1.DisposeAsync();
 
-        var session2 = await Ctx.ResumeSessionAsync(Client, sessionId, new ResumeSessionConfig
-        {
-            OnPermissionRequest = (_, _) =>
-                Task.FromResult<PermissionDecision>(PermissionDecision.UserNotAvailable())
-        });
+        var session2 = await Ctx.ResumeSessionAsync(Client, sessionId, new ResumeSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = (_, _) => Task.FromResult<PermissionDecision>(PermissionDecision.UserNotAvailable()) } });
         var permissionDenied = false;
 
         session2.On<SessionEvent>(evt =>
@@ -349,25 +365,45 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
     [Fact]
     public async Task Should_Receive_ToolCallId_In_Permission_Requests()
     {
-        var receivedToolCallId = false;
-        var session = await CreateSessionAsync(new SessionConfig
+        // Reuse a real file edit so replay does not depend on whether a shell command has exited.
+        await Ctx.ConfigureForTestAsync("permissions", nameof(Should_Invoke_Permission_Handler_For_Write_Operations));
+
+        string? permissionToolCallId = null;
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = (request, invocation) =>
+            Permissions = new SessionPermissionOptions
             {
-                if (request is PermissionRequestShell shell && !string.IsNullOrEmpty(shell.ToolCallId))
+                OnRequest = (request, invocation) =>
                 {
-                    receivedToolCallId = true;
+                    if (request is PermissionRequestWrite write)
+                    {
+                        permissionToolCallId = write.ToolCallId;
+                    }
+                    return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
                 }
-                return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
             }
         });
 
+        ToolExecutionCompleteEvent? toolCompleted = null;
+        using var subscription = session.On<ToolExecutionCompleteEvent>(evt =>
+        {
+            if (evt.Data.ToolCallId == permissionToolCallId)
+            {
+                toolCompleted = evt;
+            }
+        });
+        var testFilePath = Path.Combine(Ctx.WorkDir, "test.txt");
+        await File.WriteAllTextAsync(testFilePath, "original content");
+
         await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
-            Prompt = "Run 'echo test'"
+            Prompt = "Edit test.txt and replace 'original' with 'modified'"
         });
 
-        Assert.True(receivedToolCallId, "Should have received toolCallId in permission request");
+        Assert.False(string.IsNullOrWhiteSpace(permissionToolCallId), "Should have received toolCallId in write permission request");
+        Assert.NotNull(toolCompleted);
+        Assert.True(toolCompleted.Data.Success);
+        Assert.Equal("modified content", await File.ReadAllTextAsync(testFilePath));
     }
 
     [Fact]
@@ -388,19 +424,21 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
             }
         }
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = async (request, invocation) =>
+            Permissions = new SessionPermissionOptions
             {
-                var shellRequest = Assert.IsType<PermissionRequestShell>(request);
-                Assert.False(string.IsNullOrWhiteSpace(shellRequest.ToolCallId));
-
-                AddLifecycleEvent("permission-start", shellRequest.ToolCallId);
-                targetToolCallId.TrySetResult(shellRequest.ToolCallId!);
-                handlerEntered.TrySetResult();
-                await releaseHandler.Task.WaitAsync(TimeSpan.FromSeconds(30));
-                AddLifecycleEvent("permission-complete", shellRequest.ToolCallId);
-                return PermissionDecision.ApproveOnce();
+                OnRequest = async (request, invocation) =>
+        {
+            var shellRequest = Assert.IsType<PermissionRequestShell>(request);
+            Assert.False(string.IsNullOrWhiteSpace(shellRequest.ToolCallId));
+            AddLifecycleEvent("permission-start", shellRequest.ToolCallId);
+            targetToolCallId.TrySetResult(shellRequest.ToolCallId!);
+            handlerEntered.TrySetResult();
+            await releaseHandler.Task;
+            AddLifecycleEvent("permission-complete", shellRequest.ToolCallId);
+            return PermissionDecision.ApproveOnce();
+        }
             }
         });
 
@@ -420,21 +458,27 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         var sendTask = session.SendAndWaitAsync(new MessageOptions
         {
             Prompt = "Run 'echo slow_handler_test'"
-        });
+        }, Timeout.InfiniteTimeSpan);
 
-        await handlerEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
-        var targetToolId = await targetToolCallId.Task.WaitAsync(TimeSpan.FromSeconds(30));
-        lock (lifecycleLock)
+        string targetToolId;
+        try
         {
-            Assert.DoesNotContain(lifecycle, evt => evt.Phase == "tool-complete" && evt.ToolCallId == targetToolId);
+            await handlerEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            targetToolId = await targetToolCallId.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            lock (lifecycleLock)
+            {
+                Assert.DoesNotContain(lifecycle, evt => evt.Phase == "tool-complete" && evt.ToolCallId == targetToolId);
+            }
         }
-
-        releaseHandler.SetResult();
+        finally
+        {
+            releaseHandler.TrySetResult();
+        }
 
         AssistantMessageEvent? message;
         try
         {
-            message = await sendTask;
+            message = await sendTask.WaitAsync(TimeSpan.FromSeconds(60));
         }
         catch (TimeoutException)
         {
@@ -496,33 +540,27 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         var firstToolCalled = false;
         var secondToolCalled = false;
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Tools =
-            [
-                AIFunctionFactory.Create(
-                    FirstPermissionTool,
-                    "first_permission_tool",
-                    "First concurrent permission test tool",
-                    serializerOptions: PermissionJsonContext.Default.Options),
-                AIFunctionFactory.Create(
-                    SecondPermissionTool,
-                    "second_permission_tool",
-                    "Second concurrent permission test tool",
-                    serializerOptions: PermissionJsonContext.Default.Options),
-            ],
-            AvailableTools = ["first_permission_tool", "second_permission_tool"],
-            OnPermissionRequest = async (request, invocation) =>
+            Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(FirstPermissionTool, "first_permission_tool", "First concurrent permission test tool", serializerOptions: PermissionJsonContext.Default.Options), AIFunctionFactory.Create(SecondPermissionTool, "second_permission_tool", "Second concurrent permission test tool", serializerOptions: PermissionJsonContext.Default.Options),], AvailableTools = ["first_permission_tool", "second_permission_tool"] },
+            Permissions = new SessionPermissionOptions
             {
-                var count = Interlocked.Increment(ref permissionRequestCount);
-                lock (permissionRequestsLock) { permissionRequests.Add(request); }
-                if (count >= 2)
-                {
-                    bothPermissionRequestsStarted.TrySetResult();
-                }
+                OnRequest = async (request, invocation) =>
+        {
+            var count = Interlocked.Increment(ref permissionRequestCount);
+            lock (permissionRequestsLock)
+            {
+                permissionRequests.Add(request);
+            }
 
-                await bothPermissionRequestsStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
-                return PermissionDecision.ApproveOnce();
+            if (count >= 2)
+            {
+                bothPermissionRequestsStarted.TrySetResult();
+            }
+
+            await bothPermissionRequestsStarted.Task;
+            return PermissionDecision.ApproveOnce();
+        }
             }
         });
 
@@ -541,16 +579,24 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
                 }
             }
         });
-        var idle = TestHelper.GetNextEventOfTypeAsync<SessionIdleEvent>(session);
+        using var idle = TestHelper.ObserveEvent<SessionIdleEvent>(session);
 
-        await session.SendAsync(new MessageOptions
+        ToolExecutionCompleteEvent[] completed;
+        try
         {
-            Prompt = "Call both first_permission_tool and second_permission_tool in the same turn. Do not call any other tools."
-        });
+            await session.SendAsync(new MessageOptions
+            {
+                Prompt = "Call both first_permission_tool and second_permission_tool in the same turn. Do not call any other tools."
+            });
 
-        await bothPermissionRequestsStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
-        var completed = await Task.WhenAll(firstToolCompleted.Task, secondToolCompleted.Task).WaitAsync(TimeSpan.FromSeconds(60));
-        await idle;
+            await bothPermissionRequestsStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            completed = await Task.WhenAll(firstToolCompleted.Task, secondToolCompleted.Task).WaitAsync(TimeSpan.FromSeconds(60));
+            await idle.Task.WaitAsync(TimeSpan.FromSeconds(120));
+        }
+        finally
+        {
+            bothPermissionRequestsStarted.TrySetCanceled();
+        }
 
         // Should have received multiple permission requests (one per tool call)
         Assert.Equal(2, permissionRequestCount);
@@ -594,12 +640,15 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
     {
         var permissionCalled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = (_, _) =>
+            Permissions = new SessionPermissionOptions
             {
-                permissionCalled.TrySetResult(true);
-                return Task.FromResult<PermissionDecision>(PermissionDecision.NoResult());
+                OnRequest = (_, _) =>
+        {
+            permissionCalled.TrySetResult(true);
+            return Task.FromResult<PermissionDecision>(PermissionDecision.NoResult());
+        }
             }
         });
 
@@ -618,15 +667,22 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
     [Fact]
     public async Task Should_Short_Circuit_Permission_Handler_When_Set_Approve_All_Enabled()
     {
-        var handlerCallCount = 0;
+        await Ctx.ConfigureForTestAsync("permissions", nameof(Should_Invoke_Permission_Handler_For_Write_Operations));
 
-        var session = await CreateSessionAsync(new SessionConfig
+        var handlerCallCount = 0;
+        var testFilePath = Path.Combine(Ctx.WorkDir, "test.txt");
+        await File.WriteAllTextAsync(testFilePath, "original content");
+
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = (_, _) =>
+            Permissions = new SessionPermissionOptions
             {
-                Interlocked.Increment(ref handlerCallCount);
-                return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
-            },
+                OnRequest = (_, _) =>
+        {
+            Interlocked.Increment(ref handlerCallCount);
+            return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
+        }
+            }
         });
 
         // Runtime contract: when approveAllToolPermissionRequests is true the runtime
@@ -639,19 +695,24 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         {
             await session.SendAndWaitAsync(new MessageOptions
             {
-                Prompt = "Run 'echo test' and tell me what happens",
+                Prompt = "Edit test.txt and replace 'original' with 'modified'",
             });
 
             var persistedEvents = await WaitForPersistedEventsAsync(
                 session,
-                events => events.OfType<ToolExecutionCompleteEvent>().Any(evt =>
-                    evt.Data.Success && ToolCompleteContains(evt, "test")),
-                "Timed out waiting for persisted successful shell tool completion.");
+                events => events.OfType<ToolExecutionStartEvent>().Any(started =>
+                    started.Data.ToolName == "edit" &&
+                    events.OfType<ToolExecutionCompleteEvent>().Any(completed =>
+                        completed.Data.Success && completed.Data.ToolCallId == started.Data.ToolCallId)),
+                "Timed out waiting for persisted successful edit tool completion.");
 
             Assert.Equal(0, Volatile.Read(ref handlerCallCount));
+            var editStarted = Assert.Single(
+                persistedEvents.OfType<ToolExecutionStartEvent>(), evt => evt.Data.ToolName == "edit");
             Assert.Contains(
                 persistedEvents.OfType<ToolExecutionCompleteEvent>(),
-                evt => evt.Data.Success && ToolCompleteContains(evt, "test"));
+                evt => evt.Data.Success && evt.Data.ToolCallId == editStarted.Data.ToolCallId);
+            Assert.Equal("modified content", await File.ReadAllTextAsync(testFilePath));
         }
         finally
         {
@@ -682,16 +743,4 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
             ToolExecutionCompleteEvent completed => $"{evt.Type}:{completed.Data.ToolCallId}:{completed.Data.Success}",
             _ => evt.Type,
         };
-
-#pragma warning disable CS0618 // Compatibility coverage still reads the legacy terminal variant.
-    private static bool ToolCompleteContains(ToolExecutionCompleteEvent evt, string expected)
-        => evt.Data.Result?.Content.Contains(expected, StringComparison.OrdinalIgnoreCase) == true ||
-            evt.Data.Result?.DetailedContent?.Contains(expected, StringComparison.OrdinalIgnoreCase) == true ||
-            evt.Data.Result?.Contents?.Any(content => content switch
-            {
-                ToolExecutionCompleteContentText text => text.Text.Contains(expected, StringComparison.OrdinalIgnoreCase),
-                ToolExecutionCompleteContentTerminal terminal => terminal.Text.Contains(expected, StringComparison.OrdinalIgnoreCase),
-                _ => false,
-            }) == true;
-#pragma warning restore CS0618
 }

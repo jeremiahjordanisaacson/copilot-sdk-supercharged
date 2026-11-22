@@ -16,34 +16,30 @@ Tools are defined exactly as they are for creating a session, and a tool without
 <!-- docs-validate: strict -->
 <!-- docs-validate: hidden -->
 ```typescript
-import { CopilotClient, approveAll, defineTool } from "@github/copilot-sdk";
-import { z } from "zod";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare function findIssues(query: string): Promise<string>;
+declare const session: CopilotSession;
 
-async function main() {
-    const client = new CopilotClient();
-    const session = await client.createSession({ onPermissionRequest: approveAll });
+import { defineTool } from "copilot-sdk-supercharged";
+import { z } from "zod";
 
-    const searchIssues = defineTool("search_issues", {
-        description: "Search the issues shown on the current page",
-        parameters: z.object({ query: z.string().describe("Search text") }),
-        handler: async ({ query }) => findIssues(query),
-    });
+const searchIssues = defineTool("search_issues", {
+    description: "Search the issues shown on the current page",
+    parameters: z.object({ query: z.string().describe("Search text") }),
+    handler: async ({ query }) => findIssues(query),
+});
 
-    // Supply only the tools the current page provides.
-    await session.setTools([searchIssues]);
+// Supply only the tools the current page provides.
+await session.setTools([searchIssues]);
 
-    // Remove all of this client's tools.
-    await session.setTools([]);
-}
-
-main();
+// Remove all of this client's tools.
+await session.setTools([]);
 ```
 <!-- /docs-validate: hidden -->
 
 ```typescript
-import { defineTool } from "@github/copilot-sdk";
+import { defineTool } from "copilot-sdk-supercharged";
 import { z } from "zod";
 
 const searchIssues = defineTool("search_issues", {
@@ -65,10 +61,9 @@ await session.setTools([]);
 
 <!-- docs-validate: hidden -->
 ```python
-from pydantic import BaseModel, Field
-
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
+from pydantic import BaseModel, Field
 from copilot.tools import define_tool
 
 
@@ -86,8 +81,10 @@ async def search_issues(params: SearchIssuesParams) -> str:
 
 
 async def main() -> None:
-    client = CopilotClient()
-    session = await client.create_session(on_permission_request=PermissionHandler.approve_all)
+    client = CopilotClient(mode="coding-agent")
+    session = await client.create_session(
+        permissions={"on_request": PermissionHandler.approve_all}
+    )
 
     # Supply only the tools the current page provides.
     await session.set_tools([search_issues])
@@ -127,7 +124,7 @@ import (
 	"context"
 	"log"
 
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 type SearchIssuesParams struct {
@@ -140,9 +137,11 @@ func findIssues(query string) (string, error) {
 
 func main() {
 	ctx := context.Background()
-	client := copilot.NewClient(nil)
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+		Permissions: copilot.SessionPermissionOptions{
+			OnRequest: copilot.PermissionHandler.ApproveAll,
+		},
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -199,53 +198,46 @@ if err := session.SetTools(ctx, nil); err != nil {
 
 <!-- docs-validate: hidden -->
 ```csharp
-#pragma warning disable GHCP001
+#pragma warning disable MCPSDK001
 using System.ComponentModel;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using Microsoft.Extensions.AI;
 
-await using var client = new CopilotClient();
-await using var session = await client.CreateSessionAsync(new SessionConfig
+await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    OnPermissionRequest = PermissionHandler.ApproveAll,
-});
-
-var searchIssues = CopilotTool.DefineTool(
-    ([Description("Search text")] string query) => FindIssues(query),
-    factoryOptions: new AIFunctionFactoryOptions
+    Permissions = new SessionPermissionOptions
     {
-        Name = "search_issues",
-        Description = "Search the issues shown on the current page",
-    });
-
+        OnRequest = PermissionHandler.ApproveAll
+    }
+});
+var searchIssues = CopilotTool.DefineTool(([Description("Search text")] string query) => FindIssues(query), factoryOptions: new AIFunctionFactoryOptions
+{
+    Name = "search_issues",
+    Description = "Search the issues shown on the current page",
+});
 // Supply only the tools the current page provides.
 await session.SetToolsAsync([searchIssues]);
-
 // Remove all of this client's tools.
 await session.SetToolsAsync([]);
-
 static string FindIssues(string query) => query;
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 ```
 <!-- /docs-validate: hidden -->
 
 ```csharp
-var searchIssues = CopilotTool.DefineTool(
-    ([Description("Search text")] string query) => FindIssues(query),
-    factoryOptions: new AIFunctionFactoryOptions
-    {
-        Name = "search_issues",
-        Description = "Search the issues shown on the current page",
-    });
-
+var searchIssues = CopilotTool.DefineTool(([Description("Search text")] string query) => FindIssues(query), factoryOptions: new AIFunctionFactoryOptions
+{
+    Name = "search_issues",
+    Description = "Search the issues shown on the current page",
+});
 // Supply only the tools the current page provides.
 await session.SetToolsAsync([searchIssues]);
-
 // Remove all of this client's tools.
 await session.SetToolsAsync([]);
 ```
 
-`SetToolsAsync` raises the `GHCP001` experimental diagnostic, which you suppress with `#pragma warning disable GHCP001` or a project-level `<NoWarn>GHCP001</NoWarn>`.
+`SetToolsAsync` raises the `MCPSDK001` experimental diagnostic, which you suppress with `#pragma warning disable MCPSDK001` or a project-level `<NoWarn>MCPSDK001</NoWarn>`.
 
 </details>
 <details>
@@ -253,40 +245,53 @@ await session.SetToolsAsync([]);
 
 <!-- docs-validate: hidden -->
 ```java
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.CopilotClientMode;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-import com.github.copilot.AllowCopilotExperimental;
-import com.github.copilot.CopilotClient;
-import com.github.copilot.CopilotSession;
-import com.github.copilot.rpc.PermissionHandler;
-import com.github.copilot.rpc.SessionConfig;
-import com.github.copilot.rpc.ToolDefinition;
+import com.microsoft.copilot.AllowCopilotExperimental;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.CopilotSession;
+import com.microsoft.copilot.rpc.PermissionHandler;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
+import com.microsoft.copilot.rpc.ToolDefinition;
+import com.microsoft.copilot.rpc.SessionPermissionOptions;
 
 @AllowCopilotExperimental
 public class ChangingToolsExample {
     public static void main(String[] args) throws Exception {
-        try (var client = new CopilotClient()) {
+        try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
             CopilotSession session = client
-                    .createSession(new SessionConfig().setOnPermissionRequest(PermissionHandler.APPROVE_ALL))
+                    .createSession(new CreateSessionOptions()
+                            .setPermissions(new SessionPermissionOptions()
+                                    .setOnRequest(PermissionHandler.APPROVE_ALL)))
                     .get();
 
-            var searchIssues = ToolDefinition.create(
-                    "search_issues",
-                    "Search the issues shown on the current page",
-                    Map.of(
-                            "type", "object",
-                            "properties", Map.of("query", Map.of("type", "string", "description", "Search text")),
-                            "required", List.of("query")),
-                    invocation -> CompletableFuture.completedFuture(
-                            findIssues((String) invocation.getArguments().get("query"))));
+            var searchIssues = ToolDefinition
+                    .create("search_issues", "Search the issues shown on the current page", Map
+                            .of("type", "object", "properties", Map
+                                    .of("query", Map
+                                            .of("type", "string", "description", "Search text")),
+                                    "required", List
+                                            .of("query")),
+                            invocation -> CompletableFuture
+                                    .completedFuture(findIssues((String) invocation
+                                            .getArguments()
+                                            .get("query"))));
 
             // Supply only the tools the current page provides.
-            session.setTools(List.of(searchIssues)).get();
+            session
+                    .setTools(List
+                            .of(searchIssues))
+                    .get();
 
             // Remove all of this client's tools.
-            session.setTools(List.of()).get();
+            session
+                    .setTools(List
+                            .of())
+                    .get();
         }
     }
 
@@ -298,21 +303,29 @@ public class ChangingToolsExample {
 <!-- /docs-validate: hidden -->
 
 ```java
-var searchIssues = ToolDefinition.create(
-    "search_issues",
-    "Search the issues shown on the current page",
-    Map.of(
-        "type", "object",
-        "properties", Map.of("query", Map.of("type", "string", "description", "Search text")),
-        "required", List.of("query")),
-    invocation -> CompletableFuture.completedFuture(
-        findIssues((String) invocation.getArguments().get("query"))));
+var searchIssues = ToolDefinition
+        .create("search_issues", "Search the issues shown on the current page", Map
+                .of("type", "object", "properties", Map
+                        .of("query", Map
+                                .of("type", "string", "description", "Search text")),
+                        "required", List
+                                .of("query")),
+                invocation -> CompletableFuture
+                        .completedFuture(findIssues((String) invocation
+                                .getArguments()
+                                .get("query"))));
 
 // Supply only the tools the current page provides.
-session.setTools(List.of(searchIssues)).get();
+session
+        .setTools(List
+                .of(searchIssues))
+        .get();
 
 // Remove all of this client's tools.
-session.setTools(List.of()).get();
+session
+        .setTools(List
+                .of())
+        .get();
 ```
 
 `setTools` is `@CopilotExperimental`, so the consuming class or method must opt in with `@AllowCopilotExperimental`. See [Using experimental APIs](../../java/README.md#using-experimental-apis).
@@ -321,7 +334,35 @@ session.setTools(List.of()).get();
 <details>
 <summary><strong>Rust</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```rust
+use serde::Deserialize;
+
+async fn find_issues(query: &str) -> String {
+    query.to_owned()
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SearchIssuesParams {
+    /// Search text
+    query: String,
+}
+
+let search_issues = define_tool(
+    "search_issues",
+    "Search the issues shown on the current page",
+    |_inv, params: SearchIssuesParams| async move {
+        Ok(ToolResult::Text(find_issues(&params.query).await))
+    },
+);
+
+// Supply only the tools the current page provides.
+session.set_tools(vec![search_issues]).await?;
+
+// Remove all of this client's tools.
+session.set_tools(Vec::new()).await?;
+```
+<!-- /docs-validate: hidden -->
 
 ```rust
 #[derive(Deserialize, JsonSchema)]
@@ -357,9 +398,9 @@ session.set_tools(Vec::new()).await?;
 
 ## Replacing tools during a turn
 
-A model request that is already in flight was made with the previous tools, so the agent can still call a tool you just removed. The session doesn't answer that call, because another connected client might supply a tool with the same name, so the call can stay pending until the turn is aborted.
+A model request that is already in flight was made with the previous tools, so the agent can still call a tool you just removed. If no connected client supplies a tool with that name any more, the call fails with an error that tells the agent the tool is no longer available, and the turn continues.
 
-If a running turn might still call a tool you remove, replace tools while the session is idle, for example after the `session.idle` event, or abort the turn first. Replacing a tool's handler under the same name is safe during a turn: calls dispatched after the runtime accepts the replacement use the new handler.
+If you don't want the agent to see that failure, replace tools while the session is idle, for example after the `session.idle` event, or abort the turn first. Replacing a tool's handler under the same name is safe during a turn: calls dispatched after the runtime accepts the replacement use the new handler.
 
 ## SDK reference
 

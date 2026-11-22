@@ -8,9 +8,9 @@ using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
-#pragma warning disable GHCP001 // The LLM inference surface is intentionally experimental.
+#pragma warning disable MCPSDK001 // The LLM inference surface is intentionally experimental.
 
 /// <summary>
 /// A <see cref="CopilotRequestHandler"/> subclass for e2e tests that records every
@@ -29,7 +29,7 @@ namespace GitHub.Copilot.Test.E2E;
 /// <para>
 /// All response bodies are emitted as raw JSON string literals rather than via
 /// <c>JsonSerializer</c>: the test project disables reflection-based STJ on
-/// net8.0 (<c>JsonSerializerIsReflectionEnabledByDefault=false</c>), so
+/// net10.0 (<c>JsonSerializerIsReflectionEnabledByDefault=false</c>), so
 /// serializing anonymous types would throw at runtime.
 /// </para>
 /// </remarks>
@@ -51,7 +51,7 @@ internal sealed class RecordingRequestHandler : CopilotRequestHandler
         var url = request.RequestUri!.ToString();
         var bodyText = request.Content is null
             ? string.Empty
-#if NET8_0_OR_GREATER
+#if NET
             : await request.Content.ReadAsStringAsync(ctx.CancellationToken).ConfigureAwait(false);
 #else
             : await request.Content.ReadAsStringAsync().ConfigureAwait(false);

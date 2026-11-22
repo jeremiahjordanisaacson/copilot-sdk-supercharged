@@ -5,11 +5,11 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 /// <summary>
 /// End-to-end coverage for the experimental BYOK bearer-token-provider surface
@@ -54,8 +54,9 @@ public class ByokBearerTokenProviderE2ETests(E2ETestFixture fixture, ITestOutput
     private CopilotClient CreateClientWith(CapturingRequestHandler handler) =>
         Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(),
-            RequestHandler = handler,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(),
+            Models = new ClientModelOptions { RequestHandler = handler }
         });
 
     /// <summary>
@@ -71,13 +72,8 @@ public class ByokBearerTokenProviderE2ETests(E2ETestFixture fixture, ITestOutput
         string selectionId,
         string prompt)
     {
-        var session = await client.CreateSessionAsync(new SessionConfig
-        {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Model = selectionId,
-            Providers = providers,
-            Models = models,
-        });
+        var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Model = selectionId, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Inference = new SessionInferenceOptions { Providers = providers, Models = models } });
         try
         {
             await session.SendAndWaitAsync(new MessageOptions { Prompt = prompt });

@@ -3,17 +3,23 @@
 These types are auto-generated from the Copilot CLI protocol schemas. This
 module is the stable public access point so callers can write
 ``copilot.rpc.SessionUpdateOptionsParams`` without depending on the internal
-``copilot.generated`` package layout.
+``copilot._generated`` package layout.
 """
 
-from .generated.rpc import *  # noqa: F401, F403
-from .generated.rpc import (
+from ._generated.rpc import *  # noqa: F401, F403
+from ._generated.rpc import (
     BuiltinToolInputSchemaType as UIElicitationSchemaType,  # noqa: F401
 )
-from .generated.rpc import (
+from ._generated.rpc import (
     SessionFsReaddirWithTypesEntryType as SessionFSReaddirWithTypesEntryType,  # noqa: F401
 )
-from .generated.rpc import __all__ as _generated_all
-from .generated.session_events import PermissionDecisionSource
+from ._generated.rpc import __all__ as _generated_all
+from ._generated.session_events import PermissionDecisionSource
+from .provider_configuration import to_saved_provider_configuration
 
-__all__ = [*_generated_all, "PermissionDecisionSource", "UIElicitationSchemaType"]
+__all__ = [
+    *_generated_all,
+    "PermissionDecisionSource",
+    "UIElicitationSchemaType",
+    "to_saved_provider_configuration",
+]

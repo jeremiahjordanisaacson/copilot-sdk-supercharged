@@ -35,7 +35,8 @@ class TestTools:
             return "HOST_PATCH_HANDLED"
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, tools=[apply_patch]
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [apply_patch]},
         )
         response = await session.send_and_wait(
             "Use apply_patch to apply the supplied patch.", timeout=10.0
@@ -52,7 +53,7 @@ class TestTools:
             f.write("# ELIZA, the only chatbot you'll ever need")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
 
         assistant_message = await session.send_and_wait(
@@ -70,7 +71,8 @@ class TestTools:
             return params.input.upper()
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, tools=[encrypt_string]
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [encrypt_string]},
         )
 
         assistant_message = await session.send_and_wait(
@@ -105,9 +107,11 @@ class TestTools:
             return "Found: item_alpha, item_beta"
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            available_tools=ToolSet().add_custom("*").add_builtin("web_fetch"),
-            tools=[set_current_phase, search_items],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={
+                "available_tools": ToolSet().add_custom("*").add_builtin("web_fetch"),
+                "definitions": [set_current_phase, search_items],
+            },
         )
 
         prompt = (
@@ -128,7 +132,8 @@ class TestTools:
             raise Exception("Melbourne")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, tools=[get_user_location]
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [get_user_location]},
         )
 
         answer = await session.send_and_wait(
@@ -193,7 +198,8 @@ class TestTools:
             ]
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, tools=[db_query]
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [db_query]},
         )
         expected_session_id = session.session_id
 
@@ -232,7 +238,7 @@ class TestTools:
             return PermissionNoResult()
 
         session = await ctx.client.create_session(
-            on_permission_request=tracking_handler, tools=[safe_lookup]
+            permissions={"on_request": tracking_handler}, tools={"definitions": [safe_lookup]}
         )
 
         assistant_message = await session.send_and_wait(
@@ -255,7 +261,8 @@ class TestTools:
             return f"CUSTOM_GREP_RESULT: {params.query}"
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, tools=[custom_grep]
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={"definitions": [custom_grep]},
         )
 
         assistant_message = await session.send_and_wait(
@@ -279,7 +286,8 @@ class TestTools:
             return PermissionDecisionApproveOnce()
 
         session = await ctx.client.create_session(
-            on_permission_request=on_permission_request, tools=[encrypt_string]
+            permissions={"on_request": on_permission_request},
+            tools={"definitions": [encrypt_string]},
         )
 
         assistant_message = await session.send_and_wait(
@@ -309,7 +317,8 @@ class TestTools:
             return PermissionDecisionReject()
 
         session = await ctx.client.create_session(
-            on_permission_request=on_permission_request, tools=[encrypt_string]
+            permissions={"on_request": on_permission_request},
+            tools={"definitions": [encrypt_string]},
         )
 
         assistant_message = await session.send_and_wait(
@@ -342,31 +351,33 @@ class TestTools:
             return ToolResult(text_result_for_llm=f"COUNTRY_{country.upper()}")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[
-                Tool(
-                    name="lookup_city",
-                    description="Looks up city information",
-                    parameters={
-                        "type": "object",
-                        "properties": {"city": {"type": "string", "description": "City name"}},
-                        "required": ["city"],
-                    },
-                    handler=lookup_city,
-                ),
-                Tool(
-                    name="lookup_country",
-                    description="Looks up country information",
-                    parameters={
-                        "type": "object",
-                        "properties": {
-                            "country": {"type": "string", "description": "Country name"}
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={
+                "definitions": [
+                    Tool(
+                        name="lookup_city",
+                        description="Looks up city information",
+                        parameters={
+                            "type": "object",
+                            "properties": {"city": {"type": "string", "description": "City name"}},
+                            "required": ["city"],
                         },
-                        "required": ["country"],
-                    },
-                    handler=lookup_country,
-                ),
-            ],
+                        handler=lookup_city,
+                    ),
+                    Tool(
+                        name="lookup_country",
+                        description="Looks up country information",
+                        parameters={
+                            "type": "object",
+                            "properties": {
+                                "country": {"type": "string", "description": "Country name"}
+                            },
+                            "required": ["country"],
+                        },
+                        handler=lookup_country,
+                    ),
+                ]
+            },
         )
 
         try:
@@ -405,31 +416,37 @@ class TestTools:
             return ToolResult(text_result_for_llm=f"EXCLUDED_{input_val.upper()}")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            tools=[
-                Tool(
-                    name="allowed_tool",
-                    description="An allowed tool",
-                    parameters={
-                        "type": "object",
-                        "properties": {"input": {"type": "string", "description": "Input value"}},
-                        "required": ["input"],
-                    },
-                    handler=allowed_handler,
-                ),
-                Tool(
-                    name="excluded_tool",
-                    description="A tool that should be excluded",
-                    parameters={
-                        "type": "object",
-                        "properties": {"input": {"type": "string", "description": "Input value"}},
-                        "required": ["input"],
-                    },
-                    handler=excluded_handler,
-                ),
-            ],
-            available_tools=["allowed_tool", "excluded_tool"],
-            excluded_tools=["excluded_tool"],
+            permissions={"on_request": PermissionHandler.approve_all},
+            tools={
+                "definitions": [
+                    Tool(
+                        name="allowed_tool",
+                        description="An allowed tool",
+                        parameters={
+                            "type": "object",
+                            "properties": {
+                                "input": {"type": "string", "description": "Input value"}
+                            },
+                            "required": ["input"],
+                        },
+                        handler=allowed_handler,
+                    ),
+                    Tool(
+                        name="excluded_tool",
+                        description="A tool that should be excluded",
+                        parameters={
+                            "type": "object",
+                            "properties": {
+                                "input": {"type": "string", "description": "Input value"}
+                            },
+                            "required": ["input"],
+                        },
+                        handler=excluded_handler,
+                    ),
+                ],
+                "available_tools": ["allowed_tool", "excluded_tool"],
+                "excluded_tools": ["excluded_tool"],
+            },
         )
 
         try:

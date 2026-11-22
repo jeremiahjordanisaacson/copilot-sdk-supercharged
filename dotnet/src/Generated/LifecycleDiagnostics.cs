@@ -12,10 +12,10 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>Base class for experimental runtime lifecycle diagnostic events.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(RuntimeLifecycleSystemStateDiagnosticEvent), "runtime.lifecycle.system_state")]
 [JsonDerivedType(typeof(RuntimeLifecycleProgressStateDiagnosticEvent), "runtime.lifecycle.progress_state")]
@@ -31,7 +31,7 @@ internal abstract partial class LifecycleDiagnosticEvent
 }
 
 /// <summary>Experimental runtime lifecycle diagnostic event.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleSystemStateDiagnosticEvent : LifecycleDiagnosticEvent
 {
     /// <inheritdoc />
@@ -44,7 +44,7 @@ internal sealed partial class RuntimeLifecycleSystemStateDiagnosticEvent : Lifec
 }
 
 /// <summary>Experimental runtime lifecycle diagnostic event.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleProgressStateDiagnosticEvent : LifecycleDiagnosticEvent
 {
     /// <inheritdoc />
@@ -57,7 +57,7 @@ internal sealed partial class RuntimeLifecycleProgressStateDiagnosticEvent : Lif
 }
 
 /// <summary>Event payload for <see cref="RuntimeLifecycleSystemStateData"/>.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleSystemStateData
 {
     /// <summary>Complete active operation set after applying the change.</summary>
@@ -91,9 +91,14 @@ internal sealed partial class RuntimeLifecycleSystemStateData
 }
 
 /// <summary>Event payload for <see cref="RuntimeLifecycleProgressStateData"/>.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleProgressStateData
 {
+    /// <summary>Agent that owns this progress. Absent for the primary agent and progress without an agent owner.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("agentId")]
+    public string? AgentId { get; set; }
+
     /// <summary>Complete dependency blocker set after this progress change.</summary>
     [JsonPropertyName("blockers")]
     public required RuntimeLifecycleBlocker[] Blockers { get; set; }
@@ -137,9 +142,62 @@ internal sealed partial class RuntimeLifecycleProgressStateData
     public required RuntimeLifecycleProgressTiming Timing { get; set; }
 }
 
+/// <summary>Timing of one real dependency wait.</summary>
+/// <remarks>Nested data type for <c>RuntimeLifecycleBlockerTiming</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed partial class RuntimeLifecycleBlockerTiming
+{
+    /// <summary>ISO 8601 timestamp when this dependency began blocking its owner.</summary>
+    [JsonPropertyName("blockingSince")]
+    public required DateTimeOffset BlockingSince { get; set; }
+}
+
+/// <summary>Exact lifecycle operation awaited by a real dependency wait.</summary>
+/// <remarks>Nested data type for <c>RuntimeLifecycleBlocker</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed partial class RuntimeLifecycleBlocker
+{
+    /// <summary>Opaque blocker identifier, stable for one guard lifetime and scoped to its owner.</summary>
+    [JsonPropertyName("blockerId")]
+    public required string BlockerId { get; set; }
+
+    /// <summary>Current phase of the awaited operation.</summary>
+    [JsonPropertyName("currentPhase")]
+    public required string CurrentPhase { get; set; }
+
+    /// <summary>Current production boundary of the awaited operation.</summary>
+    [JsonPropertyName("currentStep")]
+    public required string CurrentStep { get; set; }
+
+    /// <summary>How the awaited operation ended when the real wait remains active.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("operationDisposition")]
+    public RuntimeLifecycleDisposition? OperationDisposition { get; set; }
+
+    /// <summary>Opaque awaited operation identifier.</summary>
+    [JsonPropertyName("operationId")]
+    public required string OperationId { get; set; }
+
+    /// <summary>Awaited operation revision observed by this blocker.</summary>
+    [JsonPropertyName("operationRevision")]
+    public required long OperationRevision { get; set; }
+
+    /// <summary>System-owned capability required by the blocker owner.</summary>
+    [JsonPropertyName("requirement")]
+    public required string Requirement { get; set; }
+
+    /// <summary>System that owns the awaited operation.</summary>
+    [JsonPropertyName("system")]
+    public required string System { get; set; }
+
+    /// <summary>Timing of this dependency wait.</summary>
+    [JsonPropertyName("timing")]
+    public required RuntimeLifecycleBlockerTiming Timing { get; set; }
+}
+
 /// <summary>Fixed timestamps for one observed operation revision.</summary>
 /// <remarks>Nested data type for <c>RuntimeLifecycleOperationTiming</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleOperationTiming
 {
     /// <summary>ISO 8601 timestamp when the current phase began.</summary>
@@ -157,9 +215,13 @@ internal sealed partial class RuntimeLifecycleOperationTiming
 
 /// <summary>Observed state of one readiness or convergence operation.</summary>
 /// <remarks>Nested data type for <c>RuntimeLifecycleOperation</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleOperation
 {
+    /// <summary>Complete dependency blocker set after this operation change.</summary>
+    [JsonPropertyName("blockers")]
+    public required RuntimeLifecycleBlocker[] Blockers { get; set; }
+
     /// <summary>How the operation ended. Absent while the operation remains active.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("disposition")]
@@ -190,58 +252,9 @@ internal sealed partial class RuntimeLifecycleOperation
     public required string Trigger { get; set; }
 }
 
-/// <summary>Timing of one real dependency wait.</summary>
-/// <remarks>Nested data type for <c>RuntimeLifecycleBlockerTiming</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-internal sealed partial class RuntimeLifecycleBlockerTiming
-{
-    /// <summary>ISO 8601 timestamp when this dependency began blocking progress.</summary>
-    [JsonPropertyName("blockingSince")]
-    public required DateTimeOffset BlockingSince { get; set; }
-}
-
-/// <summary>Exact lifecycle operation awaited by a real dependency wait.</summary>
-/// <remarks>Nested data type for <c>RuntimeLifecycleBlocker</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-internal sealed partial class RuntimeLifecycleBlocker
-{
-    /// <summary>Current phase of the awaited operation.</summary>
-    [JsonPropertyName("currentPhase")]
-    public required string CurrentPhase { get; set; }
-
-    /// <summary>Current production boundary of the awaited operation.</summary>
-    [JsonPropertyName("currentStep")]
-    public required string CurrentStep { get; set; }
-
-    /// <summary>How the awaited operation ended when the real wait remains active.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("operationDisposition")]
-    public RuntimeLifecycleDisposition? OperationDisposition { get; set; }
-
-    /// <summary>Opaque awaited operation identifier.</summary>
-    [JsonPropertyName("operationId")]
-    public required string OperationId { get; set; }
-
-    /// <summary>Awaited operation revision observed by this blocker.</summary>
-    [JsonPropertyName("operationRevision")]
-    public required long OperationRevision { get; set; }
-
-    /// <summary>System-owned capability required by the progress owner.</summary>
-    [JsonPropertyName("requirement")]
-    public required string Requirement { get; set; }
-
-    /// <summary>System that owns the awaited operation.</summary>
-    [JsonPropertyName("system")]
-    public required string System { get; set; }
-
-    /// <summary>Timing of this dependency wait.</summary>
-    [JsonPropertyName("timing")]
-    public required RuntimeLifecycleBlockerTiming Timing { get; set; }
-}
-
 /// <summary>Immutable causal origin of a progress record with independent identity and settlement.</summary>
 /// <remarks>Nested data type for <c>RuntimeLifecycleProgressOrigin</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleProgressOrigin
 {
     /// <summary>Kind of the originating progress record.</summary>
@@ -255,7 +268,7 @@ internal sealed partial class RuntimeLifecycleProgressOrigin
 
 /// <summary>Fixed timestamps for one observed progress revision.</summary>
 /// <remarks>Nested data type for <c>RuntimeLifecycleProgressTiming</c>.</remarks>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed partial class RuntimeLifecycleProgressTiming
 {
     /// <summary>ISO 8601 timestamp when the current phase began.</summary>
@@ -272,7 +285,7 @@ internal sealed partial class RuntimeLifecycleProgressTiming
 }
 
 /// <summary>How a settled lifecycle operation or progress record ended.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
 [DebuggerDisplay("{Value,nq}")]
 internal readonly struct RuntimeLifecycleDisposition : IEquatable<RuntimeLifecycleDisposition>

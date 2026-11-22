@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 type interceptedRequest struct {
@@ -90,6 +90,7 @@ func assertAgentMetadata(t *testing.T, r interceptedRequest) {
 }
 
 func TestCopilotRequestSessionID(t *testing.T) {
+	t.Parallel()
 	testharness.SkipIfInProcess(t, "an LLM inference provider is process-global in-process")
 	ctx := testharness.NewTestContext(t)
 	transport := &recordingTransport{}
@@ -104,9 +105,7 @@ func TestCopilotRequestSessionID(t *testing.T) {
 	var capiSessionID string
 
 	t.Run("threads session id into a CAPI session", func(t *testing.T) {
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -137,17 +136,14 @@ func TestCopilotRequestSessionID(t *testing.T) {
 
 	t.Run("threads session id into a BYOK session", func(t *testing.T) {
 		before := len(transport.inferenceRecords())
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-5",
-			Provider: &copilot.ProviderConfig{
-				Type:      "openai",
-				WireAPI:   "responses",
-				BaseURL:   "https://byok.invalid/v1",
-				APIKey:    "byok-secret",
-				ModelID:   "claude-sonnet-5",
-				WireModel: "claude-sonnet-5",
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: "claude-sonnet-5", Inference: byokInference(&copilot.ProviderConfig{
+			Type:      "openai",
+			WireAPI:   "responses",
+			BaseURL:   "https://byok.invalid/v1",
+			APIKey:    "byok-secret",
+			ModelID:   "claude-sonnet-5",
+			WireModel: "claude-sonnet-5",
+		}, copilot.SessionInferenceOptions{}),
 		})
 		if err != nil {
 			t.Fatalf("Failed to create BYOK session: %v", err)

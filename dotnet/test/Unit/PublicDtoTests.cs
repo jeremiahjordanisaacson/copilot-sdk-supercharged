@@ -7,7 +7,7 @@ using System.Reflection;
 using System.Text.Json;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 /// <summary>
 /// Reflection-based safety net that exercises the get/set surface of every public DTO in
@@ -20,6 +20,26 @@ namespace GitHub.Copilot.Test.Unit;
 /// </summary>
 public class PublicDtoTests
 {
+    [Fact]
+    public void FeedbackUpload_IsInternal_WithoutRemovingExistingPublicServerGroups()
+    {
+        Assert.Null(typeof(Rpc.ServerRpc).GetProperty("Feedback"));
+        Assert.DoesNotContain(typeof(CopilotClient).Assembly.GetExportedTypes(),
+            type => type.FullName is "Microsoft.Copilot.Rpc.ServerFeedbackApi" or "Microsoft.Copilot.Rpc.ServerFeedbackUploadApi"
+                || type.Name.StartsWith("FeedbackUpload", StringComparison.Ordinal));
+        Assert.Equal(typeof(Rpc.ServerPersistenceApi), typeof(Rpc.ServerRpc).GetProperty("Persistence")?.PropertyType);
+        Assert.Equal(typeof(Rpc.ServerSettingsApi), typeof(Rpc.ServerRpc).GetProperty("Settings")?.PropertyType);
+        Assert.Equal(typeof(Rpc.ServerModelsApi), typeof(Rpc.ServerRpc).GetProperty("Models")?.PropertyType);
+    }
+
+    [Theory]
+    [InlineData(typeof(Rpc.ProtocolExternalToolDefinition))]
+    [InlineData(typeof(ExternalToolRequestedData))]
+    public void CallbackOwnership_IsNotPublic(Type type)
+    {
+        Assert.Null(type.GetProperty("HasHandler"));
+    }
+
     [Fact]
     public void McpAuth_Result_Factories_Represent_Token_And_Cancellation()
     {
@@ -55,7 +75,7 @@ public class PublicDtoTests
             .GetTypes()
             .Where(type =>
                 type is { IsClass: true, IsAbstract: false, IsPublic: true } &&
-                type.Namespace?.StartsWith("GitHub.Copilot", StringComparison.Ordinal) == true &&
+                type.Namespace?.StartsWith("Microsoft.Copilot", StringComparison.Ordinal) == true &&
                 type.GetConstructor(Type.EmptyTypes) is not null)
             .OrderBy(type => type.FullName, StringComparer.Ordinal);
 

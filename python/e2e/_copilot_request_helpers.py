@@ -24,7 +24,7 @@ import httpx
 import pytest_asyncio
 
 from copilot import CopilotClient, CopilotRequestHandler, RuntimeConnection
-from copilot.generated.session_events import AssistantMessageData
+from copilot.session_events import AssistantMessageData
 
 from .testharness import E2ETestContext
 
@@ -363,11 +363,12 @@ def build_isolated_client(
     if extra_env:
         env = {**env, **extra_env}
     return CopilotClient(
-        connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-        working_directory=ctx.work_dir,
-        env=env,
-        github_token=github_token,
-        request_handler=handler,
+        mode="coding-agent",
+        runtime=RuntimeConnection.for_spawned_stdio(
+            path=ctx.cli_path, working_directory=ctx.work_dir, env=env
+        ),
+        github={"token": github_token},
+        models={"request_handler": handler},
     )
 
 

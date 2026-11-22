@@ -26,19 +26,24 @@ Before diving deep, verify these basics:
 
 Add environment variables to your MCP server config:
 
+<!-- docs-validate: strict -->
 ```typescript
-mcpServers: {
-  "my-server": {
-    type: "local",
-    command: "/path/to/server",
-    args: [],
-    env: {
-      MCP_DEBUG: "1",
-      DEBUG: "*",
-      NODE_DEBUG: "mcp",  // For Node.js MCP servers
+const session = await client.createSession({
+    mcp: {
+        servers: {
+            "my-server": {
+                type: "local",
+                command: "/path/to/server",
+                args: [],
+                env: {
+                    MCP_DEBUG: "1",
+                    DEBUG: "*",
+                    NODE_DEBUG: "mcp", // For Node.js MCP servers
+                },
+            },
+        },
     },
-  },
-}
+});
 ```
 
 ## Testing MCP servers independently
@@ -116,7 +121,7 @@ Usage:
 | Wrong command path | Use absolute path: `/usr/local/bin/server` |
 | Missing executable permission | Run `chmod +x /path/to/server` |
 | Missing dependencies | Check with `ldd` (Linux) or run manually |
-| Working directory issues | Set `cwd` in config |
+| Working directory issues | Set `workingDirectory` in config |
 
 **Debug by running manually:**
 ```bash
@@ -132,13 +137,18 @@ cd /expected/working/dir
 **Causes & Solutions:**
 
 1. **Tools filtered out in config:**
+   <!-- docs-validate: strict -->
    ```typescript
-   mcpServers: {
-     "server": {
-       // ...
-       tools: ["*"],  // Every tool; omitting the field does the same. [] exposes none, a list only those names
+   const session = await client.createSession({
+     mcp: {
+       servers: {
+         "server": {
+           command: "/path/to/server",
+           tools: ["*"],  // Every tool; omitting the field does the same. [] exposes none, a list only those names
+         },
+       },
      },
-   }
+   });
    ```
 
 1. **Server doesn't expose tools:**
@@ -181,18 +191,23 @@ cd /expected/working/dir
 
 ### Timeout errors
 
-**Symptoms:** `MCP tool call timed out` errors.
+**Symptoms:** Tool calls fail with `McpError: MCP error -32001: Request timed out`.
 
 **Solutions:**
 
 1. **Increase timeout:**
+   <!-- docs-validate: strict -->
    ```typescript
-   mcpServers: {
-     "slow-server": {
-       // ...
-       timeout: 300000,  // 5 minutes
+   const session = await client.createSession({
+     mcp: {
+       servers: {
+         "slow-server": {
+           command: "/path/to/server",
+           timeout: 300000,  // 5 minutes
+         },
+       },
      },
-   }
+   });
    ```
 
 1. **Optimize server performance:**
@@ -236,7 +251,7 @@ cd /expected/working/dir
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 public static class McpDotnetConfigExample
 {
@@ -271,7 +286,7 @@ public static class McpDotnetConfigExample
     Args = new List<string>(),
     WorkingDirectory = @"C:\Tools\MyServer",  // Set working directory
     Tools = new List<string> { "*" },
-}
+},
 
 // For dotnet tool (DLL)
 ["my-dotnet-tool"] = new McpStdioServerConfig
@@ -287,7 +302,7 @@ public static class McpDotnetConfigExample
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 public static class McpNpxConfigExample
 {
@@ -342,27 +357,18 @@ xattr -d com.apple.quarantine /path/to/mcp-server
 #### Homebrew paths
 
 <!-- docs-validate: strict -->
-<!-- docs-validate: hidden -->
-```typescript
-import { MCPStdioServerConfig } from "@github/copilot-sdk";
-
-const mcpServers: Record<string, MCPStdioServerConfig> = {
-  "my-server": {
-    command: "/opt/homebrew/bin/node",
-    args: ["/path/to/server.js"],
-    tools: ["*"],
-  },
-};
-```
-<!-- /docs-validate: hidden -->
 ```typescript
 // GUI apps may not have /opt/homebrew in PATH
-mcpServers: {
-  "my-server": {
-    command: "/opt/homebrew/bin/node",  // Full path
-    args: ["/path/to/server.js"],
-  },
-}
+const session = await client.createSession({
+    mcp: {
+        servers: {
+            "my-server": {
+                command: "/opt/homebrew/bin/node", // Full path
+                args: ["/path/to/server.js"],
+            },
+        },
+    },
+});
 ```
 
 ### Linux
@@ -408,13 +414,19 @@ tee -a "$LOG" | "$ACTUAL_SERVER" "$@" 2>> "$LOG" | tee -a "$LOG"
 ```
 
 Use it:
+
+<!-- docs-validate: strict -->
 ```typescript
-mcpServers: {
-  "debug-server": {
-    command: "/path/to/mcp-debug-wrapper.sh",
-    args: ["/actual/server/path", "arg1", "arg2"],
-  },
-}
+const session = await client.createSession({
+    mcp: {
+        servers: {
+            "debug-server": {
+                command: "/path/to/mcp-debug-wrapper.sh",
+                args: ["/actual/server/path", "arg1", "arg2"],
+            },
+        },
+    },
+});
 ```
 
 ### Inspect with MCP inspector
@@ -446,7 +458,7 @@ If versions don't match, update your MCP server library.
 When opening an issue or asking for help, collect:
 
 * [ ] SDK language and version
-* [ ] CLI version (`copilot --version`)
+* [ ] Runtime version (`version` from `client.getStatus()`)
 * [ ] MCP server type (Node.js, Python, .NET, Go, Rust, and more)
 * [ ] Full MCP server configuration (redact secrets)
 * [ ] Result of manual `initialize` test

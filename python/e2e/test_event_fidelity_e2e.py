@@ -29,7 +29,7 @@ class TestEventFidelity:
         Path(ctx.work_dir, "hello.txt").write_text("Hello World", encoding="utf-8")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         events = []
         unsubscribe = session.on(events.append)
@@ -53,7 +53,7 @@ class TestEventFidelity:
 
     async def test_should_include_valid_fields_on_all_events(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         events = []
         unsubscribe = session.on(events.append)
@@ -86,7 +86,7 @@ class TestEventFidelity:
         Path(ctx.work_dir, "data.txt").write_text("test data", encoding="utf-8")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         events = []
         unsubscribe = session.on(events.append)
@@ -112,7 +112,7 @@ class TestEventFidelity:
 
     async def test_should_emit_assistant_message_with_messageid(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         events = []
         unsubscribe = session.on(events.append)
@@ -133,7 +133,7 @@ class TestEventFidelity:
 
     async def test_should_emit_assistant_usage_event_after_model_call(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         events = []
         unsubscribe = session.on(events.append)
@@ -153,7 +153,7 @@ class TestEventFidelity:
 
     async def test_should_emit_session_usage_info_event_after_model_call(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         events = []
         unsubscribe = session.on(events.append)
@@ -175,7 +175,7 @@ class TestEventFidelity:
         self, ctx: E2ETestContext
     ):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         events = []
         unsubscribe = session.on(events.append)
@@ -202,7 +202,7 @@ class TestEventFidelity:
         Path(ctx.work_dir, "order.txt").write_text("ORDER_CONTENT_42", encoding="utf-8")
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         try:
             await session.send_and_wait("Read the file 'order.txt' and tell me what the number is.")

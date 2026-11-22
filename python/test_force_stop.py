@@ -5,6 +5,8 @@
 import asyncio
 import gc
 import json
+import logging
+import threading
 import weakref
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -106,7 +108,8 @@ async def connected_peer() -> AsyncIterator[tuple[CopilotClient, Peer]]:
 
     server = await asyncio.start_server(accepted, "127.0.0.1", 0)
     client = CopilotClient(
-        connection=RuntimeConnection.for_uri(f"127.0.0.1:{server.sockets[0].getsockname()[1]}"),
+        mode="coding-agent",
+        runtime=RuntimeConnection.for_tcp("127.0.0.1", server.sockets[0].getsockname()[1]),
     )
     try:
         await client.start()
@@ -133,10 +136,10 @@ async def test_force_stop_rejects_acknowledged_plain_waits(
     peer.expected_sends = count
     peer.completion_supported = completion_supported
     session = await client.create_session(
-        session_id="retirement-session", on_permission_request=PermissionHandler.approve_all
+        session_id="retirement-session", permissions={"on_request": PermissionHandler.approve_all}
     )
     waits = [
-        asyncio.create_task(session.send_and_wait("hold the response", timeout=1))
+        asyncio.create_task(session.send_and_wait("hold the response", timeout=float("inf")))
         for _ in range(count)
     ]
     try:
@@ -164,13 +167,13 @@ class Capture:
 async def captured_session(client: CopilotClient, kind: str):
     capture = Capture()
     reference = weakref.ref(capture)
-    options = {"on_permission_request": PermissionHandler.approve_all}
+    options = {"permissions": {"on_request": PermissionHandler.approve_all}}
     if kind == "permission":
-        options["on_permission_request"] = capture
+        options["permissions"] = {"on_request": capture}
     elif kind == "user_input":
-        options["on_user_input_request"] = capture
+        options["interaction"] = {"on_user_input_request": capture}
     elif kind == "hook":
-        options["hooks"] = {"on_session_end": capture}
+        options["hooks"] = {"handlers": {"on_session_end": capture}}
     session = await client.create_session(session_id="captured-session", **options)
     if kind == "event":
         session.on(capture)
@@ -189,3 +192,108 @@ async def test_force_stop_releases_retained_session_callbacks(connected_peer, ki
     assert reference() is None
     with pytest.raises(RuntimeError, match="Session is disconnected"):
         session.on(Capture())
+
+
+PARSE_WARNING = "Failed to parse incoming JSON-RPC message"
+
+
+class HeldHeaderRead:
+    """Reader side of the socket file that holds the header read after the next frame.
+
+    Once released, the held read either reads the closed socket file, or reads the
+    closed socket itself, as a reader already inside the file's read does.
+    """
+
+    def __init__(self, stream, sock=None):
+        self._stream = stream
+        self._sock = sock
+        self._frame_read = False
+        self.holding = threading.Event()
+        self.release = threading.Event()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+    def read(self, size):
+        self._frame_read = True
+        return self._stream.read(size)
+
+    def readline(self):
+        if self._frame_read:
+            self.holding.set()
+            self.release.wait(5)
+            if self._sock is not None:
+                self._sock.recv(1)
+        return self._stream.readline()
+
+
+def count_close_reports(client: CopilotClient) -> list[bool]:
+    reports: list[bool] = []
+    rpc = client._client
+    report_close = rpc.on_close
+
+    def on_close():
+        reports.append(True)
+        report_close()
+
+    rpc.on_close = on_close
+    return reports
+
+
+def parse_warnings(caplog) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.getMessage() == PARSE_WARNING]
+
+
+@pytest.mark.parametrize(
+    "reader", ["waiting-for-frame", "between-frames-closed-file", "between-frames-closed-socket"]
+)
+async def test_force_stop_reports_close_without_parse_warning(connected_peer, caplog, reader):
+    client, _peer = connected_peer
+    caplog.set_level(logging.DEBUG, logger="copilot")
+    process = client._process
+    rpc = client._client
+    reports = count_close_reports(client)
+    held = None
+    if reader.startswith("between-frames"):
+        # The reply to the ping is the last frame the reader takes before force_stop
+        # closes the socket underneath its next header read.
+        sock = process._socket if reader == "between-frames-closed-socket" else None
+        held = HeldHeaderRead(process.stdout, sock)
+        process.stdout = held
+        await client.ping()
+        assert await asyncio.to_thread(held.holding.wait, 5)
+    else:
+        await client.ping()
+        await asyncio.sleep(0.1)
+    terminate = process.terminate
+
+    def terminate_then_finish_read():
+        terminate()
+        if held is not None:
+            held.release.set()
+        rpc._read_thread.join(5)
+
+    process.terminate = terminate_then_finish_read
+
+    await client.force_stop()
+
+    assert not rpc._read_thread.is_alive()
+    assert reports == [True]
+    assert parse_warnings(caplog) == []
+
+
+async def test_malformed_frame_while_connected_still_logs_parse_warning(connected_peer, caplog):
+    client, peer = connected_peer
+    caplog.set_level(logging.DEBUG, logger="copilot")
+    reports = count_close_reports(client)
+    rpc = client._client
+
+    peer.writers[0].write(b"Content-Length: 6\r\n\r\n{oops}")
+    await peer.writers[0].drain()
+    await asyncio.to_thread(rpc._read_thread.join, 5)
+
+    assert not rpc._read_thread.is_alive()
+    assert reports == [True]
+    warnings = parse_warnings(caplog)
+    assert len(warnings) == 1
+    assert isinstance(warnings[0].exc_info[1], json.JSONDecodeError)

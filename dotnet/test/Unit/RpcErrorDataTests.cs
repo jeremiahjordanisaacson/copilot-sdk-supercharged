@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -11,7 +11,7 @@ using System.Text;
 using System.Text.Json;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed class RpcErrorDataTests
 {
@@ -66,7 +66,7 @@ public sealed class RpcErrorDataTests
             new RemoteRpcException(ErrorMessage, ErrorCode, default(JsonElement)));
     }
 
-#if NET8_0_OR_GREATER
+#if NET
     [Theory]
     [MemberData(nameof(ErrorPayloads))]
     public async Task Session_Create_Preserves_Remote_Error_And_Data(string? data, JsonValueKind? kind)
@@ -75,30 +75,26 @@ public sealed class RpcErrorDataTests
         var dataMember = data is null ? "" : ",\"data\":" + data;
         await using var server = new FakeCopilotServer("session.create",
             $$"""{"code":{{ErrorCode}},"message":"{{ErrorMessage}}"{{dataMember}}}""");
-        IOException error;
-        await using (var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) }))
+        RemoteRpcException error;
+        await using (var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) }))
         {
-            error = await Assert.ThrowsAsync<IOException>(() =>
-                client.CreateSessionAsync(new SessionConfig(), timeout.Token));
+            error = await Assert.ThrowsAsync<RemoteRpcException>(() =>
+                client.CreateSessionAsync(new CreateSessionOptions(), timeout.Token));
 
             // Processing a later response ensures the error response document has been disposed.
             var ping = await client.PingAsync(cancellationToken: timeout.Token);
             Assert.Equal("pong", ping.Message);
         }
 
-        var remote = Assert.IsType<RemoteRpcException>(error.InnerException);
-        Assert.Same(remote, error.GetBaseException());
-        Assert.Equal(ErrorCode, remote.ErrorCode);
-        Assert.Equal(ErrorMessage, remote.Message);
-        Assert.Equal($"Communication error with Copilot CLI: {ErrorMessage}", error.Message);
-        Assert.Equal($"GitHub.Copilot.RemoteRpcException: {ErrorMessage}", remote.ToString().Split(Environment.NewLine)[0]);
-        Assert.Equal($"System.IO.IOException: {error.Message}", error.ToString().Split(Environment.NewLine)[0]);
-        Assert.DoesNotContain("payload-only-marker", remote.ToString());
+        Assert.Same(error, error.GetBaseException());
+        Assert.Equal(ErrorCode, error.ErrorCode);
+        Assert.Equal(ErrorMessage, error.Message);
+        Assert.Equal($"Microsoft.Copilot.RemoteRpcException: {ErrorMessage}", error.ToString().Split(Environment.NewLine)[0]);
         Assert.DoesNotContain("payload-only-marker", error.ToString());
-        Assert.Equal(kind.HasValue, remote.ErrorData.HasValue);
+        Assert.Equal(kind.HasValue, error.ErrorData.HasValue);
         if (kind.HasValue)
         {
-            var payload = remote.ErrorData!.Value;
+            var payload = error.ErrorData!.Value;
             Assert.Equal(kind.Value, payload.ValueKind);
             Assert.Equal(data, payload.GetRawText());
         }
@@ -109,7 +105,7 @@ public sealed class RpcErrorDataTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var server = new FakeCopilotServer("session.create", null);
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
 
         var response = await client.PingAsync(cancellationToken: timeout.Token);
 
@@ -121,7 +117,7 @@ public sealed class RpcErrorDataTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var server = new FakeCopilotServer("ping", null);
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
 
         var error = await Assert.ThrowsAsync<IOException>(() => client.PingAsync(cancellationToken: timeout.Token));
 
@@ -143,11 +139,11 @@ public sealed class RpcErrorDataTests
             _method = method;
             _error = error;
             _listener.Start();
-            Url = $"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}";
             _serverTask = RunAsync();
         }
 
-        public string Url { get; }
+        public string Host => ((IPEndPoint)_listener.LocalEndpoint).Address.ToString();
+        public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
 
         public async ValueTask DisposeAsync()
         {
@@ -197,7 +193,7 @@ public sealed class RpcErrorDataTests
                 {
                     var result = method switch
                     {
-                        "connect" => """{"ok":true,"protocolVersion":3,"version":"test"}""",
+                        "connect" => """{"ok":true,"protocolVersion":4,"version":"test"}""",
                         "ping" => """{"message":"pong"}""",
                         _ => throw new InvalidOperationException($"Unexpected method: {method}"),
                     };

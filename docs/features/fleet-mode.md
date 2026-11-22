@@ -25,7 +25,7 @@ Fleet mode works best when the parent session can create clear units of work, as
 
 ## Starting fleet mode
 
-The SDK exposes fleet mode through the session RPC namespace in several languages. The binding is experimental in the generated RPC surface; pin both the SDK and the Copilot CLI runtime if your application depends on it.
+The SDK exposes fleet mode through the session RPC namespace in several languages. The binding is experimental in the generated RPC surface; pin both the SDK and the Copilot runtime if your application depends on it.
 
 ### From within a session
 
@@ -54,8 +54,10 @@ from copilot import CopilotClient
 from copilot.rpc import FleetStartRequest
 from copilot.session import PermissionHandler
 
-client = CopilotClient()
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all)
+client = CopilotClient(mode="coding-agent")
+session = await client.create_session(
+    permissions={"on_request": PermissionHandler.approve_all}
+)
 
 result = await session.rpc.fleet.start(
     FleetStartRequest(
@@ -80,16 +82,19 @@ import (
 	"context"
 	"fmt"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func main() {
-	ctx := context.Background()
-	client := copilot.NewClient(nil)
-	session, err := client.CreateSession(ctx, &copilot.SessionConfig{})
+	_ = run(context.Background())
+}
+
+func run(ctx context.Context) error {
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+	session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{})
 	if err != nil {
-		return
+		return err
 	}
 
 	prompt := "Update each package independently, then report validation results."
@@ -97,11 +102,12 @@ func main() {
 		Prompt: &prompt,
 	})
 	if err != nil {
-		return
+		return err
 	}
 	if result.Started {
 		fmt.Println("Fleet mode started")
 	}
+	return nil
 }
 ```
 <!-- /docs-validate: hidden -->
@@ -126,14 +132,11 @@ if result.Started {
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
-await using var client = new CopilotClient();
-await using var session = await client.CreateSessionAsync(new SessionConfig());
-
-var result = await session.Rpc.Fleet.StartAsync(
-    "Audit each project independently, then summarize the findings.");
-
+await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent });
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
+var result = await session.Rpc.Fleet.StartAsync("Audit each project independently, then summarize the findings.");
 if (result.Started)
 {
     Console.WriteLine("Fleet mode started");
@@ -142,9 +145,7 @@ if (result.Started)
 <!-- /docs-validate: hidden -->
 
 ```csharp
-var result = await session.Rpc.Fleet.StartAsync(
-    "Audit each project independently, then summarize the findings.");
-
+var result = await session.Rpc.Fleet.StartAsync("Audit each project independently, then summarize the findings.");
 if (result.Started)
 {
     Console.WriteLine("Fleet mode started");
@@ -157,7 +158,7 @@ if (result.Started)
 <summary><strong>Rust</strong></summary>
 
 ```rust
-use github_copilot_sdk::rpc::FleetStartRequest;
+use copilot_sdk::rpc::FleetStartRequest;
 
 let mut request = FleetStartRequest::default();
 request.prompt = Some("Research each crate independently, then summarize the plan.".into());
@@ -192,20 +193,24 @@ Use this when a user approves a plan that already contains independent work item
 
 Fleet mode relies on explicit coordination state instead of implicit shared memory. The parent agent decomposes the work into todos, each sub-agent owns one todo, and the orchestrator dispatches workers whose dependencies are already complete.
 
-The canonical schema is:
+The runtime creates these tables in the session database on first use:
 
 ```sql
-CREATE TABLE todos (
+CREATE TABLE IF NOT EXISTS todos (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     description TEXT,
-    status TEXT DEFAULT 'pending'
+    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'in_progress', 'done', 'blocked')),
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE todo_deps (
-    todo_id TEXT,
-    depends_on TEXT,
-    PRIMARY KEY (todo_id, depends_on)
+CREATE TABLE IF NOT EXISTS todo_deps (
+    todo_id TEXT NOT NULL,
+    depends_on TEXT NOT NULL,
+    PRIMARY KEY (todo_id, depends_on),
+    FOREIGN KEY (todo_id) REFERENCES todos(id),
+    FOREIGN KEY (depends_on) REFERENCES todos(id)
 );
 ```
 
@@ -243,7 +248,7 @@ This pattern gives every worker a clear owner and lets the parent session reason
 
 ## Lifecycle hooks
 
-Fleet mode invokes sub-agents through the runtime's task mechanism. The runtime emits hook activity for sub-agent tool calls: the runtime 1.0.52 changelog notes that `preToolUse`, `postToolUse`, `subagentStart`, and `subagentStop` fire correctly for sub-agent tool calls.
+Fleet mode invokes sub-agents through the runtime's task mechanism. The runtime emits hook activity for sub-agent tool calls: the runtime 1.0.49 changelog notes that `preToolUse`, `postToolUse`, `subagentStart`, and `subagentStop` fire correctly for sub-agent tool calls.
 
 All six SDKs expose typed sub-agent lifecycle hooks: Node.js uses `onSubagentStart` and `onSubagentStop`, Python and Rust use `on_subagent_start` and `on_subagent_stop`, Go and .NET use `OnSubagentStart` and `OnSubagentStop`, and Java uses `setOnSubagentStart` and `setOnSubagentStop`. Register them when creating or resuming a session. The start hook can prepend `additionalContext` to the child's first prompt; the stop hook can request another child turn with a block reason or replace the response reported to the parent.
 
@@ -276,11 +281,12 @@ from copilot import CopilotClient
 from copilot.session import PermissionHandler
 from copilot.session_events import SessionEventType
 
+
 async def main():
-    client = CopilotClient()
+    client = CopilotClient(mode="coding-agent")
     await client.start()
     session = await client.create_session(
-        on_permission_request=PermissionHandler.approve_all,
+        permissions={"on_request": PermissionHandler.approve_all}
     )
 
     def handle_event(event):
@@ -290,6 +296,7 @@ async def main():
             print(f"Completed {event.data.agent_display_name}")
 
     unsubscribe = session.on(handle_event)
+
 
 asyncio.run(main())
 ```
@@ -313,9 +320,7 @@ For hook configuration that is already exposed at the SDK layer, see [Hooks](hoo
 
 ## Plugin sub-agents
 
-The runtime can load plugins with `--plugin-dir`. Plugins loaded this way can register their agents as available `task(agent_type=...)` sub-agent types in prompt mode, which means fleet mode can dispatch to those plugin-provided worker types.
-
-This is currently a runtime-level configuration pattern rather than a documented SDK-level registration API. Configure the Copilot CLI runtime with the plugin directory, then connect the SDK client to that runtime. Native SDK helpers for registering plugin sub-agent types may be added in the future.
+Load plugin agents through the SDK's [plugin directory options](plugin-directories.md): `--plugin-dir` for a shared runtime process, `plugins.directories` for session-specific additions, or `plugins.builtinDirectories` for trusted host-bundled plugins. Active plugin agents are available as `task(agent_type=...)` sub-agent types, so fleet mode can dispatch to those workers.
 
 Conceptually, a fleet prompt can then ask for a specific worker type:
 
@@ -346,7 +351,6 @@ Keep plugin-provided sub-agent types narrow and descriptive so the orchestrator 
 * Fleet mode is exposed through generated session RPC bindings and is marked experimental in several SDKs.
 * The SQL todos pattern is the canonical coordination model in the runtime guidance, but whether it is a stable extensibility contract for SDK consumers is still an open question.
 * Sub-agent lifecycle hook inputs identify the parent session but do not yet carry a shared tool-call ID for correlating with `subagent.*` events.
-* Plugin sub-agent registration is configured at the runtime layer through `--plugin-dir`; no SDK-level plugin registration helper was verified on this branch.
 * Fleet mode does not remove the need for parent-agent review. Parallel workers can produce inconsistent assumptions that the orchestrator must reconcile.
 
 ## See also

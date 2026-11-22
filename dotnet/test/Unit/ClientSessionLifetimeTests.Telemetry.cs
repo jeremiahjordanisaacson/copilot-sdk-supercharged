@@ -2,13 +2,15 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text.Json;
+using Microsoft.Copilot.Rpc;
 using Microsoft.Extensions.AI;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -23,7 +25,7 @@ public sealed partial class ClientSessionLifetimeTests
         ActivityTraceId traceId = default;
         using var listener = new ActivityListener
         {
-            ShouldListenTo = source => source == toolSource || source.Name == "github.copilot",
+            ShouldListenTo = source => source == toolSource || source.Name == "microsoft.copilot",
             Sample = (ref ActivityCreationOptions<ActivityContext> options) =>
                 options.Source == toolSource || options.Parent.TraceId == traceId
                     ? ActivitySamplingResult.AllDataAndRecorded
@@ -41,39 +43,45 @@ public sealed partial class ClientSessionLifetimeTests
             },
         };
         ActivitySource.AddActivityListener(listener);
-        using var remote = toolSource.StartActivity("external_tool")!;
+        using var remote = toolSource.CreateActivity("external_tool", ActivityKind.Internal)!
+            .SetIdFormat(ActivityIdFormat.W3C).Start();
         traceId = remote.TraceId;
         remote.TraceStateString = "tenant=example";
         remote.Stop();
 
         using var ambient = new Activity("host").SetIdFormat(ActivityIdFormat.W3C).Start();
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         Activity? handler = null;
         Activity? child = null;
-        await using var session = await client.CreateSessionAsync(new SessionConfig
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
         {
-            Tools = [AIFunctionFactory.Create(async () =>
+            Tools = new SessionToolOptions
             {
-                handler = Activity.Current;
-                await Task.Yield();
-                Assert.Same(handler, Activity.Current);
-                Assert.NotNull(handler);
-                handler.AddBaggage("tool-tenant", "example");
-                using (child = toolSource.StartActivity("GET", ActivityKind.Client))
-                {
-                    Assert.NotNull(child);
-                    Assert.Equal("example", child.GetBaggageItem("tool-tenant"));
-                    await Task.Yield();
-                    Assert.Same(child, Activity.Current);
-                }
-                Assert.Same(handler, Activity.Current);
-                if (fail)
-                {
-                    throw new InvalidOperationException("tool failure");
-                }
-                return "tool result";
-            }, "traced_tool")],
+                Definitions = [AIFunctionFactory.Create(async () =>
+{
+    handler = Activity.Current;
+    await Task.Yield();
+    Assert.Same(handler, Activity.Current);
+    Assert.NotNull(handler);
+    handler.AddBaggage("tool-tenant", "example");
+    using (child = toolSource.StartActivity("GET", ActivityKind.Client))
+    {
+        Assert.NotNull(child);
+        Assert.Equal("example", child.GetBaggageItem("tool-tenant"));
+        await Task.Yield();
+        Assert.Same(child, Activity.Current);
+    }
+
+    Assert.Same(handler, Activity.Current);
+    if (fail)
+    {
+        throw new InvalidOperationException("tool failure");
+    }
+
+    return "tool result";
+}, "traced_tool")]
+            }
         });
 
         await server.SendSessionEventAsync(session.SessionId, "external_tool.requested", new()
@@ -99,7 +107,7 @@ public sealed partial class ClientSessionLifetimeTests
 
         // Check the missing exported parent before waiting for its stop notification.
         Assert.NotNull(handler);
-        Assert.Equal("github.copilot", handler.Source.Name);
+        Assert.Equal("microsoft.copilot", handler.Source.Name);
         await handlerStopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.NotNull(child);
         Assert.Equal(remote.SpanId, handler.ParentSpanId);
@@ -132,7 +140,7 @@ public sealed partial class ClientSessionLifetimeTests
         ActivityContext? sampledParent = null;
         using var listener = new ActivityListener
         {
-            ShouldListenTo = source => sampling is not null && source.Name == "github.copilot",
+            ShouldListenTo = source => sampling is not null && source.Name == "microsoft.copilot",
             Sample = (ref ActivityCreationOptions<ActivityContext> options) =>
             {
                 if (options.Parent.TraceId != traceId)
@@ -146,17 +154,20 @@ public sealed partial class ClientSessionLifetimeTests
         ActivitySource.AddActivityListener(listener);
         using var ambient = new Activity("host").SetIdFormat(ActivityIdFormat.W3C).Start();
         await using var server = await FakeCopilotServer.StartAsync();
-        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
         Activity? handler = null;
-        await using var session = await client.CreateSessionAsync(new SessionConfig
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
         {
-            Tools = [AIFunctionFactory.Create(async () =>
+            Tools = new SessionToolOptions
             {
-                handler = Activity.Current;
-                await Task.Yield();
-                Assert.Same(handler, Activity.Current);
-                return "done";
-            }, "traced_tool")],
+                Definitions = [AIFunctionFactory.Create(async () =>
+{
+    handler = Activity.Current;
+    await Task.Yield();
+    Assert.Same(handler, Activity.Current);
+    return "done";
+}, "traced_tool")]
+            }
         });
 
         await server.SendSessionEventAsync(session.SessionId, "external_tool.requested", new()
@@ -189,6 +200,155 @@ public sealed partial class ClientSessionLifetimeTests
             Assert.True(sampledParent!.Value.IsRemote);
         }
         Assert.Same(ambient, Activity.Current);
+    }
+
+    [Fact]
+    public async Task Hook_Runs_Under_The_Trace_Context_In_Its_Input_And_Restores_Afterwards()
+    {
+        var traceId = ActivityTraceId.CreateRandom();
+        var spanId = ActivitySpanId.CreateRandom();
+        var remote = new ActivityContext(traceId, spanId, ActivityTraceFlags.Recorded, "tenant=example", isRemote: true);
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        var seen = new List<Activity?>();
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        {
+            Hooks = new SessionHookOptions
+            {
+                Handlers = new SessionHooks
+                {
+                    OnPreToolUse = async (_, _) =>
+                    {
+                        await Task.Yield();
+                        seen.Add(Activity.Current);
+                        return null;
+                    },
+                }
+            }
+        });
+
+        Dictionary<string, object?> Input(bool traced)
+        {
+            var input = new Dictionary<string, object?>
+            {
+                ["sessionId"] = session.SessionId,
+                ["timestamp"] = 1_730_000_000_000L,
+                ["cwd"] = "workdir",
+                ["toolName"] = "view",
+                ["toolArgs"] = new Dictionary<string, object?> { ["path"] = "/tmp/original" },
+            };
+            if (traced)
+            {
+                input["traceparent"] = $"00-{traceId}-{spanId}-01";
+                input["tracestate"] = remote.TraceState;
+            }
+            return input;
+        }
+
+        await server.SendRequestAsync("hooks.invoke", new()
+        {
+            ["sessionId"] = session.SessionId,
+            ["hookType"] = "preToolUse",
+            ["input"] = Input(traced: true),
+        }).WaitAsync(TimeSpan.FromSeconds(5));
+        await server.SendRequestAsync("hooks.invoke", new()
+        {
+            ["sessionId"] = session.SessionId,
+            ["hookType"] = "preToolUse",
+            ["input"] = Input(traced: false),
+        }).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, seen.Count);
+        var traced = seen[0];
+        Assert.NotNull(traced);
+        Assert.Equal(traceId, traced.TraceId);
+        Assert.Equal(spanId, traced.ParentSpanId);
+        Assert.Equal(remote.TraceState, traced.TraceStateString);
+        Assert.Null(seen[1]);
+        Assert.Null(Activity.Current);
+    }
+
+    [Fact]
+    public async Task Callbacks_Do_Not_Run_Under_The_Activity_Current_At_Start_Or_Session_Create()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        var startup = new Activity("startup").SetIdFormat(ActivityIdFormat.W3C).Start();
+        await client.StartAsync();
+        startup.Stop();
+
+        Activity? hook = startup;
+        Activity? permission = startup;
+        Activity? idle = startup;
+        var permissionSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var idleSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var create = new Activity("create").SetIdFormat(ActivityIdFormat.W3C).Start();
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        {
+            Permissions = new SessionPermissionOptions
+            {
+                OnRequest = (_, _) =>
+                {
+                    permission = Activity.Current;
+                    permissionSeen.TrySetResult();
+                    return Task.FromResult(PermissionDecision.ApproveOnce());
+                }
+            },
+            Hooks = new SessionHookOptions
+            {
+                Handlers = new SessionHooks
+                {
+                    OnPreToolUse = (_, _) =>
+                    {
+                        hook = Activity.Current;
+                        return Task.FromResult<PreToolUseHookOutput?>(null);
+                    },
+                }
+            }
+        });
+        create.Stop();
+        Assert.Null(Activity.Current);
+        using var subscription = session.On<SessionIdleEvent>(idleEvent =>
+        {
+            idle = Activity.Current;
+            _ = session.SendAsync(new MessageOptions { Prompt = "follow-up from idle handler" });
+            idleSeen.TrySetResult();
+        });
+
+        await server.SendRequestAsync("hooks.invoke", new()
+        {
+            ["sessionId"] = session.SessionId,
+            ["hookType"] = "preToolUse",
+            ["input"] = new Dictionary<string, object?>
+            {
+                ["sessionId"] = session.SessionId,
+                ["timestamp"] = 1_730_000_000_000L,
+                ["cwd"] = "workdir",
+                ["toolName"] = "view",
+                ["toolArgs"] = new Dictionary<string, object?> { ["path"] = "/tmp/original" },
+            },
+        }).WaitAsync(TimeSpan.FromSeconds(5));
+        await server.SendSessionEventAsync(session.SessionId, "permission.requested", new()
+        {
+            ["requestId"] = "trace-permission",
+            ["permissionRequest"] = new Dictionary<string, object?>
+            {
+                ["kind"] = "read",
+                ["intention"] = "Read a file",
+                ["path"] = "/tmp/original",
+            },
+        });
+        await permissionSeen.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await server.SendSessionEventAsync(session.SessionId, "session.idle", new());
+        await idleSeen.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var send = await WaitForRequestAsync(server, "session.send");
+
+        Assert.Null(hook);
+        Assert.Null(permission);
+        Assert.Null(idle);
+        Assert.True(
+            !send.Params.TryGetProperty("traceparent", out var traceparent) || traceparent.ValueKind == JsonValueKind.Null,
+            send.Params.ToString());
     }
 }
 #endif

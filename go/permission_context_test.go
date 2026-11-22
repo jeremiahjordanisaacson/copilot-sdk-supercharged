@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 // runPermissionExchange drives executePermissionAndRespond with the supplied
@@ -63,7 +63,7 @@ func runPermissionExchange(t *testing.T, handler PermissionHandlerFunc) (frame [
 	done := make(chan struct{})
 	go func() {
 		session.registerPermissionHandler(handler)
-		session.executePermissionAndRespond("permission-1", nil, nil, nil, session.getPermissionHandler())
+		session.executePermissionAndRespond("permission-1", nil, nil, nil, nil, nil, session.getPermissionHandler())
 		close(done)
 	}()
 

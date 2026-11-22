@@ -9,12 +9,12 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from ._jsonrpc import JsonRpcClient
-from .generated.rpc import (
+from ._generated.rpc import (
     InstallationConfirmationRequest,
     InstallationConfirmationResponse,
     InstallationDecision,
 )
+from ._jsonrpc import JsonRpcClient
 
 logger = logging.getLogger(__name__)
 

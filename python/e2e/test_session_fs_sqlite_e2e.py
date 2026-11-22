@@ -246,11 +246,12 @@ def _create_sqlite_handler(sqlite_calls: list[dict]):
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def sqlite_client(ctx: E2ETestContext):
     client = CopilotClient(
-        connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
-        working_directory=ctx.work_dir,
-        env=ctx.get_env(),
-        github_token=DEFAULT_GITHUB_TOKEN,
+        mode="coding-agent",
         session_fs=SESSION_FS_CONFIG,
+        runtime=RuntimeConnection.for_spawned_stdio(
+            path=ctx.cli_path, working_directory=ctx.work_dir, env=ctx.get_env()
+        ),
+        github={"token": DEFAULT_GITHUB_TOKEN},
     )
     yield client
     try:
@@ -265,8 +266,8 @@ class TestSessionFsSqlite:
     ):
         sqlite_calls: list[dict] = []
         session = await sqlite_client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            create_session_fs_handler=_create_sqlite_handler(sqlite_calls),
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={"create_session_fs_provider": _create_sqlite_handler(sqlite_calls)},
         )
 
         await session.send_and_wait(
@@ -297,8 +298,8 @@ class TestSessionFsSqlite:
             return provider
 
         session = await sqlite_client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            create_session_fs_handler=handler_factory,
+            permissions={"on_request": PermissionHandler.approve_all},
+            state={"create_session_fs_provider": handler_factory},
         )
 
         await session.send_and_wait(

@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 // EntraAuthOptions configures the host application and optional host-owned acquisition.
@@ -19,6 +19,9 @@ type EntraAuthOptions struct {
 	// MatsAppName identifies this host in OneAuth MATS telemetry.
 	// When nil or blank, MATS telemetry is disabled.
 	MatsAppName *string
+	// OneAuthApplicationID overrides the native application descriptor.
+	// When nil or blank, the runtime uses ClientID; it does not isolate accounts.
+	OneAuthApplicationID *string
 	// TokenProvider selects/revalidates identities and acquires resource tokens.
 	// When nil, the runtime uses its built-in Entra sign-in.
 	//

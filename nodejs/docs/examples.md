@@ -1,13 +1,13 @@
 # Copilot CLI Extension Examples
 
-A practical guide to writing extensions using the `@github/copilot-sdk` extension API.
+A practical guide to writing extensions using the `@microsoft/copilot-sdk` extension API.
 
 ## Extension Skeleton
 
 Every extension starts with the same boilerplate:
 
 ```js
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 const session = await joinSession({
     hooks: {
@@ -25,7 +25,8 @@ const session = await joinSession({
 >
 > - Use `process.platform === "win32"` to detect Windows at runtime.
 > - Clipboard: `pbcopy` on macOS, `clip` on Windows.
-> - Use `exec()` instead of `execFile()` for `.cmd` scripts like `code`, `npx`, `npm` on Windows.
+> - Never interpolate tool arguments into `exec()` or shell command strings. Use `execFile()` or `spawn()` with argument arrays.
+> - On Windows, `.cmd` and `.bat` wrappers require a shell. Invoke the actual executable or use the library's Node.js API instead.
 > - PowerShell stderr redirection uses `*>&1` instead of `2>&1`.
 
 ---
@@ -152,15 +153,20 @@ Hooks intercept and modify behavior at key lifecycle points. Register them in th
 
 ### Available Hooks
 
-| Hook                    | Fires When                               | Can Modify                                  |
-| ----------------------- | ---------------------------------------- | ------------------------------------------- |
-| `onUserPromptSubmitted` | User sends a message                     | The prompt text, add context                |
-| `onPreToolUse`          | Before a tool executes                   | Tool args, permission decision, add context |
-| `onPostToolUse`         | After a tool executes successfully       | Tool result, add context                    |
-| `onPostToolUseFailure`  | After a tool execution returns a failure | Add hidden guidance to the model            |
-| `onSessionStart`        | Session starts or resumes                | Add context                                 |
-| `onSessionEnd`          | Session ends                             | Cleanup actions, summary                    |
-| `onErrorOccurred`       | An error occurs                          | Error handling strategy (retry/skip/abort)  |
+| Hook                      | Fires When                                   | Can Modify                                  |
+| ------------------------- | -------------------------------------------- | ------------------------------------------- |
+| `onUserPromptSubmitted`   | User sends a message                         | The prompt text, add context                |
+| `onUserPromptTransformed` | Runtime has transformed the submitted prompt | The transformed prompt                      |
+| `onPreToolUse`            | Before a tool executes                       | Tool args, permission decision, add context |
+| `onPreMcpToolCall`        | Before an MCP tool call is sent              | The request's `_meta`                       |
+| `onPostToolUse`           | After a tool executes successfully           | Tool result, add context                    |
+| `onPostToolUseFailure`    | After a tool execution returns a failure     | Add hidden guidance to the model            |
+| `onSessionStart`          | Session starts or resumes                    | Add context                                 |
+| `onSessionEnd`            | Session ends                                 | Cleanup actions, summary                    |
+| `onErrorOccurred`         | An error occurs                              | Error handling strategy (retry/skip/abort)  |
+| `onAgentStop`             | Top-level agent naturally stops              | Block the stop and request another turn     |
+| `onSubagentStart`         | Before a sub-agent's first turn              | Add context to its prompt                   |
+| `onSubagentStop`          | After a sub-agent completes a turn           | Request another turn, replace its response  |
 
 All hook inputs include `timestamp` (`Date`) and `workingDirectory`.
 
@@ -252,16 +258,41 @@ hooks: {
 
 Use `onPostToolUse` to run side effects after a tool completes.
 
+On macOS and Linux, install the `code` command in your `PATH`. On Windows,
+set `VSCODE_EXECUTABLE` to the absolute path of your installed `Code.exe`
+(for example, `C:\Users\you\AppData\Local\Programs\Microsoft VS Code\Code.exe`),
+not the `code.cmd` wrapper. This is trusted extension configuration, not a
+tool argument.
+
 ```js
-import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
+import { isAbsolute, resolve } from "node:path";
+
+const isWindows = process.platform === "win32";
+const vscodeExecutable = isWindows ? process.env.VSCODE_EXECUTABLE : "code";
+if (!vscodeExecutable || (isWindows && !isAbsolute(vscodeExecutable))) {
+    throw new Error("Set VSCODE_EXECUTABLE to the absolute path of Code.exe.");
+}
+const editorEnv = { ...process.env };
+// The native editor must open the file, not run it as a Node.js script.
+delete editorEnv.ELECTRON_RUN_AS_NODE;
 
 hooks: {
     onPostToolUse: async (input) => {
         if (input.toolName === "create" || input.toolName === "edit") {
             const filePath = input.toolArgs?.path;
-            if (filePath) {
-                // Open the file in VS Code
-                exec(`code "${filePath}"`, () => {});
+            if (typeof filePath === "string" && filePath) {
+                try {
+                    const child = spawn(vscodeExecutable, [resolve(filePath)], {
+                        detached: true,
+                        stdio: "ignore",
+                        env: editorEnv,
+                    });
+                    child.on("error", (err) => console.error("Could not open file in VS Code:", err.message));
+                    child.unref();
+                } catch (err) {
+                    console.error("Could not open file in VS Code:", err.message);
+                }
             }
         }
     },
@@ -290,20 +321,34 @@ hooks: {
 
 ### Running a linter after every file edit
 
+Install ESLint in the session's working directory (`npm install --save-dev eslint`)
+and configure it for TypeScript. Only run this hook in workspaces whose ESLint
+configuration and plugins you trust. Use its Node.js API rather than `npx`:
+an extension's `process.execPath` can be the Copilot single-executable binary,
+not a general-purpose Node.js interpreter.
+
 ```js
-import { exec } from "node:child_process";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const require = createRequire(import.meta.url);
 
 hooks: {
     onPostToolUse: async (input) => {
         if (input.toolName === "edit") {
             const filePath = input.toolArgs?.path;
-            if (filePath?.endsWith(".ts")) {
-                const result = await new Promise((resolve) => {
-                    exec(`npx eslint "${filePath}"`, (err, stdout) => {
-                        resolve(err ? stdout : "No lint errors.");
-                    });
-                });
-                return { additionalContext: `Lint result: ${result}` };
+            if (typeof filePath === "string" && filePath.endsWith(".ts")) {
+                try {
+                    const eslintModule = require.resolve("eslint", { paths: [process.cwd()] });
+                    const { ESLint } = await import(pathToFileURL(eslintModule).href);
+                    const eslint = new ESLint({ cwd: process.cwd(), globInputPaths: false });
+                    const results = await eslint.lintFiles([resolve(filePath)]);
+                    const formatter = await eslint.loadFormatter("stylish");
+                    return { additionalContext: `Lint result: ${formatter.format(results) || "No lint errors."}` };
+                } catch (err) {
+                    return { additionalContext: `Lint failed: ${err.message}` };
+                }
             }
         }
     },
@@ -416,7 +461,7 @@ session.on("assistant.message", (event) => {
 | --------------------------- | ------------------------------------------------ | ------------------------------------------------------ |
 | `assistant.message`         | Agent's final response                           | `content`, `messageId`, `toolRequests`                 |
 | `assistant.message_delta`   | Message content chunks (ephemeral)               | `deltaContent`                                         |
-| `tool.execution_start`      | A tool is about to run                           | `toolCallId`, `toolName`, `arguments`                  |
+| `tool.execution_start`      | A tool call was requested (may await permission) | `toolCallId`, `toolName`, `arguments`                  |
 | `tool.execution_complete`   | A tool finished running                          | `toolCallId`, `success`, `result`, `error`             |
 | `user.message`              | User sent a message                              | `content`, `attachments`, `source`                     |
 | `session.idle`              | Session finished processing a turn               | `aborted`                                              |
@@ -433,7 +478,7 @@ Correlate `tool.execution_start` / `tool.execution_complete` events by `toolCall
 ```js
 import { existsSync, watchFile, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 const agentEdits = new Set(); // toolCallIds for in-flight agent edits
 const recentAgentPaths = new Set(); // paths recently written by the agent
@@ -487,7 +532,7 @@ Filter out agent edits by tracking `tool.execution_start` / `tool.execution_comp
 ```js
 import { watch, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 const agentEditPaths = new Set();
 
@@ -580,7 +625,7 @@ const session = await joinSession({
 
 ### Handling agent questions (ask_user)
 
-Register `onUserInputRequest` to enable the agent's `ask_user` tool:
+Register `interaction.onUserInputRequest` to enable the agent's `ask_user` tool:
 
 ```js
 const session = await joinSession({
@@ -598,11 +643,22 @@ const session = await joinSession({
 
 An extension that combines tools, hooks, and events.
 
+Use the same VS Code setup as in
+[Reacting when the agent creates or edits a file](#reacting-when-the-agent-creates-or-edits-a-file).
+
 ```js
-import { execFile, exec } from "node:child_process";
-import { joinSession } from "@github/copilot-sdk/extension";
+import { execFile, spawn } from "node:child_process";
+import { isAbsolute, resolve } from "node:path";
+import { joinSession } from "@microsoft/copilot-sdk/extension";
 
 const isWindows = process.platform === "win32";
+const vscodeExecutable = isWindows ? process.env.VSCODE_EXECUTABLE : "code";
+if (!vscodeExecutable || (isWindows && !isAbsolute(vscodeExecutable))) {
+    throw new Error("Set VSCODE_EXECUTABLE to the absolute path of Code.exe.");
+}
+const editorEnv = { ...process.env };
+// The native editor must open the file, not run it as a Node.js script.
+delete editorEnv.ELECTRON_RUN_AS_NODE;
 let copyNextResponse = false;
 
 function copyToClipboard(text) {
@@ -612,8 +668,17 @@ function copyToClipboard(text) {
 }
 
 function openInEditor(filePath) {
-    if (isWindows) exec(`code "${filePath}"`, () => {});
-    else execFile("code", [filePath], () => {});
+    try {
+        const child = spawn(vscodeExecutable, [resolve(filePath)], {
+            detached: true,
+            stdio: "ignore",
+            env: editorEnv,
+        });
+        child.on("error", (err) => console.error("Could not open file in VS Code:", err.message));
+        child.unref();
+    } catch (err) {
+        console.error("Could not open file in VS Code:", err.message);
+    }
 }
 
 const session = await joinSession({
@@ -640,7 +705,7 @@ const session = await joinSession({
         onPostToolUse: async (input) => {
             if (input.toolName === "create" || input.toolName === "edit") {
                 const filePath = input.toolArgs?.path;
-                if (filePath) openInEditor(filePath);
+                if (typeof filePath === "string" && filePath) openInEditor(filePath);
             }
         },
     },

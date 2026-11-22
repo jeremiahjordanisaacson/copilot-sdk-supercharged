@@ -2,12 +2,12 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Rpc;
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Rpc;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 /// <summary>
 /// Mirrors nodejs/test/e2e/auto_tier.e2e.test.ts (snapshot category "auto_tier").
@@ -31,11 +31,8 @@ public class AutoTierE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     [Fact]
     public async Task Should_Stage_And_Reset_Auto_Tier_Preference()
     {
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            Model = "auto",
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { Model = "auto", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         await AssertPendingAutoTierAsync(session, null);
 
@@ -69,11 +66,8 @@ public class AutoTierE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     [Fact]
     public async Task Should_Preserve_Auto_Tier_When_Set_Model_Omits_It()
     {
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            Model = "auto",
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { Model = "auto", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         await session.SetAutoTierAsync(AutoTier.Balance);
         await AssertPendingAutoTierAsync(session, AutoTier.Balance);
@@ -101,22 +95,10 @@ public class AutoTierE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
 
         await using (initialClient)
         {
-            await using (var fastSession = await Ctx.CreateSessionAsync(initialClient, new SessionConfig
-            {
-                Model = "auto",
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                Capi = new CapiSessionOptions
-                {
-                    AutoTier = AutoTier.Fast,
-                    EnableWebSocketResponses = false,
-                },
-            }))
-            await using (var tierlessSession = await Ctx.CreateSessionAsync(initialClient, new SessionConfig
-            {
-                Model = "auto",
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                Capi = new CapiSessionOptions { EnableWebSocketResponses = false },
-            }))
+            await using (var fastSession = await Ctx.CreateSessionAsync(initialClient, new CreateSessionOptions
+            { Model = "auto", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { AutoTier = AutoTier.Fast, EnableWebSocketResponses = false, } } }))
+            await using (var tierlessSession = await Ctx.CreateSessionAsync(initialClient, new CreateSessionOptions
+            { Model = "auto", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { EnableWebSocketResponses = false } } }))
             {
                 fastSessionId = fastSession.SessionId;
                 tierlessSessionId = tierlessSession.SessionId;
@@ -145,11 +127,11 @@ public class AutoTierE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             await using (var restoredFast = await Ctx.ResumeSessionAsync(
                 restoredClient,
                 fastSessionId,
-                new ResumeSessionConfig { OnPermissionRequest = PermissionHandler.ApproveAll }))
+                new ResumeSessionOptions { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } }))
             await using (var restoredTierless = await Ctx.ResumeSessionAsync(
                 restoredClient,
                 tierlessSessionId,
-                new ResumeSessionConfig { OnPermissionRequest = PermissionHandler.ApproveAll }))
+                new ResumeSessionOptions { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } }))
             {
                 var restoredFastCurrent = await restoredFast.Rpc.Model.GetCurrentAsync();
                 Assert.Equal(AutoTier.Fast, restoredFastCurrent.AutoTier);
@@ -166,16 +148,8 @@ public class AutoTierE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             await using var overridden = await Ctx.ResumeSessionAsync(
                 overrideClient,
                 fastSessionId,
-                new ResumeSessionConfig
-                {
-                    Model = "auto",
-                    OnPermissionRequest = PermissionHandler.ApproveAll,
-                    Capi = new CapiSessionOptions
-                    {
-                        AutoTier = AutoTier.Balance,
-                        EnableWebSocketResponses = false,
-                    },
-                });
+                new ResumeSessionOptions
+                { Model = "auto", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { AutoTier = AutoTier.Balance, EnableWebSocketResponses = false, } } });
 
             var overriddenCurrent = await overridden.Rpc.Model.GetCurrentAsync();
             Assert.Equal(AutoTier.Balance, overriddenCurrent.AutoTier);
@@ -187,18 +161,10 @@ public class AutoTierE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     public async Task Should_Commit_Fast_Auto_Tier_After_Successful_Turn()
     {
         await using var client = Ctx.CreateClient();
-        await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            Model = "auto",
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Capi = new CapiSessionOptions
-            {
-                AutoTier = AutoTier.Efficiency,
-                EnableWebSocketResponses = false,
-            },
-        });
+        await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { Model = "auto", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { AutoTier = AutoTier.Efficiency, EnableWebSocketResponses = false, } } });
 
-        var modelChangedTask = TestHelper.GetNextEventOfTypeAsync<SessionModelChangeEvent>(
+        using var modelChangedTask = TestHelper.ObserveEvent<SessionModelChangeEvent>(
             session,
             evt => evt.Data.AutoTier == AutoTier.Fast);
 
@@ -216,7 +182,7 @@ public class AutoTierE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             Prompt = "Reply with exactly AUTO_TIER_FAST_COMMITTED.",
         });
 
-        var modelChanged = await modelChangedTask;
+        var modelChanged = await modelChangedTask.Task.WaitAsync(TimeSpan.FromSeconds(120));
         Assert.Equal("auto", modelChanged.Data.PreviousModel);
         Assert.Equal("auto", modelChanged.Data.NewModel);
         Assert.Equal(AutoTier.Efficiency, modelChanged.Data.PreviousAutoTier);
@@ -237,16 +203,8 @@ public class AutoTierE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
 
         await using (initialClient)
         {
-            await using (var session = await Ctx.CreateSessionAsync(initialClient, new SessionConfig
-            {
-                Model = "auto",
-                OnPermissionRequest = PermissionHandler.ApproveAll,
-                Capi = new CapiSessionOptions
-                {
-                    AutoTier = AutoTier.Efficiency,
-                    EnableWebSocketResponses = false,
-                },
-            }))
+            await using (var session = await Ctx.CreateSessionAsync(initialClient, new CreateSessionOptions
+            { Model = "auto", Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { AutoTier = AutoTier.Efficiency, EnableWebSocketResponses = false, } } }))
             {
                 sessionId = session.SessionId;
                 await session.SendAndWaitAsync(new MessageOptions
@@ -296,7 +254,7 @@ public class AutoTierE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         await using var resumed = await Ctx.ResumeSessionAsync(
             resumedClient,
             sessionId,
-            new ResumeSessionConfig { OnPermissionRequest = PermissionHandler.ApproveAll });
+            new ResumeSessionOptions { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var resumedCurrent = await resumed.Rpc.Model.GetCurrentAsync();
         Assert.Equal(AutoTier.Efficiency, resumedCurrent.AutoTier);

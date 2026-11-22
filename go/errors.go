@@ -2,7 +2,7 @@
 
 package copilot
 
-import "github.com/github/copilot-sdk/go/internal/jsonrpc2"
+import "github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
 
 // RPCError is the SDK's JSON-RPC transport error.
 // Use errors.As to retrieve it from errors wrapped by SDK operations.

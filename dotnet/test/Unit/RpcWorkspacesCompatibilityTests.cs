@@ -2,25 +2,26 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
-using GitHub.Copilot.Rpc;
+#if NET
+using Microsoft.Copilot.Rpc;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
     [Fact]
-    public void Workspace_Diff_Preserves_Existing_Signature_And_Defaults()
+    public void Workspace_Diff_Has_Optional_Last_Cancellation()
     {
         var method = typeof(WorkspacesApi).GetMethod("DiffAsync",
-            [typeof(WorkspaceDiffMode), typeof(bool?), typeof(CancellationToken)]);
+            [typeof(WorkspaceDiffMode), typeof(bool?), typeof(bool?), typeof(CancellationToken)]);
         Assert.NotNull(method);
         Assert.Equal(
             new (string? Name, bool IsOptional)[]
             {
                 ("mode", false),
                 ("ignoreWhitespace", true),
+                ("includeContents", true),
                 ("cancellationToken", true),
             },
             method.GetParameters().Select(parameter => (parameter.Name, parameter.IsOptional)));
@@ -28,7 +29,7 @@ public sealed partial class ClientSessionLifetimeTests
     }
 
     [Fact]
-    public async Task Workspace_Diff_Preserves_Positional_Calls_And_Offers_Contents_Through_Request()
+    public async Task Workspace_Diff_Preserves_Omitted_And_Explicit_Contents_Options()
     {
         await using var server = await FakeCopilotServer.StartAsync();
         server.ResponseFactory = request => request.Method == "session.workspaces.diff"
@@ -42,28 +43,21 @@ public sealed partial class ClientSessionLifetimeTests
             : throw new InvalidOperationException($"Unexpected workspace diff request '{request.Method}'.");
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.ClearRequests();
         var cancellation = CancellationToken.None;
 
-        await session.Rpc.Workspaces.DiffAsync(WorkspaceDiffMode.Session, false, cancellation);
+        await session.Rpc.Workspaces.DiffAsync(WorkspaceDiffMode.Session, ignoreWhitespace: false, cancellationToken: cancellation);
         await session.Rpc.Workspaces.DiffAsync(WorkspaceDiffMode.Session);
         await session.Rpc.Workspaces.DiffAsync(WorkspaceDiffMode.Session, cancellationToken: cancellation);
-        await session.Rpc.Workspaces.DiffAsync(new WorkspacesDiffRequest
-        {
-            Mode = WorkspaceDiffMode.Session,
-            IgnoreWhitespace = false,
-            IncludeContents = true,
-        }, cancellation);
-        await session.Rpc.Workspaces.DiffAsync(new WorkspacesDiffRequest
-        {
-            Mode = WorkspaceDiffMode.Session,
-            IncludeContents = false,
-        }, cancellation);
+        await session.Rpc.Workspaces.DiffAsync(WorkspaceDiffMode.Session,
+            ignoreWhitespace: false, includeContents: true, cancellationToken: cancellation);
+        await session.Rpc.Workspaces.DiffAsync(WorkspaceDiffMode.Session,
+            includeContents: false, cancellationToken: cancellation);
 
-        Assert.Null(typeof(WorkspacesDiffRequest).GetProperty("SessionId"));
         var requests = server.Requests.ToArray();
         Assert.All(requests, request => Assert.Equal(
             ("session.workspaces.diff", session.SessionId, "session"),

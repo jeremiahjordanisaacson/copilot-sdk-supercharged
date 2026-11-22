@@ -2,85 +2,155 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 using System.Text.Json;
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
-    [Fact]
-    public void Existing_Mcp_Overload_Signatures_And_Defaults_Are_Preserved()
-    {
-        (Type Owner, string Name, Type[] Parameters, int Required)[] signatures =
-        [
-            (typeof(McpApi), "EnableAsync", [typeof(string), typeof(CancellationToken)], 1),
-            (typeof(McpApi), "DisableAsync", [typeof(string), typeof(CancellationToken)], 1),
-            (typeof(McpApi), "StopServerAsync", [typeof(string), typeof(CancellationToken)], 1),
-            (typeof(McpApi), "StartServerAsync", [typeof(string), typeof(object), typeof(CancellationToken)], 1),
-            (typeof(McpApi), "RestartServerAsync", [typeof(string), typeof(object), typeof(CancellationToken)], 1),
-            (typeof(McpOauthApi), "ProbeAsync", [typeof(string), typeof(CancellationToken)], 1),
-            (typeof(McpOauthApi), "LoginAsync",
-                [typeof(string), typeof(bool?), typeof(string), typeof(string), typeof(string),
-                    typeof(string), typeof(bool?), typeof(McpOauthLoginGrantType?), typeof(CancellationToken)], 1),
-            (typeof(ServerMcpApi), "PlanInstallAsync",
-                [typeof(CatalogClientContract), typeof(McpPlanInstallSource), typeof(McpPlanScope?),
-                    typeof(CancellationToken)], 2),
-            (typeof(ServerCatalogApi), "SearchAsync",
-                [typeof(CatalogClientContract), typeof(string), typeof(int?), typeof(IList<CatalogCandidateKind>),
-                    typeof(CatalogSearchPage), typeof(CancellationToken)], 2),
-        ];
-        foreach (var (owner, name, types, required) in signatures)
-        {
-            var method = owner.GetMethod(name, types);
-            Assert.NotNull(method);
-            var parameters = method.GetParameters();
-            Assert.Equal("cancellationToken", parameters[^1].Name);
-            Assert.All(parameters.Take(required), parameter => Assert.False(parameter.IsOptional));
-            Assert.All(parameters.Skip(required), parameter =>
-            {
-                Assert.True(parameter.IsOptional);
-                Assert.True(parameter.HasDefaultValue);
-                Assert.Null(parameter.DefaultValue);
-            });
-        }
-    }
-
-    [Fact]
-    public async Task Existing_Positional_Mcp_Calls_Omit_Owned_Identity()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Mcp_StartServer_Accepts_Typed_Local_Config_Without_Changing_Caller_Data(bool includeHeaders)
     {
         await using var server = await FakeCopilotServer.StartAsync();
         server.ResponseFactory = McpCompatibilityResponse;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
+        server.ClearRequests();
+        var config = new McpServerConfigLocal
+        {
+            Type = McpServerConfigLocalType.LocalHttp,
+            SocketPath = "/runtime/ide.sock",
+            Headers = includeHeaders ? new Dictionary<string, string> { ["Authorization"] = "Bearer local" } : null,
+            Ide = new McpIdeConfig
+            {
+                IdeName = "VS Code",
+                WorkspaceFolder = "/workspace",
+                Pid = 42,
+                LockFilePath = "/runtime/ide.lock",
+                ClientVersion = "1.0",
+                ClientPid = 43,
+                ParentPid = 44,
+            },
+        };
+
+        await session.Rpc.Mcp.StartServerAsync("ide", config);
+
+        var request = Assert.Single(server.Requests);
+        Assert.Equal("session.mcp.startServer", request.Method);
+        Assert.Equal(session.SessionId, request.Params.GetProperty("sessionId").GetString());
+        var payload = request.Params.GetProperty("config");
+        Assert.Equal("local-http", payload.GetProperty("type").GetString());
+        Assert.Equal("/runtime/ide.sock", payload.GetProperty("socketPath").GetString());
+        if (includeHeaders)
+            Assert.Equal("Bearer local", payload.GetProperty("headers").GetProperty("Authorization").GetString());
+        else
+            Assert.False(payload.TryGetProperty("headers", out _));
+        Assert.Equal("VS Code", payload.GetProperty("ide").GetProperty("ideName").GetString());
+        Assert.Equal(42, payload.GetProperty("ide").GetProperty("pid").GetInt64());
+        Assert.Equal("/runtime/ide.sock", config.SocketPath);
+        if (includeHeaders)
+            Assert.Equal("Bearer local", config.Headers!["Authorization"]);
+        else
+            Assert.Null(config.Headers);
+        Assert.Equal(42, config.Ide.Pid);
+    }
+
+    [Theory]
+    [InlineData("anonymous")]
+    [InlineData("poco")]
+    [InlineData("dictionary")]
+    [InlineData("json")]
+    [InlineData("null")]
+    public async Task Mcp_CallTool_Serializes_Caller_Defined_Arguments(string shape)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.ResponseFactory = McpCompatibilityResponse;
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
+        });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
+        server.ClearRequests();
+        using var json = JsonDocument.Parse("""{ "path": "/tmp/x", "count": 3, "value": null }""");
+        object? arguments = shape switch
+        {
+            "json" => json.RootElement,
+            "null" => null,
+            "anonymous" => new { path = "/tmp/x", count = 3, value = (string?)null },
+            "poco" => new NullableMcpArguments("/tmp/x", 3, null),
+            "dictionary" => new Dictionary<string, object?> { ["path"] = "/tmp/x", ["count"] = 3, ["value"] = null },
+            _ => throw new ArgumentOutOfRangeException(nameof(shape)),
+        };
+
+        if (!JsonSerializer.IsReflectionEnabledByDefault && shape is "anonymous" or "poco")
+        {
+            await Assert.ThrowsAsync<NotSupportedException>(() => session.Rpc.Mcp.CallToolAsync("ide", "inspect", arguments));
+            Assert.Empty(server.Requests);
+            return;
+        }
+
+        await session.Rpc.Mcp.CallToolAsync("ide", "inspect", arguments);
+
+        var request = Assert.Single(server.Requests);
+        Assert.Equal("session.mcp.callTool", request.Method);
+        Assert.Equal(session.SessionId, request.Params.GetProperty("sessionId").GetString());
+        Assert.Equal("ide", request.Params.GetProperty("serverName").GetString());
+        Assert.Equal("inspect", request.Params.GetProperty("toolName").GetString());
+        var payload = request.Params.GetProperty("arguments");
+        if (shape == "null")
+        {
+            Assert.Equal(JsonValueKind.Null, payload.ValueKind);
+        }
+        else
+        {
+            Assert.Equal("/tmp/x", payload.GetProperty("path").GetString());
+            Assert.Equal(3, payload.GetProperty("count").GetInt32());
+            Assert.Equal(JsonValueKind.Null, payload.GetProperty("value").ValueKind);
+        }
+    }
+
+    private sealed record NullableMcpArguments(string Path, int Count, string? Value);
+
+    [Fact]
+    public async Task Mcp_Calls_Omit_Unspecified_Owned_Identity()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.ResponseFactory = McpCompatibilityResponse;
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
+        });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.ClearRequests();
         var cancellation = CancellationToken.None;
         using var config = JsonDocument.Parse("""{ "command": "node" }""");
 
-        await session.Rpc.Mcp.EnableAsync("manual", cancellation);
-        await session.Rpc.Mcp.DisableAsync("manual", cancellation);
-        await session.Rpc.Mcp.StartServerAsync("manual", config.RootElement, cancellation);
-        await session.Rpc.Mcp.RestartServerAsync("manual", default, cancellation);
-        await session.Rpc.Mcp.StopServerAsync("manual", cancellation);
-        await session.Rpc.Mcp.Oauth.ProbeAsync("manual", cancellation);
-        await session.Rpc.Mcp.Oauth.LoginAsync("manual", false, "client", "success", null, null, true, null, cancellation);
+        await session.Rpc.Mcp.EnableAsync("manual", cancellationToken: cancellation);
+        await session.Rpc.Mcp.DisableAsync("manual", cancellationToken: cancellation);
+        await session.Rpc.Mcp.StartServerAsync("manual", config.RootElement, cancellationToken: cancellation);
+        await session.Rpc.Mcp.RestartServerAsync("manual", default, cancellationToken: cancellation);
+        await session.Rpc.Mcp.StopServerAsync("manual", cancellationToken: cancellation);
+        await session.Rpc.Mcp.Oauth.ProbeAsync("manual", cancellationToken: cancellation);
+        await session.Rpc.Mcp.Oauth.LoginAsync("manual", false, "client", "success", null, null, true, null, cancellationToken: cancellation);
         await client.Rpc.Mcp.PlanInstallAsync(
             new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] },
             new McpPlanInstallSourceCandidate { CandidateHandle = "candidate", SearchId = "search" },
-            McpPlanScope.User,
-            cancellation);
+            McpPlanScope.User, cancellationToken: cancellation);
         await client.Rpc.Catalog.SearchAsync(
             new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] },
-            "catalogue query",
-            4,
-            null,
-            null,
-            cancellation);
+            query: "catalogue query",
+            limit: 4, cancellationToken: cancellation);
 
         var requests = server.Requests.ToArray();
         Assert.Equal(9, requests.Length);
@@ -113,42 +183,21 @@ public sealed partial class ClientSessionLifetimeTests
         server.ResponseFactory = McpCompatibilityResponse;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.ClearRequests();
         const string installationId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         const string loginId = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-        await session.Rpc.Mcp.StartServerAsync(new McpStartServerRequest
-        {
-            ServerName = "owned",
-            ExpectedInstallationId = installationId,
-        });
-        await session.Rpc.Mcp.Oauth.LoginAsync(new McpOauthLoginRequest
-        {
-            ServerName = "owned",
-            ExpectedInstallationId = installationId,
-            LoginId = loginId,
-        });
-        await client.Rpc.Mcp.PlanInstallAsync(new McpPlanInstallRequest
-        {
-            Contract = new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] },
-            Source = new McpPlanInstallSourceCandidate { CandidateHandle = "candidate", SearchId = "search" },
-            Scope = McpPlanScope.User,
-            PolicySessionId = session.SessionId,
-        });
-        await client.Rpc.Catalog.SearchAsync(new CatalogSearchRequest
-        {
-            Contract = new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] },
-            Query = "catalogue query",
-            PolicySessionId = session.SessionId,
-        });
+        await session.Rpc.Mcp.StartServerAsync(serverName: "owned", expectedInstallationId: installationId);
+        await session.Rpc.Mcp.Oauth.LoginAsync(serverName: "owned", expectedInstallationId: installationId, loginId: loginId);
+        await client.Rpc.Mcp.PlanInstallAsync(contract: new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] }, source: new McpPlanInstallSourceCandidate { CandidateHandle = "candidate", SearchId = "search" }, scope: McpPlanScope.User, policySessionId: session.SessionId);
+        await client.Rpc.Catalog.SearchAsync(contract: new CatalogClientContract { ProtocolVersion = 3, RequiredCapabilities = ["mcp-install-planning"] }, query: "catalogue query", policySessionId: session.SessionId);
 
         Assert.Null(typeof(McpApi).GetMethod("StartServerWithRequestAsync"));
         Assert.Null(typeof(McpOauthApi).GetMethod("LoginWithRequestAsync"));
-        Assert.Null(typeof(McpStartServerRequest).GetProperty("SessionId"));
-        Assert.Null(typeof(McpOauthLoginRequest).GetProperty("SessionId"));
         var requests = server.Requests.ToArray();
         Assert.Equal(4, requests.Length);
         foreach (var request in requests.Take(2))
@@ -182,7 +231,7 @@ public sealed partial class ClientSessionLifetimeTests
                 ["status"] = "failed",
                 ["error"] = "SDK wire fixture",
             },
-            "session.mcp.oauth.login" or "session.mcp.startServer" or "session.mcp.restartServer"
+            "session.mcp.callTool" or "session.mcp.oauth.login" or "session.mcp.startServer" or "session.mcp.restartServer"
                 or "session.mcp.stopServer" or "session.mcp.enable" or "session.mcp.disable" =>
                 new Dictionary<string, object?>(),
             _ => throw new InvalidOperationException($"Unexpected MCP compatibility request '{request.Method}'."),

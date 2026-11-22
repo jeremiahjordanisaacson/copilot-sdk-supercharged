@@ -13,12 +13,9 @@ RESET = "\033[0m"
 
 
 async def main():
-    from copilot.config import SubprocessConfig
-
-    cfg = SubprocessConfig(session_idle_timeout_seconds=600)
-    client = CopilotClient(config=cfg)
+    client = CopilotClient(mode="coding-agent")
     await client.start()
-    session = await client.create_session(on_permission_request=PermissionHandler.approve_all)
+    session = await client.create_session(permissions={"on_request": PermissionHandler.approve_all})
 
     def on_event(event):
         output = None

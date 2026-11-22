@@ -11,8 +11,8 @@ import (
 	"regexp"
 	"strings"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 // Shared synthetic-upstream helpers for the CopilotRequestHandler e2e tests.
@@ -314,13 +314,9 @@ func assistantText(msg *copilot.SessionEvent) string {
 
 // newCopilotRequestClient builds a client wired to handler via RequestHandler.
 // Each test that needs inference interception owns an isolated client carrying
-// its own handler. extraEnv is appended to the spawned runtime's environment
-// (e.g. to flip an ExP flag for the WS transport).
-func newCopilotRequestClient(ctx *testharness.TestContext, handler *copilot.CopilotRequestHandler, extraEnv ...string) *copilot.Client {
+// its own handler.
+func newCopilotRequestClient(ctx *testharness.TestContext, handler *copilot.CopilotRequestHandler) *testharness.Client {
 	return ctx.NewClient(func(o *copilot.ClientOptions) {
-		o.RequestHandler = handler
-		if len(extraEnv) > 0 {
-			o.Env = append(o.Env, extraEnv...)
-		}
+		o.Models.RequestHandler = handler
 	})
 }

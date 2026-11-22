@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,12 +14,13 @@ import (
 
 	"github.com/google/uuid"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestSessionE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -26,7 +28,7 @@ func TestSessionE2E(t *testing.T) {
 	t.Run("should create and disconnect sessions", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll, Model: "claude-sonnet-5"})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Model: "claude-sonnet-5"})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -54,6 +56,21 @@ func TestSessionE2E(t *testing.T) {
 			t.Errorf("Expected selectedModel to be 'claude-sonnet-5', got %v", startData)
 		}
 
+		rawEvents, err := session.GetRawEvents(t.Context())
+		if err != nil {
+			t.Fatalf("Failed to get raw events: %v", err)
+		}
+		if len(rawEvents) == 0 {
+			t.Fatal("Expected initial raw session events")
+		}
+		var rawStart map[string]json.RawMessage
+		if err := json.Unmarshal(rawEvents[0], &rawStart); err != nil {
+			t.Fatalf("Failed to decode raw session.start: %v", err)
+		}
+		if string(rawStart["type"]) != `"session.start"` || string(rawStart["parentId"]) != "null" {
+			t.Fatalf("Raw session.start must preserve parentId:null, got %s", rawEvents[0])
+		}
+
 		if err := session.Disconnect(); err != nil {
 			t.Fatalf("Failed to disconnect session: %v", err)
 		}
@@ -67,7 +84,7 @@ func TestSessionE2E(t *testing.T) {
 	t.Run("should have stateful conversation", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -95,12 +112,10 @@ func TestSessionE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		systemMessageSuffix := "End each response with the phrase 'Have a nice day!'"
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SystemMessage: &copilot.SystemMessageConfig{
-				Mode:    "append",
-				Content: systemMessageSuffix,
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SystemMessage: &copilot.SystemMessageConfig{
+			Mode:    "append",
+			Content: systemMessageSuffix,
+		},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -146,12 +161,10 @@ func TestSessionE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		testSystemMessage := "You are an assistant called Testy McTestface. Reply succinctly."
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SystemMessage: &copilot.SystemMessageConfig{
-				Mode:    "replace",
-				Content: testSystemMessage,
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SystemMessage: &copilot.SystemMessageConfig{
+			Mode:    "replace",
+			Content: testSystemMessage,
+		},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -200,16 +213,14 @@ func TestSessionE2E(t *testing.T) {
 
 		customTone := "Respond in a warm, professional tone. Be thorough in explanations."
 		appendedContent := "Always mention quarterly earnings."
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SystemMessage: &copilot.SystemMessageConfig{
-				Mode: "customize",
-				Sections: map[string]copilot.SectionOverride{
-					copilot.SectionTone:            {Action: "replace", Content: customTone},
-					copilot.SectionCodeChangeRules: {Action: "remove"},
-				},
-				Content: appendedContent,
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SystemMessage: &copilot.SystemMessageConfig{
+			Mode: "customize",
+			Sections: map[string]copilot.SectionOverride{
+				copilot.SectionTone:            {Action: "replace", Content: customTone},
+				copilot.SectionCodeChangeRules: {Action: "remove"},
 			},
+			Content: appendedContent,
+		},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -238,10 +249,7 @@ func TestSessionE2E(t *testing.T) {
 	t.Run("should create a session with availableTools", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			AvailableTools:      []string{"view", "edit"},
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{AvailableTools: []string{"view", "edit"}}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -266,10 +274,7 @@ func TestSessionE2E(t *testing.T) {
 	t.Run("should create a session with excludedTools", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			ExcludedTools:       []string{"view"},
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{ExcludedTools: []string{"view"}}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -294,24 +299,21 @@ func TestSessionE2E(t *testing.T) {
 	t.Run("should create a session with defaultAgent excludedTools", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools: []copilot.Tool{
-				{
-					Name:        "secret_tool",
-					Description: "A secret tool hidden from the default agent",
-					Parameters: map[string]any{
-						"type":       "object",
-						"properties": map[string]any{"input": map[string]any{"type": "string"}},
-					},
-					Handler: func(invocation copilot.ToolInvocation) (copilot.ToolResult, error) {
-						return copilot.ToolResult{TextResultForLLM: "SECRET", ResultType: "success"}, nil
-					},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{
+			{
+				Name:        "secret_tool",
+				Description: "A secret tool hidden from the default agent",
+				Parameters: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"input": map[string]any{"type": "string"}},
+				},
+				Handler: func(invocation copilot.ToolInvocation) (copilot.ToolResult, error) {
+					return copilot.ToolResult{TextResultForLLM: "SECRET", ResultType: "success"}, nil
 				},
 			},
-			DefaultAgent: &copilot.DefaultAgentConfig{
-				ExcludedTools: []string{"secret_tool"},
-			},
+		}}, Agents: copilot.SessionAgentOptions{Default: &copilot.DefaultAgentConfig{
+			ExcludedTools: []string{"secret_tool"},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -334,38 +336,36 @@ func TestSessionE2E(t *testing.T) {
 	t.Run("should create session with custom tool", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools: []copilot.Tool{
-				{
-					Name:        "get_secret_number",
-					Description: "Gets the secret number",
-					Parameters: map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"key": map[string]any{
-								"type":        "string",
-								"description": "Key",
-							},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{
+			{
+				Name:        "get_secret_number",
+				Description: "Gets the secret number",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"key": map[string]any{
+							"type":        "string",
+							"description": "Key",
 						},
-						"required": []string{"key"},
 					},
-					Handler: func(invocation copilot.ToolInvocation) (copilot.ToolResult, error) {
-						args, _ := invocation.Arguments.(map[string]any)
-						key, _ := args["key"].(string)
-						if key == "ALPHA" {
-							return copilot.ToolResult{
-								TextResultForLLM: "54321",
-								ResultType:       "success",
-							}, nil
-						}
+					"required": []string{"key"},
+				},
+				Handler: func(invocation copilot.ToolInvocation) (copilot.ToolResult, error) {
+					args, _ := invocation.Arguments.(map[string]any)
+					key, _ := args["key"].(string)
+					if key == "ALPHA" {
 						return copilot.ToolResult{
-							TextResultForLLM: "unknown",
+							TextResultForLLM: "54321",
 							ResultType:       "success",
 						}, nil
-					},
+					}
+					return copilot.ToolResult{
+						TextResultForLLM: "unknown",
+						ResultType:       "success",
+					}, nil
 				},
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -401,7 +401,7 @@ func TestSessionE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create initial session
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -424,9 +424,7 @@ func TestSessionE2E(t *testing.T) {
 		}
 
 		// Resume using the same client
-		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -464,7 +462,7 @@ func TestSessionE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create initial session
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -490,9 +488,7 @@ func TestSessionE2E(t *testing.T) {
 		newClient := ctx.NewClient()
 		defer newClient.ForceStop()
 
-		session2, err := newClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session2, err := newClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -543,10 +539,7 @@ func TestSessionE2E(t *testing.T) {
 		sessionID := "e2e-cold-resume-" + uuid.NewString()
 
 		client1 := ctx.NewClient()
-		session1, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SessionID:           sessionID,
-		})
+		session1, err := client1.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SessionID: sessionID})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -572,9 +565,7 @@ func TestSessionE2E(t *testing.T) {
 		client2 := ctx.NewClient()
 		defer client2.ForceStop()
 
-		session2, err := client2.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session2, err := client2.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -596,9 +587,7 @@ func TestSessionE2E(t *testing.T) {
 	t.Run("should throw error when resuming non-existent session", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		_, err := client.ResumeSession(t.Context(), "non-existent-session-id", &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		_, err := client.ResumeSession(t.Context(), "non-existent-session-id", &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err == nil {
 			t.Error("Expected error when resuming non-existent session")
 		}
@@ -607,20 +596,18 @@ func TestSessionE2E(t *testing.T) {
 	t.Run("should resume session with a custom provider", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 		sessionID := session.SessionID
 
 		// Resume the session with a provider
-		session2, err := client.ResumeSessionWithOptions(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Provider: &copilot.ProviderConfig{
-				Type:    "openai",
-				BaseURL: "https://api.openai.com/v1",
-				APIKey:  "fake-key",
-			},
+		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Model: "claude-sonnet-5", GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Inference: byokInference(&copilot.ProviderConfig{
+			Type:    "openai",
+			BaseURL: "https://api.openai.com/v1",
+			APIKey:  "fake-key",
+		}, copilot.SessionInferenceOptions{}),
 		})
 		if err != nil {
 			t.Fatalf("Failed to resume session with provider: %v", err)
@@ -634,9 +621,7 @@ func TestSessionE2E(t *testing.T) {
 	t.Run("should abort a session", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -720,16 +705,14 @@ func TestSessionE2E(t *testing.T) {
 		// session.start is emitted during the session.create RPC; with channel-based
 		// dispatch it may not have been delivered by the time CreateSession returns.
 		sessionStartCh := make(chan bool, 1)
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnEvent: func(event copilot.SessionEvent) {
-				if event.Type() == "session.start" {
-					select {
-					case sessionStartCh <- true:
-					default:
-					}
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Events: copilot.SessionEventOptions{OnEvent: func(event copilot.SessionEvent) {
+			if event.Type() == "session.start" {
+				select {
+				case sessionStartCh <- true:
+				default:
 				}
-			},
+			}
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -860,10 +843,7 @@ func TestSessionE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		customConfigDir := ctx.HomeDir + "/custom-config"
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			ConfigDirectory:     customConfigDir,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, ConfigDirectory: customConfigDir})
 		if err != nil {
 			t.Fatalf("Failed to create session with custom config dir: %v", err)
 		}
@@ -895,7 +875,7 @@ func TestSessionE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create a couple of sessions and send messages to persist them
-		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		session1, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session1: %v", err)
 		}
@@ -905,7 +885,7 @@ func TestSessionE2E(t *testing.T) {
 			t.Fatalf("Failed to send message to session1: %v", err)
 		}
 
-		session2, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		session2, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session2: %v", err)
 		}
@@ -965,7 +945,7 @@ func TestSessionE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create a session and send a message to persist it
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -1011,9 +991,7 @@ func TestSessionE2E(t *testing.T) {
 		}
 
 		// Verify we cannot resume the deleted session
-		_, err = client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		_, err = client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err == nil {
 			t.Error("Expected error when resuming deleted session")
 		}
@@ -1022,7 +1000,7 @@ func TestSessionE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create a session and send a message to persist it
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -1076,7 +1054,7 @@ func TestSessionE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create a session and send a message to persist it
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -1115,6 +1093,7 @@ func getSystemMessage(exchange testharness.ParsedHttpExchange) string {
 }
 
 func TestSetModelWithReasoningEffortE2E(t *testing.T) {
+	t.Parallel()
 	t.Run("should set model with reasoningeffort", runSetModelWithReasoningEffortE2E)
 }
 
@@ -1128,9 +1107,7 @@ func runSetModelWithReasoningEffortE2E(t *testing.T) {
 		t.Fatalf("Failed to start client: %v", err)
 	}
 
-	session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	})
+	session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
@@ -1164,6 +1141,7 @@ func runSetModelWithReasoningEffortE2E(t *testing.T) {
 }
 
 func TestSessionBlobAttachmentE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -1182,9 +1160,7 @@ func TestSessionBlobAttachmentE2E(t *testing.T) {
 			t.Fatalf("Failed to write test image: %v", err)
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -1227,6 +1203,7 @@ func contains(slice []string, item string) bool {
 }
 
 func TestSessionLogE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -1235,9 +1212,7 @@ func TestSessionLogE2E(t *testing.T) {
 		t.Fatalf("Failed to start client: %v", err)
 	}
 
-	session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	})
+	session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
@@ -1346,6 +1321,7 @@ func getEventMessage(evt copilot.SessionEvent) string {
 // Each subtest exercises a different Attachment shape end-to-end through SendAndWait
 // and verifies the resulting user.message event captured by GetEvents.
 func TestSessionAttachmentsE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -1362,9 +1338,7 @@ func TestSessionAttachmentsE2E(t *testing.T) {
 			t.Fatalf("WriteFile failed: %v", err)
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -1409,9 +1383,7 @@ func TestSessionAttachmentsE2E(t *testing.T) {
 			t.Fatalf("WriteFile failed: %v", err)
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -1449,9 +1421,7 @@ func TestSessionAttachmentsE2E(t *testing.T) {
 			t.Fatalf("WriteFile failed: %v", err)
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -1499,9 +1469,7 @@ func TestSessionAttachmentsE2E(t *testing.T) {
 	t.Run("should send with github_reference attachment", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -1573,6 +1541,7 @@ func lastUserAttachment(t *testing.T, session *copilot.Session) copilot.Attachme
 
 // TestSessionMessageOptions mirrors C# Should_Send_With_Mode_Property and Should_Send_With_Custom_RequestHeaders.
 func TestSessionMessageOptionsE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -1584,9 +1553,7 @@ func TestSessionMessageOptionsE2E(t *testing.T) {
 	t.Run("should send with mode property", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -1625,9 +1592,7 @@ func TestSessionMessageOptionsE2E(t *testing.T) {
 	t.Run("should send with custom requestHeaders", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
@@ -1672,6 +1637,7 @@ func exchangeHasHeader(exchange testharness.ParsedHttpExchange, name, expectedVa
 
 // TestSessionSetModelOnExisting mirrors C# Should_Set_Model_On_Existing_Session as a snapshot-replay subtest.
 func TestSessionSetModelOnExistingE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -1683,9 +1649,7 @@ func TestSessionSetModelOnExistingE2E(t *testing.T) {
 	t.Run("should set model on existing session", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		})
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}

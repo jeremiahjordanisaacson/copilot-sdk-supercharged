@@ -14,7 +14,7 @@ The `onUserPromptSubmitted` hook is called when a user submits a message. Use it
 
 <!-- docs-validate: hidden -->
 ```ts
-import type { UserPromptSubmittedHookInput, HookInvocation, UserPromptSubmittedHookOutput } from "@github/copilot-sdk";
+import type { UserPromptSubmittedHookInput, HookInvocation, UserPromptSubmittedHookOutput } from "copilot-sdk-supercharged";
 type UserPromptSubmittedHandler = (
   input: UserPromptSubmittedHookInput,
   invocation: HookInvocation
@@ -36,12 +36,16 @@ type UserPromptSubmittedHandler = (
 <!-- docs-validate: hidden -->
 ```python
 from copilot.session import UserPromptSubmittedHookInput, UserPromptSubmittedHookOutput
+from copilot.session import UserPromptSubmittedHandler as SdkUserPromptSubmittedHandler
 from typing import Callable, Awaitable
 
 UserPromptSubmittedHandler = Callable[
     [UserPromptSubmittedHookInput, dict[str, str]],
     Awaitable[UserPromptSubmittedHookOutput | None]
 ]
+
+def check(handler: UserPromptSubmittedHandler) -> SdkUserPromptSubmittedHandler:
+    return handler
 ```
 <!-- /docs-validate: hidden -->
 ```python
@@ -60,12 +64,21 @@ UserPromptSubmittedHandler = Callable[
 ```go
 package main
 
-import copilot "github.com/github/copilot-sdk/go"
+import copilot "github.com/microsoft/copilot-sdk/go/v2"
+
+// Aliases let the signature below use the package's own type names.
+type (
+    UserPromptSubmittedHookInput  = copilot.UserPromptSubmittedHookInput
+    HookInvocation                = copilot.HookInvocation
+    UserPromptSubmittedHookOutput = copilot.UserPromptSubmittedHookOutput
+)
 
 type UserPromptSubmittedHandler func(
-    input copilot.UserPromptSubmittedHookInput,
-    invocation copilot.HookInvocation,
-) (*copilot.UserPromptSubmittedHookOutput, error)
+    input UserPromptSubmittedHookInput,
+    invocation HookInvocation,
+) (*UserPromptSubmittedHookOutput, error)
+
+var _ = copilot.UserPromptSubmittedHandler(UserPromptSubmittedHandler(nil))
 
 func main() {}
 ```
@@ -84,11 +97,17 @@ type UserPromptSubmittedHandler func(
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
+using Microsoft.Copilot;
 
 public delegate Task<UserPromptSubmittedHookOutput?> UserPromptSubmittedHandler(
     UserPromptSubmittedHookInput input,
     HookInvocation invocation);
+
+static class UserPromptSubmittedHandlerCheck
+{
+    static SessionHooks Check(UserPromptSubmittedHandler handler) =>
+        new() { OnUserPromptSubmitted = handler.Invoke };
+}
 ```
 <!-- /docs-validate: hidden -->
 ```csharp
@@ -104,12 +123,28 @@ public delegate Task<UserPromptSubmittedHookOutput?> UserPromptSubmittedHandler(
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 public class UserPromptSubmittedSignature {
-    UserPromptSubmittedHandler handler = (UserPromptSubmittedHookInput input, HookInvocation invocation) ->
-        CompletableFuture.completedFuture(null);
+    static class Documented {
+        @FunctionalInterface
+        public interface UserPromptSubmittedHandler {
+            CompletableFuture<UserPromptSubmittedHookOutput> handle(
+                UserPromptSubmittedHookInput input,
+                HookInvocation invocation);
+        }
+    }
+
+    // The documented interface and the SDK's accept each other's implementations.
+    static UserPromptSubmittedHandler toSdk(Documented.UserPromptSubmittedHandler documented) {
+        return documented::handle;
+    }
+
+    static Documented.UserPromptSubmittedHandler fromSdk(UserPromptSubmittedHandler sdk) {
+        return sdk::handle;
+    }
+
     public static void main(String[] args) {}
 }
 ```
@@ -176,12 +211,14 @@ In Go, an empty `Reason` is omitted from the output, and the prompt is blocked o
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onUserPromptSubmitted: async (input, invocation) => {
-      console.log(`[${invocation.sessionId}] User: ${input.prompt}`);
-      return null; // Pass through unchanged
+    hooks: {
+        handlers: {
+            onUserPromptSubmitted: async (input, invocation) => {
+                console.log(`[${invocation.sessionId}] User: ${input.prompt}`);
+                return null; // Pass through unchanged
+            },
+        },
     },
-  },
 });
 ```
 
@@ -194,13 +231,18 @@ const session = await client.createSession({
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
-client = CopilotClient()
+client = CopilotClient(mode="coding-agent")
+
 
 async def on_user_prompt_submitted(input_data, invocation):
     print(f"[{invocation['session_id']}] User: {input_data['prompt']}")
     return None
 
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={"on_user_prompt_submitted": on_user_prompt_submitted})
+
+session = await client.create_session(
+    permissions={"on_request": PermissionHandler.approve_all},
+    hooks={"handlers": {"on_user_prompt_submitted": on_user_prompt_submitted}},
+)
 ```
 
 </details>
@@ -215,17 +257,18 @@ package main
 import (
 	"context"
 	"fmt"
-	copilot "github.com/github/copilot-sdk/go"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
 
 func main() {
-	client := copilot.NewClient(nil)
-	session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-		Hooks: &copilot.SessionHooks{
-			OnUserPromptSubmitted: func(input copilot.UserPromptSubmittedHookInput, inv copilot.HookInvocation) (*copilot.UserPromptSubmittedHookOutput, error) {
-				fmt.Printf("[%s] User: %s\n", inv.SessionID, input.Prompt)
-				return nil, nil
+	client := copilot.NewClient(&copilot.ClientOptions{Mode: copilot.ModeCodingAgent})
+	session, _ := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+		Hooks: copilot.SessionHookOptions{
+			Handlers: &copilot.SessionHooks{
+				OnUserPromptSubmitted: func(input copilot.UserPromptSubmittedHookInput, inv copilot.HookInvocation) (*copilot.UserPromptSubmittedHookOutput, error) {
+					fmt.Printf("[%s] User: %s\n", inv.SessionID, input.Prompt)
+					return nil, nil
+				},
 			},
 		},
 	})
@@ -234,14 +277,17 @@ func main() {
 ```
 <!-- /docs-validate: hidden -->
 ```go
-session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
-    Hooks: &copilot.SessionHooks{
-        OnUserPromptSubmitted: func(input copilot.UserPromptSubmittedHookInput, inv copilot.HookInvocation) (*copilot.UserPromptSubmittedHookOutput, error) {
-            fmt.Printf("[%s] User: %s\n", inv.SessionID, input.Prompt)
-            return nil, nil
-        },
-    },
+session, _ := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+	Hooks: copilot.SessionHookOptions{
+		Handlers: &copilot.SessionHooks{
+			OnUserPromptSubmitted: func(input copilot.UserPromptSubmittedHookInput, inv copilot.HookInvocation) (*copilot.UserPromptSubmittedHookOutput, error) {
+				fmt.Printf("[%s] User: %s\n", inv.SessionID, input.Prompt)
+				return nil, nil
+			},
+		},
+	},
 })
+
 ```
 
 </details>
@@ -249,41 +295,20 @@ session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
 <details>
 <summary><strong>.NET</strong></summary>
 
-<!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot;
-
-public static class UserPromptSubmittedExample
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    public static async Task Main()
+    Hooks = new SessionHookOptions
     {
-        await using var client = new CopilotClient();
-        var session = await client.CreateSessionAsync(new SessionConfig
+        Handlers = new SessionHooks
         {
-            Hooks = new SessionHooks
+            OnUserPromptSubmitted = (input, invocation) =>
             {
-                OnUserPromptSubmitted = (input, invocation) =>
-                {
-                    Console.WriteLine($"[{invocation.SessionId}] User: {input.Prompt}");
-                    return Task.FromResult<UserPromptSubmittedHookOutput?>(null);
-                },
+                Console.WriteLine($"[{invocation.SessionId}] User: {input.Prompt}");
+                return Task.FromResult<UserPromptSubmittedHookOutput?>(null);
             },
-        });
+        }
     }
-}
-```
-<!-- /docs-validate: hidden -->
-```csharp
-var session = await client.CreateSessionAsync(new SessionConfig
-{
-    Hooks = new SessionHooks
-    {
-        OnUserPromptSubmitted = (input, invocation) =>
-        {
-            Console.WriteLine($"[{invocation.SessionId}] User: {input.Prompt}");
-            return Task.FromResult<UserPromptSubmittedHookOutput?>(null);
-        },
-    },
 });
 ```
 
@@ -294,45 +319,59 @@ var session = await client.CreateSessionAsync(new SessionConfig
 
 <!-- docs-validate: hidden -->
 ```java
-import com.github.copilot.*;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 public class UserPromptSubmittedExample {
     public static void main(String[] args) throws Exception {
-        try (var client = new CopilotClient()) {
+        try (var client = new CopilotClient(new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT))) {
             var hooks = new SessionHooks()
-                .setOnUserPromptSubmitted((input, invocation) -> {
-                    System.out.println("[" + invocation.getSessionId() + "] User: " + input.prompt());
-                    return CompletableFuture.completedFuture(null);
-                });
+                    .setOnUserPromptSubmitted((input, invocation) -> {
+                        System.out
+                                .println("[" + invocation
+                                        .getSessionId() + "] User: "
+                                        + input
+                                                .prompt());
+                        return CompletableFuture
+                                .completedFuture(null);
+                    });
 
-            var session = client.createSession(
-                new SessionConfig()
-                    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-                    .setHooks(hooks)
-            ).get();
+            var session = client
+                    .createSession(new CreateSessionOptions()
+                            .setPermissions(new SessionPermissionOptions()
+                                    .setOnRequest(PermissionHandler.APPROVE_ALL))
+                            .setHooks(new SessionHookOptions()
+                                    .setHandlers(hooks)))
+                    .get();
         }
     }
 }
 ```
 <!-- /docs-validate: hidden -->
 ```java
-import com.github.copilot.*;
-import com.github.copilot.rpc.*;
+import com.microsoft.copilot.*;
+import com.microsoft.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 var hooks = new SessionHooks()
-    .setOnUserPromptSubmitted((input, invocation) -> {
-        System.out.println("[" + invocation.getSessionId() + "] User: " + input.prompt());
-        return CompletableFuture.completedFuture(null);
-    });
+        .setOnUserPromptSubmitted((input, invocation) -> {
+            System.out
+                    .println("[" + invocation
+                            .getSessionId() + "] User: "
+                            + input
+                                    .prompt());
+            return CompletableFuture
+                    .completedFuture(null);
+        });
 
-var session = client.createSession(
-    new SessionConfig()
-        .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-        .setHooks(hooks)
-).get();
+var session = client
+        .createSession(new CreateSessionOptions()
+                .setPermissions(new SessionPermissionOptions()
+                        .setOnRequest(PermissionHandler.APPROVE_ALL))
+                .setHooks(new SessionHookOptions()
+                        .setHandlers(hooks)))
+        .get();
 ```
 
 </details>
@@ -341,19 +380,21 @@ var session = client.createSession(
 
 ```typescript
 const session = await client.createSession({
-  hooks: {
-    onUserPromptSubmitted: async (input) => {
-      const projectInfo = await getProjectInfo();
-      
-      return {
-        additionalContext: `
+    hooks: {
+        handlers: {
+            onUserPromptSubmitted: async (input) => {
+                const projectInfo = await getProjectInfo();
+
+                return {
+                    additionalContext: `
 Project: ${projectInfo.name}
 Language: ${projectInfo.language}
 Framework: ${projectInfo.framework}
         `.trim(),
-      };
+                };
+            },
+        },
     },
-  },
 });
 ```
 
@@ -361,53 +402,53 @@ Framework: ${projectInfo.framework}
 
 ```typescript
 const SHORTCUTS: Record<string, string> = {
-  "/fix": "Please fix the errors in the code",
-  "/explain": "Please explain this code in detail",
-  "/test": "Please write unit tests for this code",
-  "/refactor": "Please refactor this code to improve readability and maintainability",
+    "/fix": "Please fix the errors in the code",
+    "/explain": "Please explain this code in detail",
+    "/test": "Please write unit tests for this code",
+    "/refactor": "Please refactor this code to improve readability and maintainability",
 };
 
 const session = await client.createSession({
-  hooks: {
-    onUserPromptSubmitted: async (input) => {
-      for (const [shortcut, expansion] of Object.entries(SHORTCUTS)) {
-        if (input.prompt.startsWith(shortcut)) {
-          const rest = input.prompt.slice(shortcut.length).trim();
-          return {
-            modifiedPrompt: `${expansion}${rest ? `: ${rest}` : ""}`,
-          };
-        }
-      }
-      return null;
+    hooks: {
+        handlers: {
+            onUserPromptSubmitted: async (input) => {
+                for (const [shortcut, expansion] of Object.entries(SHORTCUTS)) {
+                    if (input.prompt.startsWith(shortcut)) {
+                        const rest = input.prompt.slice(shortcut.length).trim();
+                        return {
+                            modifiedPrompt: `${expansion}${rest ? `: ${rest}` : ""}`,
+                        };
+                    }
+                }
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
 ### Content filtering
 
 ```typescript
-const BLOCKED_PATTERNS = [
-  /password\s*[:=]/i,
-  /api[_-]?key\s*[:=]/i,
-  /secret\s*[:=]/i,
-];
+const BLOCKED_PATTERNS = [/password\s*[:=]/i, /api[_-]?key\s*[:=]/i, /secret\s*[:=]/i];
 
 const session = await client.createSession({
-  hooks: {
-    onUserPromptSubmitted: async (input) => {
-      for (const pattern of BLOCKED_PATTERNS) {
-        if (pattern.test(input.prompt)) {
-          // Refuse the prompt; the reason reaches the client as a session.warning
-          return {
-            decision: "block",
-            reason: "Please don't include sensitive credentials in your prompts. Use environment variables instead.",
-          };
-        }
-      }
-      return null;
+    hooks: {
+        handlers: {
+            onUserPromptSubmitted: async (input) => {
+                for (const pattern of BLOCKED_PATTERNS) {
+                    if (pattern.test(input.prompt)) {
+                        // Refuse the prompt; the reason reaches the client as a session.warning
+                        return {
+                            decision: "block",
+                            reason: "Please don't include sensitive credentials in your prompts. Use environment variables instead.",
+                        };
+                    }
+                }
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -417,18 +458,20 @@ const session = await client.createSession({
 const MAX_PROMPT_LENGTH = 10000;
 
 const session = await client.createSession({
-  hooks: {
-    onUserPromptSubmitted: async (input) => {
-      if (input.prompt.length > MAX_PROMPT_LENGTH) {
-        // Truncate the prompt and add context
-        return {
-          modifiedPrompt: input.prompt.substring(0, MAX_PROMPT_LENGTH),
-          additionalContext: `Note: The original prompt was ${input.prompt.length} characters and was truncated to ${MAX_PROMPT_LENGTH} characters.`,
-        };
-      }
-      return null;
+    hooks: {
+        handlers: {
+            onUserPromptSubmitted: async (input) => {
+                if (input.prompt.length > MAX_PROMPT_LENGTH) {
+                    // Truncate the prompt and add context
+                    return {
+                        modifiedPrompt: input.prompt.substring(0, MAX_PROMPT_LENGTH),
+                        additionalContext: `Note: The original prompt was ${input.prompt.length} characters and was truncated to ${MAX_PROMPT_LENGTH} characters.`,
+                    };
+                }
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -436,33 +479,35 @@ const session = await client.createSession({
 
 ```typescript
 interface UserPreferences {
-  codeStyle: "concise" | "verbose";
-  preferredLanguage: string;
-  experienceLevel: "beginner" | "intermediate" | "expert";
+    codeStyle: "concise" | "verbose";
+    preferredLanguage: string;
+    experienceLevel: "beginner" | "intermediate" | "expert";
 }
 
 const session = await client.createSession({
-  hooks: {
-    onUserPromptSubmitted: async (input) => {
-      const prefs: UserPreferences = await loadUserPreferences();
-      
-      const contextParts = [];
-      
-      if (prefs.codeStyle === "concise") {
-        contextParts.push("User prefers concise code with minimal comments.");
-      } else {
-        contextParts.push("User prefers verbose code with detailed comments.");
-      }
-      
-      if (prefs.experienceLevel === "beginner") {
-        contextParts.push("Explain concepts in simple terms.");
-      }
-      
-      return {
-        additionalContext: contextParts.join(" "),
-      };
+    hooks: {
+        handlers: {
+            onUserPromptSubmitted: async (input) => {
+                const prefs: UserPreferences = await loadUserPreferences();
+
+                const contextParts = [];
+
+                if (prefs.codeStyle === "concise") {
+                    contextParts.push("User prefers concise code with minimal comments.");
+                } else {
+                    contextParts.push("User prefers verbose code with detailed comments.");
+                }
+
+                if (prefs.experienceLevel === "beginner") {
+                    contextParts.push("Explain concepts in simple terms.");
+                }
+
+                return {
+                    additionalContext: contextParts.join(" "),
+                };
+            },
+        },
     },
-  },
 });
 ```
 
@@ -474,27 +519,29 @@ const NOTICE_THRESHOLD = 10; // prompts
 const RATE_WINDOW = 60000; // 1 minute
 
 const session = await client.createSession({
-  hooks: {
-    onUserPromptSubmitted: async (input) => {
-      const now = Date.now();
-      
-      // Remove timestamps outside the window
-      while (promptTimestamps.length > 0 && promptTimestamps[0] < now - RATE_WINDOW) {
-        promptTimestamps.shift();
-      }
+    hooks: {
+        handlers: {
+            onUserPromptSubmitted: async (input) => {
+                const now = Date.now();
 
-      promptTimestamps.push(now);
-      if (promptTimestamps.length >= NOTICE_THRESHOLD) {
-        // This is advisory context for the model, not an enforced rate limit.
-        // Enforce hard limits before calling session.send().
-        return {
-          additionalContext: `The user has sent ${promptTimestamps.length} prompts in the last minute. Suggest waiting before sending more.`,
-        };
-      }
+                // Remove timestamps outside the window
+                while (promptTimestamps.length > 0 && promptTimestamps[0] < now - RATE_WINDOW) {
+                    promptTimestamps.shift();
+                }
 
-      return null;
+                promptTimestamps.push(now);
+                if (promptTimestamps.length >= NOTICE_THRESHOLD) {
+                    // This is advisory context for the model, not an enforced rate limit.
+                    // Enforce hard limits before calling session.send().
+                    return {
+                        additionalContext: `The user has sent ${promptTimestamps.length} prompts in the last minute. Suggest waiting before sending more.`,
+                    };
+                }
+
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -502,14 +549,14 @@ const session = await client.createSession({
 
 ```typescript
 const TEMPLATES: Record<string, (args: string) => string> = {
-  "bug:": (desc) => `I found a bug: ${desc}
+    "bug:": (desc) => `I found a bug: ${desc}
 
 Please help me:
 1. Understand why this is happening
 2. Suggest a fix
 3. Explain how to prevent similar bugs`,
 
-  "feature:": (desc) => `I want to implement this feature: ${desc}
+    "feature:": (desc) => `I want to implement this feature: ${desc}
 
 Please:
 1. Outline the implementation approach
@@ -518,19 +565,21 @@ Please:
 };
 
 const session = await client.createSession({
-  hooks: {
-    onUserPromptSubmitted: async (input) => {
-      for (const [prefix, template] of Object.entries(TEMPLATES)) {
-        if (input.prompt.toLowerCase().startsWith(prefix)) {
-          const args = input.prompt.slice(prefix.length).trim();
-          return {
-            modifiedPrompt: template(args),
-          };
-        }
-      }
-      return null;
+    hooks: {
+        handlers: {
+            onUserPromptSubmitted: async (input) => {
+                for (const [prefix, template] of Object.entries(TEMPLATES)) {
+                    if (input.prompt.toLowerCase().startsWith(prefix)) {
+                        const args = input.prompt.slice(prefix.length).trim();
+                        return {
+                            modifiedPrompt: template(args),
+                        };
+                    }
+                }
+                return null;
+            },
+        },
     },
-  },
 });
 ```
 
@@ -542,7 +591,7 @@ const session = await client.createSession({
 
 1. **Use `additionalContext` over `modifiedPrompt`** - Adding context is less intrusive than rewriting the prompt.
 
-1. **Use `additionalContext` for advisory guidance**: This hook cannot reject a prompt or enforce policy. Enforce hard limits before calling `session.send()`.
+1. **Use `additionalContext` for advisory guidance**: Context informs the model but enforces nothing. To refuse a prompt, return a [block decision](#blocking-a-prompt) instead.
 
 1. **Keep processing fast** - This hook runs on every user message. Avoid slow operations.
 

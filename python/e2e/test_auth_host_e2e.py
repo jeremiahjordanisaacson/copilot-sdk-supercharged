@@ -14,7 +14,8 @@ from .testharness import E2ETestContext
 
 @pytest_asyncio.fixture(loop_scope="module")
 async def ctx(request):
-    context = E2ETestContext()
+    # This tests process-environment precedence, not an embedded runtime option.
+    context = E2ETestContext(use_stdio=True)
     await context.setup()
     yield context
     await context.teardown(
@@ -38,5 +39,5 @@ async def test_should_report_selected_github_auth_host(ctx, copilot_host, gh_hos
 
     await ctx.client.start()
     status = await ctx.client.get_auth_status()
-    assert status.isAuthenticated, status.statusMessage
+    assert status.is_authenticated, status.status_message
     assert status.host == expected_host

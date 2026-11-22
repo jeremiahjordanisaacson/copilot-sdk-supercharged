@@ -9,7 +9,7 @@ package copilot
 import (
 	"context"
 
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 // CanvasDeclaration is the declarative metadata for a single canvas, sent over
@@ -95,7 +95,7 @@ func CanvasErrorNoHandler() *CanvasError {
 
 // CanvasHandler is the provider-side canvas lifecycle handler.
 //
-// A session installs a single CanvasHandler (via SessionConfig.CanvasHandler).
+// A session installs a single CanvasHandler (via sessionOptions.CanvasHandler).
 // The handler receives every inbound `canvas.open` / `canvas.close` /
 // `canvas.action.invoke` JSON-RPC request the runtime issues for this session
 // and decides — typically by inspecting CanvasProviderOpenRequest.CanvasID — which

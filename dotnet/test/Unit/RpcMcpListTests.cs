@@ -2,12 +2,12 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 using System.Text.Json;
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Xunit;
 
-namespace GitHub.Copilot.Test.Unit;
+namespace Microsoft.Copilot.Test.Unit;
 
 public sealed partial class ClientSessionLifetimeTests
 {
@@ -31,9 +31,10 @@ public sealed partial class ClientSessionLifetimeTests
         server.ResponseFactory = _ => response.RootElement;
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.ClearRequests();
 
         var inventory = await session.Rpc.Mcp.ListConfiguredAsync();
@@ -52,9 +53,10 @@ public sealed partial class ClientSessionLifetimeTests
         server.ResponseFactory = _ => new Dictionary<string, object?> { ["servers"] = Array.Empty<object>() };
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForUri(server.Url)
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port)
         });
-        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
         server.ClearRequests();
 
         var mcp = session.Rpc.Mcp;

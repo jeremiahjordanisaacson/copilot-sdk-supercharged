@@ -124,7 +124,7 @@ func main() {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot.SDK;
+using Microsoft.Copilot;
 
 var client = new CopilotClient();
 

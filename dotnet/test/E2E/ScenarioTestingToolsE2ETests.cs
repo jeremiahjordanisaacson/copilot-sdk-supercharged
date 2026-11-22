@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.ComponentModel;
 using System.Text.Json;
@@ -11,7 +11,7 @@ using System.Text.Json.Serialization;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 /// <summary>
 /// Representative scenario coverage for host-owned tools.
@@ -31,35 +31,8 @@ public partial class ScenarioTestingToolsE2ETests(E2ETestFixture fixture, ITestO
     public async Task Should_Advertise_Scenario_Tool_Schema_Override_And_Availability()
     {
         var hiddenToolCalled = false;
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            ClientName = "scenario-client",
-            Tools =
-            [
-                CopilotTool.DefineTool(
-                    (Func<string, int, string>)LookupIssue,
-                    factoryOptions: new AIFunctionFactoryOptions
-                    {
-                        Name = "scenario_lookup_issue",
-                        Description = "Looks up an issue in the scenario client installation.",
-                    }),
-                CopilotTool.DefineTool(
-                    (Func<string, string>)ScenarioGrep,
-                    new CopilotToolOptions { OverridesBuiltInTool = true },
-                    new AIFunctionFactoryOptions
-                    {
-                        Name = "grep",
-                        Description = "Searches the scenario-owned index.",
-                    }),
-                CopilotTool.DefineTool(
-                    (Func<string>)HiddenAdminTool,
-                    factoryOptions: new AIFunctionFactoryOptions { Name = "scenario_hidden_admin" }),
-            ],
-            AvailableTools = new ToolSet()
-                .AddCustom("scenario_lookup_issue")
-                .AddCustom("grep"),
-            ExcludedTools = new ToolSet().AddCustom("scenario_hidden_admin"),
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { ClientName = "scenario-client", Tools = new SessionToolOptions { Definitions = [CopilotTool.DefineTool((Func<string, int, string>)LookupIssue, factoryOptions: new AIFunctionFactoryOptions { Name = "scenario_lookup_issue", Description = "Looks up an issue in the scenario client installation.", }), CopilotTool.DefineTool((Func<string, string>)ScenarioGrep, new CopilotToolOptions { OverridesBuiltInTool = true }, new AIFunctionFactoryOptions { Name = "grep", Description = "Searches the scenario-owned index.", }), CopilotTool.DefineTool((Func<string>)HiddenAdminTool, factoryOptions: new AIFunctionFactoryOptions { Name = "scenario_hidden_admin" }),], AvailableTools = new ToolSet().AddCustom("scenario_lookup_issue").AddCustom("grep"), ExcludedTools = new ToolSet().AddCustom("scenario_hidden_admin") } });
 
         var response = await session.SendAndWaitAsync(new MessageOptions
         {
@@ -104,20 +77,8 @@ public partial class ScenarioTestingToolsE2ETests(E2ETestFixture fixture, ITestO
         var toolCompleted = new TaskCompletionSource<ToolExecutionCompleteEvent>(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            ClientName = "scenario-client",
-            Tools =
-            [
-                CopilotTool.DefineTool(
-                    (Func<string, ToolInvocation, TextContent>)SearchPullRequests,
-                    factoryOptions: new AIFunctionFactoryOptions
-                    {
-                        Name = "scenario_search_pull_requests",
-                        Description = "Searches pull requests visible to the scenario client.",
-                    }),
-            ],
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { ClientName = "scenario-client", Tools = new SessionToolOptions { Definitions = [CopilotTool.DefineTool((Func<string, ToolInvocation, TextContent>)SearchPullRequests, factoryOptions: new AIFunctionFactoryOptions { Name = "scenario_search_pull_requests", Description = "Searches pull requests visible to the scenario client.", }),] } });
         using var subscription = session.On<ToolExecutionCompleteEvent>(evt =>
             toolCompleted.TrySetResult(evt));
 
@@ -148,17 +109,8 @@ public partial class ScenarioTestingToolsE2ETests(E2ETestFixture fixture, ITestO
     [Fact]
     public async Task Should_Deliver_Expanded_Scenario_Tool_Result_To_The_Model()
     {
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            ClientName = "scenario-client",
-            Tools =
-            [
-                AIFunctionFactory.Create(
-                    GetDeployment,
-                    "scenario_get_deployment",
-                    serializerOptions: ScenarioToolsJsonContext.Default.Options),
-            ],
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { ClientName = "scenario-client", Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(GetDeployment, "scenario_get_deployment", serializerOptions: ScenarioToolsJsonContext.Default.Options),] } });
 
         var response = await session.SendAndWaitAsync(new MessageOptions
         {
@@ -191,11 +143,8 @@ public partial class ScenarioTestingToolsE2ETests(E2ETestFixture fixture, ITestO
     {
         var toolCompleted = new TaskCompletionSource<ToolExecutionCompleteEvent>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var session = await CreateSessionAsync(new SessionConfig
-        {
-            ClientName = "scenario-client",
-            Tools = [AIFunctionFactory.Create(FailingLookup, "scenario_failing_lookup")],
-        });
+        await using var session = await CreateSessionAsync(new CreateSessionOptions
+        { ClientName = "scenario-client", Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(FailingLookup, "scenario_failing_lookup")] } });
         using var subscription = session.On<ToolExecutionCompleteEvent>(evt =>
             toolCompleted.TrySetResult(evt));
 
@@ -220,11 +169,8 @@ public partial class ScenarioTestingToolsE2ETests(E2ETestFixture fixture, ITestO
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var session = await CreateSessionAsync(new SessionConfig
-        {
-            ClientName = "scenario-client",
-            Tools = [AIFunctionFactory.Create(WaitForScenarioAsync, "scenario_wait_for_operation")],
-        });
+        var session = await CreateSessionAsync(new CreateSessionOptions
+        { ClientName = "scenario-client", Tools = new SessionToolOptions { Definitions = [AIFunctionFactory.Create(WaitForScenarioAsync, "scenario_wait_for_operation")] } });
 
         _ = session.SendAsync(new MessageOptions
         {

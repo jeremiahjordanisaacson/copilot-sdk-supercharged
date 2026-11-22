@@ -4,11 +4,11 @@
 
 using System.Text.RegularExpressions;
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>
-/// Builder for <see cref="SessionConfigBase.AvailableTools"/> /
-/// <see cref="SessionConfigBase.ExcludedTools"/> using source-qualified filter
+/// Builder for <see cref="SessionToolOptions.AvailableTools"/> /
+/// <see cref="SessionToolOptions.ExcludedTools"/> using source-qualified filter
 /// patterns (<c>builtin:*</c>, <c>mcp:&lt;name&gt;</c>, <c>custom:*</c>, etc.).
 /// </summary>
 /// <remarks>
@@ -20,19 +20,13 @@ namespace GitHub.Copilot;
 /// </para>
 /// <para>
 /// <see cref="ToolSet"/> inherits from <c>List&lt;string&gt;</c>, so instances
-/// can be assigned directly to <see cref="SessionConfigBase.AvailableTools"/>
-/// or <see cref="SessionConfigBase.ExcludedTools"/>.
+/// can be assigned directly to <see cref="SessionToolOptions.AvailableTools"/>
+/// or <see cref="SessionToolOptions.ExcludedTools"/>.
 /// </para>
 /// </remarks>
 /// <example>
 /// <code>
-/// var session = await client.CreateSessionAsync(new SessionConfig
-/// {
-///     AvailableTools = new ToolSet()
-///         .AddBuiltIn(BuiltInTools.Isolated)
-///         .AddMcp("*")
-///         .AddCustom("*"),
-/// });
+/// var session = await client.CreateSessionAsync(new CreateSessionOptions { Tools = new SessionToolOptions { AvailableTools = new ToolSet().AddBuiltIn(BuiltInTools.Isolated).AddMcp("*").AddCustom("*") } });
 /// </code>
 /// </example>
 public sealed class ToolSet : List<string>
@@ -70,7 +64,7 @@ public sealed class ToolSet : List<string>
 
     /// <summary>
     /// Adds a custom tool pattern. Matches tools registered via the SDK's
-    /// <see cref="SessionConfigBase.Tools"/> option or via custom agents.
+    /// <see cref="SessionToolOptions.Definitions"/> option or via custom agents.
     /// </summary>
     /// <param name="name">A specific custom tool name or <c>"*"</c> to match
     /// all custom tools.</param>

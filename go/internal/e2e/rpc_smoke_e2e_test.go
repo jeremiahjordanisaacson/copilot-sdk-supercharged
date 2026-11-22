@@ -5,12 +5,13 @@ package e2e
 import (
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 func TestGeneratedRPCRoundTrip(t *testing.T) {
+	t.Parallel()
 	client := testharness.NewTestContext(t).NewClient()
 	t.Cleanup(client.ForceStop)
 	if err := client.Start(t.Context()); err != nil {
@@ -25,9 +26,7 @@ func TestGeneratedRPCRoundTrip(t *testing.T) {
 		t.Fatalf("RPC.Ping returned %#v", result)
 	}
 
-	session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-	})
+	session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}

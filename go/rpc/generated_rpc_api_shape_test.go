@@ -2,7 +2,9 @@ package rpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/format"
 	"go/parser"
@@ -10,10 +12,17 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 )
 
 var (
+	_ interface {
+		Import(context.Context, *MemoryImportRequest) (*MemoryImportResult, error)
+	} = (*ServerMemoriesAPI)(nil)
+	_ interface {
+		Import(context.Context, *SessionImportRequest) (*SessionImportResult, error)
+	} = (*ServerSessionsAPI)(nil)
 	_ ExternalToolResult      = ExternalToolStringResult("")
 	_ ExternalToolResult      = (*ExternalToolTextResultForLlm)(nil)
 	_ FilterMapping           = FilterMappingEnumMap{}
@@ -25,6 +34,53 @@ var (
 	_ UIElicitationFieldValue = UIElicitationBooleanValue(false)
 	_ UIElicitationFieldValue = UIElicitationNumberValue(0)
 )
+
+func TestMCPDiscoveryFormattingRedactsConfigurationWithoutChangingJSON(t *testing.T) {
+	const secret = "discovery-formatting-test-secret"
+	var options MCPDiscoveryOptions
+	optionsJSON := `{"additionalConfig":["{\"mcpServers\":{\"private\":{\"headers\":{\"Authorization\":\"` + secret + `\"}}}}"],"enabledServers":["visible-server"]}`
+	var server DiscoveredMCPServer
+	serverJSON := `{"configuration":{"type":"http","url":"https://example.com/mcp","headers":{"Authorization":"` + secret + `"},"tools":["*"]},"enabled":true,"name":"visible-server","source":"user"}`
+	for _, tc := range []struct {
+		name  string
+		value any
+		input string
+	}{
+		{"options", &options, optionsJSON},
+		{"server", &server, serverJSON},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := json.Unmarshal([]byte(tc.input), tc.value); err != nil {
+				t.Fatal(err)
+			}
+			for _, value := range []any{tc.value, reflect.ValueOf(tc.value).Elem().Interface(), struct{ Discovery any }{tc.value}} {
+				for _, format := range []string{"%v", "%+v", "%#v"} {
+					formatted := fmt.Sprintf(format, value)
+					if strings.Contains(formatted, secret) || !strings.Contains(formatted, "<redacted>") {
+						t.Fatalf("%s exposed configuration or omitted redaction: %s", format, formatted)
+					}
+					if !strings.Contains(formatted, "visible-server") {
+						t.Fatalf("%s lost non-secret discovery fields: %s", format, formatted)
+					}
+				}
+			}
+			encoded, err := json.Marshal(tc.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got, want any
+			if err := json.Unmarshal(encoded, &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(tc.input), &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("diagnostic redaction changed wire configuration:\ngot: %s\nwant: %s", encoded, tc.input)
+			}
+		})
+	}
+}
 
 func TestGeneratedRPCAPIShape(t *testing.T) {
 	file, fileSet := parseGeneratedRPC(t)

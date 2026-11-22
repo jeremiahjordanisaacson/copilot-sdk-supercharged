@@ -219,7 +219,7 @@ cd go && go test ./... && cd ..
 cd rust && cargo test && cd ..
 
 # .NET (safe)
-cd dotnet && dotnet test test/GitHub.Copilot.SDK.Test.csproj && cd ..
+cd dotnet && dotnet test test/Microsoft.Copilot.SDK.Test.csproj && cd ..
 
 # Node — TYPECHECK ONLY (no npm test!)
 cd nodejs && npx tsc --noEmit && cd ..

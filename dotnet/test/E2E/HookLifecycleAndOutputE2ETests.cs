@@ -2,12 +2,12 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 /// <summary>
 /// E2E coverage for session and tool handlers exposed on <see cref="SessionHooks"/>:
@@ -29,17 +29,20 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
     {
         var sessionStartInputs = new List<SessionStartHookInput>();
         CopilotSession? session = null;
-        session = await CreateSessionAsync(new SessionConfig
+        session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Hooks = new SessionHooks
+            Hooks = new SessionHookOptions
             {
-                OnSessionStart = (input, invocation) =>
+                Handlers = new SessionHooks
                 {
-                    sessionStartInputs.Add(input);
-                    Assert.Equal(session!.SessionId, invocation.SessionId);
-                    return Task.FromResult<SessionStartHookOutput?>(null);
-                },
-            },
+                    OnSessionStart = (input, invocation) =>
+                    {
+                        sessionStartInputs.Add(input);
+                        Assert.Equal(session!.SessionId, invocation.SessionId);
+                        return Task.FromResult<SessionStartHookOutput?>(null);
+                    },
+                }
+            }
         });
 
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "Say hi" });
@@ -57,17 +60,20 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
     {
         var userPromptInputs = new List<UserPromptSubmittedHookInput>();
         CopilotSession? session = null;
-        session = await CreateSessionAsync(new SessionConfig
+        session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Hooks = new SessionHooks
+            Hooks = new SessionHookOptions
             {
-                OnUserPromptSubmitted = (input, invocation) =>
+                Handlers = new SessionHooks
                 {
-                    userPromptInputs.Add(input);
-                    Assert.Equal(session!.SessionId, invocation.SessionId);
-                    return Task.FromResult<UserPromptSubmittedHookOutput?>(null);
-                },
-            },
+                    OnUserPromptSubmitted = (input, invocation) =>
+                    {
+                        userPromptInputs.Add(input);
+                        Assert.Equal(session!.SessionId, invocation.SessionId);
+                        return Task.FromResult<UserPromptSubmittedHookOutput?>(null);
+                    },
+                }
+            }
         });
 
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "Say hello" });
@@ -88,8 +94,9 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
         var handler = new RecordingRequestHandler();
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(),
-            RequestHandler = handler,
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForSpawnedStdio(),
+            Models = new ClientModelOptions { RequestHandler = handler }
         });
         await client.StartAsync();
 
@@ -119,16 +126,8 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
             ModelId = "claude-sonnet-5",
             WireModel = "claude-sonnet-5",
         };
-        await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            Model = "claude-sonnet-5",
-            Provider = provider,
-            Streaming = true,
-            CustomAgents = [agent],
-            Agent = agent.Name,
-            Hooks = hooks,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, Model = "claude-sonnet-5", Inference = ByokTestOptions.Inference(provider, new SessionInferenceOptions { }), Events = new SessionEventOptions { Streaming = true }, Agents = new SessionAgentOptions { Definitions = [agent], Selected = agent.Name }, Hooks = new SessionHookOptions { Handlers = hooks }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
 
         var first = await session.SendAndWaitAsync(new MessageOptions { Prompt = "First named-agent turn" });
         Assert.Contains(RecordingRequestHandler.SyntheticText, first?.Data.Content ?? string.Empty);
@@ -139,17 +138,8 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
         }
         await session.DisposeAsync();
 
-        await using var recreated = await Ctx.CreateSessionAsync(client, new SessionConfig
-        {
-            SessionId = session.SessionId,
-            Model = "claude-sonnet-5",
-            Provider = provider,
-            Streaming = true,
-            CustomAgents = [agent],
-            Agent = agent.Name,
-            Hooks = hooks,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-        });
+        await using var recreated = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        { GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } }, SessionId = session.SessionId, Model = "claude-sonnet-5", Inference = ByokTestOptions.Inference(provider, new SessionInferenceOptions { }), Events = new SessionEventOptions { Streaming = true }, Agents = new SessionAgentOptions { Definitions = [agent], Selected = agent.Name }, Hooks = new SessionHookOptions { Handlers = hooks }, Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
         Assert.Equal(session.SessionId, recreated.SessionId);
         var second = await recreated.SendAndWaitAsync(new MessageOptions { Prompt = "Second named-agent turn" });
         Assert.Contains(RecordingRequestHandler.SyntheticText, second?.Data.Content ?? string.Empty);
@@ -167,18 +157,21 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
         var sessionEndInputs = new List<SessionEndHookInput>();
         var sessionEndHookInvoked = new TaskCompletionSource<SessionEndHookInput>(TaskCreationOptions.RunContinuationsAsynchronously);
         CopilotSession? session = null;
-        session = await CreateSessionAsync(new SessionConfig
+        session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Hooks = new SessionHooks
+            Hooks = new SessionHookOptions
             {
-                OnSessionEnd = (input, invocation) =>
+                Handlers = new SessionHooks
                 {
-                    sessionEndInputs.Add(input);
-                    sessionEndHookInvoked.TrySetResult(input);
-                    Assert.Equal(session!.SessionId, invocation.SessionId);
-                    return Task.FromResult<SessionEndHookOutput?>(null);
-                },
-            },
+                    OnSessionEnd = (input, invocation) =>
+                    {
+                        sessionEndInputs.Add(input);
+                        sessionEndHookInvoked.TrySetResult(input);
+                        Assert.Equal(session!.SessionId, invocation.SessionId);
+                        return Task.FromResult<SessionEndHookOutput?>(null);
+                    },
+                }
+            }
         });
 
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "Say hi" });
@@ -193,20 +186,23 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
     public async Task Should_Invoke_OnErrorOccurred_Hook_When_Error_Occurs()
     {
         CopilotSession? session = null;
-        session = await CreateSessionAsync(new SessionConfig
+        session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Hooks = new SessionHooks
+            Hooks = new SessionHookOptions
             {
-                OnErrorOccurred = (input, invocation) =>
+                Handlers = new SessionHooks
                 {
-                    Assert.Equal(session!.SessionId, invocation.SessionId);
-                    Assert.True(input.Timestamp > DateTimeOffset.UnixEpoch);
-                    Assert.False(string.IsNullOrEmpty(input.WorkingDirectory));
-                    Assert.False(string.IsNullOrEmpty(input.Error));
-                    Assert.Contains(input.ErrorContext, ValidErrorContexts);
-                    return Task.FromResult<ErrorOccurredHookOutput?>(null);
-                },
-            },
+                    OnErrorOccurred = (input, invocation) =>
+                    {
+                        Assert.Equal(session!.SessionId, invocation.SessionId);
+                        Assert.True(input.Timestamp > DateTimeOffset.UnixEpoch);
+                        Assert.False(string.IsNullOrEmpty(input.WorkingDirectory));
+                        Assert.False(string.IsNullOrEmpty(input.Error));
+                        Assert.Contains(input.ErrorContext, ValidErrorContexts);
+                        return Task.FromResult<ErrorOccurredHookOutput?>(null);
+                    },
+                }
+            }
         });
 
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "Say hi" });
@@ -224,20 +220,20 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
     public async Task Should_Invoke_UserPromptSubmitted_Hook_And_Modify_Prompt()
     {
         var inputs = new List<UserPromptSubmittedHookInput>();
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Hooks = new SessionHooks
+            Hooks = new SessionHookOptions
             {
-                OnUserPromptSubmitted = (input, invocation) =>
+                Handlers = new SessionHooks
                 {
-                    inputs.Add(input);
-                    Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
-                    return Task.FromResult<UserPromptSubmittedHookOutput?>(new UserPromptSubmittedHookOutput
+                    OnUserPromptSubmitted = (input, invocation) =>
                     {
-                        ModifiedPrompt = "Reply with exactly: HOOKED_PROMPT",
-                    });
-                },
-            },
+                        inputs.Add(input);
+                        Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
+                        return Task.FromResult<UserPromptSubmittedHookOutput?>(new UserPromptSubmittedHookOutput { ModifiedPrompt = "Reply with exactly: HOOKED_PROMPT", });
+                    },
+                }
+            }
         });
 
         var response = await session.SendAndWaitAsync(new MessageOptions { Prompt = "Say something else" });
@@ -251,20 +247,20 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
     public async Task Should_Invoke_UserPromptTransformed_Hook_And_Modify_Transformed_Prompt()
     {
         var inputs = new List<UserPromptTransformedHookInput>();
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Hooks = new SessionHooks
+            Hooks = new SessionHookOptions
             {
-                OnUserPromptTransformed = (input, invocation) =>
+                Handlers = new SessionHooks
                 {
-                    inputs.Add(input);
-                    Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
-                    return Task.FromResult<UserPromptTransformedHookOutput?>(new UserPromptTransformedHookOutput
+                    OnUserPromptTransformed = (input, invocation) =>
                     {
-                        ModifiedTransformedPrompt = "Reply with exactly: HOOKED_TRANSFORMED_PROMPT",
-                    });
-                },
-            },
+                        inputs.Add(input);
+                        Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
+                        return Task.FromResult<UserPromptTransformedHookOutput?>(new UserPromptTransformedHookOutput { ModifiedTransformedPrompt = "Reply with exactly: HOOKED_TRANSFORMED_PROMPT", });
+                    },
+                }
+            }
         });
 
         var response = await session.SendAndWaitAsync(new MessageOptions { Prompt = "Answer the request above." });
@@ -282,20 +278,20 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
     public async Task Should_Invoke_SessionStart_Hook()
     {
         var inputs = new List<SessionStartHookInput>();
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Hooks = new SessionHooks
+            Hooks = new SessionHookOptions
             {
-                OnSessionStart = (input, invocation) =>
+                Handlers = new SessionHooks
                 {
-                    inputs.Add(input);
-                    Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
-                    return Task.FromResult<SessionStartHookOutput?>(new SessionStartHookOutput
+                    OnSessionStart = (input, invocation) =>
                     {
-                        AdditionalContext = "Session start hook context.",
-                    });
-                },
-            },
+                        inputs.Add(input);
+                        Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
+                        return Task.FromResult<SessionStartHookOutput?>(new SessionStartHookOutput { AdditionalContext = "Session start hook context.", });
+                    },
+                }
+            }
         });
 
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "Say hi" });
@@ -310,21 +306,21 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
     {
         var inputs = new List<SessionEndHookInput>();
         var hookInvoked = new TaskCompletionSource<SessionEndHookInput>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Hooks = new SessionHooks
+            Hooks = new SessionHookOptions
             {
-                OnSessionEnd = (input, invocation) =>
+                Handlers = new SessionHooks
                 {
-                    inputs.Add(input);
-                    hookInvoked.TrySetResult(input);
-                    Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
-                    return Task.FromResult<SessionEndHookOutput?>(new SessionEndHookOutput
+                    OnSessionEnd = (input, invocation) =>
                     {
-                        SessionSummary = "session ended",
-                    });
-                },
-            },
+                        inputs.Add(input);
+                        hookInvoked.TrySetResult(input);
+                        Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
+                        return Task.FromResult<SessionEndHookOutput?>(new SessionEndHookOutput { SessionSummary = "session ended", });
+                    },
+                }
+            }
         });
 
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "Say bye" });
@@ -338,20 +334,20 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
     public async Task Should_Register_ErrorOccurred_Hook()
     {
         var inputs = new List<ErrorOccurredHookInput>();
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Hooks = new SessionHooks
+            Hooks = new SessionHookOptions
             {
-                OnErrorOccurred = (input, invocation) =>
+                Handlers = new SessionHooks
                 {
-                    inputs.Add(input);
-                    Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
-                    return Task.FromResult<ErrorOccurredHookOutput?>(new ErrorOccurredHookOutput
+                    OnErrorOccurred = (input, invocation) =>
                     {
-                        ErrorHandling = "skip",
-                    });
-                },
-            },
+                        inputs.Add(input);
+                        Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
+                        return Task.FromResult<ErrorOccurredHookOutput?>(new ErrorOccurredHookOutput { ErrorHandling = "skip", });
+                    },
+                }
+            }
         });
 
         await session.SendAndWaitAsync(new MessageOptions
@@ -374,26 +370,25 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
     public async Task Should_Invoke_AgentStop_Hook_And_Apply_Block_Response()
     {
         var inputs = new List<AgentStopHookInput>();
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            Hooks = new SessionHooks
+            Hooks = new SessionHookOptions
             {
-                OnAgentStop = (input, invocation) =>
+                Handlers = new SessionHooks
                 {
-                    inputs.Add(input);
-                    Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
-                    if (inputs.Count == 1)
+                    OnAgentStop = (input, invocation) =>
                     {
-                        return Task.FromResult<AgentStopHookOutput?>(new AgentStopHookOutput
+                        inputs.Add(input);
+                        Assert.False(string.IsNullOrWhiteSpace(invocation.SessionId));
+                        if (inputs.Count == 1)
                         {
-                            Decision = "block",
-                            Reason = "Reply with exactly: AGENT_STOP_CONTINUED",
-                        });
-                    }
+                            return Task.FromResult<AgentStopHookOutput?>(new AgentStopHookOutput { Decision = "block", Reason = "Reply with exactly: AGENT_STOP_CONTINUED", });
+                        }
 
-                    return Task.FromResult<AgentStopHookOutput?>(null);
-                },
-            },
+                        return Task.FromResult<AgentStopHookOutput?>(null);
+                    },
+                }
+            }
         });
 
         var response = await session.SendAndWaitAsync(new MessageOptions
@@ -413,37 +408,32 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
     public async Task Should_Allow_PreToolUse_To_Return_ModifiedArgs_And_SuppressOutput()
     {
         var inputs = new List<PreToolUseHookInput>();
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Tools =
-            [
-                AIFunctionFactory.Create(
-                    (string value) => value,
-                    "echo_value",
-                    "Echoes the supplied value")
-            ],
-            Hooks = new SessionHooks
+            Permissions = new SessionPermissionOptions
             {
-                OnPreToolUse = (input, invocation) =>
-                {
-                    inputs.Add(input);
-                    if (input.ToolName != "echo_value")
-                    {
-                        return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput
-                        {
-                            PermissionDecision = "allow",
-                        });
-                    }
-
-                    return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput
-                    {
-                        PermissionDecision = "allow",
-                        ModifiedArgs = new Dictionary<string, object> { ["value"] = "modified by hook" },
-                        SuppressOutput = false,
-                    });
-                },
+                OnRequest = PermissionHandler.ApproveAll
             },
+            Tools = new SessionToolOptions
+            {
+                Definitions = [AIFunctionFactory.Create((string value) => value, "echo_value", "Echoes the supplied value")]
+            },
+            Hooks = new SessionHookOptions
+            {
+                Handlers = new SessionHooks
+                {
+                    OnPreToolUse = (input, invocation) =>
+                    {
+                        inputs.Add(input);
+                        if (input.ToolName != "echo_value")
+                        {
+                            return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput { PermissionDecision = "allow", });
+                        }
+
+                        return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput { PermissionDecision = "allow", ModifiedArgs = new Dictionary<string, object> { ["value"] = "modified by hook" }, SuppressOutput = false, });
+                    },
+                }
+            }
         });
 
         var response = await session.SendAndWaitAsync(new MessageOptions
@@ -460,31 +450,28 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
     public async Task Should_Allow_PostToolUse_To_Return_ModifiedResult()
     {
         var inputs = new List<PostToolUseHookInput>();
-        var session = await CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            Hooks = new SessionHooks
+            Permissions = new SessionPermissionOptions
             {
-                OnPostToolUse = (input, invocation) =>
-                {
-                    inputs.Add(input);
-                    if (input.ToolName != "view")
-                    {
-                        return Task.FromResult<PostToolUseHookOutput?>(null);
-                    }
-
-                    return Task.FromResult<PostToolUseHookOutput?>(new PostToolUseHookOutput
-                    {
-                        ModifiedResult = new ToolResultObject
-                        {
-                            TextResultForLlm = "modified by post hook",
-                            ResultType = "success",
-                            ToolTelemetry = new Dictionary<string, object>(),
-                        },
-                        SuppressOutput = false,
-                    });
-                },
+                OnRequest = PermissionHandler.ApproveAll
             },
+            Hooks = new SessionHookOptions
+            {
+                Handlers = new SessionHooks
+                {
+                    OnPostToolUse = (input, invocation) =>
+                    {
+                        inputs.Add(input);
+                        if (input.ToolName != "view")
+                        {
+                            return Task.FromResult<PostToolUseHookOutput?>(null);
+                        }
+
+                        return Task.FromResult<PostToolUseHookOutput?>(new PostToolUseHookOutput { ModifiedResult = new ToolResultObject { TextResultForLlm = "modified by post hook", ResultType = "success", ToolTelemetry = new Dictionary<string, object>(), }, SuppressOutput = false, });
+                    },
+                }
+            }
         });
 
         var response = await session.SendAndWaitAsync(new MessageOptions
@@ -502,27 +489,33 @@ public class HookLifecycleAndOutputE2ETests(E2ETestFixture fixture, ITestOutputH
         var failureInputs = new List<PostToolUseFailureHookInput>();
         var postToolUseInputs = new List<PostToolUseHookInput>();
         CopilotSession? session = null;
-        session = await CreateSessionAsync(new SessionConfig
+        session = await CreateSessionAsync(new CreateSessionOptions
         {
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            AvailableTools = ["report_intent"],
-            Hooks = new SessionHooks
+            Permissions = new SessionPermissionOptions
             {
-                OnPostToolUse = (input, invocation) =>
-                {
-                    postToolUseInputs.Add(input);
-                    return Task.FromResult<PostToolUseHookOutput?>(null);
-                },
-                OnPostToolUseFailure = (input, invocation) =>
-                {
-                    failureInputs.Add(input);
-                    Assert.Equal(session!.SessionId, invocation.SessionId);
-                    return Task.FromResult<PostToolUseFailureHookOutput?>(new PostToolUseFailureHookOutput
-                    {
-                        AdditionalContext = "HOOK_FAILURE_GUIDANCE_APPLIED",
-                    });
-                },
+                OnRequest = PermissionHandler.ApproveAll
             },
+            Tools = new SessionToolOptions
+            {
+                AvailableTools = ["report_intent"]
+            },
+            Hooks = new SessionHookOptions
+            {
+                Handlers = new SessionHooks
+                {
+                    OnPostToolUse = (input, invocation) =>
+                    {
+                        postToolUseInputs.Add(input);
+                        return Task.FromResult<PostToolUseHookOutput?>(null);
+                    },
+                    OnPostToolUseFailure = (input, invocation) =>
+                    {
+                        failureInputs.Add(input);
+                        Assert.Equal(session!.SessionId, invocation.SessionId);
+                        return Task.FromResult<PostToolUseFailureHookOutput?>(new PostToolUseFailureHookOutput { AdditionalContext = "HOOK_FAILURE_GUIDANCE_APPLIED", });
+                    },
+                }
+            }
         });
 
         var response = await session.SendAndWaitAsync(new MessageOptions

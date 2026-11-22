@@ -2,16 +2,16 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-#if NET8_0_OR_GREATER
+#if NET
 
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
-using GitHub.Copilot.Test.E2E;
+using Microsoft.Copilot.Test.E2E;
 using Xunit;
 
-namespace GitHub.Copilot.Test;
+namespace Microsoft.Copilot.Test;
 
 public class FakeCopilotUpstreamTests
 {

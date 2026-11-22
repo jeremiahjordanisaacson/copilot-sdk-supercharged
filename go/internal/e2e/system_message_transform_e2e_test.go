@@ -10,11 +10,12 @@ import (
 	"sync"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 func TestSystemMessageTransformE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -28,31 +29,29 @@ func TestSystemMessageTransformE2E(t *testing.T) {
 		identityCalled := false
 		toneCalled := false
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SystemMessage: &copilot.SystemMessageConfig{
-				Mode: "customize",
-				Sections: map[string]copilot.SectionOverride{
-					"identity": {
-						Transform: func(currentContent string) (string, error) {
-							mu.Lock()
-							identityCalled = true
-							identityContent = currentContent
-							mu.Unlock()
-							return currentContent, nil
-						},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SystemMessage: &copilot.SystemMessageConfig{
+			Mode: "customize",
+			Sections: map[string]copilot.SectionOverride{
+				"identity": {
+					Transform: func(currentContent string) (string, error) {
+						mu.Lock()
+						identityCalled = true
+						identityContent = currentContent
+						mu.Unlock()
+						return currentContent, nil
 					},
-					"tone": {
-						Transform: func(currentContent string) (string, error) {
-							mu.Lock()
-							toneCalled = true
-							toneContent = currentContent
-							mu.Unlock()
-							return currentContent, nil
-						},
+				},
+				"tone": {
+					Transform: func(currentContent string) (string, error) {
+						mu.Lock()
+						toneCalled = true
+						toneContent = currentContent
+						mu.Unlock()
+						return currentContent, nil
 					},
 				},
 			},
+		},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -91,18 +90,16 @@ func TestSystemMessageTransformE2E(t *testing.T) {
 	t.Run("should_apply_transform_modifications_to_section_content", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SystemMessage: &copilot.SystemMessageConfig{
-				Mode: "customize",
-				Sections: map[string]copilot.SectionOverride{
-					"identity": {
-						Transform: func(currentContent string) (string, error) {
-							return currentContent + "\nAlways end your reply with TRANSFORM_MARKER", nil
-						},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SystemMessage: &copilot.SystemMessageConfig{
+			Mode: "customize",
+			Sections: map[string]copilot.SectionOverride{
+				"identity": {
+					Transform: func(currentContent string) (string, error) {
+						return currentContent + "\nAlways end your reply with TRANSFORM_MARKER", nil
 					},
 				},
 			},
+		},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -143,24 +140,22 @@ func TestSystemMessageTransformE2E(t *testing.T) {
 		var mu sync.Mutex
 		transformCalled := false
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			SystemMessage: &copilot.SystemMessageConfig{
-				Mode: "customize",
-				Sections: map[string]copilot.SectionOverride{
-					"safety": {
-						Action: copilot.SectionActionRemove,
-					},
-					"identity": {
-						Transform: func(currentContent string) (string, error) {
-							mu.Lock()
-							transformCalled = true
-							mu.Unlock()
-							return currentContent, nil
-						},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, SystemMessage: &copilot.SystemMessageConfig{
+			Mode: "customize",
+			Sections: map[string]copilot.SectionOverride{
+				"safety": {
+					Action: copilot.SectionActionRemove,
+				},
+				"identity": {
+					Transform: func(currentContent string) (string, error) {
+						mu.Lock()
+						transformCalled = true
+						mu.Unlock()
+						return currentContent, nil
 					},
 				},
 			},
+		},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)

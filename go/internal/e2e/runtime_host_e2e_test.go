@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
-	"github.com/github/copilot-sdk/go/rpc"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 const ahpToolPrompt = "Use the magic_number tool with seed 'hello' and tell me the result"
@@ -67,7 +67,7 @@ func connectAhpTest(t *testing.T, ahp *testharness.AhpTestClient, host *copilot.
 }
 
 type ahpApplication struct {
-	client   *copilot.Client
+	client   *testharness.Client
 	workDir  string
 	session  atomic.Pointer[copilot.Session]
 	creates  atomic.Int32
@@ -80,7 +80,7 @@ type ahpApplication struct {
 	exited   chan copilot.AhpHostExit
 }
 
-func newAhpApplication(client *copilot.Client, workDir string) *ahpApplication {
+func newAhpApplication(client *testharness.Client, workDir string) *ahpApplication {
 	return &ahpApplication{
 		client: client, workDir: workDir,
 		released: make(chan *copilot.Session, 4), exited: make(chan copilot.AhpHostExit, 4),
@@ -110,15 +110,16 @@ func (a *ahpApplication) callbacks() ([]copilot.Tool, *copilot.SessionHooks) {
 	return []copilot.Tool{tool}, hooks
 }
 
-func (a *ahpApplication) createConfig(config *copilot.SessionConfig) {
-	config.OnPermissionRequest = copilot.PermissionHandler.ApproveAll
+func (a *ahpApplication) createConfig(config *copilot.CreateSessionOptions) {
+	config.Permissions.OnRequest = copilot.PermissionHandler.ApproveAll
 	config.SystemMessage = &copilot.SystemMessageConfig{Mode: "append", Content: ahpPromptMarker}
-	config.Tools, config.Hooks = a.callbacks()
+	config.Tools.Definitions, config.Hooks.Handlers = a.callbacks()
 }
 
 func (a *ahpApplication) options() *copilot.AhpHostOptions {
 	return &copilot.AhpHostOptions{
 		Authentication:           copilot.AhpHostAuthentication{Mode: "github"},
+		Workspace:                &a.workDir,
 		LocalServer:              &rpc.HostLocalServerOptions{},
 		AllowCreatingNewSessions: copilot.Bool(true),
 		CreateSession: func(ctx context.Context, request copilot.AhpSessionCreateRequest) (*copilot.Session, error) {
@@ -146,10 +147,10 @@ func (a *ahpApplication) options() *copilot.AhpHostOptions {
 				config.ContinuePendingWork == nil || *config.ContinuePendingWork {
 				return nil, fmt.Errorf("invalid resume handoff")
 			}
-			config.OnPermissionRequest = copilot.PermissionHandler.ApproveAll
+			config.Permissions.OnRequest = copilot.PermissionHandler.ApproveAll
 			config.SystemMessage = &copilot.SystemMessageConfig{Mode: "append", Content: ahpPromptMarker}
-			config.Tools, config.Hooks = a.callbacks()
-			session, err := a.client.ResumeSessionWithOptions(ctx, request.SessionID, config)
+			config.Tools.Definitions, config.Hooks.Handlers = a.callbacks()
+			session, err := a.client.ResumeSession(ctx, request.SessionID, config)
 			if err == nil && session.SessionID != request.SessionID {
 				return nil, fmt.Errorf("resume returned %q, requested %q", session.SessionID, request.SessionID)
 			}
@@ -197,6 +198,7 @@ func awaitAhpRelease(t *testing.T, app *ahpApplication) {
 }
 
 func TestRuntimeHostE2E(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("COPILOT_RUNTIME_HOST_E2E") != "1" {
 		t.Skip("Requires an integrated runtime; set COPILOT_RUNTIME_HOST_E2E=1")
 	}
@@ -217,7 +219,7 @@ func TestRuntimeHostE2E(t *testing.T) {
 			})
 			app := newAhpApplication(client, ctx.WorkDir)
 			if publish {
-				config := &copilot.SessionConfig{WorkingDirectory: ctx.WorkDir}
+				config := &copilot.CreateSessionOptions{WorkingDirectory: ctx.WorkDir}
 				app.createConfig(config)
 				session, err := client.CreateSession(t.Context(), config)
 				if err != nil {

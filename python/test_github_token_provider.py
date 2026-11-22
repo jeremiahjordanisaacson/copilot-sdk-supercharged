@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, cast
+from copy import deepcopy
+from typing import Any, cast, get_args, get_type_hints
 
 import pytest
 
@@ -11,7 +12,15 @@ from copilot import (
     RuntimeConnection,
 )
 from copilot._jsonrpc import JsonRpcClient, JsonRpcError
-from copilot.rpc import GitHubTokenAcquireRequest
+from copilot.rpc import (
+    UNSET_SENTINEL,
+    GitHubTokenAcquireRequest,
+    SessionOpenInferenceOptions,
+    SessionRpc,
+    SessionUpdateInferenceOptions,
+    SessionUpdateOptionsParams,
+    Unset,
+)
 
 
 class FakeJsonRpcClient:
@@ -35,6 +44,8 @@ class FakeJsonRpcClient:
         if method == "session.detach":
             return {"success": True}
         if method == "session.delete":
+            return {"success": True}
+        if method == "session.options.update":
             return {"success": True}
         raise RuntimeError(f"Unexpected method: {method}")
 
@@ -74,23 +85,144 @@ class ConcurrentResumeJsonRpcClient(FakeJsonRpcClient):
         raise RuntimeError(f"Unexpected method: {method}")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resume", [False, True])
+@pytest.mark.parametrize("routing", [{}, {"default_provider": None}, {"default_provider": "named"}])
+async def test_default_provider_presence_on_wire(resume, routing):
+    fake = FakeJsonRpcClient()
+    client = make_client(fake)
+    options = {
+        "model": "model",
+        "github": {"token": "identity", "capi": {"enabled": False}},
+        "inference": {
+            **routing,
+            "providers": [
+                {
+                    "name": "named",
+                    "base_url": "https://provider.invalid",
+                    "transport": "websockets",
+                    "api_key_command": "credential-helper",
+                    "bearer_token_provider": lambda _: "token",
+                }
+            ],
+            "models": [],
+        },
+    }
+    try:
+        if resume:
+            await client.resume_session("routing", **options)
+        else:
+            await client.create_session(session_id="routing", **options)
+        method = "session.resume" if resume else "session.create"
+        payload = next(params for name, params in fake.requests if name == method)
+        inference = payload["inference"]
+        if "default_provider" in routing:
+            assert inference["defaultProvider"] == routing["default_provider"]
+        else:
+            assert "defaultProvider" not in inference
+        assert "provider" not in inference
+        assert inference["models"] == []
+        assert inference["providers"] == [
+            {
+                "name": "named",
+                "baseUrl": "https://provider.invalid",
+                "transport": "websockets",
+                "apiKeyCommand": "credential-helper",
+                "hasBearerTokenProvider": True,
+            }
+        ]
+        assert payload["github"] == {"token": "identity", "capi": {"enabled": False}}
+    finally:
+        await client.force_stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resume", [False, True])
+@pytest.mark.parametrize("inference", [{}, {"providers": [], "models": []}])
+async def test_empty_provider_configuration_preserves_wire_presence(resume, inference):
+    fake = FakeJsonRpcClient()
+    client = make_client(fake)
+    try:
+        if resume:
+            await client.resume_session("routing", inference=inference)
+        else:
+            await client.create_session(session_id="routing", inference=inference)
+        method = "session.resume" if resume else "session.create"
+        payload = next(params for name, params in fake.requests if name == method)
+        actual = payload.get("inference", {})
+        for key in ("providers", "models"):
+            assert (key in actual) == (key in inference)
+            if key in inference:
+                assert actual[key] == []
+    finally:
+        await client.force_stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("routing", [{}, {"defaultProvider": None}, {"defaultProvider": "named"}])
+async def test_copied_options_update_preserves_default_provider_presence(routing):
+    fake = FakeJsonRpcClient()
+    rpc = SessionRpc(cast(JsonRpcClient, fake), "routing")
+    params = SessionUpdateOptionsParams(inference=SessionUpdateInferenceOptions.from_dict(routing))
+    await rpc.options.update(deepcopy(params))
+    assert fake.requests == [
+        ("session.options.update", {"sessionId": "routing", "inference": routing})
+    ]
+
+
+@pytest.mark.parametrize(
+    "options_type", [SessionOpenInferenceOptions, SessionUpdateInferenceOptions]
+)
+@pytest.mark.parametrize("routing", [{}, {"defaultProvider": None}, {"defaultProvider": "named"}])
+def test_generated_default_provider_annotation_covers_omission(options_type, routing):
+    assert Unset in get_args(get_type_hints(options_type)["default_provider"])
+    value = deepcopy(options_type.from_dict(routing)).default_provider
+    if isinstance(value, Unset):
+        assert "defaultProvider" not in routing
+        assert value is UNSET_SENTINEL
+    elif value is None:
+        assert routing["defaultProvider"] is None
+    else:
+        assert value.upper() == "NAMED"
+
+
+@pytest.mark.asyncio
+async def test_removed_singular_provider_is_rejected():
+    client = make_client(FakeJsonRpcClient())
+    try:
+        with pytest.raises(TypeError, match="Unknown inference option.*provider"):
+            await client.create_session(inference={"provider": {}})
+        with pytest.raises(TypeError, match="Unknown inference option.*provider"):
+            await client.resume_session("routing", inference={"provider": {}})
+    finally:
+        await client.force_stop()
+
+
 def make_client(fake: FakeJsonRpcClient) -> CopilotClient:
-    client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    client = CopilotClient(
+        mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 1234)
+    )
     client._client = cast(JsonRpcClient, fake)
     return client
 
 
 class TestGitHubTokenProvider:
-    async def test_mutual_exclusion(self) -> None:
-        client = CopilotClient(connection=RuntimeConnection.for_uri("localhost:1234"))
+    @pytest.mark.parametrize("token", ["", "static"])
+    @pytest.mark.parametrize("resume", [False, True])
+    async def test_mutual_exclusion(self, token: str, resume: bool) -> None:
+        fake = FakeJsonRpcClient()
+        client = make_client(fake)
+        github = {"token": token, "token_provider": lambda _: {"kind": "cancelled"}}
 
         with pytest.raises(
             ValueError, match="github_token and github_token_provider are mutually exclusive"
         ):
-            await client.create_session(
-                github_token="static",
-                github_token_provider=lambda _: {"kind": "cancelled"},
-            )
+            if resume:
+                await client.resume_session("session", github=github)
+            else:
+                await client.create_session(github=github)
+        assert fake.requests == []
+        assert client._github_token_providers == {}
 
     async def test_wire_mapping_token_and_cancelled(self) -> None:
         fake = FakeJsonRpcClient()
@@ -109,13 +241,12 @@ class TestGitHubTokenProvider:
             return {"kind": "cancelled"}
 
         await client.create_session(
-            session_id="python-session",
-            github_token_provider=provider,
+            session_id="python-session", github={"token_provider": provider}
         )
         create_payload = fake.requests[0][1]
-        registration_id = create_payload["gitHubTokenProviderRegistrationId"]
+        registration_id = create_payload["github"]["tokenProviderRegistrationId"]
         assert "github_token_provider" not in create_payload
-        assert "gitHubToken" not in create_payload
+        assert "token" not in create_payload.get("github", {})
         client._register_client_global_handlers()
         get_token = fake.request_handlers["gitHubToken.getToken"]
 
@@ -163,11 +294,8 @@ class TestGitHubTokenProvider:
         def provider(_args):
             raise failure
 
-        await client.create_session(
-            session_id="error-session",
-            github_token_provider=provider,
-        )
-        registration_id = fake.requests[0][1]["gitHubTokenProviderRegistrationId"]
+        await client.create_session(session_id="error-session", github={"token_provider": provider})
+        registration_id = fake.requests[0][1]["github"]["tokenProviderRegistrationId"]
 
         with pytest.raises(RuntimeError, match="credential broker failed") as exc:
             await client._github_token_provider_adapter.get_token(
@@ -191,18 +319,16 @@ class TestGitHubTokenProvider:
     async def test_failure_session_close_and_client_close_cleanup(self) -> None:
         failing = make_client(FakeJsonRpcClient(fail_method="session.create"))
         with pytest.raises(RuntimeError, match="session.create failed"):
-            await failing.create_session(github_token_provider=lambda _: {"kind": "cancelled"})
+            await failing.create_session(github={"token_provider": lambda _: {"kind": "cancelled"}})
         assert failing._github_token_providers == {}
 
         fake = FakeJsonRpcClient()
         client = make_client(fake)
         first = await client.create_session(
-            session_id="first",
-            github_token_provider=lambda _: {"kind": "cancelled"},
+            session_id="first", github={"token_provider": lambda _: {"kind": "cancelled"}}
         )
         await client.create_session(
-            session_id="second",
-            github_token_provider=lambda _: {"kind": "cancelled"},
+            session_id="second", github={"token_provider": lambda _: {"kind": "cancelled"}}
         )
         assert len(client._github_token_providers) == 2
 
@@ -220,14 +346,14 @@ class TestGitHubTokenProvider:
 
         await client.create_session(
             session_id="resumed",
-            github_token_provider=lambda _: calls.append("first") or {"kind": "cancelled"},
+            github={"token_provider": lambda _: calls.append("first") or {"kind": "cancelled"}},
         )
-        first_registration = fake.requests[0][1]["gitHubTokenProviderRegistrationId"]
+        first_registration = fake.requests[0][1]["github"]["tokenProviderRegistrationId"]
         await client.resume_session(
             "resumed",
-            github_token_provider=lambda _: calls.append("second") or {"kind": "cancelled"},
+            github={"token_provider": lambda _: calls.append("second") or {"kind": "cancelled"}},
         )
-        second_registration = fake.requests[1][1]["gitHubTokenProviderRegistrationId"]
+        second_registration = fake.requests[1][1]["github"]["tokenProviderRegistrationId"]
 
         with pytest.raises(JsonRpcError):
             await client._github_token_provider_adapter.get_token(
@@ -250,20 +376,17 @@ class TestGitHubTokenProvider:
         fake = ConcurrentResumeJsonRpcClient()
         client = make_client(fake)
         await client.create_session(
-            session_id="concurrent",
-            github_token_provider=lambda _: {"kind": "cancelled"},
+            session_id="concurrent", github={"token_provider": lambda _: {"kind": "cancelled"}}
         )
 
         first_resume = asyncio.create_task(
             client.resume_session(
-                "concurrent",
-                github_token_provider=lambda _: {"kind": "cancelled"},
+                "concurrent", github={"token_provider": lambda _: {"kind": "cancelled"}}
             )
         )
         second_resume = asyncio.create_task(
             client.resume_session(
-                "concurrent",
-                github_token_provider=lambda _: {"kind": "cancelled"},
+                "concurrent", github={"token_provider": lambda _: {"kind": "cancelled"}}
             )
         )
         await asyncio.wait_for(fake.both_resumes_started.wait(), timeout=5.0)
@@ -275,5 +398,5 @@ class TestGitHubTokenProvider:
         fake.resume_responses[1].set_result({"sessionId": "concurrent"})
         await second_resume
         assert len(client._github_token_providers) == 1
-        second_registration = fake.requests[2][1]["gitHubTokenProviderRegistrationId"]
+        second_registration = fake.requests[2][1]["github"]["tokenProviderRegistrationId"]
         assert second_registration in client._github_token_providers

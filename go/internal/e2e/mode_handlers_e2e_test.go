@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 const (
@@ -18,11 +18,10 @@ const (
 )
 
 func TestModeHandlersE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 
-	client := ctx.NewClient(func(opts *copilot.ClientOptions) {
-		opts.Env = append(opts.Env, "COPILOT_DEBUG_GITHUB_API_URL="+ctx.ProxyURL)
-	})
+	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
 
 	if err := ctx.SetCopilotUserByToken(modeHandlerToken, map[string]interface{}{
@@ -34,30 +33,72 @@ func TestModeHandlersE2E(t *testing.T) {
 		t.Fatalf("Failed to set copilot user for mode handler test: %v", err)
 	}
 
+	t.Run("should opt in to recovery on create and resume", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+		options := &copilot.CreateSessionOptions{
+			Interaction: copilot.SessionInteractionOptions{OnAutoModeSwitchRequest: func(copilot.AutoModeSwitchRequest, copilot.AutoModeSwitchInvocation) (copilot.AutoModeSwitchResponse, error) {
+				return copilot.AutoModeSwitchResponseNo, nil
+			}},
+		}
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Interaction: copilot.SessionInteractionOptions{AutoModeRecovery: true, OnAutoModeSwitchRequest: options.Interaction.OnAutoModeSwitchRequest}, Events: copilot.SessionEventOptions{OnEvent: options.Events.OnEvent},
+			Experiments: copilot.SessionExperimentOptions{Flags: map[string]bool{"AUTO_MODE_RECOVERY": true}},
+			GitHub:      copilot.SessionGitHubOptions{Token: modeHandlerToken},
+			Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if caps := session.Capabilities(); caps.UI == nil || !caps.UI.AutoModeRecovery {
+			t.Fatalf("recovery enrollment was not acknowledged: %#v", caps)
+		}
+		if caps := session.Capabilities(); caps.UI == nil {
+			t.Fatal("legacy capability snapshot is unavailable")
+		}
+		legacy, err := client.ResumeSession(t.Context(), session.SessionID, &copilot.ResumeSessionOptions{GitHub: copilot.SessionGitHubOptions{Token: modeHandlerToken}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if caps := legacy.Capabilities(); caps.UI != nil && caps.UI.AutoModeRecovery {
+			t.Fatalf("legacy resume enrolled in recovery: %#v", caps)
+		}
+		resumed, err := client.ResumeSession(t.Context(), legacy.SessionID, &copilot.ResumeSessionOptions{Interaction: copilot.SessionInteractionOptions{AutoModeRecovery: true, OnAutoModeSwitchRequest: options.Interaction.OnAutoModeSwitchRequest}, Events: copilot.SessionEventOptions{OnEvent: options.Events.OnEvent},
+			Experiments: copilot.SessionExperimentOptions{Flags: map[string]bool{"AUTO_MODE_RECOVERY": true}},
+			GitHub:      copilot.SessionGitHubOptions{Token: modeHandlerToken},
+			Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resumed.Disconnect()
+		if caps := resumed.Capabilities(); caps.UI == nil || !caps.UI.AutoModeRecovery {
+			t.Fatalf("recovery resume was not acknowledged: %#v", caps)
+		}
+		if resumed.SessionID != session.SessionID {
+			t.Fatalf("resume changed identity: %q != %q", resumed.SessionID, session.SessionID)
+		}
+	})
+
 	t.Run("should invoke exit plan mode handler when model uses tool", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		var mu sync.Mutex
 		var exitPlanModeRequests []copilot.ExitPlanModeRequest
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			GitHubToken:         modeHandlerToken,
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnExitPlanModeRequest: func(request copilot.ExitPlanModeRequest, invocation copilot.ExitPlanModeInvocation) (copilot.ExitPlanModeResult, error) {
-				mu.Lock()
-				exitPlanModeRequests = append(exitPlanModeRequests, request)
-				mu.Unlock()
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{GitHub: copilot.SessionGitHubOptions{Token: modeHandlerToken}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnExitPlanModeRequest: func(request copilot.ExitPlanModeRequest, invocation copilot.ExitPlanModeInvocation) (copilot.ExitPlanModeResult, error) {
+			mu.Lock()
+			exitPlanModeRequests = append(exitPlanModeRequests, request)
+			mu.Unlock()
 
-				if invocation.SessionID == "" {
-					t.Error("Expected non-empty session ID in invocation")
-				}
+			if invocation.SessionID == "" {
+				t.Error("Expected non-empty session ID in invocation")
+			}
 
-				return copilot.ExitPlanModeResult{
-					Approved:       true,
-					SelectedAction: "interactive",
-					Feedback:       "Approved by the Go E2E test",
-				}, nil
-			},
+			return copilot.ExitPlanModeResult{
+				Approved:       true,
+				SelectedAction: "interactive",
+				Feedback:       "Approved by the Go E2E test",
+			}, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -129,20 +170,17 @@ func TestModeHandlersE2E(t *testing.T) {
 		var mu sync.Mutex
 		var autoModeSwitchRequests []copilot.AutoModeSwitchRequest
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			GitHubToken:         modeHandlerToken,
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnAutoModeSwitchRequest: func(request copilot.AutoModeSwitchRequest, invocation copilot.AutoModeSwitchInvocation) (copilot.AutoModeSwitchResponse, error) {
-				mu.Lock()
-				autoModeSwitchRequests = append(autoModeSwitchRequests, request)
-				mu.Unlock()
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{GitHub: copilot.SessionGitHubOptions{Token: modeHandlerToken}, Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnAutoModeSwitchRequest: func(request copilot.AutoModeSwitchRequest, invocation copilot.AutoModeSwitchInvocation) (copilot.AutoModeSwitchResponse, error) {
+			mu.Lock()
+			autoModeSwitchRequests = append(autoModeSwitchRequests, request)
+			mu.Unlock()
 
-				if invocation.SessionID == "" {
-					t.Error("Expected non-empty session ID in invocation")
-				}
+			if invocation.SessionID == "" {
+				t.Error("Expected non-empty session ID in invocation")
+			}
 
-				return copilot.AutoModeSwitchResponseYes, nil
-			},
+			return copilot.AutoModeSwitchResponseYes, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -263,7 +301,17 @@ func waitForMatchingEventAllowingRateLimit(session *copilot.Session, eventType c
 		case err := <-errCh:
 			return nil, err
 		case <-time.After(30 * time.Second):
-			return nil, fmt.Errorf("timed out waiting for %s", description)
+			select {
+			case err := <-errCh:
+				return nil, err
+			default:
+			}
+			select {
+			case event := <-result:
+				return event, nil
+			default:
+				return nil, fmt.Errorf("timed out waiting for %s", description)
+			}
 		}
 	}
 }

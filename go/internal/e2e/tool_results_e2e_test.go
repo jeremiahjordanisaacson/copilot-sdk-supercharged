@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 func TestToolResultsE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -21,17 +22,15 @@ func TestToolResultsE2E(t *testing.T) {
 			City string `json:"city" jsonschema:"City name"`
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools: []copilot.Tool{
-				copilot.DefineTool("get_weather", "Gets weather for a city",
-					func(params WeatherParams, inv copilot.ToolInvocation) (copilot.ToolResult, error) {
-						return copilot.ToolResult{
-							TextResultForLLM: "The weather in " + params.City + " is sunny and 72°F",
-							ResultType:       "success",
-						}, nil
-					}),
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{
+			copilot.DefineTool("get_weather", "Gets weather for a city",
+				func(params WeatherParams, inv copilot.ToolInvocation) (copilot.ToolResult, error) {
+					return copilot.ToolResult{
+						TextResultForLLM: "The weather in " + params.City + " is sunny and 72°F",
+						ResultType:       "success",
+					}, nil
+				}),
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -65,21 +64,19 @@ func TestToolResultsE2E(t *testing.T) {
 	t.Run("should handle tool result with failure resulttype", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools: []copilot.Tool{
-				{
-					Name:        "check_status",
-					Description: "Checks the status of a service",
-					Handler: func(inv copilot.ToolInvocation) (copilot.ToolResult, error) {
-						return copilot.ToolResult{
-							TextResultForLLM: "Service unavailable",
-							ResultType:       "failure",
-							Error:            "API timeout",
-						}, nil
-					},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{
+			{
+				Name:        "check_status",
+				Description: "Checks the status of a service",
+				Handler: func(inv copilot.ToolInvocation) (copilot.ToolResult, error) {
+					return copilot.ToolResult{
+						TextResultForLLM: "Service unavailable",
+						ResultType:       "failure",
+						Error:            "API timeout",
+					}, nil
 				},
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -119,21 +116,19 @@ func TestToolResultsE2E(t *testing.T) {
 			File string `json:"file" jsonschema:"File to analyze"`
 		}
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools: []copilot.Tool{
-				copilot.DefineTool("analyze_code", "Analyzes code for issues",
-					func(params AnalyzeParams, inv copilot.ToolInvocation) (copilot.ToolResult, error) {
-						return copilot.ToolResult{
-							TextResultForLLM: "Analysis of " + params.File + ": no issues found",
-							ResultType:       "success",
-							ToolTelemetry: map[string]any{
-								"metrics":    map[string]any{"analysisTimeMs": 150},
-								"properties": map[string]any{"analyzer": "eslint"},
-							},
-						}, nil
-					}),
-			},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{
+			copilot.DefineTool("analyze_code", "Analyzes code for issues",
+				func(params AnalyzeParams, inv copilot.ToolInvocation) (copilot.ToolResult, error) {
+					return copilot.ToolResult{
+						TextResultForLLM: "Analysis of " + params.File + ": no issues found",
+						ResultType:       "success",
+						ToolTelemetry: map[string]any{
+							"metrics":    map[string]any{"analysisTimeMs": 150},
+							"properties": map[string]any{"analyzer": "eslint"},
+						},
+					}, nil
+				}),
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -195,21 +190,19 @@ func TestToolResultsE2E(t *testing.T) {
 		toolCompleted := make(chan *copilot.ToolExecutionCompleteData, 1)
 		idle := make(chan struct{}, 1)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools: []copilot.Tool{
-				{
-					Name:        "deploy_service",
-					Description: "Deploys a service",
-					Handler: func(inv copilot.ToolInvocation) (copilot.ToolResult, error) {
-						toolHandlerCalled = true
-						return copilot.ToolResult{
-							TextResultForLLM: "Deployment rejected: policy violation - production deployments require approval",
-							ResultType:       "rejected",
-						}, nil
-					},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{
+			{
+				Name:        "deploy_service",
+				Description: "Deploys a service",
+				Handler: func(inv copilot.ToolInvocation) (copilot.ToolResult, error) {
+					toolHandlerCalled = true
+					return copilot.ToolResult{
+						TextResultForLLM: "Deployment rejected: policy violation - production deployments require approval",
+						ResultType:       "rejected",
+					}, nil
 				},
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -274,21 +267,19 @@ func TestToolResultsE2E(t *testing.T) {
 		toolHandlerCalled := false
 		toolCompleted := make(chan *copilot.ToolExecutionCompleteData, 1)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Tools: []copilot.Tool{
-				{
-					Name:        "access_secret",
-					Description: "Accesses a secret",
-					Handler: func(inv copilot.ToolInvocation) (copilot.ToolResult, error) {
-						toolHandlerCalled = true
-						return copilot.ToolResult{
-							TextResultForLLM: "Access denied: insufficient permissions to read secrets",
-							ResultType:       "denied",
-						}, nil
-					},
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Tools: copilot.SessionToolOptions{Definitions: []copilot.Tool{
+			{
+				Name:        "access_secret",
+				Description: "Accesses a secret",
+				Handler: func(inv copilot.ToolInvocation) (copilot.ToolResult, error) {
+					toolHandlerCalled = true
+					return copilot.ToolResult{
+						TextResultForLLM: "Access denied: insufficient permissions to read secrets",
+						ResultType:       "denied",
+					}, nil
 				},
 			},
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)

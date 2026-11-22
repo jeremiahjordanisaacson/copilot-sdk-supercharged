@@ -52,6 +52,12 @@ try {
     connection.listen();
     const internal = createInternalServerRpc(connection);
     const rpc = createServerRpc(connection);
+    const sandboxSettingsPath = await internal.sandbox.settings.getPath({
+        configDir,
+        homeDirectory: home,
+        environment: {},
+    });
+    assert.equal(sandboxSettingsPath, join(configDir, "settings.json"));
     const startupGates = await internal.featureFlags.resolveStartupGates({
         flags: ["NATIVE_WEB_SEARCH"],
         isStaff: false,
@@ -114,7 +120,9 @@ try {
                 permissions,
                 ingestion: ingestion.serverResolution,
                 sandbox: sandbox.sandboxJson,
+                sandboxSettingsPath,
                 proxyCaRelevant: relevant,
+                proxyCaStatus: await rpc.sandbox.proxyCa.getStatusForConfigDir({ configDir }),
                 proxyCaInstallationSupported: await rpc.sandbox.proxyCa.checkInstallationSupport(),
             },
             null,

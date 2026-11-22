@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-namespace GitHub.Copilot;
+namespace Microsoft.Copilot;
 
 /// <summary>
 /// A disposable that invokes an action when disposed.

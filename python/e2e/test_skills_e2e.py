@@ -57,7 +57,8 @@ class TestSkillBehavior:
         """Test that skills are loaded and applied from skillDirectories"""
         skills_dir = create_skill_dir(ctx.work_dir)
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, skill_directories=[skills_dir]
+            permissions={"on_request": PermissionHandler.approve_all},
+            skills={"directories": [skills_dir]},
         )
 
         assert session.session_id is not None
@@ -75,9 +76,8 @@ class TestSkillBehavior:
         """Test that disabledSkills prevents skill from being applied"""
         skills_dir = create_skill_dir(ctx.work_dir)
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            skill_directories=[skills_dir],
-            disabled_skills=["test-skill"],
+            permissions={"on_request": PermissionHandler.approve_all},
+            skills={"directories": [skills_dir], "disabled_skills": ["test-skill"]},
         )
 
         assert session.session_id is not None
@@ -102,10 +102,9 @@ class TestSkillBehavior:
         ]
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            skill_directories=[skills_dir],
-            custom_agents=custom_agents,
-            agent="skill-agent",
+            permissions={"on_request": PermissionHandler.approve_all},
+            skills={"directories": [skills_dir]},
+            agents={"definitions": custom_agents, "selected": "skill-agent"},
         )
 
         assert session.session_id is not None
@@ -131,10 +130,9 @@ class TestSkillBehavior:
         ]
 
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            skill_directories=[skills_dir],
-            custom_agents=custom_agents,
-            agent="no-skill-agent",
+            permissions={"on_request": PermissionHandler.approve_all},
+            skills={"directories": [skills_dir]},
+            agents={"definitions": custom_agents, "selected": "no-skill-agent"},
         )
 
         assert session.session_id is not None
@@ -158,7 +156,7 @@ class TestSkillBehavior:
 
         # Create a session without skills first
         session1 = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all
+            permissions={"on_request": PermissionHandler.approve_all}
         )
         session_id = session1.session_id
 
@@ -170,8 +168,8 @@ class TestSkillBehavior:
         # Resume with skillDirectories - skill should now be active
         session2 = await ctx.client.resume_session(
             session_id,
-            on_permission_request=PermissionHandler.approve_all,
-            skill_directories=[skills_dir],
+            permissions={"on_request": PermissionHandler.approve_all},
+            skills={"directories": [skills_dir]},
         )
 
         assert session2.session_id == session_id
@@ -212,8 +210,8 @@ class TestSkillBehavior:
 
         # Disabled discovery: project skills should be hidden.
         disabled_session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             working_directory=project_dir,
+            permissions={"on_request": PermissionHandler.approve_all},
             enable_config_discovery=False,
         )
         disabled_skills = await disabled_session.rpc.skills.list()
@@ -222,8 +220,8 @@ class TestSkillBehavior:
 
         # Enabled discovery: project skills should be present and active.
         enabled_session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
             working_directory=project_dir,
+            permissions={"on_request": PermissionHandler.approve_all},
             enable_config_discovery=True,
         )
         enabled_skills = await enabled_session.rpc.skills.list()

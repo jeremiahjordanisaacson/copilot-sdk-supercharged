@@ -4,6 +4,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 from datetime import UTC, datetime, timedelta
@@ -57,20 +58,23 @@ async def boundary():
 
     def client():
         instance = CopilotClient(
-            connection=RuntimeConnection.for_stdio(path=get_cli_path_for_tests()),
-            working_directory=str(work),
-            use_logged_in_user=False,
-            env={
-                **os.environ,
-                "COPILOT_HOME": str(home),
-                "HOME": str(home),
-                "USERPROFILE": str(home),
-                "GH_TOKEN": "",
-                "GITHUB_TOKEN": "",
-                "COPILOT_GITHUB_TOKEN": "",
-                "COPILOT_HMAC_KEY": "",
-                "CAPI_HMAC_KEY": "",
-            },
+            mode="coding-agent",
+            runtime=RuntimeConnection.for_spawned_stdio(
+                path=get_cli_path_for_tests(),
+                working_directory=str(work),
+                env={
+                    **os.environ,
+                    "COPILOT_HOME": str(home),
+                    "HOME": str(home),
+                    "USERPROFILE": str(home),
+                    "GH_TOKEN": "",
+                    "GITHUB_TOKEN": "",
+                    "COPILOT_GITHUB_TOKEN": "",
+                    "COPILOT_HMAC_KEY": "",
+                    "CAPI_HMAC_KEY": "",
+                },
+            ),
+            github={"use_logged_in_user": False},
         )
         clients.append(instance)
         return instance
@@ -176,13 +180,24 @@ async def test_byok_create_and_cold_resume_trust_admission_identity(boundary, mo
             mode, "owner" if mode == "custom" else None
         )
         assert "authentication" not in request.config
-        assert "github_token" not in request.config
+        assert "token" not in request.config.get("github", {})
         config = {
             **request.config,
-            "provider": provider,
+            "inference": {
+                **request.config.get("inference", {}),
+                "default_provider": "byok",
+                "providers": [{"name": "byok", **provider}],
+            },
+            "github": {**request.config.get("github", {}), "capi": {"enabled": False}},
             "model": "local-model",
-            "extension_sdk_path": str(Path(__file__).parents[2] / "nodejs/dist"),
-            "on_permission_request": PermissionHandler.approve_all,
+            "extensions": {
+                **request.config.get("extensions", {}),
+                "sdk_path": str(Path(__file__).parents[2] / "nodejs/dist"),
+            },
+            "permissions": {
+                **request.config.get("permissions", {}),
+                "on_request": PermissionHandler.approve_all,
+            },
         }
         session = (
             await owner.resume_session(request.session_id, **config)
@@ -294,10 +309,47 @@ async def test_expired_custom_identity_requires_reauthentication(boundary):
     make_client, work, ahp = boundary
     client = make_client()
     validations = []
+    issued = None
+    attempts = 1
+    before = 0
+    expired_admission_errors = {
+        "RPC error -32009: permission denied: application authentication was rejected",
+        "RPC error -32603: internal error: application authentication failed",
+        "RPC error -32007: authentication required for https://copilot.github.com/hosting/authentication",
+    }
 
     async def authenticate(request):
+        nonlocal issued
+        assert request.token in ("short-lived", "renewed")
+        expiry = future(60 if request.token == "renewed" else 2)
+        result = AhpAuthenticationResult("owner", expiry)
         validations.append(request.token)
-        return AhpAuthenticationResult("owner", future(2 if len(validations) == 1 else 60))
+        issued = (request.token, expiry, result)
+        return result
+
+    def check_credential(token):
+        assert len(validations) == before + 1
+        assert issued is not None
+        assert issued[0] == token
+        assert issued[2].identity == "owner"
+        assert issued[2].expires_at == issued[1]
+        return datetime.fromisoformat(issued[1])
+
+    def retry_expired(error):
+        nonlocal issued, before, attempts
+        if error not in expired_admission_errors:
+            return False
+        expiry = check_credential("short-lived")
+        if expiry > datetime.now(UTC):
+            return False
+        logging.getLogger(__name__).warning(
+            "Retrying initial authentication with an already-expired fixture credential: %s",
+            error,
+        )
+        before = len(validations)
+        issued = None
+        attempts += 1
+        return True
 
     host = await client.start_ahp_host(
         AhpHostOptions(
@@ -307,12 +359,19 @@ async def test_expired_custom_identity_requires_reauthentication(boundary):
     )
     try:
         await ahp.request({"op": "connect", "url": host.url, "token": host.token})
-        await ahp.request({"op": "authenticate", "token": "short-lived"})
+        await ahp.request(
+            {"op": "authenticate", "token": "short-lived"},
+            retry_expired_error=retry_expired,
+        )
+        check_credential("short-lived")
         await ahp.request({"op": "expired"})
         with pytest.raises(RuntimeError):
             await ahp.request({"op": "create", "workDir": str(work)})
+        issued = None
+        before = len(validations)
         await ahp.request({"op": "authenticate", "token": "renewed"})
-        assert validations == ["short-lived", "renewed"]
+        check_credential("renewed")
+        assert validations == ["short-lived"] * attempts + ["renewed"]
     finally:
         await host.dispose()
         await ahp.request({"op": "close"})

@@ -5,10 +5,10 @@
 import json
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, create_model, field_validator
 
 from copilot import define_tool
-from copilot.generated.rpc import ExternalToolTextResultForLlm
+from copilot.rpc import ExternalToolTextResultForLlm
 from copilot.tools import (
     ToolBinaryResult,
     ToolInvocation,
@@ -358,6 +358,108 @@ class TestDefineTool:
                 handler=lambda params, inv: params.value.upper(),
                 params_type=Params,
             )
+
+
+class TestAdvertisedParameterDefaults:
+    """The runtime reads JSON integers exactly only within the 64-bit ranges."""
+
+    @pytest.mark.parametrize(
+        ("annotation", "default", "advertised"),
+        [
+            (int, 7, True),
+            (int, 2**53, True),
+            (int, 2**53 + 1, True),
+            (int, -(2**53 + 1), True),
+            (int, 2**63 - 1, True),
+            (int, -(2**63), True),
+            (int, 2**64 - 1, True),
+            (int, 2**64, False),
+            (int, 2**64 + 1, False),
+            (int, -(2**63) - 1, False),
+            (float, 0.1, True),
+            (float, 1e300, True),
+            (bool, True, True),
+            (str, "18446744073709551616", True),
+            (int | None, None, True),
+            (int | None, 2**64, False),
+            (list[int], [1, 2**64 - 1], True),
+            (list[int], [1, 2**64], False),
+            (dict[str, int], {"a": -(2**63) - 1}, False),
+            (tuple[int, int], (1, 2**64), False),
+        ],
+    )
+    def test_default_is_advertised_only_when_the_runtime_reads_it_exactly(
+        self, annotation, default, advertised
+    ):
+        Params = create_model("Params", value=(annotation, default))
+        expected = Params.model_json_schema()
+        if not advertised:
+            del expected["properties"]["value"]["default"]
+
+        decorated = define_tool(
+            "decorated",
+            description="Decorated tool",
+            handler=lambda params, invocation: "ok",
+            params_type=Params,
+        )
+        declared = define_tool("declared", description="Declared tool", params_type=Params)
+
+        assert json.dumps(decorated.parameters) == json.dumps(expected)
+        assert json.dumps(declared.parameters) == json.dumps(expected)
+
+    def test_only_default_keywords_are_left_out(self):
+        class Inner(BaseModel):
+            exact: int = 2**64 - 1
+            inexact: int = 2**64
+
+        class Params(BaseModel):
+            default: int = -(2**63) - 1
+            bounded: int = Field(default=1, ge=0, le=2**70)
+            noted: int = Field(default=2, json_schema_extra={"examples": [2**64]})
+            inner: Inner = Inner()
+            inners: list[Inner] = []
+            required: str
+
+        expected = Params.model_json_schema()
+        del expected["properties"]["default"]["default"]
+        del expected["properties"]["inner"]["default"]
+        del expected["$defs"]["Inner"]["properties"]["inexact"]["default"]
+
+        schema = define_tool("nested", description="Nested tool", params_type=Params).parameters
+
+        assert schema is not None
+        assert json.dumps(schema) == json.dumps(expected)
+        assert schema["properties"]["bounded"]["maximum"] == 2**70
+        assert schema["properties"]["noted"]["examples"] == [2**64]
+        assert schema["required"] == ["required"]
+
+    async def test_handler_still_receives_a_left_out_default(self):
+        class Params(BaseModel):
+            above: int = 2**64 + 1
+            below: int = -(2**63) - 1
+
+        received = []
+
+        @define_tool("big_defaults", description="Big defaults")
+        def big_defaults(params: Params) -> str:
+            received.append((params.above, params.below))
+            return "ok"
+
+        assert big_defaults.parameters is not None
+        assert "default" not in big_defaults.parameters["properties"]["above"]
+        assert "default" not in big_defaults.parameters["properties"]["below"]
+
+        result = await big_defaults.handler(
+            ToolInvocation(
+                session_id="session-1",
+                tool_call_id="call-1",
+                tool_name="big_defaults",
+                arguments={},
+            )
+        )
+
+        assert result.result_type == "success", result.error
+        assert received == [(2**64 + 1, -(2**63) - 1)]
 
 
 class TestNormalizeResult:

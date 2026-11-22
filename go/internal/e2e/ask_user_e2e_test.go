@@ -4,11 +4,12 @@ import (
 	"sync"
 	"testing"
 
-	copilot "github.com/github/copilot-sdk/go"
-	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	copilot "github.com/microsoft/copilot-sdk/go/v2"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/e2e/testharness"
 )
 
 func TestAskUserE2E(t *testing.T) {
+	t.Parallel()
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -19,30 +20,28 @@ func TestAskUserE2E(t *testing.T) {
 		var userInputRequests []copilot.UserInputRequest
 		var mu sync.Mutex
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnUserInputRequest: func(request copilot.UserInputRequest, invocation copilot.UserInputInvocation) (copilot.UserInputResponse, error) {
-				mu.Lock()
-				userInputRequests = append(userInputRequests, request)
-				mu.Unlock()
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnUserInputRequest: func(request copilot.UserInputRequest, invocation copilot.UserInputInvocation) (copilot.UserInputResponse, error) {
+			mu.Lock()
+			userInputRequests = append(userInputRequests, request)
+			mu.Unlock()
 
-				if invocation.SessionID == "" {
-					t.Error("Expected non-empty session ID in invocation")
-				}
+			if invocation.SessionID == "" {
+				t.Error("Expected non-empty session ID in invocation")
+			}
 
-				// Return the first choice if available, otherwise a freeform answer
-				answer := "freeform answer"
-				wasFreeform := true
-				if len(request.Choices) > 0 {
-					answer = request.Choices[0]
-					wasFreeform = false
-				}
+			// Return the first choice if available, otherwise a freeform answer
+			answer := "freeform answer"
+			wasFreeform := true
+			if len(request.Choices) > 0 {
+				answer = request.Choices[0]
+				wasFreeform = false
+			}
 
-				return copilot.UserInputResponse{
-					Answer:      answer,
-					WasFreeform: wasFreeform,
-				}, nil
-			},
+			return copilot.UserInputResponse{
+				Answer:      answer,
+				WasFreeform: wasFreeform,
+			}, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -80,24 +79,22 @@ func TestAskUserE2E(t *testing.T) {
 		var userInputRequests []copilot.UserInputRequest
 		var mu sync.Mutex
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnUserInputRequest: func(request copilot.UserInputRequest, invocation copilot.UserInputInvocation) (copilot.UserInputResponse, error) {
-				mu.Lock()
-				userInputRequests = append(userInputRequests, request)
-				mu.Unlock()
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnUserInputRequest: func(request copilot.UserInputRequest, invocation copilot.UserInputInvocation) (copilot.UserInputResponse, error) {
+			mu.Lock()
+			userInputRequests = append(userInputRequests, request)
+			mu.Unlock()
 
-				// Pick the first choice
-				answer := "default"
-				if len(request.Choices) > 0 {
-					answer = request.Choices[0]
-				}
+			// Pick the first choice
+			answer := "default"
+			if len(request.Choices) > 0 {
+				answer = request.Choices[0]
+			}
 
-				return copilot.UserInputResponse{
-					Answer:      answer,
-					WasFreeform: false,
-				}, nil
-			},
+			return copilot.UserInputResponse{
+				Answer:      answer,
+				WasFreeform: false,
+			}, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -136,19 +133,17 @@ func TestAskUserE2E(t *testing.T) {
 		var mu sync.Mutex
 		freeformAnswer := "This is my custom freeform answer that was not in the choices"
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			OnUserInputRequest: func(request copilot.UserInputRequest, invocation copilot.UserInputInvocation) (copilot.UserInputResponse, error) {
-				mu.Lock()
-				userInputRequests = append(userInputRequests, request)
-				mu.Unlock()
+		session, err := client.CreateSession(t.Context(), &copilot.CreateSessionOptions{Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll}, Interaction: copilot.SessionInteractionOptions{OnUserInputRequest: func(request copilot.UserInputRequest, invocation copilot.UserInputInvocation) (copilot.UserInputResponse, error) {
+			mu.Lock()
+			userInputRequests = append(userInputRequests, request)
+			mu.Unlock()
 
-				// Return a freeform answer (not from choices)
-				return copilot.UserInputResponse{
-					Answer:      freeformAnswer,
-					WasFreeform: true,
-				}, nil
-			},
+			// Return a freeform answer (not from choices)
+			return copilot.UserInputResponse{
+				Answer:      freeformAnswer,
+				WasFreeform: true,
+			}, nil
+		}},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)

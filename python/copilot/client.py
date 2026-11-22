@@ -7,7 +7,7 @@ to the Copilot CLI server and provides session management capabilities.
 Example:
     >>> from copilot import CopilotClient
     >>>
-    >>> async with CopilotClient() as client:
+    >>> async with CopilotClient(mode="coding-agent") as client:
     ...     session = await client.create_session()
     ...     await session.send("Hello!")
 """
@@ -15,6 +15,7 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import codecs
 import inspect
 import ipaddress
 import logging
@@ -26,7 +27,9 @@ import sys
 import threading
 import time
 import uuid
+import weakref
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from concurrent.futures import Future as ConcurrentFuture
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,6 +38,50 @@ from typing import Any, ClassVar, Literal, NotRequired, TypedDict, cast, overloa
 
 from ._diagnostics import log_timing
 from ._ffi_runtime_host import FfiRuntimeHost
+from ._generated.rpc import (
+    ClientGlobalApiHandlers,
+    ClientSessionApiHandlers,
+    DiagnosticsConfiguration,
+    EntraAuthConfig,
+    ExtensionLaunchProviderHandler,
+    GitHubTelemetryNotification,
+    GitHubTokenAcquireReason,
+    GitHubTokenAcquireRequest,
+    GitHubTokenAcquireResult,
+    HostDiagnostics,
+    Model,
+    NetworkAuthenticateBasicOptions,
+    NetworkAuthenticateBasicRequest,
+    NetworkAuthenticateBasicResult,
+    NetworkAuthenticateNegotiateOptions,
+    NetworkAuthenticateNegotiateRequest,
+    NetworkAuthenticateNegotiateResult,
+    NetworkResolveProxyOptions,
+    NetworkResolveProxyRequest,
+    NetworkResolveProxyResult,
+    NetworkScope,
+    NetworkSetProviderRequest,
+    OpenCanvasInstance,
+    PermissionsSetModeResult,
+    PingResult,
+    RemoteSessionMode,  # noqa: F401
+    SandboxConfig,
+    ServerRpc,
+    SessionsFindByPrefixRequest,
+    UIThreadRunRequest,
+    _ConnectResult,
+    _HookInvokeRequest,
+    _HookInvokeResponse,
+    from_datetime,
+    register_client_global_api_handlers,
+    register_client_session_api_handlers,
+)
+from ._generated.rpc import FusionTier as _RpcFusionTier
+from ._generated.session_events import (
+    PermissionMode,
+    SessionEvent,
+    session_event_from_dict,
+)
 from ._jsonrpc import JsonRpcClient, JsonRpcError, ProcessExitedError
 from ._mode import (
     CopilotClientMode,
@@ -72,41 +119,6 @@ from .copilot_request_handler import (
     create_copilot_request_adapter,
 )
 from .entra import EntraAuthOptions, _EntraTokenAdapter
-from .generated.rpc import (
-    ClientGlobalApiHandlers,
-    ClientSessionApiHandlers,
-    DiagnosticsConfiguration,
-    EntraAuthConfig,
-    ExtensionLaunchProviderHandler,
-    GitHubTelemetryNotification,
-    GitHubTokenAcquireReason,
-    GitHubTokenAcquireRequest,
-    GitHubTokenAcquireResult,
-    HostDiagnostics,
-    KerberosAuthAcquireRequest,
-    KerberosAuthAcquireResult,
-    KerberosAuthMode,
-    KerberosAuthScope,
-    KerberosAuthSetProviderRequest,
-    ModelBillingTokenPrices,
-    ModelBillingTokenPricesLongContext,  # noqa: F401
-    ModelProviderRef,
-    OpenCanvasInstance,
-    RemoteSessionMode,  # noqa: F401
-    SandboxConfig,
-    ServerRpc,
-    UIThreadRunRequest,
-    _ConnectResult,
-    _HookInvokeRequest,
-    _HookInvokeResponse,
-    from_datetime,
-    register_client_global_api_handlers,
-    register_client_session_api_handlers,
-)
-from .generated.session_events import (
-    SessionEvent,
-    session_event_from_dict,
-)
 from .host import AhpHost, AhpHostOptions, _AhpHostManager
 from .installation_confirmation import (
     InstallationConfirmationHandler,
@@ -125,6 +137,7 @@ from .session import (
     DefaultAgentConfig,
     ElicitationHandler,
     ExitPlanModeHandler,
+    FusionTier,
     GitHubMcpToolConfig,
     ImageGenerationConfig,
     InfiniteSessionConfig,
@@ -134,7 +147,6 @@ from .session import (
     MemoryConfiguration,
     ModelCapabilitiesOverride,
     NamedProviderConfig,
-    ProviderConfig,
     ProviderModelConfig,
     ReasoningEffort,
     ReasoningSummary,
@@ -142,12 +154,14 @@ from .session import (
     SessionFsConfig,
     SessionHooks,
     SessionLimitsConfig,
+    ShellAuthenticationHandler,
+    ShellAuthenticationRequest,
     SkillProvider,
+    StoredMemory,
     SystemMessageConfig,
     ToolSearchConfig,
     TranscriptRecoveryReport,
     UserInputHandler,
-    _capabilities_to_dict,
     _PermissionHandlerFn,
     _tools_to_wire_definitions,
 )
@@ -197,8 +211,9 @@ GitHubTokenProvider = Callable[
 ]
 """Acquire a GitHub credential for one session.
 
-Token results require ``expiresIn`` to be the positive number of seconds of
-remaining lifetime when the callback completes. Production GitHub tokens
+Token results require ``expiresIn`` to be the number of seconds of remaining
+lifetime when the callback completes. More than one hour must still remain
+after the runtime validates the token. Production GitHub tokens
 typically last eight hours. Initial cancellation, callback errors, and invalid
 token responses reject session creation or resume instead of falling back to
 ambient authentication.
@@ -210,6 +225,11 @@ def _required_string_param(params: dict, name: str) -> str:
     if not isinstance(value, str):
         raise JsonRpcError(-32602, "Invalid params")
     return value
+
+
+def _permission_mode_result(response: dict) -> PermissionsSetModeResult | None:
+    result = response.get("permissionModeResult")
+    return PermissionsSetModeResult.from_dict(result) if result is not None else None
 
 
 # ============================================================================
@@ -307,6 +327,9 @@ def _exp_assignment_response_to_dict(
 class CapiSessionOptions(TypedDict, total=False):
     """Provider-scoped Copilot API (CAPI) session options."""
 
+    enabled: bool
+    """Enables Copilot API models independently of GitHub identity."""
+
     auto_tier: AutoTier
     """Routing preference used when the session model is ``auto``.
 
@@ -319,6 +342,27 @@ class CapiSessionOptions(TypedDict, total=False):
 
     To change the preference on a live session, call
     :meth:`CopilotSession.set_auto_tier` instead.
+
+    For Copilot Fusion, prefer ``fusion_tier``. The ``balance``,
+    ``hydrafusion`` and ``hydrafusion-max`` identifiers it replaces remain
+    accepted but are deprecated.
+    """
+
+    fusion_tier: FusionTier | _RpcFusionTier
+    """Copilot Fusion tier used when the session model is ``fusion`` or ``auto``.
+
+    **Experimental.** Matches the CLI's ``--fusion-tier``: ``"standard"``,
+    ``"high"`` or ``"max"``, or the generated ``FusionTier`` enum. The runtime
+    resolves the tier to the Auto routing preference it stands for, using the
+    same runtime-owned bindings as the CLI, and then applies it exactly like
+    ``auto_tier``, so ``session.rpc.model.get_current()`` and
+    ``session.model_change`` events report that preference as ``autoTier``;
+    ``get_current()`` also reports the resolved tier as ``fusionTier`` once
+    the session's Auto tier metadata is known. Cannot be combined with
+    ``auto_tier``.
+
+    To change the tier on a live session, call
+    :meth:`CopilotSession.set_fusion_tier` instead.
     """
 
     enable_web_socket_responses: bool
@@ -347,8 +391,15 @@ def _cloud_session_options_to_dict(options: CloudSessionOptions) -> dict[str, An
 
 def _capi_session_options_to_wire(options: CapiSessionOptions) -> dict[str, Any]:
     wire: dict[str, Any] = {}
+    if "enabled" in options:
+        wire["enabled"] = options["enabled"]
     if "auto_tier" in options:
         wire["autoTier"] = options["auto_tier"]
+    if "fusion_tier" in options:
+        fusion_tier = options["fusion_tier"]
+        wire["fusionTier"] = (
+            fusion_tier.value if isinstance(fusion_tier, _RpcFusionTier) else fusion_tier
+        )
     if "enable_web_socket_responses" in options:
         wire["enableWebSocketResponses"] = options["enable_web_socket_responses"]
     return wire
@@ -436,29 +487,17 @@ def _managed_settings_to_dict(settings: ManagedSettings) -> dict[str, Any]:
     return wire
 
 
-# Implicit provider name for the singular, whole-session ``provider`` config.
-# Named providers are keyed by their own ``name``.
-_DEFAULT_BEARER_TOKEN_PROVIDER_NAME = "default"
-
-
 def _collect_bearer_token_callbacks(
-    provider: ProviderConfig | None,
     providers: list[NamedProviderConfig] | None,
 ) -> dict[str, BearerTokenProvider]:
     """Collect per-provider ``bearer_token_provider`` callbacks keyed by provider name.
 
-    The singular, whole-session ``provider`` uses the implicit
-    ``_DEFAULT_BEARER_TOKEN_PROVIDER_NAME``; ``providers`` entries use their own
-    ``name``. The callbacks are never serialized — the wire conversion emits
+    Callbacks use the configured ``name`` and are never serialized. Conversion emits
     ``hasBearerTokenProvider: true`` instead and the runtime calls back over
     ``providerToken.getToken``.
     """
     callbacks: dict[str, BearerTokenProvider] = {}
-    if provider is not None:
-        singular = provider.get("bearer_token_provider")
-        if singular is not None:
-            callbacks[_DEFAULT_BEARER_TOKEN_PROVIDER_NAME] = singular
-    if providers:
+    if providers is not None:
         for named in providers:
             callback = named.get("bearer_token_provider")
             if callback is not None:
@@ -501,6 +540,18 @@ def _large_output_to_wire(config: Mapping[str, Any]) -> dict[str, Any]:
     if "output_directory" in config:
         wire["outputDir"] = config["output_directory"]
     return wire
+
+
+def _requested_memory_store(
+    memory: MemoryConfiguration | None,
+) -> Callable[[StoredMemory], Awaitable[None]] | None:
+    """Return the app memory store callback, rejecting one that memory is not enabled for."""
+    store_memory = memory.get("store_memory") if memory else None
+    if memory is None or store_memory is None:
+        return None
+    if memory.get("enabled") is not True:
+        raise ValueError("memory.store_memory requires memory.enabled to be true.")
+    return store_memory
 
 
 def _memory_to_wire(config: Mapping[str, Any]) -> dict[str, Any]:
@@ -582,6 +633,72 @@ class TelemetryConfig(TypedDict, total=False):
     """Whether to capture span content. Sets OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT and its legacy alias."""  # noqa: E501
 
 
+def _normalize_environment(env: Mapping[str, str]) -> dict[str, str]:
+    if sys.platform == "win32":
+        return {key.upper(): value for key, value in env.items()}
+    return dict(env)
+
+
+def _find_executable(command: str, env: Mapping[str, str], cwd: str) -> str | None:
+    if sys.platform != "win32":
+        path = env.get("PATH", os.defpath)
+        if "PATH" in env:
+            base = cwd if os.path.isabs(cwd) else os.path.join(os.getcwd(), cwd)
+            path = os.pathsep.join(
+                os.path.join(base, directory) for directory in path.split(os.pathsep)
+            )
+        return shutil.which(command, path=path)
+    path = env.get("PATH", "")
+    directory, name = os.path.split(command)
+    if directory:
+        # Explicit paths keep their application-relative interpretation.
+        directories = [os.path.abspath(directory)]
+    else:
+        directories = [] if "NODEFAULTCURRENTDIRECTORYINEXEPATH" in env else [os.getcwd()]
+        if path:
+            directories.extend(
+                os.path.abspath(os.path.join(cwd, entry.strip('"')))
+                for entry in path.split(os.pathsep)
+            )
+    extensions = [
+        ext.rstrip(".")
+        for ext in (env.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(os.pathsep)
+        if ext
+    ]
+    names = [name + ext for ext in extensions]
+    if name.endswith(".js") or name.upper().endswith(tuple(ext.upper() for ext in extensions)):
+        names.insert(0, name)
+    for directory in directories:
+        for name in names:
+            candidate = os.path.join(directory, name)
+            if os.path.isfile(candidate):
+                return candidate
+    return None
+
+
+def _apply_telemetry_environment(env: dict[str, str], telemetry: TelemetryConfig | None) -> None:
+    if telemetry is None:
+        return
+    env["COPILOT_OTEL_ENABLED"] = "true"
+    if "otlp_endpoint" in telemetry:
+        env["OTEL_EXPORTER_OTLP_ENDPOINT"] = telemetry["otlp_endpoint"]
+    if "otlp_protocol" in telemetry:
+        env["OTEL_EXPORTER_OTLP_PROTOCOL"] = telemetry["otlp_protocol"]
+    if "file_path" in telemetry:
+        env["COPILOT_OTEL_FILE_EXPORTER_PATH"] = telemetry["file_path"]
+    if "exporter_type" in telemetry:
+        env["COPILOT_OTEL_EXPORTER_TYPE"] = telemetry["exporter_type"]
+    if "source_name" in telemetry:
+        env["COPILOT_OTEL_SOURCE_NAME"] = telemetry["source_name"]
+    if "capture_content" in telemetry:
+        env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT"] = (
+            "SPAN_ONLY" if telemetry["capture_content"] else "NO_CONTENT"
+        )
+        env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = str(
+            telemetry["capture_content"]
+        ).lower()
+
+
 class ClientInfo(TypedDict, total=False):
     """Identity of the integrating application, declared on ``server.connect``.
 
@@ -622,84 +739,166 @@ def _client_info_to_wire(client_info: ClientInfo | None) -> dict[str, str] | Non
     return wire or None
 
 
-class KerberosAuthConfig(TypedDict):
-    """Supplies Kerberos credentials from the SDK host for a requested service principal."""
+class NetworkConfig(TypedDict):
+    """**Experimental.** Network callbacks through which the SDK host takes over parts of the
+    runtime's networking.
 
-    mode: KerberosAuthMode | Literal["fallback", "always"]
-    """``"fallback"`` uses the callback only when native lookup fails; ``"always"`` never
-    attempts native lookup.
+    For example when the runtime runs in WSL or a container and should use VS Code's proxy
+    settings and the host's Kerberos tickets. Each configured callback replaces the runtime's own
+    handling for the traffic in ``scope``; without it, the runtime handles that part itself.
+
+    Callbacks may be sync or async and run on the client's event loop, so offload a blocking
+    lookup, e.g. with :func:`asyncio.to_thread`. An awaitable a callback returns is cancelled with
+    :class:`asyncio.CancelledError` when the runtime stops waiting: it cancels the request (for
+    example when its wait times out) or the connection closes. The SDK then ignores any later
+    result.
     """
-    scope: NotRequired[KerberosAuthScope | Literal["connection", "runtime"]]
-    """``"connection"`` (default) authenticates only requests made for sessions this client
-    creates or resumes; ``"runtime"`` also authenticates the runtime's shared background
-    traffic. Only one connection at a time can hold ``"runtime"``, so startup fails if another
-    client holds it. The registration ends when the connection closes.
+
+    scope: NotRequired[NetworkScope | Literal["connection", "runtime"]]
+    """``"connection"`` (default) serves only requests made for sessions this client creates or
+    resumes; ``"runtime"`` also serves the runtime's shared background traffic. Only one
+    connection at a time can hold ``"runtime"``, so startup fails if another client holds it.
+    The registration ends when the connection closes.
     """
-    callback: Callable[[KerberosAuthAcquireRequest], str | None | Awaitable[str | None]]
-    """Returns a fresh, single-use base64 SPNEGO token without the ``Negotiate `` prefix, or
-    ``None`` when unavailable.
+    resolve_proxy: NotRequired[
+        Callable[[NetworkResolveProxyRequest], str | None | Awaitable[str | None]]
+    ]
+    """Returns the proxies for ``request.url`` as a PAC-style list such as
+    ``PROXY proxy.example:8080; HTTPS proxy.example:443; DIRECT`` (the format of Electron's
+    ``session.resolveProxy``); return ``DIRECT`` for a direct connection, or ``None`` to let the
+    runtime resolve the proxy itself, as if no callback were registered. Entry types the runtime
+    doesn't support, such as SOCKS and QUIC, are skipped. ``request.url`` is the request target
+    as a PAC script sees it: without credentials or fragment, and for ``https`` and ``wss`` also
+    without path and query.
+
+    The callback decides every request that would otherwise follow ambient proxy settings: proxy
+    environment variables, ``NO_PROXY`` and operating-system proxy settings are not consulted
+    unless it returns ``None``, and a failing callback fails the request rather than connecting
+    directly. Requests to loopback targets, and requests with an explicitly configured proxy,
+    never consult it. The runtime caches answers, including ``None``, for a few seconds.
+    """
+    authenticate_negotiate: NotRequired[
+        Callable[[NetworkAuthenticateNegotiateRequest], str | None | Awaitable[str | None]]
+    ]
+    """Returns a fresh, single-use base64 SPNEGO token without the ``Negotiate `` prefix for a
+    proxy's Negotiate challenge, or ``None`` when unavailable. The runtime then does not look up
+    Kerberos credentials itself, so a missing token or a failing callback fails the request, unless
+    the proxy also offers Basic and ``authenticate_basic`` supplies credentials.
 
     The SPN uses the platform-independent ``service/host[@REALM]`` form; validate it before
-    issuing credentials. Like other client callbacks it runs on the event loop, so offload a
-    blocking lookup, e.g. with :func:`asyncio.to_thread`.
+    issuing credentials. Never log or persist tokens.
+    """
+    authenticate_basic: NotRequired[
+        Callable[
+            [NetworkAuthenticateBasicRequest],
+            NetworkAuthenticateBasicResult
+            | None
+            | Awaitable[NetworkAuthenticateBasicResult | None],
+        ]
+    ]
+    """Returns credentials for a proxy's Basic challenge, or ``None`` when unavailable, which
+    fails the request with the proxy's challenge, as does an empty user name. Applies to requests
+    the runtime tunnels through the proxy (``https`` and ``wss``). The runtime remembers the answer
+    for that proxy and uses it for later connections, until the proxy rejects it; then it calls
+    again with ``previous_rejected`` set, so answer with different credentials, for example by
+    asking the user, or with ``None``. A later connection sends the answer without waiting for a
+    challenge, unless the runtime may try Negotiate with that proxy first. A connection submits at
+    most three sets of credentials. While a call is pending, other requests through that proxy wait
+    for its answer. When a proxy offers both Negotiate and Basic, the runtime prefers Negotiate and
+    answers with Basic when Negotiate is unavailable or the proxy rejects it.
+
+    ``realm`` comes from the proxy, so treat it as untrusted text. The user name must not contain
+    a colon, and neither the user name nor the password may contain control characters; an
+    omitted password means an empty password. The runtime does not time the callback out: a
+    request whose own deadline passes stops waiting, but the answer is still remembered. Never log
+    or persist credentials.
     """
 
 
-def _kerberos_auth_registration(config: KerberosAuthConfig) -> KerberosAuthSetProviderRequest:
-    try:
-        mode = KerberosAuthMode(config.get("mode"))
-    except ValueError:
-        raise ValueError("kerberos_auth.mode must be either 'fallback' or 'always'") from None
+def _network_registration(config: NetworkConfig) -> NetworkSetProviderRequest | None:
+    """Validate ``config`` and build its registration, or ``None`` when it has no callbacks."""
     scope_value = config.get("scope")
     try:
-        scope = None if scope_value is None else KerberosAuthScope(scope_value)
+        scope = None if scope_value is None else NetworkScope(scope_value)
     except ValueError:
-        raise ValueError("kerberos_auth.scope must be either 'connection' or 'runtime'") from None
-    if not callable(config.get("callback")):
-        raise ValueError("kerberos_auth.callback must be callable")
-    return KerberosAuthSetProviderRequest(mode=mode, scope=scope)
+        raise ValueError("network.scope must be either 'connection' or 'runtime'") from None
+    resolve_proxy = config.get("resolve_proxy")
+    if resolve_proxy is not None and not callable(resolve_proxy):
+        raise ValueError("network.resolve_proxy must be callable")
+    authenticate_negotiate = config.get("authenticate_negotiate")
+    if authenticate_negotiate is not None and not callable(authenticate_negotiate):
+        raise ValueError("network.authenticate_negotiate must be callable")
+    authenticate_basic = config.get("authenticate_basic")
+    if authenticate_basic is not None and not callable(authenticate_basic):
+        raise ValueError("network.authenticate_basic must be callable")
+    if resolve_proxy is None and authenticate_negotiate is None and authenticate_basic is None:
+        return None
+    return NetworkSetProviderRequest(
+        scope=scope,
+        resolve_proxy=None if resolve_proxy is None else NetworkResolveProxyOptions(),
+        authenticate_negotiate=(
+            None if authenticate_negotiate is None else NetworkAuthenticateNegotiateOptions()
+        ),
+        authenticate_basic=(
+            None if authenticate_basic is None else NetworkAuthenticateBasicOptions()
+        ),
+    )
 
 
 @dataclass
 class RuntimeConnection:
     """Discriminated config describing how to reach the Copilot runtime.
 
-    Construct via the static factories :meth:`for_stdio`, :meth:`for_tcp`,
-    or :meth:`for_uri`. Each factory returns the matching subclass;
+    Construct via the static factories :meth:`for_spawned_stdio`, :meth:`for_spawned_tcp`,
+    :meth:`for_tcp`, or :meth:`for_inprocess`. Each factory returns the matching subclass;
     pattern-match on the subclass (or :func:`isinstance`) to branch on the
     transport.
 
     Example:
-        >>> CopilotClient()  # default: stdio with the bundled runtime
-        >>> CopilotClient(connection=RuntimeConnection.for_uri("localhost:3000"))
+        >>> CopilotClient(mode="coding-agent")  # default: native runtime in this process
+        >>> CopilotClient(mode="coding-agent", runtime=RuntimeConnection.for_tcp("localhost", 3000))
     """
 
     @staticmethod
-    def for_stdio(
+    def for_spawned_stdio(
         *,
         path: str | None = None,
         args: Sequence[str] = (),
-    ) -> StdioRuntimeConnection:
+        env: dict[str, str] | None = None,
+        working_directory: str | None = None,
+        base_directory: str | None = None,
+        session_idle_timeout_seconds: int | None = None,
+    ) -> SpawnedStdioRuntimeConnection:
         """Spawn a runtime child process and communicate over its stdin/stdout.
-
-        This is the default when no :attr:`CopilotClientOptions.connection`
-        is supplied.
 
         Args:
             path: Path to the runtime executable. When ``None``, uses the
                 bundled binary.
             args: Extra command-line arguments passed to the runtime process.
+            env: Child environment replacing inherited variables. ``None`` inherits.
+            working_directory: Child process directory. ``None`` inherits.
         """
-        return StdioRuntimeConnection(path=path, args=tuple(args))
+        return SpawnedStdioRuntimeConnection(
+            path=path,
+            args=tuple(args),
+            env=env,
+            working_directory=working_directory,
+            base_directory=base_directory,
+            session_idle_timeout_seconds=session_idle_timeout_seconds,
+        )
 
     @staticmethod
-    def for_tcp(
+    def for_spawned_tcp(
         *,
         port: int = 0,
         connection_token: str | None = None,
         path: str | None = None,
         args: Sequence[str] = (),
-    ) -> TcpRuntimeConnection:
+        env: dict[str, str] | None = None,
+        working_directory: str | None = None,
+        base_directory: str | None = None,
+        session_idle_timeout_seconds: int | None = None,
+    ) -> SpawnedTcpRuntimeConnection:
         """Spawn a runtime child process listening on a TCP socket.
 
         Args:
@@ -713,47 +912,53 @@ class RuntimeConnection:
             path: Path to the runtime executable. When ``None``, uses the
                 bundled binary.
             args: Extra command-line arguments passed to the runtime process.
+            env: Child environment replacing inherited variables. ``None`` inherits.
+            working_directory: Child process directory. ``None`` inherits.
         """
-        return TcpRuntimeConnection(
+        return SpawnedTcpRuntimeConnection(
             path=path,
             args=tuple(args),
+            env=env,
+            working_directory=working_directory,
             port=port,
             connection_token=connection_token,
+            base_directory=base_directory,
+            session_idle_timeout_seconds=session_idle_timeout_seconds,
         )
 
     @staticmethod
-    def for_uri(url: str, *, connection_token: str | None = None) -> UriRuntimeConnection:
-        """Connect to an already-running runtime at the given URL.
+    def for_tcp(
+        host: str, port: int, *, connection_token: str | None = None
+    ) -> TcpRuntimeConnection:
+        """Connect to an already-running runtime over plaintext TCP.
 
         Args:
-            url: URL of the runtime to connect to. Accepts ``"port"``,
-                ``"host:port"``, or a full URL.
+            host: Hostname or IP address, without a scheme, port, path, or IPv6 brackets.
+            port: TCP port, from 1 through 65535.
             connection_token: Optional shared secret to authenticate the
                 connection. Required when the server was started with a
                 token; ignored by legacy servers without ``connect`` support.
         """
-        return UriRuntimeConnection(url=url, connection_token=connection_token)
+        return TcpRuntimeConnection(host=host, port=port, connection_token=connection_token)
 
     @staticmethod
     def for_inprocess(
         *,
         run_on_ui_thread: Callable[[Callable[[], None]], None | Awaitable[None]] | None = None,
+        base_directory: str | None = None,
+        session_idle_timeout_seconds: int | None = None,
     ) -> InProcessRuntimeConnection:
         """Host the runtime **in-process** via its native C ABI (FFI).
 
-        **Experimental.** The in-process (FFI) transport is experimental and its
-        behavior may change or be removed in a future release.
+        This is the default when no connection or environment override is supplied.
 
         Instead of spawning the runtime as a child process, the SDK loads the
         runtime's native shared library into this process and drives JSON-RPC
         over its C ABI.
 
-        Because the runtime loads into this single shared process, per-client
-        options that lower to environment variables or a working directory
-        cannot be honored: :attr:`CopilotClientOptions.env`,
-        :attr:`CopilotClientOptions.telemetry`, and
-        :attr:`CopilotClientOptions.working_directory` are rejected with this
-        transport. Set those on the host process before creating the client.
+        Typed authentication, telemetry and ``base_directory`` are scoped to this host.
+        Client-level ``env`` and ``working_directory`` are
+        unsupported; set working directories on individual sessions.
         Set ``COPILOT_CLI_PATH`` only when using an externally provisioned
         compatible runtime package.
 
@@ -768,14 +973,44 @@ class RuntimeConnection:
             ``python -m copilot download-runtime --in-process`` when automatic
             downloads are disabled.
         """
-        return InProcessRuntimeConnection(run_on_ui_thread=run_on_ui_thread)
+        return InProcessRuntimeConnection(
+            run_on_ui_thread=run_on_ui_thread,
+            base_directory=base_directory,
+            session_idle_timeout_seconds=session_idle_timeout_seconds,
+        )
+
+    @staticmethod
+    def for_default(
+        *,
+        base_directory: str | None = None,
+        session_idle_timeout_seconds: int | None = None,
+    ) -> SpawnedStdioRuntimeConnection | InProcessRuntimeConnection:
+        """Resolve the current deployment default without starting a runtime.
+
+        Reads COPILOT_SDK_DEFAULT_CONNECTION at invocation time. Unset or empty
+        selects in-process hosting; stdio and inprocess are case-insensitive.
+        """
+        connection = _resolve_default_connection(os.environ)
+        assert isinstance(connection, (SpawnedStdioRuntimeConnection, InProcessRuntimeConnection))
+        connection.base_directory = base_directory
+        connection.session_idle_timeout_seconds = session_idle_timeout_seconds
+        return connection
 
 
 @dataclass
-class ChildProcessRuntimeConnection(RuntimeConnection):
+class OwnedRuntimeConnection(RuntimeConnection):
+    """Settings for a runtime owned by this client."""
+
+    base_directory: str | None = None
+    session_idle_timeout_seconds: int | None = None
+
+
+@dataclass
+class ChildProcessRuntimeConnection(OwnedRuntimeConnection):
     """Base for :class:`RuntimeConnection` variants that spawn a runtime child process.
 
-    Construct via :meth:`RuntimeConnection.for_stdio` or :meth:`RuntimeConnection.for_tcp`.
+    Construct via :meth:`RuntimeConnection.for_spawned_stdio` or
+    :meth:`RuntimeConnection.for_spawned_tcp`.
     """
 
     path: str | None = None
@@ -790,24 +1025,25 @@ class ChildProcessRuntimeConnection(RuntimeConnection):
     When set, this mapping replaces the inherited process environment instead
     of extending it, so include ``PATH`` and anything else the runtime needs
     (the SDK still adds the variables it manages, such as the auth token).
-    Do not also set :attr:`CopilotClientOptions.env` — the client rejects
-    setting environment in both places. ``None`` inherits the client-level
-    env (or the current process env)."""
+    ``None`` inherits the current process env; an empty mapping has no inherited variables."""
+
+    working_directory: str | None = None
+    """Working directory for the child process. ``None`` inherits the current directory."""
 
 
 @dataclass
-class StdioRuntimeConnection(ChildProcessRuntimeConnection):
+class SpawnedStdioRuntimeConnection(ChildProcessRuntimeConnection):
     """Spawns a runtime child process and communicates over its stdin/stdout.
 
-    Construct via :meth:`RuntimeConnection.for_stdio`.
+    Construct via :meth:`RuntimeConnection.for_spawned_stdio`.
     """
 
 
 @dataclass
-class TcpRuntimeConnection(ChildProcessRuntimeConnection):
+class SpawnedTcpRuntimeConnection(ChildProcessRuntimeConnection):
     """Spawns a runtime child process listening on a TCP socket.
 
-    Construct via :meth:`RuntimeConnection.for_tcp`.
+    Construct via :meth:`RuntimeConnection.for_spawned_tcp`.
     """
 
     port: int = 0
@@ -818,25 +1054,27 @@ class TcpRuntimeConnection(ChildProcessRuntimeConnection):
 
 
 @dataclass
-class UriRuntimeConnection(RuntimeConnection):
-    """Connects to an already-running runtime at the specified URL.
+class TcpRuntimeConnection(RuntimeConnection):
+    """Connects to an already-running runtime over plaintext TCP without owning its lifetime.
 
-    Construct via :meth:`RuntimeConnection.for_uri`.
+    Construct via :meth:`RuntimeConnection.for_tcp`.
     """
 
-    url: str = ""
-    """URL of the runtime to connect to. Accepts ``"port"``, ``"host:port"``, or a full URL."""
+    host: str
+    """Hostname or IP address, without a scheme, port, path, or IPv6 brackets."""
+
+    port: int
+    """TCP port, from 1 through 65535."""
 
     connection_token: str | None = None
     """Shared secret to authenticate the connection."""
 
 
 @dataclass
-class InProcessRuntimeConnection(RuntimeConnection):
+class InProcessRuntimeConnection(OwnedRuntimeConnection):
     """Hosts the runtime in-process via its native C ABI (FFI).
 
-    **Experimental.** The in-process (FFI) transport is experimental and its
-    behavior may change or be removed in a future release.
+    This is the default transport.
 
     Construct via :meth:`RuntimeConnection.for_inprocess`. The runtime's native
     shared library is loaded into this process and JSON-RPC is driven over its
@@ -894,21 +1132,123 @@ class _GitHubTelemetryAdapter:
             logger.warning("Error handling gitHubTelemetry.event notification", exc_info=True)
 
 
-class _KerberosAuthAdapter:
-    """Adapts a ``kerberos_auth`` callback to the generated ``KerberosAuthHandler`` protocol."""
+class _CancellableCallbackAdapter:
+    """Runs client callbacks for runtime requests whose handlers are registered as cancellable.
 
-    def __init__(self, config: KerberosAuthConfig) -> None:
-        self._callback = config["callback"]
+    An awaitable a callback returns is cancelled when the runtime cancels the request
+    (``$/cancelRequest``) or the connection closes; requests after the close fail.
+    """
 
-    async def acquire(self, params: KerberosAuthAcquireRequest) -> KerberosAuthAcquireResult:
-        token = self._callback(params)
-        if inspect.isawaitable(token):
-            token = await token
-        return KerberosAuthAcquireResult(token=cast(str | None, token))
+    def __init__(self) -> None:
+        # Each in-flight callback with the future that ends its wait when the connection closes.
+        self._pending: set[tuple[asyncio.Future[object], asyncio.Future[None]]] = set()
+        self._closed = False
 
-    async def handle_request(self, params: dict) -> dict:
-        """Wire-level ``kerberosAuth.acquire`` handler, registered as cancellable."""
-        result = await self.acquire(KerberosAuthAcquireRequest.from_dict(params))
+    def cancel_pending(self) -> None:
+        """Cancel in-flight callbacks because the connection closed; later requests fail."""
+        self._closed = True
+        pending = list(self._pending)
+        self._pending.clear()
+        for lookup, closed in pending:
+            lookup.cancel()
+            if not closed.done():
+                closed.set_result(None)
+
+    async def _run_callback(self, label: str, invoke: Callable[[], object]) -> object:
+        if self._closed:
+            raise RuntimeError(f"{label} connection closed")
+        try:
+            result = invoke()
+        except asyncio.CancelledError:
+            # A synchronous call cannot receive the request's cancellation, so this came from the
+            # callback itself. The dispatcher answers only the request's own cancellation; a
+            # propagated CancelledError would leave the runtime waiting for its deadline.
+            raise RuntimeError(f"{label} request cancelled") from None
+        if inspect.isawaitable(result):
+            result = await self._await_callback(label, result)
+        return result
+
+    async def _await_callback(self, label: str, awaitable: Awaitable[object]) -> object:
+        lookup = asyncio.ensure_future(awaitable)
+        # Mark a failure as retrieved, so the late failure of a callback that ignored its
+        # cancellation is not reported as an unhandled task exception.
+        lookup.add_done_callback(lambda done: done.cancelled() or done.exception())
+        closed: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        entry = (lookup, closed)
+        self._pending.add(entry)
+        try:
+            # Unlike ``await lookup``, this raises CancelledError only when the request itself
+            # is cancelled, not when the callback's own awaitable is. A closed connection ends
+            # the wait even when the callback suppresses its cancellation.
+            await asyncio.wait({lookup, closed}, return_when=asyncio.FIRST_COMPLETED)
+        except BaseException:
+            lookup.cancel()
+            raise
+        finally:
+            self._pending.discard(entry)
+            closed.cancel()
+        if self._closed or not lookup.done():
+            # Discard the late result of a callback that ignored its cancellation, or that
+            # answered it in the same turn as the close.
+            raise RuntimeError(f"{label} connection closed")
+        if lookup.cancelled():
+            # The dispatcher answers only the request's own cancellation; a propagated
+            # CancelledError would leave the runtime waiting for its deadline.
+            raise RuntimeError(f"{label} request cancelled")
+        return lookup.result()
+
+
+class _NetworkAdapter(_CancellableCallbackAdapter):
+    """Adapts ``network`` callbacks to the generated ``NetworkHandler`` protocol."""
+
+    def __init__(self, config: NetworkConfig) -> None:
+        super().__init__()
+        self._resolve_proxy = config.get("resolve_proxy")
+        self._authenticate_negotiate = config.get("authenticate_negotiate")
+        self._authenticate_basic = config.get("authenticate_basic")
+
+    async def resolve_proxy(self, params: NetworkResolveProxyRequest) -> NetworkResolveProxyResult:
+        callback = self._resolve_proxy
+        if callback is None:
+            raise RuntimeError("No network resolve_proxy callback registered")
+        proxy = await self._run_callback("Proxy resolution", lambda: callback(params))
+        return NetworkResolveProxyResult(proxy=cast(str | None, proxy))
+
+    async def authenticate_negotiate(
+        self, params: NetworkAuthenticateNegotiateRequest
+    ) -> NetworkAuthenticateNegotiateResult:
+        callback = self._authenticate_negotiate
+        if callback is None:
+            raise RuntimeError("No network authenticate_negotiate callback registered")
+        token = await self._run_callback("Negotiate authentication", lambda: callback(params))
+        return NetworkAuthenticateNegotiateResult(token=cast(str | None, token))
+
+    async def authenticate_basic(
+        self, params: NetworkAuthenticateBasicRequest
+    ) -> NetworkAuthenticateBasicResult:
+        callback = self._authenticate_basic
+        if callback is None:
+            raise RuntimeError("No network authenticate_basic callback registered")
+        credentials = await self._run_callback("Basic authentication", lambda: callback(params))
+        if credentials is None:
+            return NetworkAuthenticateBasicResult()
+        return cast(NetworkAuthenticateBasicResult, credentials)
+
+    async def handle_resolve_proxy(self, params: dict) -> dict:
+        """Wire-level ``network.resolveProxy`` handler, registered as cancellable."""
+        result = await self.resolve_proxy(NetworkResolveProxyRequest.from_dict(params))
+        return result.to_dict()
+
+    async def handle_authenticate_negotiate(self, params: dict) -> dict:
+        """Wire-level ``network.authenticateNegotiate`` handler, registered as cancellable."""
+        result = await self.authenticate_negotiate(
+            NetworkAuthenticateNegotiateRequest.from_dict(params)
+        )
+        return result.to_dict()
+
+    async def handle_authenticate_basic(self, params: dict) -> dict:
+        """Wire-level ``network.authenticateBasic`` handler, registered as cancellable."""
+        result = await self.authenticate_basic(NetworkAuthenticateBasicRequest.from_dict(params))
         return result.to_dict()
 
 
@@ -969,6 +1309,42 @@ class _HooksAdapter:
 
 
 @dataclass
+class _InternalTestOptions:
+    """SDK test infrastructure only; unsupported and subject to change.
+
+    Supplied values override the owned runtime's startup environment, never
+    the host process environment. None preserves the inherited value.
+    """
+
+    copilot_api_url: str | None = None
+    github_api_url: str | None = None
+    proxy_url: str | None = None
+    no_proxy: str | None = None
+    ca_certificate_path: str | None = None
+
+    def _to_environment(self) -> dict[str, str]:
+        return {
+            key: value
+            for key, value in {
+                "COPILOT_API_URL": self.copilot_api_url,
+                "COPILOT_DEBUG_GITHUB_API_URL": self.github_api_url,
+                "HTTP_PROXY": self.proxy_url,
+                "HTTPS_PROXY": self.proxy_url,
+                "http_proxy": self.proxy_url,
+                "https_proxy": self.proxy_url,
+                "NO_PROXY": self.no_proxy,
+                "no_proxy": self.no_proxy,
+                "NODE_EXTRA_CA_CERTS": self.ca_certificate_path,
+                "SSL_CERT_FILE": self.ca_certificate_path,
+                "REQUESTS_CA_BUNDLE": self.ca_certificate_path,
+                "CURL_CA_BUNDLE": self.ca_certificate_path,
+                "GIT_SSL_CAINFO": self.ca_certificate_path,
+            }.items()
+            if value is not None
+        }
+
+
+@dataclass
 class _CopilotClientOptions:
     """Internal configuration carrier used by :class:`CopilotClient`.
 
@@ -976,28 +1352,27 @@ class _CopilotClientOptions:
     these options as keyword arguments directly.
     """
 
+    mode: CopilotClientMode
     entra: EntraAuthConfig | None = None
+    internal_test_options: _InternalTestOptions | None = None
     connection: RuntimeConnection | None = None
-    working_directory: str | None = None
-    log_level: LogLevel = "info"
-    env: dict[str, str] | None = None
+    log_level: LogLevel | None = None
     github_token: str | None = None
     base_directory: str | None = None
     builtin_plugin_directories: tuple[str, ...] = ()
     extension_launch_provider: ExtensionLaunchProviderHandler | None = None
     installation_confirmation_handler: InstallationConfirmationHandler | None = None
-    kerberos_auth: KerberosAuthConfig | None = None
+    network: NetworkConfig | None = None
     use_logged_in_user: bool | None = None
     telemetry: TelemetryConfig | None = None
     session_fs: SessionFsConfig | None = None
     request_handler: CopilotRequestHandler | None = None
     session_idle_timeout_seconds: int | None = None
     client_info: ClientInfo | None = None
-    on_list_models: Callable[[], list[ModelInfo] | Awaitable[list[ModelInfo]]] | None = None
+    on_list_models: Callable[[], list[Model] | Awaitable[list[Model]]] | None = None
     on_github_telemetry: Callable[[GitHubTelemetryNotification], None | Awaitable[None]] | None = (
         None
     )
-    mode: CopilotClientMode = "copilot-cli"
 
 
 # ============================================================================
@@ -1005,38 +1380,15 @@ class _CopilotClientOptions:
 # ============================================================================
 
 
-@dataclass
-class PingResponse:
-    """Response from ping"""
-
-    message: str  # Echo message with "pong: " prefix
-    timestamp: datetime  # Timestamp when the ping was processed
-    protocol_version: int  # Protocol version for SDK compatibility
-
-    @staticmethod
-    def from_dict(obj: Any) -> PingResponse:
-        assert isinstance(obj, dict)
-        message = obj.get("message")
-        timestamp = obj.get("timestamp")
-        protocol_version = obj.get("protocolVersion")
-        if message is None or timestamp is None or protocol_version is None:
-            raise ValueError(
-                f"Missing required fields in PingResponse: message={message}, "
-                f"timestamp={timestamp}, protocolVersion={protocol_version}"
-            )
-        timestamp_value = (
-            datetime.fromtimestamp(timestamp / 1000, tz=UTC)
-            if isinstance(timestamp, (int, float))
-            else from_datetime(timestamp)
-        )
-        return PingResponse(str(message), timestamp_value, int(protocol_version))
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["message"] = self.message
-        result["timestamp"] = self.timestamp.isoformat()
-        result["protocolVersion"] = self.protocol_version
-        return result
+async def _ping(client: JsonRpcClient, message: str | None) -> PingResult:
+    result = await client.request("ping", {"message": message})
+    timestamp = result.get("timestamp")
+    if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool):
+        result = {
+            **result,
+            "timestamp": datetime.fromtimestamp(timestamp / 1000, tz=UTC).isoformat(),
+        }
+    return PingResult.from_dict(result)
 
 
 @dataclass
@@ -1104,278 +1456,47 @@ class GetStatusResponse:
 class GetAuthStatusResponse:
     """Response from auth.getStatus"""
 
-    isAuthenticated: bool  # Whether the user is authenticated
-    authType: str | None = None  # Authentication type
+    is_authenticated: bool  # Whether the user is authenticated
+    auth_type: str | None = None  # Authentication type
     host: str | None = None  # GitHub host URL
     login: str | None = None  # User login name
-    statusMessage: str | None = None  # Human-readable status message
+    status_message: str | None = None  # Human-readable status message
 
     @staticmethod
     def from_dict(obj: Any) -> GetAuthStatusResponse:
         assert isinstance(obj, dict)
-        isAuthenticated = obj.get("isAuthenticated")
-        if isAuthenticated is None:
+        is_authenticated = obj.get("isAuthenticated")
+        if is_authenticated is None:
             raise ValueError("Missing required field 'isAuthenticated' in GetAuthStatusResponse")
-        authType = obj.get("authType")
+        auth_type = obj.get("authType")
         host = obj.get("host")
         login = obj.get("login")
-        statusMessage = obj.get("statusMessage")
+        status_message = obj.get("statusMessage")
         return GetAuthStatusResponse(
-            isAuthenticated=bool(isAuthenticated),
-            authType=authType,
+            is_authenticated=bool(is_authenticated),
+            auth_type=auth_type,
             host=host,
             login=login,
-            statusMessage=statusMessage,
+            status_message=status_message,
         )
 
     def to_dict(self) -> dict:
         result: dict = {}
-        result["isAuthenticated"] = self.isAuthenticated
-        if self.authType is not None:
-            result["authType"] = self.authType
+        result["isAuthenticated"] = self.is_authenticated
+        if self.auth_type is not None:
+            result["authType"] = self.auth_type
         if self.host is not None:
             result["host"] = self.host
         if self.login is not None:
             result["login"] = self.login
-        if self.statusMessage is not None:
-            result["statusMessage"] = self.statusMessage
+        if self.status_message is not None:
+            result["statusMessage"] = self.status_message
         return result
 
 
 # ============================================================================
 # Model Types
 # ============================================================================
-
-
-@dataclass
-class ModelVisionLimits:
-    """Vision-specific limits"""
-
-    supported_media_types: list[str] | None = None
-    max_prompt_images: int | None = None
-    max_prompt_image_size: int | None = None
-
-    @staticmethod
-    def from_dict(obj: Any) -> ModelVisionLimits:
-        assert isinstance(obj, dict)
-        supported_media_types = obj.get("supported_media_types")
-        max_prompt_images = obj.get("max_prompt_images")
-        max_prompt_image_size = obj.get("max_prompt_image_size")
-        return ModelVisionLimits(
-            supported_media_types=supported_media_types,
-            max_prompt_images=max_prompt_images,
-            max_prompt_image_size=max_prompt_image_size,
-        )
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        if self.supported_media_types is not None:
-            result["supported_media_types"] = self.supported_media_types
-        if self.max_prompt_images is not None:
-            result["max_prompt_images"] = self.max_prompt_images
-        if self.max_prompt_image_size is not None:
-            result["max_prompt_image_size"] = self.max_prompt_image_size
-        return result
-
-
-@dataclass
-class ModelLimits:
-    """Model limits"""
-
-    max_prompt_tokens: int | None = None
-    max_context_window_tokens: int | None = None
-    vision: ModelVisionLimits | None = None
-    # Last, so existing positional constructor calls keep their meaning.
-    max_output_tokens: int | None = None
-
-    @staticmethod
-    def from_dict(obj: Any) -> ModelLimits:
-        assert isinstance(obj, dict)
-        max_prompt_tokens = obj.get("max_prompt_tokens")
-        max_output_tokens = obj.get("max_output_tokens")
-        max_context_window_tokens = obj.get("max_context_window_tokens")
-        vision_dict = obj.get("vision")
-        vision = ModelVisionLimits.from_dict(vision_dict) if vision_dict else None
-        return ModelLimits(
-            max_prompt_tokens=max_prompt_tokens,
-            max_output_tokens=max_output_tokens,
-            max_context_window_tokens=max_context_window_tokens,
-            vision=vision,
-        )
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        if self.max_prompt_tokens is not None:
-            result["max_prompt_tokens"] = self.max_prompt_tokens
-        if self.max_output_tokens is not None:
-            result["max_output_tokens"] = self.max_output_tokens
-        if self.max_context_window_tokens is not None:
-            result["max_context_window_tokens"] = self.max_context_window_tokens
-        if self.vision is not None:
-            result["vision"] = self.vision.to_dict()
-        return result
-
-
-@dataclass
-class ModelSupports:
-    """Model support flags"""
-
-    vision: bool = False
-    reasoning_effort: bool = False  # Whether this model supports reasoning effort
-
-    @staticmethod
-    def from_dict(obj: Any) -> ModelSupports:
-        assert isinstance(obj, dict)
-        vision = obj.get("vision", False)
-        reasoning_effort = obj.get("reasoningEffort", False)
-        return ModelSupports(vision=bool(vision), reasoning_effort=bool(reasoning_effort))
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["vision"] = self.vision
-        result["reasoningEffort"] = self.reasoning_effort
-        return result
-
-
-@dataclass
-class ModelCapabilities:
-    """Model capabilities and limits"""
-
-    supports: ModelSupports
-    limits: ModelLimits
-
-    @staticmethod
-    def from_dict(obj: Any) -> ModelCapabilities:
-        assert isinstance(obj, dict)
-        supports_dict = obj.get("supports")
-        limits_dict = obj.get("limits")
-        supports = ModelSupports.from_dict(supports_dict) if supports_dict else ModelSupports()
-        limits = ModelLimits.from_dict(limits_dict) if limits_dict else ModelLimits()
-        return ModelCapabilities(supports=supports, limits=limits)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["supports"] = self.supports.to_dict()
-        result["limits"] = self.limits.to_dict()
-        return result
-
-
-@dataclass
-class ModelPolicy:
-    """Model policy state"""
-
-    state: str  # "enabled", "disabled", or "unconfigured"
-    terms: str
-
-    @staticmethod
-    def from_dict(obj: Any) -> ModelPolicy:
-        assert isinstance(obj, dict)
-        state = obj.get("state")
-        terms = obj.get("terms")
-        if state is None or terms is None:
-            raise ValueError(
-                f"Missing required fields in ModelPolicy: state={state}, terms={terms}"
-            )
-        return ModelPolicy(state=str(state), terms=str(terms))
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["state"] = self.state
-        result["terms"] = self.terms
-        return result
-
-
-@dataclass
-class ModelBilling:
-    """Model billing information"""
-
-    multiplier: float | None = None
-    token_prices: ModelBillingTokenPrices | None = None
-
-    @staticmethod
-    def from_dict(obj: Any) -> ModelBilling:
-        assert isinstance(obj, dict)
-        multiplier = obj.get("multiplier")
-        tp = obj.get("tokenPrices")
-        token_prices = ModelBillingTokenPrices.from_dict(tp) if tp is not None else None
-        return ModelBilling(
-            multiplier=float(multiplier) if multiplier is not None else None,
-            token_prices=token_prices,
-        )
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        if self.multiplier is not None:
-            result["multiplier"] = self.multiplier
-        if self.token_prices is not None:
-            result["tokenPrices"] = self.token_prices.to_dict()
-        return result
-
-
-@dataclass
-class ModelInfo:
-    """Information about an available model"""
-
-    id: str  # Model identifier (e.g., "claude-sonnet-4.5")
-    name: str  # Display name
-    capabilities: ModelCapabilities  # Model capabilities and limits
-    policy: ModelPolicy | None = None  # Policy state
-    billing: ModelBilling | None = None  # Billing information
-    # Supported reasoning effort levels (only present if model supports reasoning effort)
-    supported_reasoning_efforts: list[str] | None = None
-    # Default reasoning effort level (only present if model supports reasoning effort)
-    default_reasoning_effort: str | None = None
-    # Native serving provider; absent for unattributed and configured BYOK models.
-    provider: ModelProviderRef | None = None
-
-    @staticmethod
-    def from_dict(obj: Any) -> ModelInfo:
-        assert isinstance(obj, dict)
-        id = obj.get("id")
-        name = obj.get("name")
-        capabilities_dict = obj.get("capabilities")
-        if id is None or name is None or capabilities_dict is None:
-            raise ValueError(
-                f"Missing required fields in ModelInfo: id={id}, name={name}, "
-                f"capabilities={capabilities_dict}"
-            )
-        capabilities = ModelCapabilities.from_dict(capabilities_dict)
-        policy_dict = obj.get("policy")
-        policy = ModelPolicy.from_dict(policy_dict) if policy_dict else None
-        billing_dict = obj.get("billing")
-        billing = ModelBilling.from_dict(billing_dict) if billing_dict else None
-        supported_reasoning_efforts = obj.get("supportedReasoningEfforts")
-        default_reasoning_effort = obj.get("defaultReasoningEffort")
-        provider_dict = obj.get("provider")
-        return ModelInfo(
-            id=str(id),
-            name=str(name),
-            capabilities=capabilities,
-            policy=policy,
-            billing=billing,
-            supported_reasoning_efforts=supported_reasoning_efforts,
-            default_reasoning_effort=default_reasoning_effort,
-            provider=ModelProviderRef.from_dict(provider_dict)
-            if provider_dict is not None
-            else None,
-        )
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["id"] = self.id
-        result["name"] = self.name
-        result["capabilities"] = self.capabilities.to_dict()
-        if self.provider is not None:
-            result["provider"] = self.provider.to_dict()
-        if self.policy is not None:
-            result["policy"] = self.policy.to_dict()
-        if self.billing is not None:
-            result["billing"] = self.billing.to_dict()
-        if self.supported_reasoning_efforts is not None:
-            result["supportedReasoningEfforts"] = self.supported_reasoning_efforts
-        if self.default_reasoning_effort is not None:
-            result["defaultReasoningEffort"] = self.default_reasoning_effort
-        return result
 
 
 # ============================================================================
@@ -1448,6 +1569,13 @@ class SessionMetadata:
     is_remote: bool  # Whether the session is remote
     summary: str | None = None  # Optional summary of the session
     context: SessionContext | None = None  # Working directory context
+    # Name of the client that created the session (for example "github/cli").
+    client_name: str | None = None
+    # Name of the client that most recently ran the session: the client that
+    # created it, or a client that resumed it and then ran it. Resuming a session
+    # only to observe it does not change this. None when unknown, such as for
+    # sessions persisted before this field existed.
+    last_client_name: str | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> SessionMetadata:
@@ -1471,6 +1599,8 @@ class SessionMetadata:
             is_remote=bool(is_remote),
             summary=summary,
             context=context,
+            client_name=obj.get("clientName"),
+            last_client_name=obj.get("lastClientName"),
         )
 
     def to_dict(self) -> dict:
@@ -1483,6 +1613,10 @@ class SessionMetadata:
             result["summary"] = self.summary
         if self.context is not None:
             result["context"] = self.context.to_dict()
+        if self.client_name is not None:
+            result["clientName"] = self.client_name
+        if self.last_client_name is not None:
+            result["lastClientName"] = self.last_client_name
         return result
 
 
@@ -1611,7 +1745,7 @@ HandlerUnsubcribe = Callable[[], None]
 
 # Minimum protocol version this SDK can communicate with.
 # Servers reporting a version below this are rejected.
-_MIN_PROTOCOL_VERSION = 3
+_MIN_PROTOCOL_VERSION = 4
 _RUNTIME_SHUTDOWN_TIMEOUT_SECONDS = 10
 _CLI_PROCESS_GRACEFUL_EXIT_TIMEOUT_SECONDS = 10
 _CLI_PROCESS_EXIT_TIMEOUT_SECONDS = 5
@@ -1652,109 +1786,585 @@ def _extract_transform_callbacks(
     return wire_payload, callbacks
 
 
+_SESSION_WIRE_GROUPS: dict[str, tuple[str, ...]] = {
+    "allowMultipleToolCalls": ("inference", "allowMultipleToolCalls"),
+    "allowedModels": ("policy", "allowedModels"),
+    "reasoningEffort": ("inference", "reasoningEffort"),
+    "reasoningSummary": ("inference", "reasoningSummary"),
+    "enableExperimentalMode": ("experiments", "enableExperimentalMode"),
+    "contextTier": ("inference", "contextTier"),
+    "modelCapabilities": ("inference", "capabilities"),
+    "largeOutput": ("tools", "largeOutput"),
+    "tools": ("tools", "definitions"),
+    "canvases": ("canvases", "definitions"),
+    "requestCanvasRenderer": ("canvases", "requestRenderer"),
+    "requestExtensions": ("extensions", "enabled"),
+    "extensionSdkPath": ("extensions", "sdkPath"),
+    "extensionInfo": ("extensions", "identity"),
+    "canvasProvider": ("canvases", "provider"),
+    "commands": ("interaction", "commands"),
+    "toolSearch": ("tools", "search"),
+    "imageGeneration": ("tools", "imageGeneration"),
+    "availableTools": ("tools", "availableTools"),
+    "excludedTools": ("tools", "excludedTools"),
+    "excludedBuiltinAgents": ("agents", "excludedBuiltinAgents"),
+    "includedBuiltinAgents": ("agents", "includedBuiltinAgents"),
+    "includedBuiltinSkills": ("skills", "includedBuiltinSkills"),
+    "defaultProvider": ("inference", "defaultProvider"),
+    "capi": ("github", "capi"),
+    "providers": ("inference", "providers"),
+    "models": ("inference", "models"),
+    "enableSessionTelemetry": ("github", "telemetryEnabled"),
+    "enableCitations": ("inference", "enableCitations"),
+    "enableFileChangeTracking": ("filesystem", "trackFileChanges"),
+    "sessionLimits": ("execution", "limits"),
+    "autopilot": ("execution", "autopilot"),
+    "skipCustomInstructions": ("instructions", "skipCustomInstructions"),
+    "customAgentsLocalOnly": ("agents", "localDiscoveryOnly"),
+    "coauthorEnabled": ("git", "coauthorEnabled"),
+    "manageScheduleEnabled": ("tools", "manageScheduleEnabled"),
+    "onPermissionRequest": ("permissions", "onRequest"),
+    "onMcpAuthRequest": ("mcp", "onAuthRequest"),
+    "onUserInputRequest": ("interaction", "onUserInputRequest"),
+    "askUserVariant": ("interaction", "askUserVariant"),
+    "onElicitationRequest": ("interaction", "onElicitationRequest"),
+    "enableMcpApps": ("mcp", "enableApps"),
+    "githubMcpToolConfig": ("github", "mcp"),
+    "onExitPlanModeRequest": ("interaction", "onExitPlanModeRequest"),
+    "onAutoModeSwitchRequest": ("interaction", "onAutoModeSwitchRequest"),
+    "autoModeRecovery": ("interaction", "autoModeRecovery"),
+    "hooks": ("hooks", "hasHandlers"),
+    "additionalDirectories": ("filesystem", "additionalDirectories"),
+    "streaming": ("events", "streaming"),
+    "includeSubAgentStreamingEvents": ("events", "includeSubAgentStreamingEvents"),
+    "mcpOAuthTokenStorage": ("mcp", "oauthTokenStorage"),
+    "authClientIdMetadataUrl": ("mcp", "authClientIdMetadataUrl"),
+    "mcpServers": ("mcp", "servers"),
+    "customAgents": ("agents", "definitions"),
+    "defaultAgent": ("agents", "default"),
+    "agent": ("agents", "selected"),
+    "skillDirectories": ("skills", "directories"),
+    "skillProvider": ("skills", "provider"),
+    "agentDirectories": ("agents", "directories"),
+    "hookDirectories": ("hooks", "directories"),
+    "pluginDirectories": ("plugins", "directories"),
+    "instructionDirectories": ("instructions", "directories"),
+    "disabledSkills": ("skills", "disabledSkills"),
+    "disabledMcpServers": ("mcp", "disabledServers"),
+    "sandboxConfig": ("permissions", "sandbox"),
+    "infiniteSessions": ("state", "infiniteSessions"),
+    "memory": ("state", "memory"),
+    "gitHubToken": ("github", "token"),
+    "gitHubTokenProvider": ("github", "tokenProvider"),
+    "enableManagedSettings": ("github", "fetchManagedSettings"),
+    "excludedManagedSettings": ("policy", "excludedManagedSettings"),
+    "enforceManagedModelDefaults": ("policy", "enforceManagedModelDefaults"),
+    "interactiveUser": ("github", "interactiveUser"),
+    "permissionMode": ("permissions", "mode"),
+    "managedSettings": ("policy", "managedSettings"),
+    "skipEmbeddingRetrieval": ("state", "skipEmbeddingRetrieval"),
+    "embeddingCacheStorage": ("state", "embeddingCacheStorage"),
+    "organizationCustomInstructions": ("instructions", "organizationText"),
+    "enableOnDemandInstructionDiscovery": ("instructions", "onDemandDiscovery"),
+    "enableFileHooks": ("hooks", "enableRepositoryHooks"),
+    "enableHostGitOperations": ("git", "enableHostGitOperations"),
+    "enableSessionStore": ("state", "enableCrossSessionStore"),
+    "enableSkills": ("skills", "enabled"),
+    "onEvent": ("events", "onEvent"),
+    "createSessionFsProvider": ("state", "createSessionFsProvider"),
+    "featureFlags": ("experiments", "flags"),
+    "expAssignments": ("experiments", "assignments"),
+    "trustWorkingDirectory": ("filesystem", "trustWorkingDirectory"),
+    "refreshCustomInstructions": ("instructions", "refreshCustomInstructions"),
+    "openCanvases": ("canvases", "open"),
+    "requestPermission": ("permissions", "request"),
+    "requestUserInput": ("interaction", "requestUserInput"),
+    "requestShellAuthentication": ("interaction", "requestShellAuthentication"),
+    "requestElicitation": ("interaction", "requestElicitation"),
+    "requestExitPlanMode": ("interaction", "requestExitPlanMode"),
+    "requestAutoModeSwitch": ("interaction", "requestAutoModeSwitch"),
+    "requestAutoModeRecovery": ("interaction", "requestAutoModeRecovery"),
+    "hasSkillProvider": ("skills", "hasProvider"),
+    "hasMemoryStore": ("state", "hasMemoryStore"),
+    "gitHubTokenProviderRegistrationId": ("github", "tokenProviderRegistrationId"),
+    "configDir": ("configDirectory",),
+    "envValueMode": ("mcp", "envValueMode"),
+    "requestMcpApps": ("mcp", "enableApps"),
+    "isExperimentalMode": ("experiments", "enableExperimentalMode"),
+    "enableGitHubTelemetryForwarding": ("github", "telemetryForwarding"),
+    "disableResume": ("suppressResumeEvent",),
+    "webSearch": ("tools", "webSearch"),
+    "shell": ("tools", "shell"),
+    "managedMcpServers": ("mcp", "managedServers"),
+    "ignoredSkillsLocations": ("skills", "ignoredLocations"),
+    "allowAllMcpServerInstructions": ("mcp", "allowAllServerInstructions"),
+    "autopilotContinuation": ("execution", "autopilotContinuation"),
+}
+
+
+def _group_session_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for name, value in payload.items():
+        path = _SESSION_WIRE_GROUPS.get(name, (name,))
+        if len(path) == 1:
+            result[path[0]] = value
+        else:
+            result.setdefault(path[0], {})[path[1]] = value
+    return result
+
+
 _DEFAULT_CONNECTION_ENV_VAR = "COPILOT_SDK_DEFAULT_CONNECTION"
+
+
+def _session_ids_overlap(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    if not _is_uuid_session_id(left) or not _is_uuid_session_id(right):
+        return False
+    left, right = left.lower(), right.lower()
+    return left.startswith(right) or right.startswith(left)
+
+
+def _is_abbreviated_uuid_prefix(session_id: str) -> bool:
+    return (
+        7 <= len(session_id) < 36
+        and all(character in "0123456789abcdefABCDEF" for character in session_id[:7])
+        and all(character in "0123456789abcdefABCDEF-" for character in session_id[7:])
+    )
+
+
+def _is_uuid_session_id(session_id: str) -> bool:
+    return _is_abbreviated_uuid_prefix(session_id) or (
+        len(session_id) == 36
+        and all(
+            character == "-" if index in (8, 13, 18, 23) else character in "0123456789abcdefABCDEF"
+            for index, character in enumerate(session_id)
+        )
+    )
+
+
+class _SessionInitializationLock(asyncio.Lock):
+    def __init__(self) -> None:
+        super().__init__()
+        self.users = 0
+        self.inline_reservation: ConcurrentFuture[None] | None = None
+
+    async def acquire(self) -> Literal[True]:
+        reservation = self.inline_reservation
+        if reservation is not None:
+            await asyncio.shield(asyncio.wrap_future(reservation))
+        return await super().acquire()
+
+    def locked(self) -> bool:
+        return self.inline_reservation is not None or super().locked()
+
+
+class _SessionInitialization:
+    def __init__(self, locks: list[_SessionInitializationLock]):
+        self._locks = locks
+        self.acquired = 0
+
+    def release(self) -> None:
+        for lock in reversed(self._locks[: self.acquired]):
+            lock.release()
+        for lock in self._locks:
+            lock.users -= 1
 
 
 def _resolve_default_connection(env: Mapping[str, str]) -> RuntimeConnection:
     """Resolve the transport when the caller supplies no explicit connection.
 
     Honors the ``COPILOT_SDK_DEFAULT_CONNECTION`` override (``"inprocess"`` or
-    ``"stdio"``); defaults to stdio. Matches the Node/.NET/Rust default-transport
+    ``"stdio"``); defaults to in-process. Matches the Node/.NET/Rust default-transport
     override so the CI matrix can run the whole suite under either transport.
     """
     value = env.get(_DEFAULT_CONNECTION_ENV_VAR)
     if value is None or value == "":
-        return RuntimeConnection.for_stdio()
+        return RuntimeConnection.for_inprocess()
     normalized = value.strip().lower()
     if normalized == "inprocess":
         return RuntimeConnection.for_inprocess()
     if normalized == "stdio":
-        return RuntimeConnection.for_stdio()
+        return RuntimeConnection.for_spawned_stdio()
     raise ValueError(
         f"Invalid {_DEFAULT_CONNECTION_ENV_VAR}={value!r}. Expected 'inprocess', 'stdio', or unset."
     )
 
 
-def _validate_environment_options(
+class SessionPermissionOptions(TypedDict, total=False):
+    """Options for session permissions."""
+
+    on_request: _PermissionHandlerFn | None
+    sandbox: SandboxConfig | None
+    mode: PermissionMode | None
+
+
+class SessionInferenceOptions(TypedDict, total=False):
+    """Options for session inference."""
+
+    reasoning_effort: ReasoningEffort | None
+    allow_multiple_tool_calls: bool | None
+    reasoning_summary: ReasoningSummary | None
+    context_tier: ContextTier | None
+    providers: list[NamedProviderConfig] | None
+    models: list[ProviderModelConfig] | None
+    # Omit to create without a default or preserve it on resume; None clears it.
+    # Requires github.capi.enabled=False and a configured provider name.
+    default_provider: str | None
+    enable_citations: bool | None
+    capabilities: ModelCapabilitiesOverride | None
+
+
+class SessionExperimentOptions(TypedDict, total=False):
+    """Options for session experiments."""
+
+    enable_experimental_mode: bool | None
+    flags: dict[str, bool] | None
+    assignments: CopilotExpAssignmentResponse | None
+
+
+class SessionToolOptions(TypedDict, total=False):
+    """Options for session tools."""
+
+    definitions: list[Tool] | None
+    search: ToolSearchConfig | None
+    image_generation: ImageGenerationConfig | None
+    available_tools: list[str] | ToolSet | None
+    excluded_tools: list[str] | ToolSet | None
+    manage_schedule_enabled: bool | None
+    large_output: LargeToolOutputConfig | None
+
+
+class SessionInteractionOptions(TypedDict, total=False):
+    """Options for session interaction."""
+
+    on_user_input_request: UserInputHandler | None
+    on_shell_authentication_request: ShellAuthenticationHandler | None
+    ask_user_variant: AskUserVariant | None
+    commands: list[CommandDefinition] | None
+    on_elicitation_request: ElicitationHandler | None
+    on_exit_plan_mode_request: ExitPlanModeHandler | None
+    on_auto_mode_switch_request: AutoModeSwitchHandler | None
+    auto_mode_recovery: bool
+
+
+class SessionHookOptions(TypedDict, total=False):
+    """Options for session hooks."""
+
+    handlers: SessionHooks | None
+    enable_repository_hooks: bool | None
+    directories: list[str] | None
+
+
+class SessionFilesystemOptions(TypedDict, total=False):
+    """Options for session filesystem."""
+
+    additional_directories: list[str] | None
+    track_file_changes: bool | None
+
+
+class CreateSessionFilesystemOptions(SessionFilesystemOptions, total=False):
+    trust_working_directory: Literal["session", "user"] | None
+
+
+class SessionGitHubOptions(TypedDict, total=False):
+    """Options for session github."""
+
+    capi: CapiSessionOptions | None
+    telemetry_enabled: bool | None
+    token: str | None
+    token_provider: GitHubTokenProvider | None
+    fetch_managed_settings: bool | None
+    interactive_user: bool | None
+    mcp: GitHubMcpToolConfig | None
+
+
+class SessionAgentOptions(TypedDict, total=False):
+    """Options for session agents."""
+
+    excluded_builtin_agents: list[str] | None
+    included_builtin_agents: list[str] | None
+    local_discovery_only: bool | None
+    definitions: list[CustomAgentConfig] | None
+    default: DefaultAgentConfig | dict[str, Any] | None
+    selected: str | None
+    directories: list[str] | None
+
+
+class SessionExecutionOptions(TypedDict, total=False):
+    """Options for session execution."""
+
+    limits: SessionLimitsConfig | None
+    autopilot: AutopilotOptions | None
+
+
+class SessionInstructionOptions(TypedDict, total=False):
+    """Options for session instructions."""
+
+    skip_custom_instructions: bool | None
+
+    organization_text: str | None
+    on_demand_discovery: bool | None
+    directories: list[str] | None
+
+
+class CreateSessionInstructionOptions(SessionInstructionOptions, total=False):
+    refresh_custom_instructions: bool | None
+
+
+class SessionGitOptions(TypedDict, total=False):
+    """Options for session git."""
+
+    coauthor_enabled: bool | None
+    enable_host_git_operations: bool | None
+
+
+class SessionEventOptions(TypedDict, total=False):
+    """Options for session events."""
+
+    streaming: bool | None
+    include_sub_agent_streaming_events: bool | None
+    on_event: Callable[[SessionEvent], None] | None
+
+
+class SessionMcpOptions(TypedDict, total=False):
+    """Options for session mcp."""
+
+    servers: dict[str, MCPServerConfig] | None
+    oauth_token_storage: Literal["persistent", "in-memory"] | None
+    auth_client_id_metadata_url: str | None
+    disabled_servers: list[str] | None
+    on_auth_request: McpAuthHandler | None
+    enable_apps: bool
+
+
+class SessionStateOptions(TypedDict, total=False):
+    """Options for session state."""
+
+    embedding_cache_storage: Literal["persistent", "in-memory"] | None
+    skip_embedding_retrieval: bool | None
+    enable_cross_session_store: bool | None
+    infinite_sessions: InfiniteSessionConfig | None
+    memory: MemoryConfiguration | None
+    create_session_fs_provider: CreateSessionFsHandler | None
+
+
+class SessionSkillOptions(TypedDict, total=False):
+    """Options for session skills."""
+
+    enabled: bool | None
+    included_builtin_skills: list[str] | None
+    directories: list[str] | None
+    provider: SkillProvider | None
+    disabled_skills: list[str] | None
+
+
+class SessionPluginOptions(TypedDict, total=False):
+    """Options for session plugins."""
+
+    directories: list[str] | None
+
+
+class SessionCanvasOptions(TypedDict, total=False):
+    """Options for session canvases."""
+
+    definitions: list[CanvasDeclaration] | None
+    request_renderer: bool | None
+    provider: CanvasProviderIdentity | None
+    handler: CanvasHandler | None
+
+
+class ResumeSessionCanvasOptions(SessionCanvasOptions, total=False):
+    open: list[OpenCanvasInstance] | None
+
+
+class SessionExtensionOptions(TypedDict, total=False):
+    """Options for session extensions."""
+
+    enabled: bool | None
+    sdk_path: str | None
+    identity: ExtensionInfo | None
+
+
+class SessionPolicyOptions(TypedDict, total=False):
+    """Options for session policy."""
+
+    excluded_managed_settings: list[str] | None
+    enforce_managed_model_defaults: bool | None
+    managed_settings: ManagedSettings | None
+
+
+class CreateSessionOptions(TypedDict, total=False):
+    """Keyword options accepted by CopilotClient.create_session."""
+
+    model: str | None
+    session_id: str | None
+    name: str | None
+    client_name: str | None
+    system_message: SystemMessageConfig | None
+    working_directory: str | None
+    diagnostics: DiagnosticsConfiguration | None
+    cloud: CloudSessionOptions | None
+    permissions: SessionPermissionOptions | None
+    inference: SessionInferenceOptions | None
+    experiments: SessionExperimentOptions | None
+    tools: SessionToolOptions | None
+    interaction: SessionInteractionOptions | None
+    hooks: SessionHookOptions | None
+    filesystem: CreateSessionFilesystemOptions | None
+    github: SessionGitHubOptions | None
+    agents: SessionAgentOptions | None
+    execution: SessionExecutionOptions | None
+    instructions: CreateSessionInstructionOptions | None
+    git: SessionGitOptions | None
+    events: SessionEventOptions | None
+    mcp: SessionMcpOptions | None
+    state: SessionStateOptions | None
+    config_directory: str | None
+    enable_config_discovery: bool | None
+    skills: SessionSkillOptions | None
+    plugins: SessionPluginOptions | None
+    canvases: SessionCanvasOptions | None
+    extensions: SessionExtensionOptions | None
+    policy: SessionPolicyOptions | None
+
+
+class ResumeSessionOptions(TypedDict, total=False):
+    """Keyword options accepted by CopilotClient.resume_session."""
+
+    model: str | None
+    client_name: str | None
+    system_message: SystemMessageConfig | None
+    working_directory: str | None
+    diagnostics: DiagnosticsConfiguration | None
+    continue_pending_work: bool | None
+    suppress_resume_event: bool | None
+    allow_transcript_recovery: bool | None
+    permissions: SessionPermissionOptions | None
+    inference: SessionInferenceOptions | None
+    experiments: SessionExperimentOptions | None
+    tools: SessionToolOptions | None
+    interaction: SessionInteractionOptions | None
+    hooks: SessionHookOptions | None
+    filesystem: SessionFilesystemOptions | None
+    github: SessionGitHubOptions | None
+    agents: SessionAgentOptions | None
+    execution: SessionExecutionOptions | None
+    instructions: SessionInstructionOptions | None
+    git: SessionGitOptions | None
+    events: SessionEventOptions | None
+    mcp: SessionMcpOptions | None
+    state: SessionStateOptions | None
+    config_directory: str | None
+    enable_config_discovery: bool | None
+    skills: SessionSkillOptions | None
+    plugins: SessionPluginOptions | None
+    canvases: ResumeSessionCanvasOptions | None
+    extensions: SessionExtensionOptions | None
+    policy: SessionPolicyOptions | None
+
+
+class ClientObservabilityOptions(TypedDict, total=False):
+    """Options for client observability."""
+
+    log_level: LogLevel | None
+    telemetry: TelemetryConfig | None
+
+
+class ClientGitHubOptions(TypedDict, total=False):
+    """Options for client github."""
+
+    token: str | None
+    use_logged_in_user: bool | None
+    on_telemetry: Callable[[GitHubTelemetryNotification], None | Awaitable[None]] | None
+
+
+class ClientPluginOptions(TypedDict, total=False):
+    """Options for client plugins."""
+
+    builtin_directories: Sequence[str] | None
+
+
+class ClientExtensionOptions(TypedDict, total=False):
+    """Options for client extensions."""
+
+    launch_provider: ExtensionLaunchProviderHandler | None
+
+
+class ClientInstallationOptions(TypedDict, total=False):
+    """Options for client installations."""
+
+    confirmation_handler: InstallationConfirmationHandler | None
+
+
+class ClientModelOptions(TypedDict, total=False):
+    """Options for client models."""
+
+    request_handler: CopilotRequestHandler | None
+    on_list_models: Callable[[], list[Model] | Awaitable[list[Model]]] | None
+
+
+def _validate_option_group(name: str, value: Any, schema: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise TypeError(f"{name} must be an options dictionary")
+    unknown = value.keys() - schema.__annotations__.keys()
+    if unknown:
+        raise TypeError(f"Unknown {name} option(s): {', '.join(sorted(unknown))}")
+
+
+def _validate_connection_options(
     options: _CopilotClientOptions, connection: RuntimeConnection
 ) -> None:
-    """Validate env/telemetry/working-directory options against the transport.
-
-    Per-client environment is only representable for child-process transports
-    (each client owns its own OS process). The in-process (FFI) transport loads
-    the native runtime into the shared host process, whose single environment
-    block and process-global working directory cannot carry per-client values,
-    so options that lower to them are rejected there (fail loud, not silent).
-    """
-    if isinstance(connection, InProcessRuntimeConnection):
-        if options.env is not None:
-            raise ValueError(
-                "env is not supported with RuntimeConnection.for_inprocess(): the "
-                "in-process transport loads the native runtime into the shared host "
-                "process, whose single environment block cannot carry per-client "
-                "values. Set the variables on the host process environment instead."
-            )
-        if options.telemetry is not None:
-            raise ValueError(
-                "telemetry is not supported with RuntimeConnection.for_inprocess(): "
-                "telemetry configuration is lowered to environment variables read by "
-                "native runtime code running in the shared host process, so per-client "
-                "telemetry cannot be honored in-process. Configure telemetry via the "
-                "host process environment, or use a child-process transport."
-            )
-        if options.working_directory is not None:
-            raise ValueError(
-                "working_directory is not supported with RuntimeConnection.for_inprocess(): "
-                "the native runtime shares the host process working directory, so a "
-                "per-client working directory cannot be honored in-process. Use a "
-                "child-process "
-                "transport, or set the process working directory before creating the client."
-            )
+    """Reject runtime startup settings on attached runtimes."""
+    if not isinstance(connection, TcpRuntimeConnection):
         return
-
-    if (
-        isinstance(connection, ChildProcessRuntimeConnection)
-        and connection.env is not None
-        and options.env is not None
-    ):
+    runtime_only_options = {
+        "runtime.base_directory": options.base_directory,
+        "github.token": options.github_token,
+        "github.use_logged_in_user": options.use_logged_in_user,
+        "observability.telemetry": options.telemetry,
+        "runtime.session_idle_timeout_seconds": options.session_idle_timeout_seconds,
+        "observability.log_level": options.log_level,
+        "_test_options": options.internal_test_options,
+    }
+    unsupported = [name for name, value in runtime_only_options.items() if value is not None]
+    if unsupported:
         raise ValueError(
-            "Set environment variables via either the client-level env argument or "
-            "ChildProcessRuntimeConnection.env, not both. Prefer the connection-level "
-            "env for child-process transports."
+            "Cannot configure runtime startup options for an attached runtime: "
+            + ", ".join(unsupported)
         )
 
 
 class CopilotClient:
     """
-    Main client for interacting with the Copilot CLI.
+    Main client for interacting with the Copilot runtime.
 
-    The CopilotClient manages the connection to the Copilot CLI server and provides
-    methods to create and manage conversation sessions. It can either spawn a CLI
-    server process or connect to an existing server.
-
-    The client supports both stdio (default) and TCP transport modes for
-    communication with the CLI server.
+    The CopilotClient hosts the native runtime in-process by default and provides
+    methods to create and manage conversation sessions. Explicit stdio and TCP
+    connections can spawn a runtime process or connect to an existing server.
 
     Example:
-        >>> # Create a client with default options (spawns CLI server)
-        >>> client = CopilotClient()
+        >>> # Create a client with default transport (in-process runtime)
+        >>> client = CopilotClient(mode="coding-agent")
         >>> await client.start()
-        >>>
+
         >>> # Create a session and send a message
         >>> session = await client.create_session(
-        ...     on_permission_request=PermissionHandler.approve_all,
-        ...     model="gpt-4",
+        ...     model="gpt-5.4", permissions={"on_request": PermissionHandler.approve_all}
         ... )
         >>> session.on(lambda event: print(event.type))
         >>> await session.send("Hello!")
-        >>>
+
         >>> # Clean up
         >>> await session.disconnect()
         >>> await client.stop()
 
         >>> # Or connect to an existing server
         >>> client = CopilotClient(
-        ...     connection=RuntimeConnection.for_uri("localhost:3000"),
+        ...     mode="coding-agent",
+        ...     runtime=RuntimeConnection.for_tcp("localhost", 3000),
         ... )
     """
 
@@ -1762,26 +2372,18 @@ class CopilotClient:
         self,
         *,
         entra: EntraAuthConfig | None = None,
-        connection: RuntimeConnection | None = None,
-        working_directory: str | None = None,
-        log_level: LogLevel = "info",
-        env: dict[str, str] | None = None,
-        github_token: str | None = None,
-        base_directory: str | None = None,
-        builtin_plugin_directories: Sequence[str] | None = None,
-        extension_launch_provider: ExtensionLaunchProviderHandler | None = None,
-        installation_confirmation_handler: InstallationConfirmationHandler | None = None,
-        kerberos_auth: KerberosAuthConfig | None = None,
-        use_logged_in_user: bool | None = None,
-        telemetry: TelemetryConfig | None = None,
+        _test_options: _InternalTestOptions | None = None,
+        runtime: RuntimeConnection | None = None,
+        network: NetworkConfig | None = None,
         session_fs: SessionFsConfig | None = None,
-        request_handler: CopilotRequestHandler | None = None,
-        session_idle_timeout_seconds: int | None = None,
         client_info: ClientInfo | None = None,
-        on_list_models: Callable[[], list[ModelInfo] | Awaitable[list[ModelInfo]]] | None = None,
-        on_github_telemetry: Callable[[GitHubTelemetryNotification], None | Awaitable[None]]
-        | None = None,
-        mode: CopilotClientMode = "copilot-cli",
+        mode: CopilotClientMode,
+        observability: ClientObservabilityOptions | None = None,
+        github: ClientGitHubOptions | None = None,
+        plugins: ClientPluginOptions | None = None,
+        extensions: ClientExtensionOptions | None = None,
+        installations: ClientInstallationOptions | None = None,
+        models: ClientModelOptions | None = None,
     ):
         """
         Initialize a new CopilotClient.
@@ -1791,57 +2393,63 @@ class CopilotClient:
         other authentication methods remain available.
 
         Runtime options apply to locally hosted connections. The in-process
-        transport supports typed runtime options such as ``log_level``,
-        ``github_token``, and ``base_directory``, but rejects per-client
-        ``working_directory``, ``env``, and ``telemetry``. Options are ignored
-        when connecting to an existing runtime via
-        :meth:`RuntimeConnection.for_uri`.
+        transport supports typed options such as ``observability.log_level``,
+        ``github.token``, ``observability.telemetry``, and ``runtime.base_directory``,
+        but rejects per-client ``working_directory`` and ``env``.
+        Attached runtimes reject runtime-only settings; omit ``observability.log_level``
+        or pass ``None`` to leave it unset.
 
         Args:
+            mode: Required. Select ``"coding-agent"`` for Copilot CLI-like defaults
+                or ``"empty"`` to opt into features explicitly.
             entra: **Experimental.** Host Entra application and optional host-owned
                 identity and token acquisition callback. May change or be removed.
-            connection: How to reach the runtime. Defaults to
-                :meth:`RuntimeConnection.for_stdio` with the bundled binary.
-            working_directory: Working directory for the runtime process.
+            runtime: How to reach the runtime. Defaults to
+                :meth:`RuntimeConnection.for_default` at construction time.
+            runtime.working_directory: Working directory for the runtime process.
                 ``None`` uses the current directory.
-            log_level: Log level for the runtime process. Defaults to ``"info"``.
-            env: Environment variables for the runtime process. ``None`` inherits
+            observability.log_level: Runtime log level. ``None`` preserves the runtime default.
+            runtime.env: Environment variables for the runtime process. ``None`` inherits
                 the current env.
-            github_token: GitHub token for authentication. Takes priority over
+            github.token: GitHub token for authentication. Takes priority over
                 other auth methods.
-            base_directory: Base directory for Copilot data (session state,
+            runtime.base_directory: Base directory for Copilot data (session state,
                 config, etc.). Sets the ``COPILOT_HOME`` environment variable on
                 the spawned runtime. When ``None``, the runtime defaults to
-                ``~/.copilot``.
-            builtin_plugin_directories: Absolute paths to trusted plugin
+                ``~/.copilot``. In-process hosts also keep their runtime cache
+                in this directory's ``cache`` subdirectory.
+            plugins.builtin_directories: Absolute paths to trusted plugin
                 directories bundled by the host. When non-empty, the complete
                 set is registered during startup before sessions can be created.
-            extension_launch_provider: Connection-level extension launch profile
+            extensions.launch_provider: Connection-level extension launch profile
                 provider. When set, it is registered during startup before any
                 session can be created.
-            installation_confirmation_handler: Experimental connection-global
+            installations.confirmation_handler: Experimental connection-global
                 human review handler for ``installations.confirm``. Receives the
                 typed request and independent request/connection cancellation
                 signals, and returns only an explicit decision. This does not
                 enable installation capabilities.
-            kerberos_auth: Supplies Kerberos credentials from the SDK host. The
-                client installs the ``kerberosAuth.acquire`` handler and
-                registers ``mode`` and ``scope`` during startup before
-                sessions can be created.
-            use_logged_in_user: Use the logged-in user for authentication.
+            network: **Experimental.** Network callbacks through which the SDK
+                host decides the runtime's proxies and supplies its Kerberos
+                tokens and proxy credentials. The client installs the
+                ``network.resolveProxy``, ``network.authenticateNegotiate`` and
+                ``network.authenticateBasic`` handlers and registers the
+                configured callbacks and ``scope`` during startup before
+                sessions can be created. May change or be removed.
+            github.use_logged_in_user: Use the logged-in user for authentication.
                 ``None`` (default) resolves to ``True`` unless ``github_token``
                 is set. When ``False``, only explicit tokens such as
                 ``github_token`` are used; environment variable tokens
                 (``COPILOT_GITHUB_TOKEN``, ``GH_TOKEN``, ``GITHUB_TOKEN``) are
                 ignored.
-            telemetry: OpenTelemetry configuration. Providing this enables
+            observability.telemetry: OpenTelemetry configuration. Providing this enables
                 telemetry.
             session_fs: Connection-level session filesystem provider
                 configuration.
-            request_handler: Connection-level request handler. When set, the
+            models.request_handler: Connection-level request handler. When set, the
                 supplied handler services every model-layer HTTP/WebSocket
                 request the runtime would otherwise issue (both BYOK and CAPI).
-            session_idle_timeout_seconds: Server-wide session idle timeout in
+            runtime.session_idle_timeout_seconds: Server-wide session idle timeout in
                 seconds. Sessions without activity for this duration are
                 automatically cleaned up. Set to ``None`` or ``0`` to disable.
             client_info: Identity of the integrating application, forwarded to the
@@ -1849,41 +2457,70 @@ class CopilotClient:
                 the telemetry the runtime emits on this connection be attributed
                 to a consistent surface instead of the runtime's own build. All
                 fields are optional; omit it to keep the default attribution.
-            on_list_models: Custom handler for :meth:`list_models`. When
+            models.on_list_models: Custom handler for :meth:`list_models`. When
                 provided, the handler is called instead of querying the runtime
                 server.
-            on_github_telemetry: Internal. Callback invoked when the runtime
+            github.on_telemetry: Internal. Callback invoked when the runtime
                 forwards a GitHub telemetry event for a session. The callback
                 may be sync or async. Registering a handler opts every session
                 opened by this client into telemetry forwarding.
 
         Example:
-            >>> # Default — spawns runtime using stdio with the bundled binary
-            >>> client = CopilotClient()
-            >>>
+            >>> # Default — loads the native runtime in this process
+            >>> client = CopilotClient(mode="coding-agent")
+
             >>> # Connect to an existing runtime
             >>> client = CopilotClient(
-            ...     connection=RuntimeConnection.for_uri("localhost:3000"),
+            ...     mode="coding-agent",
+            ...     runtime=RuntimeConnection.for_tcp("localhost", 3000),
             ... )
-            >>>
+
             >>> # Custom runtime path with specific log level
             >>> client = CopilotClient(
-            ...     connection=RuntimeConnection.for_stdio(path="/usr/local/bin/copilot"),
-            ...     log_level="debug",
+            ...     mode="coding-agent",
+            ...     runtime=RuntimeConnection.for_spawned_stdio(path="/usr/local/bin/copilot"),
+            ...     observability={"log_level": "debug"},
             ... )
         """
+        if mode not in ("coding-agent", "empty"):
+            raise ValueError("mode must be 'coding-agent' or 'empty'")
+        _validate_option_group("observability", observability, ClientObservabilityOptions)
+        _validate_option_group("github", github, ClientGitHubOptions)
+        _validate_option_group("plugins", plugins, ClientPluginOptions)
+        _validate_option_group("extensions", extensions, ClientExtensionOptions)
+        _validate_option_group("installations", installations, ClientInstallationOptions)
+        _validate_option_group("models", models, ClientModelOptions)
+        runtime = runtime if runtime is not None else RuntimeConnection.for_default()
+        log_level = (observability or {}).get("log_level")
+        github_token = (github or {}).get("token", None)
+        base_directory = (
+            runtime.base_directory if isinstance(runtime, OwnedRuntimeConnection) else None
+        )
+        builtin_plugin_directories = (plugins or {}).get("builtin_directories", None)
+        extension_launch_provider = (extensions or {}).get("launch_provider", None)
+        installation_confirmation_handler = (installations or {}).get("confirmation_handler", None)
+        use_logged_in_user = (github or {}).get("use_logged_in_user", None)
+        telemetry = (observability or {}).get("telemetry", None)
+        request_handler = (models or {}).get("request_handler", None)
+        session_idle_timeout_seconds = (
+            runtime.session_idle_timeout_seconds
+            if isinstance(runtime, OwnedRuntimeConnection)
+            else None
+        )
+        on_list_models = (models or {}).get("on_list_models", None)
+        on_github_telemetry = (github or {}).get("on_telemetry", None)
+        connection = runtime
         options = _CopilotClientOptions(
             entra=entra,
+            internal_test_options=_test_options,
             connection=connection,
-            working_directory=working_directory,
             log_level=log_level,
-            env=env,
             github_token=github_token,
             base_directory=base_directory,
             builtin_plugin_directories=tuple(builtin_plugin_directories or ()),
             extension_launch_provider=extension_launch_provider,
             installation_confirmation_handler=installation_confirmation_handler,
-            kerberos_auth=kerberos_auth,
+            network=network,
             use_logged_in_user=use_logged_in_user,
             telemetry=telemetry,
             session_fs=session_fs,
@@ -1899,22 +2536,25 @@ class CopilotClient:
             if options.connection is not None
             else _resolve_default_connection(os.environ)
         )
-        _validate_environment_options(options, connection)
+        _validate_connection_options(options, connection)
         for path in options.builtin_plugin_directories:
             if not os.path.isabs(path):
                 raise ValueError(
                     f"builtin_plugin_directories must contain only absolute paths: {path}"
                 )
-        self._kerberos_auth_registration = (
-            _kerberos_auth_registration(options.kerberos_auth)
-            if options.kerberos_auth is not None
-            else None
+        # A snapshot, so later changes to the caller's dict cannot make the registration and the
+        # request handlers disagree.
+        self._network: NetworkConfig | None = (
+            NetworkConfig(**options.network) if options.network is not None else None
+        )
+        self._network_registration = (
+            _network_registration(self._network) if self._network is not None else None
         )
         _require_storage_for_empty_mode(
             mode=options.mode,
             base_directory=options.base_directory,
             session_fs_set=options.session_fs is not None,
-            is_uri_connection=isinstance(connection, UriRuntimeConnection),
+            is_tcp_connection=isinstance(connection, TcpRuntimeConnection),
         )
 
         self._options: _CopilotClientOptions = options
@@ -1924,20 +2564,42 @@ class CopilotClient:
 
         # Resolve connection-mode-specific state.
         self._actual_host: str = "localhost"
-        self._is_external_server: bool = isinstance(connection, UriRuntimeConnection)
+        self._is_external_server: bool = isinstance(connection, TcpRuntimeConnection)
         self._cli_path_source: str | None = None
         self._ffi_host: FfiRuntimeHost | None = None
         self._inprocess_runtime_path: str | None = None
         self._inprocess_cli_entrypoint: str | None = None
+        effective_env = _normalize_environment(
+            connection.env
+            if isinstance(connection, ChildProcessRuntimeConnection) and connection.env is not None
+            else os.environ
+        )
         self._cli_login_sync_integration_id = (
-            os.environ.get("GITHUB_COPILOT_INTEGRATION_ID", "").strip() or None
+            effective_env.get("GITHUB_COPILOT_INTEGRATION_ID", "").strip() or None
         )
 
-        if isinstance(connection, UriRuntimeConnection):
+        if isinstance(connection, TcpRuntimeConnection):
             if connection.connection_token is not None and len(connection.connection_token) == 0:
                 raise ValueError("connection_token must be a non-empty string")
-            self._actual_host, actual_port = self._parse_cli_url(connection.url)
-            self._runtime_port: int | None = actual_port
+            if (
+                not isinstance(connection.host, str)
+                or not connection.host
+                or any(c.isspace() or c in "/\\?#@[]" for c in connection.host)
+            ):
+                raise ValueError(
+                    "host must be a hostname or IP address without a scheme, port, or path"
+                )
+            if ":" in connection.host:
+                try:
+                    ipaddress.IPv6Address(connection.host)
+                except ValueError as e:
+                    raise ValueError(
+                        "host must be a hostname or IP address without a scheme, port, or path"
+                    ) from e
+            if type(connection.port) is not int or not 1 <= connection.port <= 65535:
+                raise ValueError("port must be an integer from 1 through 65535")
+            self._actual_host = connection.host
+            self._runtime_port: int | None = connection.port
             self._effective_connection_token: str | None = connection.connection_token
         elif isinstance(connection, InProcessRuntimeConnection):
             # In-process (FFI): no child process and no per-connection token.
@@ -1950,7 +2612,7 @@ class CopilotClient:
             assert isinstance(connection, ChildProcessRuntimeConnection)
             self._runtime_port = None
 
-            if isinstance(connection, TcpRuntimeConnection):
+            if isinstance(connection, SpawnedTcpRuntimeConnection):
                 if (
                     connection.connection_token is not None
                     and len(connection.connection_token) == 0
@@ -1966,15 +2628,9 @@ class CopilotClient:
 
             # Resolve runtime path: explicit CLI > COPILOT_CLI_PATH > downloaded runtime.
             # Select the environment by identity, not truthiness, so an intentionally
-            # empty per-connection or client env stays authoritative (the spawned child
+            # empty per-connection env stays authoritative (the spawned child
             # receives that empty mapping) instead of falling back to os.environ and
             # unexpectedly honoring a host COPILOT_CLI_PATH.
-            if connection.env is not None:
-                effective_env: Mapping[str, str] = connection.env
-            elif options.env is not None:
-                effective_env = options.env
-            else:
-                effective_env = os.environ
             connection.path = self._resolve_runtime_entrypoint(connection.path, env=effective_env)
 
             # Resolve use_logged_in_user default
@@ -1983,20 +2639,41 @@ class CopilotClient:
 
         self._process: Any = None
         self._cli_process: subprocess.Popen | None = None
+        self._tcp_process_exit_error: Callable[[], str] | None = None
         self._client: JsonRpcClient | None = None
         self._state: _ConnectionState = "disconnected"
         self._start_lock = asyncio.Lock()
+        self._start_outcome: asyncio.Future[BaseException | None] | None = None
+        self._starting_task: asyncio.Task[Any] | None = None
+        self._shutdown_count = 0
+        self._shutdown_generation = 0
         self._sessions: dict[str, CopilotSession] = {}
         self._sessions_lock = threading.Lock()
+        # Open secret prompts by session ID and request ID. Tracked here rather
+        # than on a session object, which a resume can replace while one is open.
+        self._pending_shell_authentication_requests: dict[tuple[str, str], asyncio.Event] = {}
+        self._session_initializations: weakref.WeakValueDictionary[
+            str, _SessionInitializationLock
+        ] = weakref.WeakValueDictionary()
+        self._active_session_callbacks: dict[str, int] = {}
+        self._ordinary_session_resumes: dict[str, set[asyncio.Future[None]]] = {}
+        self._resume_predecessors: dict[CopilotSession, CopilotSession | None] = {}
+        self._auto_mode_recovery_cleanups: dict[JsonRpcClient, dict[str, asyncio.Future[None]]] = {}
+        self._auto_mode_recovery_cleanup_tasks: set[asyncio.Task[None]] = set()
         self._session_admission_closed = False
+        self._connection_lost = False
         self._ahp_hosts = _AhpHostManager(
             self._get_session, self.create_session, self.resume_session
         )
         self._github_token_providers: dict[str, _GitHubTokenProviderRegistration] = {}
         self._github_token_providers_lock = threading.Lock()
         self._github_token_provider_adapter = _GitHubTokenProviderAdapter(self)
-        self._models_cache: list[ModelInfo] | None = None
+        self._models_cache: list[Model] | None = None
         self._models_cache_lock = asyncio.Lock()
+        # Clearing the cache retires the lock and bumps this, so a fetch in flight or queued
+        # cannot repopulate it afterwards. Clearing never waits on the lock, which a custom
+        # model callback may hold for as long as it likes.
+        self._models_cache_generation = 0
         self._lifecycle_handlers: list[SessionLifecycleHandler] = []
         self._typed_lifecycle_handlers: dict[
             SessionLifecycleEventType, list[SessionLifecycleHandler]
@@ -2009,6 +2686,7 @@ class CopilotClient:
         self._session_fs_config = options.session_fs
         self._request_handler = options.request_handler
         self._llm_inference_adapter: _CopilotRequestAdapterHandler | None = None
+        self._network_adapter: _NetworkAdapter | None = None
         self._installation_confirmation_adapter: _InstallationConfirmationAdapter | None = None
         self._entra_token_provider = (
             options.entra.token_provider if isinstance(options.entra, EntraAuthOptions) else None
@@ -2045,9 +2723,14 @@ class CopilotClient:
     def _resolve_inprocess_runtime(self) -> str:
         explicit_cli = os.environ.get("COPILOT_CLI_PATH")
         if explicit_cli:
-            from ._cli_download import ensure_runtime_library
+            cli_path = Path(explicit_cli)
+            if not cli_path.is_file() or cli_path.stat().st_size == 0:
+                raise RuntimeError(
+                    f"COPILOT_CLI_PATH must point to a non-empty CLI file: '{explicit_cli}'."
+                )
+            from ._ffi_runtime_host import resolve_library_path
 
-            runtime_path = ensure_runtime_library(explicit_cli)
+            runtime_path = resolve_library_path(explicit_cli)
             if runtime_path is None:
                 raise RuntimeError(
                     f"In-process runtime library not found next to '{explicit_cli}'."
@@ -2079,57 +2762,6 @@ class CopilotClient:
         """
         return self._runtime_port
 
-    def _parse_cli_url(self, url: str) -> tuple[str, int]:
-        """
-        Parse CLI URL into host and port.
-
-        Supports formats: "host:port", "[ipv6]:port", "http://host:port",
-        "https://host:port", or just "port".
-
-        Args:
-            url: The CLI URL to parse.
-
-        Returns:
-            A tuple of (host, port).
-
-        Raises:
-            ValueError: If the URL format is invalid or the port is out of range.
-        """
-        clean_url = re.sub(r"^https?://", "", url)
-
-        # Check if it's just a port number
-        if clean_url.isdigit():
-            port = int(clean_url)
-            if port <= 0 or port > 65535:
-                raise ValueError(f"Invalid port in cli_url: {url}")
-            return ("localhost", port)
-
-        ipv6_match = re.match(r"^\[([^\]]+)\]:(.*)$", clean_url)
-        if ipv6_match:
-            host = ipv6_match.group(1)
-            port_text = ipv6_match.group(2)
-            try:
-                ipaddress.IPv6Address(host)
-            except ValueError as e:
-                raise ValueError(f"Invalid cli_url format: {url}") from e
-        else:
-            # Parse host:port format
-            parts = clean_url.split(":")
-            if len(parts) != 2:
-                raise ValueError(f"Invalid cli_url format: {url}")
-            host = parts[0] if parts[0] else "localhost"
-            port_text = parts[1]
-
-        try:
-            port = int(port_text)
-        except ValueError as e:
-            raise ValueError(f"Invalid port in cli_url: {url}") from e
-
-        if port <= 0 or port > 65535:
-            raise ValueError(f"Invalid port in cli_url: {url}")
-
-        return (host, port)
-
     async def __aenter__(self) -> CopilotClient:
         """
         Enter the async context manager.
@@ -2141,7 +2773,7 @@ class CopilotClient:
             The CopilotClient instance.
 
         Example:
-            >>> async with CopilotClient() as client:
+            >>> async with CopilotClient(mode="coding-agent") as client:
             ...     session = await client.create_session()
             ...     await session.send("Hello!")
         """
@@ -2164,11 +2796,11 @@ class CopilotClient:
 
     async def start(self) -> None:
         """
-        Start the CLI server and establish a connection.
+        Start the runtime host and establish a connection.
 
-        If connecting to an already-running runtime (via :meth:`RuntimeConnection.for_uri`),
-        only establishes the connection. Otherwise, spawns the CLI server process
-        and then connects.
+        If connecting to an already-running runtime (via :meth:`RuntimeConnection.for_tcp`),
+        only establishes the connection. Otherwise, starts an in-process host or
+        the explicitly selected subprocess.
 
         This method is called automatically when creating a session, so most
         callers do not need to call it explicitly.
@@ -2177,7 +2809,7 @@ class CopilotClient:
             RuntimeError: If the server fails to start or the connection fails.
 
         Example:
-            >>> client = CopilotClient()
+            >>> client = CopilotClient(mode="coding-agent")
             >>> await client.start()
             >>> # Now ready to create sessions
         """
@@ -2185,36 +2817,128 @@ class CopilotClient:
         # state check and all transport initialization under one lock so only
         # one caller can spawn a runtime and install its connection at a time.
         async with self._start_lock:
-            await self._start()
+            outcome: asyncio.Future[BaseException | None] = (
+                asyncio.get_running_loop().create_future()
+            )
+            self._start_outcome = outcome
+            self._starting_task = asyncio.current_task()
+            try:
+                await self._start()
+            except BaseException as error:
+                outcome.set_result(error)
+                raise
+            else:
+                outcome.set_result(None)
+            finally:
+                self._starting_task = None
+
+    async def _started_client(self) -> JsonRpcClient:
+        """Lazily start or join the current attempt without retrying its failure.
+
+        A start() already in progress is waited for, so the request never precedes the
+        ``connect`` handshake or the provider registrations that follow it.
+        """
+        self._assert_not_stopping()
+        outcome = self._start_outcome
+        if outcome is not None and not outcome.done():
+            while True:
+                failure = await asyncio.shield(outcome)
+                if isinstance(failure, asyncio.CancelledError):
+                    raise failure
+                if failure is not None:
+                    raise RuntimeError(f"Client failed to start: {failure}") from failure
+                # A start queued behind the one just observed may already be replacing
+                # its connection, so a successful outcome does not mean the installed
+                # client is still the one to use. Follow it to the latest attempt.
+                latest = self._start_outcome
+                if latest is None or latest is outcome:
+                    break
+                outcome = latest
+        elif self._client is None:
+            await self.start()
+        self._assert_not_stopping()
+        if self._client is None:
+            raise RuntimeError("Client not connected")
+        return self._client
+
+    def _assert_not_stopping(self) -> None:
+        if self._shutdown_count:
+            raise RuntimeError("Client disconnected during session initialization")
+
+    async def _started_client_in_order(self) -> JsonRpcClient:
+        """Wait for queued starts before reserving a session ID."""
+        self._assert_not_stopping()
+        observed = self._start_outcome
+        if observed is None or observed.done():
+            return await self._started_client()
+        async with self._start_lock:
+            pass
+        for outcome in (observed, self._start_outcome):
+            if outcome is None or not outcome.done():
+                continue
+            failure = outcome.result()
+            if isinstance(failure, asyncio.CancelledError):
+                raise failure
+            if failure is not None:
+                raise RuntimeError(f"Client failed to start: {failure}") from failure
+        self._assert_not_stopping()
+        if self._client is None:
+            raise RuntimeError("Client not connected")
+        return self._client
 
     async def _start(self) -> None:
-        if self._state == "connected":
-            return
+        with self._sessions_lock:
+            connected = self._state == "connected"
+            process = self._cli_process
+            rpc = self._client
+        if (
+            connected
+            and process is not None
+            and isinstance(self._connection, SpawnedStdioRuntimeConnection)
+            and process.poll() is not None
+        ):
+            # The stdio runtime this client spawned has exited, so every request on this
+            # connection already fails, but the connection has not closed: a descendant of
+            # the runtime can hold its output open, so the reader never sees EOF. Retire the
+            # connection as that EOF would, then start anew.
+            if rpc is not None:
+                await asyncio.to_thread(rpc._report_close)
+            else:
+                self._handle_connection_close()
+
+        with self._sessions_lock:
+            if self._state == "connected":
+                return
+            connection_lost = self._connection_lost
+
+        if connection_lost:
+            await self.force_stop()
 
         start_time = time.perf_counter()
         self._state = "connecting"
 
         try:
-            # Only start CLI server process if not connecting to external server
-            if not self._is_external_server:
-                await self._start_cli_server()
-
-            # Connect to the server
-            await self._connect_to_server()
-            log_timing(
-                logger,
-                logging.DEBUG,
-                "CopilotClient.start transport setup complete",
-                start_time,
-            )
-
             try:
+                # Only start CLI server process if not connecting to external server
+                if not self._is_external_server:
+                    await self._start_cli_server()
+
+                # Connect to the server
+                await self._connect_to_server()
+                log_timing(
+                    logger,
+                    logging.DEBUG,
+                    "CopilotClient.start transport setup complete",
+                    start_time,
+                )
                 await self._initialize_connection(start_time)
             except BaseException as startup_error:
-                # The runtime keeps registrations made on this connection, such as an exclusive
-                # Kerberos claim, until it closes. Cancellation bypasses the outer startup
-                # cleanup, so close the connection here for every outcome and never let a
-                # cleanup error mask the startup error.
+                # A runtime this client spawned must not outlive a failed start: a retry spawns
+                # a new one and replaces the only reference to it. The runtime also keeps
+                # registrations made on this connection, such as an exclusive runtime-scoped
+                # network registration, until it closes. Cancellation bypasses the outer startup
+                # cleanup, so stop the runtime and close the connection here for every outcome
+                # and never let a cleanup error mask the startup error.
                 try:
                     await self.force_stop()
                 except Exception as cleanup_error:
@@ -2223,7 +2947,8 @@ class CopilotClient:
 
             with self._sessions_lock:
                 self._session_admission_closed = False
-            self._state = "connected"
+                self._connection_lost = False
+                self._state = "connected"
             log_timing(
                 logger,
                 logging.DEBUG,
@@ -2259,7 +2984,7 @@ class CopilotClient:
                     except subprocess.TimeoutExpired:
                         pass
                 return_code = process.poll()
-                if return_code is not None and self._client:
+                if return_code is not None and self._client and self._client.process is process:
                     raise RuntimeError(self._client._get_process_exit_error()) from e
             raise
 
@@ -2273,8 +2998,8 @@ class CopilotClient:
             start_time,
         )
 
-        if self._kerberos_auth_registration is not None:
-            await self.rpc.kerberos_auth.set_provider(self._kerberos_auth_registration)
+        if self._network_registration is not None:
+            await self.rpc.network.set_provider(self._network_registration)
 
         if self._options.extension_launch_provider is not None:
             await self.rpc.register_extension_launch_provider()
@@ -2304,7 +3029,9 @@ class CopilotClient:
         Stop the CLI server and close all active sessions.
 
         This method performs graceful cleanup:
-        1. Closes all active sessions (releases in-memory resources)
+        1. Closes all active sessions (releases in-memory resources); detach
+           requests share one shutdown timeout, so an unresponsive runtime
+           cannot hold the remaining steps back
         2. Requests runtime shutdown for SDK-owned CLI processes
         3. Closes owned stdio input and waits for host cleanup and natural exit
         4. Closes the JSON-RPC connection and terminates any remaining owned process
@@ -2323,6 +3050,15 @@ class CopilotClient:
             ...     for error in eg.exceptions:
             ...         print(f"Cleanup error: {error.message}")
         """
+        self._shutdown_count += 1
+        with self._sessions_lock:
+            self._shutdown_generation += 1
+        try:
+            await self._stop()
+        finally:
+            self._shutdown_count -= 1
+
+    async def _stop(self) -> None:
         errors: list[StopError] = []
         if self._entra_token_adapter is not None:
             self._entra_token_adapter.close_connection()
@@ -2332,25 +3068,47 @@ class CopilotClient:
         if self._llm_inference_adapter is not None:
             self._llm_inference_adapter.cancel_pending()
 
-        # Atomically take ownership of all sessions and clear the dict
-        # so no other thread can access them
+        # Close admission and take the sessions to close. Each stays registered until its
+        # own detach finishes, because the runtime calls back into it while detaching
+        # (sessionEnd hooks, session.shutdown); disconnect() unregisters it, and the
+        # finally below clears any session whose detach failed.
         with self._sessions_lock:
             self._session_admission_closed = True
             sessions_to_destroy = list(self._sessions.values())
-            self._sessions.clear()
+        self._cancel_pending_shell_authentication_requests()
 
-        for session in sessions_to_destroy:
-            try:
-                await session.disconnect()
-            except Exception as e:
-                logger.debug(
-                    "Error while cleaning up Copilot session %s",
-                    session.session_id,
-                    exc_info=True,
-                )
-                errors.append(
-                    StopError(message=f"Failed to disconnect session {session.session_id}: {e}")
-                )
+        # A hung runtime never answers session.detach, so every detach shares one
+        # deadline; past it, stop() moves on to runtime shutdown and termination.
+        loop = asyncio.get_running_loop()
+        detach_deadline = loop.time() + _RUNTIME_SHUTDOWN_TIMEOUT_SECONDS
+        try:
+            for session in sessions_to_destroy:
+                try:
+                    await asyncio.wait_for(
+                        session.disconnect(), timeout=max(0.0, detach_deadline - loop.time())
+                    )
+                except TimeoutError:
+                    errors.append(
+                        StopError(
+                            message=f"Failed to disconnect session {session.session_id}: "
+                            "session.detach did not complete within the "
+                            f"{_RUNTIME_SHUTDOWN_TIMEOUT_SECONDS}s shutdown timeout"
+                        )
+                    )
+                except Exception as e:
+                    logger.debug(
+                        "Error while cleaning up Copilot session %s",
+                        session.session_id,
+                        exc_info=True,
+                    )
+                    errors.append(
+                        StopError(message=f"Failed to disconnect session {session.session_id}: {e}")
+                    )
+                finally:
+                    session._mark_disconnected()
+        finally:
+            with self._sessions_lock:
+                self._sessions.clear()
         with self._github_token_providers_lock:
             self._github_token_providers.clear()
 
@@ -2383,7 +3141,7 @@ class CopilotClient:
         if (
             self._cli_process is not None
             and not self._is_external_server
-            and isinstance(self._connection, StdioRuntimeConnection)
+            and isinstance(self._connection, SpawnedStdioRuntimeConnection)
             and self._cli_process.poll() is None
         ):
             try:
@@ -2398,16 +3156,21 @@ class CopilotClient:
             except OSError:
                 logger.debug("Error while closing Copilot CLI stdin", exc_info=True)
 
-        # Close client
+        # Close client. Network callbacks stay available until here because the runtime may still
+        # route or authenticate requests while it shuts down.
+        if self._network_adapter is not None:
+            self._network_adapter.cancel_pending()
         if self._client:
-            await self._client.stop()
+            rpc_client = self._client
+            await rpc_client.stop()
+            with self._sessions_lock:
+                self._auto_mode_recovery_cleanups.pop(rpc_client, None)
             self._client = None
         self._rpc = None
         self._installation_confirmation_adapter = None
 
         # Clear models cache
-        async with self._models_cache_lock:
-            self._models_cache = None
+        self._clear_models_cache()
 
         # Dispose the in-process FFI host and release the loaded native library.
         if self._ffi_host is not None:
@@ -2456,12 +3219,21 @@ class CopilotClient:
                 self._process = None
             self._cli_process = None
 
+        self._tcp_process_exit_error = None
         self._state = "disconnected"
         if not self._is_external_server:
             self._runtime_port = None
 
         if errors:
             raise ExceptionGroup("errors during CopilotClient.stop()", errors)
+
+        with self._sessions_lock:
+            self._connection_lost = False
+
+    def _clear_models_cache(self) -> None:
+        self._models_cache_generation += 1
+        self._models_cache_lock = asyncio.Lock()
+        self._models_cache = None
 
     async def force_stop(self) -> None:
         """
@@ -2486,6 +3258,18 @@ class CopilotClient:
             ... except asyncio.TimeoutError:
             ...     await client.force_stop()
         """
+        # Failed startup owns its cleanup; requests joining it still observe its failure.
+        stopping = asyncio.current_task() is not self._starting_task
+        self._shutdown_count += int(stopping)
+        if stopping:
+            with self._sessions_lock:
+                self._shutdown_generation += 1
+        try:
+            await self._force_stop()
+        finally:
+            self._shutdown_count -= int(stopping)
+
+    async def _force_stop(self) -> None:
         if self._entra_token_adapter is not None:
             self._entra_token_adapter.close_connection()
         if self._installation_confirmation_adapter is not None:
@@ -2493,12 +3277,15 @@ class CopilotClient:
         self._ahp_hosts.disconnect()
         if self._llm_inference_adapter is not None:
             self._llm_inference_adapter.cancel_pending()
+        if self._network_adapter is not None:
+            self._network_adapter.cancel_pending()
 
         # Clear sessions immediately without trying to destroy them
         with self._sessions_lock:
             self._session_admission_closed = True
             sessions = list(self._sessions.values())
             self._sessions.clear()
+        self._cancel_pending_shell_authentication_requests()
         for session in sessions:
             session._mark_disconnected()
         with self._github_token_providers_lock:
@@ -2575,20 +3362,23 @@ class CopilotClient:
 
         # Then clean up the JSON-RPC client
         if self._client:
+            rpc_client = self._client
             try:
-                await self._client.stop()
+                await rpc_client.stop()
             except Exception:
                 logger.debug(
                     "Error while stopping JSON-RPC client during force stop", exc_info=True
                 )
+            with self._sessions_lock:
+                self._auto_mode_recovery_cleanups.pop(rpc_client, None)
             self._client = None
         self._rpc = None
         self._installation_confirmation_adapter = None
 
         # Clear models cache
-        async with self._models_cache_lock:
-            self._models_cache = None
+        self._clear_models_cache()
 
+        self._tcp_process_exit_error = None
         self._state = "disconnected"
         if not self._is_external_server:
             self._runtime_port = None
@@ -2596,104 +3386,42 @@ class CopilotClient:
         if process_error is not None:
             raise process_error
 
+        with self._sessions_lock:
+            self._connection_lost = False
+
     async def create_session(
         self,
         *,
-        on_permission_request: _PermissionHandlerFn | None = None,
         model: str | None = None,
         session_id: str | None = None,
         name: str | None = None,
         client_name: str | None = None,
-        reasoning_effort: ReasoningEffort | None = None,
-        reasoning_summary: ReasoningSummary | None = None,
-        enable_experimental_mode: bool | None = None,
-        context_tier: ContextTier | None = None,
-        tools: list[Tool] | None = None,
         system_message: SystemMessageConfig | None = None,
-        tool_search: ToolSearchConfig | None = None,
-        image_generation: ImageGenerationConfig | None = None,
-        available_tools: list[str] | ToolSet | None = None,
-        excluded_tools: list[str] | ToolSet | None = None,
-        on_user_input_request: UserInputHandler | None = None,
-        ask_user_variant: AskUserVariant | None = None,
-        hooks: SessionHooks | None = None,
         working_directory: str | None = None,
-        additional_directories: list[str] | None = None,
-        provider: ProviderConfig | None = None,
-        capi: CapiSessionOptions | None = None,
-        providers: list[NamedProviderConfig] | None = None,
-        models: list[ProviderModelConfig] | None = None,
-        enable_session_telemetry: bool | None = None,
-        enable_citations: bool | None = None,
-        enable_file_change_tracking: bool | None = None,
-        excluded_builtin_agents: list[str] | None = None,
-        session_limits: SessionLimitsConfig | None = None,
-        autopilot: AutopilotOptions | None = None,
-        skip_custom_instructions: bool | None = None,
-        refresh_custom_instructions: bool | None = None,
-        trust_working_directory: Literal["session", "user"] | None = None,
-        custom_agents_local_only: bool | None = None,
-        coauthor_enabled: bool | None = None,
-        manage_schedule_enabled: bool | None = None,
-        model_capabilities: ModelCapabilitiesOverride | None = None,
-        streaming: bool | None = None,
-        include_sub_agent_streaming_events: bool | None = None,
-        mcp_servers: dict[str, MCPServerConfig] | None = None,
         diagnostics: DiagnosticsConfiguration | None = None,
-        mcp_oauth_token_storage: Literal["persistent", "in-memory"] | None = None,
-        auth_client_id_metadata_url: str | None = None,
-        embedding_cache_storage: Literal["persistent", "in-memory"] | None = None,
-        custom_agents: list[CustomAgentConfig] | None = None,
-        default_agent: DefaultAgentConfig | dict[str, Any] | None = None,
-        agent: str | None = None,
+        cloud: CloudSessionOptions | None = None,
+        permissions: SessionPermissionOptions | None = None,
+        inference: SessionInferenceOptions | None = None,
+        experiments: SessionExperimentOptions | None = None,
+        tools: SessionToolOptions | None = None,
+        interaction: SessionInteractionOptions | None = None,
+        hooks: SessionHookOptions | None = None,
+        filesystem: CreateSessionFilesystemOptions | None = None,
+        github: SessionGitHubOptions | None = None,
+        agents: SessionAgentOptions | None = None,
+        execution: SessionExecutionOptions | None = None,
+        instructions: CreateSessionInstructionOptions | None = None,
+        git: SessionGitOptions | None = None,
+        events: SessionEventOptions | None = None,
+        mcp: SessionMcpOptions | None = None,
+        state: SessionStateOptions | None = None,
         config_directory: str | None = None,
         enable_config_discovery: bool | None = None,
-        skip_embedding_retrieval: bool | None = None,
-        organization_custom_instructions: str | None = None,
-        enable_on_demand_instruction_discovery: bool | None = None,
-        enable_file_hooks: bool | None = None,
-        enable_host_git_operations: bool | None = None,
-        enable_session_store: bool | None = None,
-        enable_skills: bool | None = None,
-        included_builtin_skills: list[str] | None = None,
-        skill_directories: list[str] | None = None,
-        skill_provider: SkillProvider | None = None,
-        agent_directories: list[str] | None = None,
-        hook_directories: list[str] | None = None,
-        plugin_directories: list[str] | None = None,
-        instruction_directories: list[str] | None = None,
-        disabled_skills: list[str] | None = None,
-        disabled_mcp_servers: list[str] | None = None,
-        sandbox_config: SandboxConfig | None = None,
-        infinite_sessions: InfiniteSessionConfig | None = None,
-        large_output: LargeToolOutputConfig | None = None,
-        memory: MemoryConfiguration | None = None,
-        on_event: Callable[[SessionEvent], None] | None = None,
-        commands: list[CommandDefinition] | None = None,
-        on_elicitation_request: ElicitationHandler | None = None,
-        on_mcp_auth_request: McpAuthHandler | None = None,
-        enable_mcp_apps: bool = False,
-        on_exit_plan_mode_request: ExitPlanModeHandler | None = None,
-        on_auto_mode_switch_request: AutoModeSwitchHandler | None = None,
-        create_session_fs_handler: CreateSessionFsHandler | None = None,
-        github_token: str | None = None,
-        github_token_provider: GitHubTokenProvider | None = None,
-        cloud: CloudSessionOptions | None = None,
-        canvases: list[CanvasDeclaration] | None = None,
-        request_canvas_renderer: bool | None = None,
-        request_extensions: bool | None = None,
-        extension_sdk_path: str | None = None,
-        extension_info: ExtensionInfo | None = None,
-        canvas_provider: CanvasProviderIdentity | None = None,
-        canvas_handler: CanvasHandler | None = None,
-        feature_flags: dict[str, bool] | None = None,
-        exp_assignments: CopilotExpAssignmentResponse | None = None,
-        enable_managed_settings: bool | None = None,
-        excluded_managed_settings: list[str] | None = None,
-        enforce_managed_model_defaults: bool | None = None,
-        interactive_user: bool | None = None,
-        github_mcp_tool_config: GitHubMcpToolConfig | None = None,
-        managed_settings: ManagedSettings | None = None,
+        skills: SessionSkillOptions | None = None,
+        plugins: SessionPluginOptions | None = None,
+        canvases: SessionCanvasOptions | None = None,
+        extensions: SessionExtensionOptions | None = None,
+        policy: SessionPolicyOptions | None = None,
     ) -> CopilotSession:
         """
         Create a new conversation session with the Copilot CLI.
@@ -2703,10 +3431,10 @@ class CopilotClient:
         connection.
 
         Args:
-            on_permission_request: Optional handler for permission requests. When
+            permissions.on_request: Optional handler for permission requests. When
                 omitted, permission requests are surfaced as events and left pending
                 for the consumer to resolve via the pending permission RPC.
-            model: The model to use for the session (e.g. ``"gpt-4"``).
+            model: The model to use for the session (e.g. ``"gpt-5.4"``).
             session_id: Optional session ID. If not provided, a UUID is generated.
             name: Names the session at creation, as ``session.name.set`` would, and
                 is validated the same way: non-empty, no leading or trailing whitespace,
@@ -2715,39 +3443,49 @@ class CopilotClient:
                 and resumed without ever running a turn. Local sessions only: cloud
                 creation rejects it.
             client_name: Optional client name for identification.
-            reasoning_effort: Reasoning effort level for the model.
-            reasoning_summary: Reasoning summary mode for supported models.
+            inference.reasoning_effort: Reasoning effort level for the model.
+            inference.allow_multiple_tool_calls: Allow multiple calls per response (default True).
+                False is a provider hint, not an execution guarantee;
+                all returned calls are handled and handlers may run concurrently.
+                Re-supply on cold resume.
+            inference.reasoning_summary: Reasoning summary mode for supported models.
                 Use ``"none"`` to suppress summary output regardless of whether
                 reasoning is enabled.
-            enable_experimental_mode: Controls whether the session enables
+            experiments.enable_experimental_mode: Controls whether the session enables
                 experimental features. Defaults to ``False`` in ``"empty"``
                 mode; otherwise the runtime decides when omitted.
-            coauthor_enabled: Whether to instruct the agent to include a
+            git.coauthor_enabled: Whether to instruct the agent to include a
                 ``Co-authored-by`` trailer in commit messages. Subagents inherit this
                 setting. Defaults to ``False`` in ``"empty"`` mode; otherwise the
                 runtime decides when omitted.
-            context_tier: Context window tier for models that support it. Use
+            inference.context_tier: Context window tier for models that support it. Use
                 ``"long_context"`` to pin the session to the long-context tier.
-            tools: Custom tools to register with the session.
+            tools.definitions: Custom tools to register with the session.
             system_message: System message configuration.
-            available_tools: Allowlist of tools to enable. When specified, only
+            tools.available_tools: Allowlist of tools to enable. When specified, only
                 these tools will be available. Applies to the full merged tool
                 catalog including built-in tools, MCP tools, and custom tools
                 registered via ``tools=``. Custom tool names must be explicitly
-                included or they will be hidden from the model. Takes precedence
-                over ``excluded_tools``.
-            excluded_tools: List of tools to disable. Applies to all tools
-                including custom tools registered via ``tools=``. Ignored if
-                ``available_tools`` is set.
-            on_user_input_request: Handler for user input requests.
-            ask_user_variant: Model-facing shape of the ``ask_user`` tool.
+                included or they will be hidden from the model. When
+                ``excluded_tools`` is also set, a tool must match
+                ``available_tools`` and not match ``excluded_tools``.
+            tools.excluded_tools: List of tools to disable. Applies to all tools
+                including custom tools registered via ``tools=``. Takes
+                precedence over ``available_tools``: a tool listed here is
+                disabled even if it also matches ``available_tools``.
+            interaction.on_user_input_request: Handler for user input requests.
+            interaction.on_shell_authentication_request: Handler for passwords and other answers
+                that shell commands run by the agent ask for. When provided,
+                ``sudo -A``, ``ssh``, and ``git`` prompts reach this handler
+                instead of failing for lack of a terminal. Return
+                ``{"action": "cancel"}`` when nobody can answer.
+            interaction.ask_user_variant: Model-facing shape of the ``ask_user`` tool.
                 Accepted values are ``"legacy"`` and ``"elicitation"``. The
                 default is ``"legacy"``. To use ``"elicitation"``, also provide
                 ``on_elicitation_request`` so the host can answer structured forms.
-            hooks: Lifecycle hooks for the session.
+            hooks.handlers: Lifecycle hooks for the session.
             working_directory: Working directory for the session.
-            provider: Provider configuration for Azure or custom endpoints.
-            capi: CAPI provider-scoped options. Set ``auto_tier`` to ``efficiency``,
+            github.capi: CAPI provider-scoped options. Set ``auto_tier`` to ``efficiency``,
                 ``balance``, ``intelligence``, or ``fast`` to select an Auto routing
                 preference on a runtime with Auto tier support. ``fast`` is an
                 integrator-only latency preset, not a first-party GitHub Copilot
@@ -2761,110 +3499,127 @@ class CopilotClient:
                 variable. The option is under the ``capi`` namespace because a
                 single session can host multiple providers (CAPI + BYOK), so
                 transport choice is provider-level.
-            providers: Named BYOK provider connections. Additive to Copilot API
-                auth (unlike `provider`); combine with `models`. Cannot be
-                combined with `provider`.
-            models: BYOK model definitions added to the selectable model list,
+            inference.providers: Named BYOK connections, independent of GitHub identity.
+            inference.default_provider: Connection for unqualified selections. Omission
+                creates no default; None clears it. Requires github.capi.enabled=False.
+            inference.models: BYOK model definitions added to the selectable model list,
                 each referencing a `providers` entry by name.
-            enable_session_telemetry: Enables or disables internal session telemetry
+            github.telemetry_enabled: Enables or disables internal session telemetry
                 for this session. When False, disables session telemetry. When omitted
                 or True, telemetry is enabled for eligible GitHub-authenticated sessions,
                 including custom providers (BYOK). Host and account policies still
                 control uploads. This is independent of client OpenTelemetry configuration.
-            enable_citations: **Experimental.** Enables native model citations for
+            inference.enable_citations: **Experimental.** Enables native model citations for
                 supported providers.
-            enable_file_change_tracking: Opts in to capturing file changes from the
+            filesystem.track_file_changes: Opts in to capturing file changes from the
                 first turn for session rewind and cumulative session diff.
-            excluded_builtin_agents: Built-in agent names to exclude from the
+            agents.excluded_builtin_agents: Built-in agent names to exclude from the
                 session. Excluded built-in agents are hidden from discovery and
                 cannot be selected or invoked unless a custom agent with the same
                 name is configured.
-            session_limits: **Experimental.** Limits applied to this session's
+            agents.included_builtin_agents: Built-in subagent names to allow, subject to
+                availability and exclusions. An empty list disables all built-in
+                subagents; custom agents remain available, including same-name
+                agents. Omission uses defaults. Not persisted; re-supply on resume
+                after restart.
+            execution.limits: **Experimental.** Limits applied to this session's
                 current accounting window.
-            autopilot: **Experimental.** Autopilot policy, independent of session mode.
+            execution.autopilot: **Experimental.** Autopilot policy, independent of session mode.
                 Omitted fields use runtime defaults.
-            refresh_custom_instructions: When True, invalidates the process-wide
+            instructions.refresh_custom_instructions: When True, invalidates the process-wide
                 custom-instruction discovery cache before constructing this new
                 session. Omitted or False retains the cache. Other sessions in this
                 runtime may observe updated instructions on later turns or discovery.
                 This does not watch files or enable disabled instruction loading.
-            trust_working_directory: Trust the canonical working directory for this session
+            filesystem.trust_working_directory: Trust the canonical working directory
                 ("session") or persistently for the user ("user"). Omitted leaves
                 existing folder trust unchanged.
-            model_capabilities: Override individual model capabilities resolved by the runtime.
-            streaming: Whether to enable streaming responses.
-            include_sub_agent_streaming_events: Whether to include sub-agent streaming
+            inference.capabilities: Override individual model capabilities resolved by the runtime.
+            events.streaming: Whether to enable streaming responses.
+            events.include_sub_agent_streaming_events: Whether to include sub-agent streaming
                 delta events (e.g., ``assistant.message_delta``,
                 ``assistant.reasoning_delta``, ``assistant.streaming_delta`` with
                 ``agentId`` set). When False, only non-streaming sub-agent events and
                 ``subagent.*`` lifecycle events are forwarded. Defaults to True.
-            mcp_servers: MCP server configurations.
-            mcp_oauth_token_storage: Controls how MCP OAuth tokens are stored.
+            mcp.servers: MCP server configurations.
+            mcp.oauth_token_storage: Controls how MCP OAuth tokens are stored.
                 ``"persistent"`` uses the OS keychain (shared across sessions).
                 ``"in-memory"`` stores tokens in memory (discarded on session end).
-                Defaults to ``"in-memory"`` for safe multitenant behavior.
-            auth_client_id_metadata_url: OAuth Client ID Metadata Document URL
+                When omitted, the client sends ``"in-memory"`` in ``"empty"`` mode
+                for safe multitenant behavior; in other modes nothing is sent and
+                tokens are stored persistently.
+            mcp.auth_client_id_metadata_url: OAuth Client ID Metadata Document URL
                 identifying the host for MCP authorization. When unset, no host
                 identity is supplied.
-            embedding_cache_storage: Controls how embedding caches are stored.
+            state.embedding_cache_storage: Controls how embedding caches are stored.
                 `"persistent"` uses disk-based storage (shared across sessions).
                 `"in-memory"` stores embeddings in memory (discarded on session end).
                 Defaults to `"in-memory"` in empty mode.
-            custom_agents: Custom agent configurations.
-            default_agent: Configuration for the default agent,
+            agents.definitions: Custom agent configurations.
+            agents.default: Configuration for the default agent,
                 including tool visibility controls.
-            agent: Agent to use for the session.
+            agents.selected: Agent to use for the session.
             config_directory: Override for the configuration directory.
             enable_config_discovery: Enables runtime discovery of supported
                 configuration. Explicitly supplied configuration takes precedence
                 over discovered values.
-            skip_embedding_retrieval: When True, skips embedding-based retrieval.
-            organization_custom_instructions: Organization-level custom instructions.
-            enable_on_demand_instruction_discovery: Enables on-demand instruction file
+            state.skip_embedding_retrieval: When True, skips embedding-based retrieval.
+            instructions.organization_text: Organization-level custom instructions.
+            instructions.on_demand_discovery: Enables on-demand instruction file
                 discovery.
-            enable_file_hooks: Enables repository-origin file hooks from ``.github/hooks/``
+            hooks.enable_repository_hooks: Enables repository file hooks from ``.github/hooks/``
                 and trusted repository-configured roots, not explicit hook_directories
                 or callback hooks.
-            enable_host_git_operations: Enables git operations on the host filesystem.
-            enable_session_store: Enables the cross-session store.
-            enable_skills: Enables skill loading.
-            skill_directories: Explicit discovery-only skill roots. No general filesystem
+            git.enable_host_git_operations: Enables git operations on the host filesystem.
+            state.enable_cross_session_store: Enables the cross-session store.
+            skills.enabled: Enables skill loading.
+            skills.directories: Explicit discovery-only skill roots. No general filesystem
                 grant. Available without enable_config_discovery, subject to skill/managed
                 disables. Relative paths resolve once when supplied against the request's
                 effective working_directory; retained roots do not move on cwd changes.
                 None and omission are equivalent; [] clears only the explicit SDK roots.
-            skill_provider: **Experimental.** Session-scoped provider for SDK-owned
+            skills.provider: **Experimental.** Session-scoped provider for SDK-owned
                 skills. Providers are not persisted; re-supply the provider when
                 resuming the session. Synchronous providers run on the event loop,
                 so keep them fast or make them async. Not supported for cloud
                 sessions.
-            agent_directories: Explicit discovery-only agent roots, separate from
+            agents.directories: Explicit discovery-only agent roots, separate from
                 custom_agents. Same path and clearing rules as skill_directories. Available
                 without enable_config_discovery, subject to source/managed disables.
-            hook_directories: Explicit discovery-only file-hook roots, separate from callback
+            hooks.directories: Explicit discovery-only file-hook roots, separate from callback
                 hooks. Same path and clearing rules as skill_directories. Available without
                 enable_config_discovery or enable_file_hooks (repository-origin hooks only);
                 hook and managed disables still apply.
-            instruction_directories: Explicit discovery-only instruction roots using existing
+            plugins.directories: Local filesystem paths to Open Plugins-format directories
+                to load for this session. None and omission are equivalent; [] unloads
+                plugins mounted from these directories on resume.
+            instructions.directories: Explicit discovery-only instruction roots using existing
                 SDK formats. Same path and clearing rules as skill_directories. Available
                 without enable_config_discovery, subject to instruction/managed disables.
-            disabled_skills: Skills to disable.
-            disabled_mcp_servers: Exact MCP server names to disable only for this
+            skills.disabled_skills: Skills to disable.
+            mcp.disabled_servers: Exact MCP server names to disable only for this
                 session. Disabled servers are not started or authenticated on
                 create or cold resume; a resident resume cannot stop servers
                 already running. This does not change global MCP settings.
-            sandbox_config: Sandbox configuration applied when the session is constructed,
+            permissions.sandbox: Sandbox configuration applied when the session is constructed,
                 before MCP servers start. Same shape as the sandboxConfig option of session
                 options update; an identical later update is a no-op.
-            infinite_sessions: Infinite session configuration.
-            memory: Session memory configuration.
-            image_generation: **Experimental.** Image generation opt-in. Not persisted; re-supply
+            state.infinite_sessions: Infinite session configuration.
+            state.memory: Session memory configuration. **Experimental:** set
+                ``store_memory`` to store memories in the app instead of the
+                built-in memory backends; see :class:`MemoryConfiguration`.
+            tools.image_generation: **Experimental.** Image generation opt-in; re-supply
                 after runtime restart. See :class:`ImageGenerationConfig`.
             cloud: Creates a remote session in the cloud instead of a local
                 session. Optionally associates repository metadata with the
                 cloud session.
-            on_event: Callback for session events.
-            enable_mcp_apps: **Experimental.** Opt into MCP Apps (SEP-1865) UI
+            events.on_event: Callback for session events.
+            interaction.auto_mode_recovery: Enable runtime recovery of eligible active requests.
+                Requires ``on_auto_mode_switch_request`` and a positive
+                ``capabilities.ui.autoModeRecovery`` acknowledgment. Unsupported enrollment
+                fails and detaches the session. Defaults to False; re-supply on resume.
+                Consent has no runtime deadline. Do not resend or rewind from the handler.
+            mcp.enable_apps: **Experimental.** Opt into MCP Apps (SEP-1865) UI
                 passthrough. This parameter is part of an experimental
                 wire-protocol surface and may change or be removed in a future
                 release. When True, the SDK sends ``requestMcpApps: True`` on
@@ -2873,7 +3628,7 @@ class CopilotClient:
                 override) is on; otherwise the request is silently dropped.
                 Inspect ``capabilities.ui.mcpApps`` on the create response to
                 detect the drop.
-            github_mcp_tool_config: Configuration for the built-in GitHub MCP
+            github.mcp: Configuration for the built-in GitHub MCP
                 server, sent as ``githubMcpToolConfig`` on ``session.create``.
                 Supports ``enable_all_tools``, ``additional_toolsets``,
                 ``additional_tools``, ``enable_insiders_mode``, and
@@ -2883,10 +3638,10 @@ class CopilotClient:
                 on its own and has no effect unless MCP Apps are enabled for
                 the session (see ``enable_mcp_apps``). Omitted from the wire
                 payload entirely when None.
-            feature_flags: Feature-flag values resolved by the host for this
+            experiments.flags: Feature-flag values resolved by the host for this
                 session. Re-supply them when resuming after a runtime restart.
                 Sent on the wire as ``featureFlags``.
-            exp_assignments: ExP assignment ("flight") data injected by a
+            experiments.assignments: ExP assignment ("flight") data injected by a
                 trusted integrator, in the same JSON shape the Copilot CLI
                 fetches from the experimentation service
                 (``CopilotExpAssignmentResponse``). When supplied, the runtime
@@ -2897,27 +3652,35 @@ class CopilotClient:
                 malformed payloads are dropped by the runtime (fail-open). This
                 is an internal/trusted-integrator option. Sent on the wire as
                 ``expAssignments``.
-            enable_managed_settings: Opt-in flag. When ``True``, the runtime
+            github.fetch_managed_settings: Opt-in flag. When ``True``, the runtime
                 self-fetches enterprise managed settings (bypass-permissions
                 policy) at session bootstrap using the session's ``github_token``.
                 Requires ``github_token`` to be set; if omitted, the runtime is
                 expected to reject session creation (fail-closed). When unset,
                 behaves exactly as before. Sent on the wire as
                 ``enableManagedSettings``.
-            excluded_managed_settings: Exact dotted managed-setting paths to exclude
+            policy.excluded_managed_settings: Exact dotted managed-setting paths to exclude
                 from fetched, device, and policy-helper policy, such as ``sandbox``.
                 Does not exclude host-injected policy or availability checks.
                 Not persisted; re-supply on resume. Requires
                 ``enable_managed_settings`` to self-fetch policy.
-            enforce_managed_model_defaults: When ``True``, locked managed model
+            policy.enforce_managed_model_defaults: When ``True``, locked managed model
                 controls are enforced for this session. Conflicting model changes
                 are rejected, while overridable managed defaults remain mutable.
                 Sent on the wire as ``enforceManagedModelDefaults``.
-            interactive_user: Declares that a human drives this session's
+            github.interactive_user: Declares that a human drives this session's
                 conversation, enabling user-message analysis telemetry for
                 user-authored messages. Automated messages remain excluded.
                 Defaults to False for SDK sessions. Ignored for cloud sessions.
-            managed_settings: Host-injected enterprise managed settings for the
+            permissions.mode: Permission mode applied before the session's first
+                turn, before this method returns. Uses the same checks as
+                ``session.rpc.permissions.set_mode``; a mode that managed policy
+                or session capabilities refuse leaves the current mode in place.
+                ``session.permission_mode_result`` reports whether it was
+                applied and the authoritative mode. Omit to keep the default
+                mode. Not supported for cloud sessions. Sent on the wire as
+                ``permissionMode``.
+            policy.managed_settings: Host-injected enterprise managed settings for the
                 session. Supplies managed policy directly instead of
                 self-fetching; the runtime validates it and composes it
                 restrictively with any self-fetched (server) and device-managed
@@ -2926,7 +3689,7 @@ class CopilotClient:
                 May be combined with ``enable_managed_settings``. Requires a
                 runtime whose RPC schema includes ``managedSettings``. Sent on
                 the wire as ``managedSettings``.
-            github_token_provider: Callback that acquires a short-lived GitHub
+            github.token_provider: Callback that acquires a short-lived GitHub
                 credential for this session. Mutually exclusive with
                 ``github_token``. It receives the effective host, session ID
                 when assigned, and acquisition reason; the registration ID is
@@ -2945,16 +3708,135 @@ class CopilotClient:
 
         Example:
             >>> session = await client.create_session(
-            ...     on_permission_request=PermissionHandler.approve_all,
+            ...     permissions={"on_request": PermissionHandler.approve_all}
             ... )
-            >>>
+
             >>> # Session with model and streaming
             >>> session = await client.create_session(
-            ...     on_permission_request=PermissionHandler.approve_all,
-            ...     model="gpt-4",
-            ...     streaming=True,
+            ...     model="gpt-5.4",
+            ...     permissions={"on_request": PermissionHandler.approve_all},
+            ...     events={"streaming": True},
             ... )
         """
+        _validate_option_group("permissions", permissions, SessionPermissionOptions)
+        _validate_option_group("inference", inference, SessionInferenceOptions)
+        _validate_option_group("experiments", experiments, SessionExperimentOptions)
+        _validate_option_group("tools", tools, SessionToolOptions)
+        _validate_option_group("interaction", interaction, SessionInteractionOptions)
+        _validate_option_group("hooks", hooks, SessionHookOptions)
+        _validate_option_group("filesystem", filesystem, CreateSessionFilesystemOptions)
+        _validate_option_group("github", github, SessionGitHubOptions)
+        _validate_option_group("agents", agents, SessionAgentOptions)
+        _validate_option_group("execution", execution, SessionExecutionOptions)
+        _validate_option_group("instructions", instructions, CreateSessionInstructionOptions)
+        _validate_option_group("git", git, SessionGitOptions)
+        _validate_option_group("events", events, SessionEventOptions)
+        _validate_option_group("mcp", mcp, SessionMcpOptions)
+        _validate_option_group("state", state, SessionStateOptions)
+        _validate_option_group("skills", skills, SessionSkillOptions)
+        _validate_option_group("plugins", plugins, SessionPluginOptions)
+        _validate_option_group("canvases", canvases, SessionCanvasOptions)
+        _validate_option_group("extensions", extensions, SessionExtensionOptions)
+        _validate_option_group("policy", policy, SessionPolicyOptions)
+        on_permission_request = (permissions or {}).get("on_request", None)
+        reasoning_effort = (inference or {}).get("reasoning_effort", None)
+        allow_multiple_tool_calls = (inference or {}).get("allow_multiple_tool_calls", None)
+        reasoning_summary = (inference or {}).get("reasoning_summary", None)
+        enable_experimental_mode = (experiments or {}).get("enable_experimental_mode", None)
+        context_tier = (inference or {}).get("context_tier", None)
+        tool_definitions = (tools or {}).get("definitions", None)
+        tool_search = (tools or {}).get("search", None)
+        image_generation = (tools or {}).get("image_generation", None)
+        available_tools = (tools or {}).get("available_tools", None)
+        excluded_tools = (tools or {}).get("excluded_tools", None)
+        on_user_input_request = (interaction or {}).get("on_user_input_request", None)
+        on_shell_authentication_request = (interaction or {}).get(
+            "on_shell_authentication_request", None
+        )
+        ask_user_variant = (interaction or {}).get("ask_user_variant", None)
+        hook_handlers = (hooks or {}).get("handlers", None)
+        additional_directories = (filesystem or {}).get("additional_directories", None)
+        if inference is not None and "provider" in inference:
+            raise ValueError("inference.provider is no longer supported; use inference.providers")
+        capi = (github or {}).get("capi", None)
+        providers = (inference or {}).get("providers", None)
+        models = (inference or {}).get("models", None)
+        enable_session_telemetry = (github or {}).get("telemetry_enabled", None)
+        enable_citations = (inference or {}).get("enable_citations", None)
+        enable_file_change_tracking = (filesystem or {}).get("track_file_changes", None)
+        excluded_builtin_agents = (agents or {}).get("excluded_builtin_agents", None)
+        included_builtin_agents = (agents or {}).get("included_builtin_agents", None)
+        session_limits = (execution or {}).get("limits", None)
+        autopilot = (execution or {}).get("autopilot", None)
+        skip_custom_instructions = (instructions or {}).get("skip_custom_instructions", None)
+        refresh_custom_instructions = (instructions or {}).get("refresh_custom_instructions", None)
+        trust_working_directory = (filesystem or {}).get("trust_working_directory", None)
+        custom_agents_local_only = (agents or {}).get("local_discovery_only", None)
+        coauthor_enabled = (git or {}).get("coauthor_enabled", None)
+        manage_schedule_enabled = (tools or {}).get("manage_schedule_enabled", None)
+        model_capabilities = (inference or {}).get("capabilities", None)
+        streaming = (events or {}).get("streaming", None)
+        include_sub_agent_streaming_events = (events or {}).get(
+            "include_sub_agent_streaming_events", None
+        )
+        mcp_servers = (mcp or {}).get("servers", None)
+        mcp_oauth_token_storage = (mcp or {}).get("oauth_token_storage", None)
+        auth_client_id_metadata_url = (mcp or {}).get("auth_client_id_metadata_url", None)
+        embedding_cache_storage = (state or {}).get("embedding_cache_storage", None)
+        custom_agents = (agents or {}).get("definitions", None)
+        default_agent = (agents or {}).get("default", None)
+        agent = (agents or {}).get("selected", None)
+        skip_embedding_retrieval = (state or {}).get("skip_embedding_retrieval", None)
+        organization_custom_instructions = (instructions or {}).get("organization_text", None)
+        enable_on_demand_instruction_discovery = (instructions or {}).get(
+            "on_demand_discovery", None
+        )
+        enable_file_hooks = (hooks or {}).get("enable_repository_hooks", None)
+        enable_host_git_operations = (git or {}).get("enable_host_git_operations", None)
+        enable_session_store = (state or {}).get("enable_cross_session_store", None)
+        enable_skills = (skills or {}).get("enabled", None)
+        included_builtin_skills = (skills or {}).get("included_builtin_skills", None)
+        skill_directories = (skills or {}).get("directories", None)
+        skill_provider = (skills or {}).get("provider", None)
+        agent_directories = (agents or {}).get("directories", None)
+        hook_directories = (hooks or {}).get("directories", None)
+        plugin_directories = (plugins or {}).get("directories", None)
+        instruction_directories = (instructions or {}).get("directories", None)
+        disabled_skills = (skills or {}).get("disabled_skills", None)
+        disabled_mcp_servers = (mcp or {}).get("disabled_servers", None)
+        sandbox_config = (permissions or {}).get("sandbox", None)
+        infinite_sessions = (state or {}).get("infinite_sessions", None)
+        large_output = (tools or {}).get("large_output", None)
+        memory = (state or {}).get("memory", None)
+        on_event = (events or {}).get("on_event", None)
+        commands = (interaction or {}).get("commands", None)
+        on_elicitation_request = (interaction or {}).get("on_elicitation_request", None)
+        on_mcp_auth_request = (mcp or {}).get("on_auth_request", None)
+        enable_mcp_apps = (mcp or {}).get("enable_apps", False)
+        on_exit_plan_mode_request = (interaction or {}).get("on_exit_plan_mode_request", None)
+        on_auto_mode_switch_request = (interaction or {}).get("on_auto_mode_switch_request", None)
+        auto_mode_recovery = (interaction or {}).get("auto_mode_recovery", False)
+        create_session_fs_handler = (state or {}).get("create_session_fs_provider", None)
+        github_token = (github or {}).get("token", None)
+        github_token_provider = (github or {}).get("token_provider", None)
+        canvas_definitions = (canvases or {}).get("definitions", None)
+        request_canvas_renderer = (canvases or {}).get("request_renderer", None)
+        request_extensions = (extensions or {}).get("enabled", None)
+        extension_sdk_path = (extensions or {}).get("sdk_path", None)
+        extension_info = (extensions or {}).get("identity", None)
+        canvas_provider = (canvases or {}).get("provider", None)
+        canvas_handler = (canvases or {}).get("handler", None)
+        feature_flags = (experiments or {}).get("flags", None)
+        exp_assignments = (experiments or {}).get("assignments", None)
+        enable_managed_settings = (github or {}).get("fetch_managed_settings", None)
+        excluded_managed_settings = (policy or {}).get("excluded_managed_settings", None)
+        enforce_managed_model_defaults = (policy or {}).get("enforce_managed_model_defaults", None)
+        interactive_user = (github or {}).get("interactive_user", None)
+        permission_mode = (permissions or {}).get("mode", None)
+        github_mcp_tool_config = (github or {}).get("mcp", None)
+        managed_settings = (policy or {}).get("managed_settings", None)
+        if auto_mode_recovery and not callable(on_auto_mode_switch_request):
+            raise ValueError("auto_mode_recovery requires on_auto_mode_switch_request")
         if on_permission_request is not None and not callable(on_permission_request):
             raise ValueError("on_permission_request must be callable when provided.")
         if github_token is not None and github_token_provider is not None:
@@ -2963,11 +3845,15 @@ class CopilotClient:
             raise ValueError('ask_user_variant must be "legacy" or "elicitation"')
         if cloud is not None and skill_provider is not None:
             raise ValueError("Skill providers are not supported for cloud sessions.")
-        # Wait for in-progress startup too: its provider registrations must precede any session.
+        store_memory = _requested_memory_store(memory)
+        if cloud is not None and store_memory is not None:
+            raise ValueError("Memory stores are not supported for cloud sessions.")
         if not self._client or self._start_lock.locked():
-            await self.start()
+            await self._started_client()
 
-        tool_defs = [definition.to_dict() for definition in _tools_to_wire_definitions(tools)]
+        tool_defs = [
+            definition.to_dict() for definition in _tools_to_wire_definitions(tool_definitions)
+        ]
 
         # Empty-mode validation and normalization
         mode = self._options.mode
@@ -3002,13 +3888,15 @@ class CopilotClient:
             payload["clientName"] = client_name
         if reasoning_effort:
             payload["reasoningEffort"] = reasoning_effort
+        if allow_multiple_tool_calls is not None:
+            payload["allowMultipleToolCalls"] = allow_multiple_tool_calls
         if reasoning_summary:
             payload["reasoningSummary"] = reasoning_summary
         if enable_experimental_mode is not None:
             payload["isExperimentalMode"] = enable_experimental_mode
         if context_tier:
             payload["contextTier"] = context_tier
-        if tool_defs:
+        if tool_definitions is not None:
             payload["tools"] = tool_defs
 
         wire_system_message, transform_callbacks = _extract_transform_callbacks(system_message)
@@ -3024,9 +3912,6 @@ class CopilotClient:
             payload["availableTools"] = available_tools
         if excluded_tools is not None:
             payload["excludedTools"] = excluded_tools
-        # Always emit "excluded" precedence so caller-supplied excludedTools win
-        # over any built-in availableTools defaults the runtime applies.
-        payload["toolFilterPrecedence"] = "excluded"
 
         # Enable permission request callback if handler provided
         payload["requestPermission"] = bool(on_permission_request)
@@ -3034,6 +3919,8 @@ class CopilotClient:
         # Enable user input request callback if handler provided
         if on_user_input_request:
             payload["requestUserInput"] = True
+        if on_shell_authentication_request:
+            payload["requestShellAuthentication"] = True
         if ask_user_variant is not None:
             payload["askUserVariant"] = ask_user_variant
 
@@ -3045,15 +3932,17 @@ class CopilotClient:
             payload["githubMcpToolConfig"] = _github_mcp_tool_config_to_wire(github_mcp_tool_config)
         payload["requestExitPlanMode"] = bool(on_exit_plan_mode_request)
         payload["requestAutoModeSwitch"] = bool(on_auto_mode_switch_request)
+        if auto_mode_recovery:
+            payload["requestAutoModeRecovery"] = True
 
         # Serialize commands (name + description only) into payload
-        if commands:
+        if commands is not None:
             payload["commands"] = [
                 {"name": cmd.name, "description": cmd.description or ""} for cmd in commands
             ]
 
         # Enable hooks callback if any hook handler provided
-        if hooks and any(hooks.values()):
+        if hook_handlers and any(hook_handlers.values()):
             payload["hooks"] = True
 
         # Add GitHub token for per-session authentication
@@ -3082,6 +3971,9 @@ class CopilotClient:
         if interactive_user is not None:
             payload["interactiveUser"] = interactive_user
 
+        if permission_mode is not None:
+            payload["permissionMode"] = PermissionMode(permission_mode).value
+
         # Host-injected managed settings (permissions-only contract)
         if managed_settings is not None:
             payload["managedSettings"] = _managed_settings_to_dict(managed_settings)
@@ -3108,18 +4000,17 @@ class CopilotClient:
         if self._on_github_telemetry is not None:
             payload["enableGitHubTelemetryForwarding"] = True
 
-        # Add provider configuration if provided
-        if provider:
-            payload["provider"] = self._convert_provider_to_wire_format(provider)
+        if inference is not None and "default_provider" in inference:
+            payload["defaultProvider"] = inference["default_provider"]
 
         if capi is not None:
             payload["capi"] = _capi_session_options_to_wire(capi)
         # Add additive BYOK provider/model registry if provided
-        if providers:
+        if providers is not None:
             payload["providers"] = [
                 self._convert_named_provider_to_wire_format(p) for p in providers
             ]
-        if models:
+        if models is not None:
             payload["models"] = [self._convert_model_to_wire_format(m) for m in models]
 
         if enable_session_telemetry is not None:
@@ -3130,6 +4021,8 @@ class CopilotClient:
             payload["enableFileChangeTracking"] = enable_file_change_tracking
         if excluded_builtin_agents is not None:
             payload["excludedBuiltinAgents"] = excluded_builtin_agents
+        if included_builtin_agents is not None:
+            payload["includedBuiltinAgents"] = included_builtin_agents
         if session_limits is not None:
             payload["sessionLimits"] = _session_limits_to_wire(session_limits)
         if autopilot is not None:
@@ -3141,7 +4034,7 @@ class CopilotClient:
 
         # Add model capabilities override if provided
         if model_capabilities:
-            payload["modelCapabilities"] = _capabilities_to_dict(model_capabilities)
+            payload["modelCapabilities"] = model_capabilities.to_dict()
 
         # Add MCP servers configuration if provided
         if mcp_servers is not None:
@@ -3160,7 +4053,7 @@ class CopilotClient:
         payload["envValueMode"] = "direct"
 
         # Add custom agents configuration if provided
-        if custom_agents:
+        if custom_agents is not None:
             payload["customAgents"] = [
                 self._convert_custom_agent_to_wire_format(agent) for agent in custom_agents
             ]
@@ -3198,6 +4091,8 @@ class CopilotClient:
             payload["enableSkills"] = enable_skills
         if skill_provider is not None:
             payload["hasSkillProvider"] = True
+        if store_memory is not None:
+            payload["hasMemoryStore"] = True
 
         # Add skill directories configuration if provided
         if skill_directories is not None:
@@ -3208,7 +4103,7 @@ class CopilotClient:
             payload["hookDirectories"] = hook_directories
 
         # Add plugin directories configuration if provided
-        if plugin_directories:
+        if plugin_directories is not None:
             payload["pluginDirectories"] = plugin_directories
 
         # Add instruction directories configuration if provided
@@ -3244,8 +4139,8 @@ class CopilotClient:
         if memory is not None:
             payload["memory"] = _memory_to_wire(memory)
 
-        if canvases:
-            payload["canvases"] = [c.to_dict() for c in canvases]
+        if canvas_definitions:
+            payload["canvases"] = [c.to_dict() for c in canvas_definitions]
         if request_canvas_renderer is not None:
             payload["requestCanvasRenderer"] = request_canvas_renderer
         if request_extensions is not None:
@@ -3354,13 +4249,16 @@ class CopilotClient:
                                 "does not implement SessionFsBinaryProvider"
                             )
                     s._client_session_apis.session_fs = create_session_fs_adapter(fs_provider)
-                s._register_tools(tools)
+                s._register_tools(tool_definitions)
                 s._register_commands(commands)
                 s._register_skill_provider(skill_provider)
+                s._register_memory_store(store_memory)
                 s._register_permission_handler(on_permission_request)
                 s._register_mcp_auth_handler(on_mcp_auth_request)
                 if on_user_input_request:
                     s._register_user_input_handler(on_user_input_request)
+                if on_shell_authentication_request:
+                    s._register_shell_authentication_handler(on_shell_authentication_request)
                 if on_elicitation_request:
                     s._register_elicitation_handler(on_elicitation_request)
                 if on_exit_plan_mode_request:
@@ -3369,11 +4267,9 @@ class CopilotClient:
                     s._register_auto_mode_switch_handler(on_auto_mode_switch_request)
                 if canvas_handler is not None:
                     s._register_canvas_handler(canvas_handler)
-                s._register_bearer_token_providers(
-                    _collect_bearer_token_callbacks(provider, providers)
-                )
-                if hooks:
-                    s._register_hooks(hooks)
+                s._register_bearer_token_providers(_collect_bearer_token_callbacks(providers))
+                if hook_handlers:
+                    s._register_hooks(hook_handlers)
                 if transform_callbacks:
                     s._register_transform_callbacks(transform_callbacks)
                 if on_event:
@@ -3387,27 +4283,41 @@ class CopilotClient:
                 "CopilotClient.create_session local setup complete",
                 setup_start,
                 session_id=sid,
-                tools_count=len(tools or []),
+                tools_count=len(tool_definitions or []),
                 commands_count=len(commands or []),
-                has_hooks=hooks is not None,
+                has_hooks=hook_handlers is not None,
             )
             return s
 
+        initialization_lock: _SessionInitialization | None = None
+        release_inline_initialization: Callable[[], None] | None = None
         session: CopilotSession | None = None
+        replaced_session: CopilotSession | None = None
         registered_session_id: str | None = None
         server_assigned_session_id: str | None = None
         inline_state_lock = threading.Lock()
         request_failed = False
 
-        async def _delete_uninitialized_session(sid: str) -> None:
+        async def _delete_uninitialized_session(
+            sid: str, release: Callable[[], None] | None = None
+        ) -> None:
             try:
-                await asyncio.wait_for(self.delete_session(sid), timeout=10)
+                response = await asyncio.wait_for(
+                    rpc_client.request("session.delete", {"sessionId": sid}), timeout=10
+                )
+                if not response.get("success", False):
+                    raise RuntimeError(
+                        f"Failed to delete session {sid}: {response.get('error', 'Unknown error')}"
+                    )
             except Exception:
                 logger.warning(
                     "Failed to delete cloud session %s after creation failed",
                     sid,
                     exc_info=True,
                 )
+            finally:
+                if release is not None:
+                    release()
 
         # Pre-register non-cloud sessions BEFORE issuing the RPC so any
         # session-scoped requests the CLI emits during session.create
@@ -3415,12 +4325,20 @@ class CopilotClient:
         # routed to the correct handlers.
         if local_session_id is not None:
             try:
+                initialization_lock = await self._acquire_session_initialization(
+                    local_session_id, rpc_client, wait_for_resumes=auto_mode_recovery
+                )
                 session = _initialize_session(local_session_id)
-                self._register_session(session)
+                replaced_session = self._register_session(session)
+                with self._sessions_lock:
+                    # A concurrent resume rollback must retain the resident behind this create.
+                    self._resume_predecessors[session] = replaced_session
                 registered_session_id = local_session_id
             except BaseException:
                 if session is not None:
                     session._mark_disconnected()
+                if initialization_lock is not None:
+                    initialization_lock.release()
                 self._unregister_github_token_provider(github_token_provider_registration_id)
                 raise
 
@@ -3436,12 +4354,14 @@ class CopilotClient:
             # registered. Non-cloud sessions are already registered above.
             def _register_inline(raw_response: Any) -> None:
                 nonlocal session, registered_session_id, server_assigned_session_id
+                nonlocal release_inline_initialization, replaced_session
                 if session is not None:
                     return
                 if not isinstance(raw_response, dict):
                     return
                 sid = raw_response.get("sessionId")
                 if isinstance(sid, str) and sid:
+                    release = self._reserve_inline_session_initialization(sid, rpc_client)
                     try:
                         initialized = _initialize_session(sid)
                     except Exception:
@@ -3449,12 +4369,14 @@ class CopilotClient:
                             late_failure = request_failed
                             if not late_failure:
                                 server_assigned_session_id = sid
+                                release_inline_initialization = release
                         if late_failure:
-                            cleanup = _delete_uninitialized_session(sid)
+                            cleanup = _delete_uninitialized_session(sid, release)
                             try:
                                 asyncio.run_coroutine_threadsafe(cleanup, event_loop)
                             except RuntimeError:
                                 cleanup.close()
+                                release()
                                 logger.warning(
                                     "Failed to schedule cleanup of cloud session %s",
                                     sid,
@@ -3464,8 +4386,11 @@ class CopilotClient:
                     with inline_state_lock:
                         late_success = request_failed
                         if not late_success:
+                            release_inline_initialization = release
                             try:
-                                self._register_session(initialized)
+                                replaced_session = self._register_session(initialized)
+                                with self._sessions_lock:
+                                    self._resume_predecessors[initialized] = replaced_session
                             except BaseException:
                                 _retire_unreturned_session(initialized)
                                 raise
@@ -3473,9 +4398,12 @@ class CopilotClient:
                             registered_session_id = sid
                     if late_success:
                         _retire_unreturned_session(initialized)
+                        release()
 
             response = await rpc_client.request(
-                "session.create", payload, on_response_inline=_register_inline
+                "session.create",
+                _group_session_payload(payload),
+                on_response_inline=_register_inline,
             )
             log_timing(
                 logger,
@@ -3494,29 +4422,90 @@ class CopilotClient:
             self._assign_github_token_provider(
                 github_token_provider_registration_id, session.session_id
             )
+            capabilities = response.get("capabilities")
+            session._set_capabilities(capabilities)
+            if auto_mode_recovery:
+                delete_on_failure = use_server_generated_id and (
+                    (session.capabilities.get("ui") or {}).get("autoModeRecovery") is not True
+                )
+                await self._require_auto_mode_recovery(session, delete_on_failure=delete_on_failure)
             if on_mcp_auth_request is not None:
                 await rpc_client.request(
                     "session.eventLog.registerInterest",
                     {"sessionId": session.session_id, "eventType": "mcp.oauth_required"},
                 )
             session._workspace_path = response.get("workspacePath")
-            capabilities = response.get("capabilities")
-            session._set_capabilities(capabilities)
+            session.permission_mode_result = _permission_mode_result(response)
+            options_patch = await self._apply_post_create_options_patch(
+                session,
+                mode,
+                skip_custom_instructions,
+                custom_agents_local_only,
+                coauthor_enabled,
+                manage_schedule_enabled,
+                included_builtin_skills,
+                delete_on_failure=use_server_generated_id and auto_mode_recovery,
+            )
+            self._commit_github_token_provider(
+                session.session_id, github_token_provider_registration_id
+            )
+            self._ahp_hosts.capture(session, payload, options_patch)
         except BaseException as exc:
             with inline_state_lock:
                 request_failed = True
                 registered_id = registered_session_id
                 orphaned_id = server_assigned_session_id
                 failed_session = session
-            if failed_session is not None:
-                failed_session._mark_disconnected()
-            if registered_id is not None:
+            with self._sessions_lock:
+                cleanup_owns_session = (
+                    failed_session is not None
+                    and registered_id is not None
+                    and self._sessions.get(registered_id) is failed_session
+                    and registered_id in self._auto_mode_recovery_cleanups.get(rpc_client, {})
+                )
+            cleanup_error = None
+            if (
+                use_server_generated_id
+                and auto_mode_recovery
+                and failed_session is not None
+                and not cleanup_owns_session
+            ):
+                try:
+                    await self._cleanup_failed_session(
+                        failed_session,
+                        delete_on_failure=True,
+                        wait=not isinstance(exc, asyncio.CancelledError),
+                    )
+                except Exception as error:
+                    cleanup_error = error
                 with self._sessions_lock:
+                    cleanup_owns_session = (
+                        registered_id is not None
+                        and self._sessions.get(registered_id) is failed_session
+                        and registered_id in self._auto_mode_recovery_cleanups.get(rpc_client, {})
+                    )
+            with self._sessions_lock:
+                if failed_session is not None:
+                    replaced_session = self._rollback_resume_predecessor(failed_session)
+                retiring = self._session_admission_closed or self._client is not rpc_client
+                if registered_id is not None and not cleanup_owns_session:
                     if self._sessions.get(registered_id) is failed_session:
-                        del self._sessions[registered_id]
+                        if (
+                            not retiring
+                            and replaced_session is not None
+                            and not replaced_session._destroyed
+                        ):
+                            self._sessions[registered_id] = replaced_session
+                        else:
+                            del self._sessions[registered_id]
+            if retiring and replaced_session is not None:
+                replaced_session._mark_disconnected()
+            if failed_session is not None and not cleanup_owns_session:
+                failed_session._mark_disconnected()
             if orphaned_id is not None:
                 await _delete_uninitialized_session(orphaned_id)
-            self._unregister_github_token_provider(github_token_provider_registration_id)
+            if not cleanup_owns_session:
+                self._unregister_github_token_provider(github_token_provider_registration_id)
             if not isinstance(exc, asyncio.CancelledError):
                 log_timing(
                     logger,
@@ -3526,21 +4515,19 @@ class CopilotClient:
                     exc_info=True,
                     session_id=registered_session_id,
                 )
+            if cleanup_error is not None:
+                raise exc from cleanup_error
             raise
-
-        await self._apply_post_create_options_patch(
-            session,
-            mode,
-            skip_custom_instructions,
-            custom_agents_local_only,
-            coauthor_enabled,
-            manage_schedule_enabled,
-            included_builtin_skills,
-        )
-        self._commit_github_token_provider(
-            session.session_id, github_token_provider_registration_id
-        )
-        self._ahp_hosts.capture(session, payload)
+        finally:
+            with self._sessions_lock:
+                if session is not None:
+                    self._resume_predecessors.pop(session, None)
+            if initialization_lock is not None:
+                initialization_lock.release()
+            with inline_state_lock:
+                release = release_inline_initialization
+            if release is not None:
+                release()
 
         log_timing(
             logger,
@@ -3555,100 +4542,36 @@ class CopilotClient:
         self,
         session_id: str,
         *,
-        on_permission_request: _PermissionHandlerFn | None = None,
         model: str | None = None,
         client_name: str | None = None,
-        reasoning_effort: ReasoningEffort | None = None,
-        reasoning_summary: ReasoningSummary | None = None,
-        enable_experimental_mode: bool | None = None,
-        context_tier: ContextTier | None = None,
-        tools: list[Tool] | None = None,
         system_message: SystemMessageConfig | None = None,
-        tool_search: ToolSearchConfig | None = None,
-        image_generation: ImageGenerationConfig | None = None,
-        available_tools: list[str] | ToolSet | None = None,
-        excluded_tools: list[str] | ToolSet | None = None,
-        on_user_input_request: UserInputHandler | None = None,
-        ask_user_variant: AskUserVariant | None = None,
-        hooks: SessionHooks | None = None,
         working_directory: str | None = None,
-        additional_directories: list[str] | None = None,
-        provider: ProviderConfig | None = None,
-        capi: CapiSessionOptions | None = None,
-        providers: list[NamedProviderConfig] | None = None,
-        models: list[ProviderModelConfig] | None = None,
-        enable_session_telemetry: bool | None = None,
-        enable_citations: bool | None = None,
-        enable_file_change_tracking: bool | None = None,
-        excluded_builtin_agents: list[str] | None = None,
-        session_limits: SessionLimitsConfig | None = None,
-        autopilot: AutopilotOptions | None = None,
-        skip_custom_instructions: bool | None = None,
-        custom_agents_local_only: bool | None = None,
-        coauthor_enabled: bool | None = None,
-        manage_schedule_enabled: bool | None = None,
-        model_capabilities: ModelCapabilitiesOverride | None = None,
-        streaming: bool | None = None,
-        include_sub_agent_streaming_events: bool | None = None,
-        mcp_servers: dict[str, MCPServerConfig] | None = None,
         diagnostics: DiagnosticsConfiguration | None = None,
-        mcp_oauth_token_storage: Literal["persistent", "in-memory"] | None = None,
-        auth_client_id_metadata_url: str | None = None,
-        embedding_cache_storage: Literal["persistent", "in-memory"] | None = None,
-        custom_agents: list[CustomAgentConfig] | None = None,
-        default_agent: DefaultAgentConfig | dict[str, Any] | None = None,
-        agent: str | None = None,
-        config_directory: str | None = None,
-        enable_config_discovery: bool | None = None,
-        skip_embedding_retrieval: bool | None = None,
-        organization_custom_instructions: str | None = None,
-        enable_on_demand_instruction_discovery: bool | None = None,
-        enable_file_hooks: bool | None = None,
-        enable_host_git_operations: bool | None = None,
-        enable_session_store: bool | None = None,
-        enable_skills: bool | None = None,
-        included_builtin_skills: list[str] | None = None,
-        skill_directories: list[str] | None = None,
-        skill_provider: SkillProvider | None = None,
-        agent_directories: list[str] | None = None,
-        hook_directories: list[str] | None = None,
-        plugin_directories: list[str] | None = None,
-        instruction_directories: list[str] | None = None,
-        disabled_skills: list[str] | None = None,
-        disabled_mcp_servers: list[str] | None = None,
-        sandbox_config: SandboxConfig | None = None,
-        infinite_sessions: InfiniteSessionConfig | None = None,
-        large_output: LargeToolOutputConfig | None = None,
-        memory: MemoryConfiguration | None = None,
-        on_event: Callable[[SessionEvent], None] | None = None,
-        commands: list[CommandDefinition] | None = None,
-        on_elicitation_request: ElicitationHandler | None = None,
-        on_mcp_auth_request: McpAuthHandler | None = None,
-        enable_mcp_apps: bool = False,
-        on_exit_plan_mode_request: ExitPlanModeHandler | None = None,
-        on_auto_mode_switch_request: AutoModeSwitchHandler | None = None,
-        create_session_fs_handler: CreateSessionFsHandler | None = None,
-        github_token: str | None = None,
-        github_token_provider: GitHubTokenProvider | None = None,
         continue_pending_work: bool | None = None,
         suppress_resume_event: bool | None = None,
         allow_transcript_recovery: bool | None = None,
-        canvases: list[CanvasDeclaration] | None = None,
-        request_canvas_renderer: bool | None = None,
-        request_extensions: bool | None = None,
-        extension_sdk_path: str | None = None,
-        extension_info: ExtensionInfo | None = None,
-        canvas_provider: CanvasProviderIdentity | None = None,
-        canvas_handler: CanvasHandler | None = None,
-        open_canvases: list[OpenCanvasInstance] | None = None,
-        feature_flags: dict[str, bool] | None = None,
-        exp_assignments: CopilotExpAssignmentResponse | None = None,
-        enable_managed_settings: bool | None = None,
-        excluded_managed_settings: list[str] | None = None,
-        enforce_managed_model_defaults: bool | None = None,
-        interactive_user: bool | None = None,
-        github_mcp_tool_config: GitHubMcpToolConfig | None = None,
-        managed_settings: ManagedSettings | None = None,
+        permissions: SessionPermissionOptions | None = None,
+        inference: SessionInferenceOptions | None = None,
+        experiments: SessionExperimentOptions | None = None,
+        tools: SessionToolOptions | None = None,
+        interaction: SessionInteractionOptions | None = None,
+        hooks: SessionHookOptions | None = None,
+        filesystem: SessionFilesystemOptions | None = None,
+        github: SessionGitHubOptions | None = None,
+        agents: SessionAgentOptions | None = None,
+        execution: SessionExecutionOptions | None = None,
+        instructions: SessionInstructionOptions | None = None,
+        git: SessionGitOptions | None = None,
+        events: SessionEventOptions | None = None,
+        mcp: SessionMcpOptions | None = None,
+        state: SessionStateOptions | None = None,
+        config_directory: str | None = None,
+        enable_config_discovery: bool | None = None,
+        skills: SessionSkillOptions | None = None,
+        plugins: SessionPluginOptions | None = None,
+        canvases: ResumeSessionCanvasOptions | None = None,
+        extensions: SessionExtensionOptions | None = None,
+        policy: SessionPolicyOptions | None = None,
     ) -> CopilotSession:
         """
         Resume an existing conversation session by its ID.
@@ -3659,44 +4582,56 @@ class CopilotClient:
 
         Args:
             session_id: The ID of the session to resume.
-            on_permission_request: Optional handler for permission requests. When
+            permissions.on_request: Optional handler for permission requests. When
                 omitted, permission requests are surfaced as events and left pending
                 for the consumer to resolve via the pending permission RPC.
             model: The model to use for the resumed session.
             client_name: Optional client name for identification.
-            reasoning_effort: Reasoning effort level for the model.
-            reasoning_summary: Reasoning summary mode for supported models.
+            inference.reasoning_effort: Reasoning effort level for the model.
+            inference.allow_multiple_tool_calls: Allow multiple calls per response (default True).
+                False is a provider hint, not an execution guarantee;
+                all returned calls are handled and handlers may run concurrently.
+                Re-supply on cold resume.
+            inference.reasoning_summary: Reasoning summary mode for supported models.
                 Use ``"none"`` to suppress summary output regardless of whether
                 reasoning is enabled.
-            enable_experimental_mode: Controls whether the session enables
+            experiments.enable_experimental_mode: Controls whether the session enables
                 experimental features. Defaults to ``False`` in ``"empty"``
                 mode; otherwise the runtime decides when omitted.
-            coauthor_enabled: Whether to instruct the agent to include a
+            git.coauthor_enabled: Whether to instruct the agent to include a
                 ``Co-authored-by`` trailer in commit messages. Subagents inherit this
                 setting. Defaults to ``False`` in ``"empty"`` mode; otherwise the
                 runtime decides when omitted.
-            context_tier: Context window tier for models that support it. Use
+            inference.context_tier: Context window tier for models that support it. Use
                 ``"long_context"`` to pin the session to the long-context tier.
-            tools: Custom tools to register with the session.
+            tools.definitions: Custom tools to register with the session. An empty list
+                replaces the tools previously registered for this session with
+                none; ``None`` leaves them unchanged.
             system_message: System message configuration.
-            available_tools: Allowlist of tools to enable. When specified, only
+            tools.available_tools: Allowlist of tools to enable. When specified, only
                 these tools will be available. Applies to the full merged tool
                 catalog including built-in tools, MCP tools, and custom tools
                 registered via ``tools=``. Custom tool names must be explicitly
-                included or they will be hidden from the model. Takes precedence
-                over ``excluded_tools``.
-            excluded_tools: List of tools to disable. Applies to all tools
-                including custom tools registered via ``tools=``. Ignored if
-                ``available_tools`` is set.
-            on_user_input_request: Handler for user input requests.
-            ask_user_variant: Model-facing shape of the ``ask_user`` tool.
+                included or they will be hidden from the model. When
+                ``excluded_tools`` is also set, a tool must match
+                ``available_tools`` and not match ``excluded_tools``.
+            tools.excluded_tools: List of tools to disable. Applies to all tools
+                including custom tools registered via ``tools=``. Takes
+                precedence over ``available_tools``: a tool listed here is
+                disabled even if it also matches ``available_tools``.
+            interaction.on_user_input_request: Handler for user input requests.
+            interaction.on_shell_authentication_request: Handler for passwords and other answers
+                that shell commands run by the agent ask for. When provided,
+                ``sudo -A``, ``ssh``, and ``git`` prompts reach this handler
+                instead of failing for lack of a terminal. Return
+                ``{"action": "cancel"}`` when nobody can answer.
+            interaction.ask_user_variant: Model-facing shape of the ``ask_user`` tool.
                 Accepted values are ``"legacy"`` and ``"elicitation"``. The
                 default is ``"legacy"``. To use ``"elicitation"``, also provide
                 ``on_elicitation_request`` so the host can answer structured forms.
-            hooks: Lifecycle hooks for the session.
+            hooks.handlers: Lifecycle hooks for the session.
             working_directory: Working directory for the session.
-            provider: Provider configuration for Azure or custom endpoints.
-            capi: CAPI provider-scoped options. Omit ``auto_tier`` to preserve the
+            github.capi: CAPI provider-scoped options. Omit ``auto_tier`` to preserve the
                 current or persisted Auto routing preference. An explicit tier
                 overrides it on cold resume, but cannot change it on an
                 already-resident session. WebSocket transport is the
@@ -3709,100 +4644,118 @@ class CopilotClient:
                 variable. The option is under the ``capi`` namespace because a
                 single session can host multiple providers (CAPI + BYOK), so
                 transport choice is provider-level.
-            providers: Named BYOK provider connections. Additive to Copilot API
-                auth (unlike `provider`); combine with `models`. Cannot be
-                combined with `provider`.
-            models: BYOK model definitions added to the selectable model list,
+            inference.providers: Named BYOK connections, independent of GitHub identity.
+            inference.default_provider: Connection for unqualified selections. Omission
+                preserves routing; None clears it. Requires github.capi.enabled=False.
+            inference.models: BYOK model definitions added to the selectable model list,
                 each referencing a `providers` entry by name.
-            enable_session_telemetry: Enables or disables internal session telemetry
+            github.telemetry_enabled: Enables or disables internal session telemetry
                 for this session. False disables telemetry; True enables it for eligible
                 GitHub-authenticated sessions, including custom providers (BYOK).
                 Omission preserves a resident session's choice; otherwise defaults to enabled.
                 Host and account policies still control uploads. This is independent of
                 client OpenTelemetry configuration.
-            enable_citations: **Experimental.** Enables native model citations for
+            inference.enable_citations: **Experimental.** Enables native model citations for
                 supported providers.
-            enable_file_change_tracking: Opts in to capturing file changes for
+            filesystem.track_file_changes: Opts in to capturing file changes for
                 session rewind and cumulative session diff when the resumed session
                 has a valid baseline. Earlier untracked changes cannot be reconstructed.
-            excluded_builtin_agents: Built-in agent names to exclude from the
+            agents.excluded_builtin_agents: Built-in agent names to exclude from the
                 resumed session. Excluded built-in agents are hidden from discovery
                 and cannot be selected or invoked unless a custom agent with the
                 same name is configured.
-            session_limits: **Experimental.** Limits applied to this session's
+            agents.included_builtin_agents: Built-in subagent names to allow, subject to
+                availability and exclusions. An empty list disables all built-in
+                subagents; custom agents remain available, including same-name
+                agents. Omission uses defaults on cold resume and preserves the
+                current allowlist on warm resume. Not persisted; re-supply on
+                resume after restart.
+            execution.limits: **Experimental.** Limits applied to this session's
                 current accounting window.
-            autopilot: **Experimental.** Patch resident Autopilot policy on warm
+            execution.autopilot: **Experimental.** Patch resident Autopilot policy on warm
                 resume without changing mode. Re-supply on cold resume.
-            model_capabilities: Override individual model capabilities resolved by the runtime.
-            streaming: Whether to enable streaming responses.
-            include_sub_agent_streaming_events: Whether to include sub-agent streaming
+            inference.capabilities: Override individual model capabilities resolved by the runtime.
+            events.streaming: Whether to enable streaming responses.
+            events.include_sub_agent_streaming_events: Whether to include sub-agent streaming
                 delta events (e.g., ``assistant.message_delta``,
                 ``assistant.reasoning_delta``, ``assistant.streaming_delta`` with
                 ``agentId`` set). When False, only non-streaming sub-agent events and
                 ``subagent.*`` lifecycle events are forwarded. Defaults to True.
-            mcp_servers: MCP server configurations.
-            mcp_oauth_token_storage: Controls how MCP OAuth tokens are stored.
+            mcp.servers: MCP server configurations.
+            mcp.oauth_token_storage: Controls how MCP OAuth tokens are stored.
                 ``"persistent"`` uses the OS keychain (shared across sessions).
                 ``"in-memory"`` stores tokens in memory (discarded on session end).
-                Defaults to ``"in-memory"`` for safe multitenant behavior.
-            auth_client_id_metadata_url: OAuth Client ID Metadata Document URL
+                When omitted, the client sends ``"in-memory"`` in ``"empty"`` mode
+                for safe multitenant behavior; in other modes nothing is sent, so a
+                resident session keeps its current storage and any other session
+                stores tokens persistently.
+            mcp.auth_client_id_metadata_url: OAuth Client ID Metadata Document URL
                 identifying the host for MCP authorization. Re-supply the same
                 host identity used when the session was created.
-            embedding_cache_storage: Controls how embedding caches are stored.
+            state.embedding_cache_storage: Controls how embedding caches are stored.
                 `"persistent"` uses disk-based storage (shared across sessions).
                 `"in-memory"` stores embeddings in memory (discarded on session end).
                 Defaults to `"in-memory"` in empty mode.
-            custom_agents: Custom agent configurations.
-            default_agent: Configuration for the default agent,
+            agents.definitions: Custom agent configurations.
+            agents.default: Configuration for the default agent,
                 including tool visibility controls.
-            agent: Agent to use for the session.
+            agents.selected: Agent to use for the session.
             config_directory: Override for the configuration directory.
             enable_config_discovery: Enables runtime discovery of supported
                 configuration. Explicitly supplied configuration takes precedence
                 over discovered values.
-            skip_embedding_retrieval: When True, skips embedding-based retrieval.
-            organization_custom_instructions: Organization-level custom instructions.
-            enable_on_demand_instruction_discovery: Enables on-demand instruction file
+            state.skip_embedding_retrieval: When True, skips embedding-based retrieval.
+            instructions.organization_text: Organization-level custom instructions.
+            instructions.on_demand_discovery: Enables on-demand instruction file
                 discovery.
-            enable_file_hooks: Enables repository-origin file hooks from ``.github/hooks/``
+            hooks.enable_repository_hooks: Enables repository file hooks from ``.github/hooks/``
                 and trusted repository-configured roots, not explicit hook_directories
                 or callback hooks.
-            enable_host_git_operations: Enables git operations on the host filesystem.
-            enable_session_store: Enables the cross-session store.
-            enable_skills: Enables skill loading.
-            skill_directories: Explicit discovery-only skill roots. No general filesystem
+            git.enable_host_git_operations: Enables git operations on the host filesystem.
+            state.enable_cross_session_store: Enables the cross-session store.
+            skills.enabled: Enables skill loading.
+            skills.directories: Explicit discovery-only skill roots. No general filesystem
                 grant. Available without enable_config_discovery, subject to skill/managed
                 disables. Relative paths resolve once when supplied against the request's
                 effective working_directory; retained roots do not move on cwd changes.
                 None and omission are equivalent; [] clears only the explicit SDK roots.
-            skill_provider: **Experimental.** Session-scoped provider for SDK-owned
+            skills.provider: **Experimental.** Session-scoped provider for SDK-owned
                 skills. Providers are not persisted; callers must re-supply the
                 provider on resume. Synchronous providers run on the event loop,
                 so keep them fast or make them async.
-            agent_directories: Explicit discovery-only agent roots, separate from
+            agents.directories: Explicit discovery-only agent roots, separate from
                 custom_agents. Same path and clearing rules as skill_directories. Available
                 without enable_config_discovery, subject to source/managed disables.
-            hook_directories: Explicit discovery-only file-hook roots, separate from callback
+            hooks.directories: Explicit discovery-only file-hook roots, separate from callback
                 hooks. Same path and clearing rules as skill_directories. Available without
                 enable_config_discovery or enable_file_hooks (repository-origin hooks only);
                 hook and managed disables still apply.
-            instruction_directories: Explicit discovery-only instruction roots using existing
+            plugins.directories: Local filesystem paths to Open Plugins-format directories
+                to load for this session. None and omission keep the existing plugins;
+                [] unloads plugins mounted from these directories.
+            instructions.directories: Explicit discovery-only instruction roots using existing
                 SDK formats. Same path and clearing rules as skill_directories. Available
                 without enable_config_discovery, subject to instruction/managed disables.
-            disabled_skills: Skills to disable.
-            disabled_mcp_servers: Exact MCP server names to disable only for this
+            skills.disabled_skills: Skills to disable. On resident resume, None keeps the
+                skills disabled before and [] re-enables them.
+            mcp.disabled_servers: Exact MCP server names to disable only for this
                 session. Disabled servers are not started or authenticated on
                 create or cold resume; a resident resume cannot stop servers
                 already running. This does not change global MCP settings.
-            sandbox_config: Sandbox configuration applied when the session is constructed,
+            permissions.sandbox: Sandbox configuration applied when the session is constructed,
                 before MCP servers start. Same shape as the sandboxConfig option of session
                 options update; an identical later update is a no-op.
-            infinite_sessions: Infinite session configuration.
-            memory: Session memory configuration.
-            image_generation: **Experimental.** Image generation opt-in. Omission preserves a
+            state.infinite_sessions: Infinite session configuration.
+            state.memory: Session memory configuration. **Experimental:** set
+                ``store_memory`` to store memories in the app instead of the
+                built-in memory backends; see :class:`MemoryConfiguration`.
+            tools.image_generation: **Experimental.** Image generation opt-in. Omission preserves a
                 resident session's setting; re-supply after runtime restart.
-            on_event: Callback for session events.
-            enable_mcp_apps: **Experimental.** Opt into MCP Apps (SEP-1865) UI
+            events.on_event: Callback for session events.
+            interaction.auto_mode_recovery: Re-enroll in runtime-owned recovery on resume.
+                Requires ``on_auto_mode_switch_request`` and a positive runtime acknowledgment.
+                See :meth:`create_session` for consent and lifetime requirements.
+            mcp.enable_apps: **Experimental.** Opt into MCP Apps (SEP-1865) UI
                 passthrough on resume. This parameter is part of an experimental
                 wire-protocol surface and may change or be removed in a future
                 release. When True, the SDK sends ``requestMcpApps: True`` on
@@ -3811,7 +4764,7 @@ class CopilotClient:
                 override) is on; otherwise the request is silently dropped.
                 Inspect ``capabilities.ui.mcpApps`` on the resume response to
                 detect the drop.
-            github_mcp_tool_config: Configuration for the built-in GitHub MCP
+            github.mcp: Configuration for the built-in GitHub MCP
                 server, sent as ``githubMcpToolConfig`` on ``session.resume``.
                 Supports ``enable_all_tools``, ``additional_toolsets``,
                 ``additional_tools``, ``enable_insiders_mode``, and
@@ -3830,15 +4783,21 @@ class CopilotClient:
                 for caller-supplied results via the corresponding low-level RPC methods.
                 Resuming does not re-emit restored permission requests or re-invoke
                 permission handlers or already-dispatched external tool callbacks.
+                If a pending call was recorded as SDK-handler-backed and resume
+                registers a handler for that tool, the abandoned callback is
+                interrupted, never replayed. Handlerless calls remain pending.
+                To supply an abandoned callback's result manually, resume without
+                a handler for it. Older requests without recorded callback
+                ownership also remain pending.
             suppress_resume_event: When True, skips emitting the session.resume
                 event when attaching to an existing session. Defaults to False.
             allow_transcript_recovery: Whether to repair a damaged transcript on
                 resume. Defaults to True in all modes. Set False to reject
                 recovery. Recovery can discard a torn tail; inspect
                 ``session.transcript_recovery`` for the reported affected lines.
-            feature_flags: Feature-flag values resolved by the host to apply
+            experiments.flags: Feature-flag values resolved by the host to apply
                 on resume. Sent on the wire as ``featureFlags``.
-            exp_assignments: ExP assignment ("flight") data injected by a
+            experiments.assignments: ExP assignment ("flight") data injected by a
                 trusted integrator, in the same JSON shape the Copilot CLI
                 fetches from the experimentation service
                 (``CopilotExpAssignmentResponse``). When supplied, the runtime
@@ -3849,30 +4808,36 @@ class CopilotClient:
                 malformed payloads are dropped by the runtime (fail-open). This
                 is an internal/trusted-integrator option. Sent on the wire as
                 ``expAssignments``.
-            enable_managed_settings: Opt-in flag. When ``True``, the runtime
+            github.fetch_managed_settings: Opt-in flag. When ``True``, the runtime
                 self-fetches enterprise managed settings (bypass-permissions
                 policy) at session bootstrap using the session's ``github_token``.
                 Requires ``github_token`` to be set; if omitted, the runtime is
                 expected to reject session creation (fail-closed). When unset,
                 behaves exactly as before. Sent on the wire as
                 ``enableManagedSettings``.
-            excluded_managed_settings: Exact dotted managed-setting paths to exclude.
+            policy.excluded_managed_settings: Exact dotted managed-setting paths to exclude.
                 Same semantics as :meth:`create_session`; omitting restores full
                 enforcement, including when resuming a live session.
-            enforce_managed_model_defaults: When ``True``, locked managed model
+            policy.enforce_managed_model_defaults: When ``True``, locked managed model
                 controls are enforced after resume. Conflicting model changes are
                 rejected, while overridable managed defaults remain mutable. Sent
                 on the wire as ``enforceManagedModelDefaults``.
-            interactive_user: Re-supplies that a human drives this session so a
+            github.interactive_user: Re-supplies that a human drives this session so a
                 session loaded from storage keeps the declaration. It is not
                 persisted and is ignored if the session is already active in the
                 runtime process.
-            managed_settings: Host-injected enterprise managed settings for the
+            permissions.mode: Permission mode applied before resumed pending work
+                continues and before this method returns. If it is refused (for
+                example by managed policy), continued work runs under the mode
+                ``session.permission_mode_result`` reports. Same checks and
+                semantics as in :meth:`create_session`. Omit to keep the
+                restored mode. Sent on the wire as ``permissionMode``.
+            policy.managed_settings: Host-injected enterprise managed settings for the
                 session. Must be re-supplied on resume; it replaces the prior
                 injected layer, and omitting it clears that layer so warm and
                 cold resume behave identically. See :meth:`create_session`. Sent
                 on the wire as ``managedSettings``.
-            github_token_provider: Callback that acquires a short-lived GitHub
+            github.token_provider: Callback that acquires a short-lived GitHub
                 credential for this resumed session. Mutually exclusive with
                 ``github_token``. The new registration replaces the prior
                 provider only after resume succeeds.
@@ -3891,28 +4856,147 @@ class CopilotClient:
 
         Example:
             >>> session = await client.resume_session(
-            ...     "session-123",
-            ...     on_permission_request=PermissionHandler.approve_all,
+            ...     "session-123", permissions={"on_request": PermissionHandler.approve_all}
             ... )
-            >>>
+
             >>> # Resume with new tools
             >>> session = await client.resume_session(
             ...     "session-123",
-            ...     on_permission_request=PermissionHandler.approve_all,
-            ...     tools=[my_new_tool],
+            ...     permissions={"on_request": PermissionHandler.approve_all},
+            ...     tools={"definitions": [my_new_tool]},
             ... )
         """
+        _validate_option_group("permissions", permissions, SessionPermissionOptions)
+        _validate_option_group("inference", inference, SessionInferenceOptions)
+        _validate_option_group("experiments", experiments, SessionExperimentOptions)
+        _validate_option_group("tools", tools, SessionToolOptions)
+        _validate_option_group("interaction", interaction, SessionInteractionOptions)
+        _validate_option_group("hooks", hooks, SessionHookOptions)
+        _validate_option_group("filesystem", filesystem, SessionFilesystemOptions)
+        _validate_option_group("github", github, SessionGitHubOptions)
+        _validate_option_group("agents", agents, SessionAgentOptions)
+        _validate_option_group("execution", execution, SessionExecutionOptions)
+        _validate_option_group("instructions", instructions, SessionInstructionOptions)
+        _validate_option_group("git", git, SessionGitOptions)
+        _validate_option_group("events", events, SessionEventOptions)
+        _validate_option_group("mcp", mcp, SessionMcpOptions)
+        _validate_option_group("state", state, SessionStateOptions)
+        _validate_option_group("skills", skills, SessionSkillOptions)
+        _validate_option_group("plugins", plugins, SessionPluginOptions)
+        _validate_option_group("canvases", canvases, ResumeSessionCanvasOptions)
+        _validate_option_group("extensions", extensions, SessionExtensionOptions)
+        _validate_option_group("policy", policy, SessionPolicyOptions)
+        on_permission_request = (permissions or {}).get("on_request", None)
+        reasoning_effort = (inference or {}).get("reasoning_effort", None)
+        allow_multiple_tool_calls = (inference or {}).get("allow_multiple_tool_calls", None)
+        reasoning_summary = (inference or {}).get("reasoning_summary", None)
+        enable_experimental_mode = (experiments or {}).get("enable_experimental_mode", None)
+        context_tier = (inference or {}).get("context_tier", None)
+        tool_definitions = (tools or {}).get("definitions", None)
+        tool_search = (tools or {}).get("search", None)
+        image_generation = (tools or {}).get("image_generation", None)
+        available_tools = (tools or {}).get("available_tools", None)
+        excluded_tools = (tools or {}).get("excluded_tools", None)
+        on_user_input_request = (interaction or {}).get("on_user_input_request", None)
+        on_shell_authentication_request = (interaction or {}).get(
+            "on_shell_authentication_request", None
+        )
+        ask_user_variant = (interaction or {}).get("ask_user_variant", None)
+        hook_handlers = (hooks or {}).get("handlers", None)
+        additional_directories = (filesystem or {}).get("additional_directories", None)
+        if inference is not None and "provider" in inference:
+            raise ValueError("inference.provider is no longer supported; use inference.providers")
+        capi = (github or {}).get("capi", None)
+        providers = (inference or {}).get("providers", None)
+        models = (inference or {}).get("models", None)
+        enable_session_telemetry = (github or {}).get("telemetry_enabled", None)
+        enable_citations = (inference or {}).get("enable_citations", None)
+        enable_file_change_tracking = (filesystem or {}).get("track_file_changes", None)
+        excluded_builtin_agents = (agents or {}).get("excluded_builtin_agents", None)
+        included_builtin_agents = (agents or {}).get("included_builtin_agents", None)
+        session_limits = (execution or {}).get("limits", None)
+        autopilot = (execution or {}).get("autopilot", None)
+        skip_custom_instructions = (instructions or {}).get("skip_custom_instructions", None)
+        custom_agents_local_only = (agents or {}).get("local_discovery_only", None)
+        coauthor_enabled = (git or {}).get("coauthor_enabled", None)
+        manage_schedule_enabled = (tools or {}).get("manage_schedule_enabled", None)
+        model_capabilities = (inference or {}).get("capabilities", None)
+        streaming = (events or {}).get("streaming", None)
+        include_sub_agent_streaming_events = (events or {}).get(
+            "include_sub_agent_streaming_events", None
+        )
+        mcp_servers = (mcp or {}).get("servers", None)
+        mcp_oauth_token_storage = (mcp or {}).get("oauth_token_storage", None)
+        auth_client_id_metadata_url = (mcp or {}).get("auth_client_id_metadata_url", None)
+        embedding_cache_storage = (state or {}).get("embedding_cache_storage", None)
+        custom_agents = (agents or {}).get("definitions", None)
+        default_agent = (agents or {}).get("default", None)
+        agent = (agents or {}).get("selected", None)
+        skip_embedding_retrieval = (state or {}).get("skip_embedding_retrieval", None)
+        organization_custom_instructions = (instructions or {}).get("organization_text", None)
+        enable_on_demand_instruction_discovery = (instructions or {}).get(
+            "on_demand_discovery", None
+        )
+        enable_file_hooks = (hooks or {}).get("enable_repository_hooks", None)
+        enable_host_git_operations = (git or {}).get("enable_host_git_operations", None)
+        enable_session_store = (state or {}).get("enable_cross_session_store", None)
+        enable_skills = (skills or {}).get("enabled", None)
+        included_builtin_skills = (skills or {}).get("included_builtin_skills", None)
+        skill_directories = (skills or {}).get("directories", None)
+        skill_provider = (skills or {}).get("provider", None)
+        agent_directories = (agents or {}).get("directories", None)
+        hook_directories = (hooks or {}).get("directories", None)
+        plugin_directories = (plugins or {}).get("directories", None)
+        instruction_directories = (instructions or {}).get("directories", None)
+        disabled_skills = (skills or {}).get("disabled_skills", None)
+        disabled_mcp_servers = (mcp or {}).get("disabled_servers", None)
+        sandbox_config = (permissions or {}).get("sandbox", None)
+        infinite_sessions = (state or {}).get("infinite_sessions", None)
+        large_output = (tools or {}).get("large_output", None)
+        memory = (state or {}).get("memory", None)
+        on_event = (events or {}).get("on_event", None)
+        commands = (interaction or {}).get("commands", None)
+        on_elicitation_request = (interaction or {}).get("on_elicitation_request", None)
+        on_mcp_auth_request = (mcp or {}).get("on_auth_request", None)
+        enable_mcp_apps = (mcp or {}).get("enable_apps", False)
+        on_exit_plan_mode_request = (interaction or {}).get("on_exit_plan_mode_request", None)
+        on_auto_mode_switch_request = (interaction or {}).get("on_auto_mode_switch_request", None)
+        auto_mode_recovery = (interaction or {}).get("auto_mode_recovery", False)
+        create_session_fs_handler = (state or {}).get("create_session_fs_provider", None)
+        github_token = (github or {}).get("token", None)
+        github_token_provider = (github or {}).get("token_provider", None)
+        canvas_definitions = (canvases or {}).get("definitions", None)
+        request_canvas_renderer = (canvases or {}).get("request_renderer", None)
+        request_extensions = (extensions or {}).get("enabled", None)
+        extension_sdk_path = (extensions or {}).get("sdk_path", None)
+        extension_info = (extensions or {}).get("identity", None)
+        canvas_provider = (canvases or {}).get("provider", None)
+        canvas_handler = (canvases or {}).get("handler", None)
+        open_canvases = (canvases or {}).get("open", None)
+        feature_flags = (experiments or {}).get("flags", None)
+        exp_assignments = (experiments or {}).get("assignments", None)
+        enable_managed_settings = (github or {}).get("fetch_managed_settings", None)
+        excluded_managed_settings = (policy or {}).get("excluded_managed_settings", None)
+        enforce_managed_model_defaults = (policy or {}).get("enforce_managed_model_defaults", None)
+        interactive_user = (github or {}).get("interactive_user", None)
+        permission_mode = (permissions or {}).get("mode", None)
+        github_mcp_tool_config = (github or {}).get("mcp", None)
+        managed_settings = (policy or {}).get("managed_settings", None)
+        if auto_mode_recovery and not callable(on_auto_mode_switch_request):
+            raise ValueError("auto_mode_recovery requires on_auto_mode_switch_request")
         if on_permission_request is not None and not callable(on_permission_request):
             raise ValueError("on_permission_request must be callable when provided.")
         if github_token is not None and github_token_provider is not None:
             raise ValueError("github_token and github_token_provider are mutually exclusive")
         if ask_user_variant not in (None, "legacy", "elicitation"):
             raise ValueError('ask_user_variant must be "legacy" or "elicitation"')
-        # Wait for in-progress startup too: its provider registrations must precede any session.
+        store_memory = _requested_memory_store(memory)
         if not self._client or self._start_lock.locked():
-            await self.start()
+            await self._started_client()
 
-        tool_defs = [definition.to_dict() for definition in _tools_to_wire_definitions(tools)]
+        tool_defs = [
+            definition.to_dict() for definition in _tools_to_wire_definitions(tool_definitions)
+        ]
 
         # Empty-mode validation and normalization
         mode = self._options.mode
@@ -3945,13 +5029,15 @@ class CopilotClient:
             payload["model"] = model
         if reasoning_effort:
             payload["reasoningEffort"] = reasoning_effort
+        if allow_multiple_tool_calls is not None:
+            payload["allowMultipleToolCalls"] = allow_multiple_tool_calls
         if reasoning_summary:
             payload["reasoningSummary"] = reasoning_summary
         if enable_experimental_mode is not None:
             payload["isExperimentalMode"] = enable_experimental_mode
         if context_tier:
             payload["contextTier"] = context_tier
-        if tool_defs:
+        if tool_definitions is not None:
             payload["tools"] = tool_defs
         wire_system_message, transform_callbacks = _extract_transform_callbacks(system_message)
         if wire_system_message:
@@ -3964,16 +5050,15 @@ class CopilotClient:
             payload["availableTools"] = available_tools
         if excluded_tools is not None:
             payload["excludedTools"] = excluded_tools
-        payload["toolFilterPrecedence"] = "excluded"
-        if provider:
-            payload["provider"] = self._convert_provider_to_wire_format(provider)
+        if inference is not None and "default_provider" in inference:
+            payload["defaultProvider"] = inference["default_provider"]
         if capi is not None:
             payload["capi"] = _capi_session_options_to_wire(capi)
-        if providers:
+        if providers is not None:
             payload["providers"] = [
                 self._convert_named_provider_to_wire_format(p) for p in providers
             ]
-        if models:
+        if models is not None:
             payload["models"] = [self._convert_model_to_wire_format(m) for m in models]
         if enable_session_telemetry is not None:
             payload["enableSessionTelemetry"] = enable_session_telemetry
@@ -3983,12 +5068,14 @@ class CopilotClient:
             payload["enableFileChangeTracking"] = enable_file_change_tracking
         if excluded_builtin_agents is not None:
             payload["excludedBuiltinAgents"] = excluded_builtin_agents
+        if included_builtin_agents is not None:
+            payload["includedBuiltinAgents"] = included_builtin_agents
         if session_limits is not None:
             payload["sessionLimits"] = _session_limits_to_wire(session_limits)
         if autopilot is not None:
             payload["autopilot"] = _autopilot_to_wire(autopilot)
         if model_capabilities:
-            payload["modelCapabilities"] = _capabilities_to_dict(model_capabilities)
+            payload["modelCapabilities"] = model_capabilities.to_dict()
         if streaming is not None:
             payload["streaming"] = streaming
 
@@ -4009,6 +5096,8 @@ class CopilotClient:
 
         if on_user_input_request:
             payload["requestUserInput"] = True
+        if on_shell_authentication_request:
+            payload["requestShellAuthentication"] = True
         if ask_user_variant is not None:
             payload["askUserVariant"] = ask_user_variant
 
@@ -4020,14 +5109,16 @@ class CopilotClient:
             payload["githubMcpToolConfig"] = _github_mcp_tool_config_to_wire(github_mcp_tool_config)
         payload["requestExitPlanMode"] = bool(on_exit_plan_mode_request)
         payload["requestAutoModeSwitch"] = bool(on_auto_mode_switch_request)
+        if auto_mode_recovery:
+            payload["requestAutoModeRecovery"] = True
 
         # Serialize commands (name + description only) into payload
-        if commands:
+        if commands is not None:
             payload["commands"] = [
                 {"name": cmd.name, "description": cmd.description or ""} for cmd in commands
             ]
 
-        if hooks and any(hooks.values()):
+        if hook_handlers and any(hook_handlers.values()):
             payload["hooks"] = True
 
         # Add GitHub token for per-session authentication
@@ -4051,6 +5142,9 @@ class CopilotClient:
 
         if interactive_user is not None:
             payload["interactiveUser"] = interactive_user
+
+        if permission_mode is not None:
+            payload["permissionMode"] = PermissionMode(permission_mode).value
 
         # Host-injected managed settings (permissions-only contract)
         if managed_settings is not None:
@@ -4080,6 +5174,8 @@ class CopilotClient:
             payload["enableSkills"] = enable_skills
         if skill_provider is not None:
             payload["hasSkillProvider"] = True
+        if store_memory is not None:
+            payload["hasMemoryStore"] = True
 
         if continue_pending_work is not None:
             payload["continuePendingWork"] = continue_pending_work
@@ -4104,7 +5200,7 @@ class CopilotClient:
             payload["embeddingCacheStorage"] = embedding_cache_storage
         payload["envValueMode"] = "direct"
 
-        if custom_agents:
+        if custom_agents is not None:
             payload["customAgents"] = [
                 self._convert_custom_agent_to_wire_format(a) for a in custom_agents
             ]
@@ -4123,11 +5219,11 @@ class CopilotClient:
             payload["agentDirectories"] = agent_directories
         if hook_directories is not None:
             payload["hookDirectories"] = hook_directories
-        if plugin_directories:
+        if plugin_directories is not None:
             payload["pluginDirectories"] = plugin_directories
         if instruction_directories is not None:
             payload["instructionDirectories"] = instruction_directories
-        if disabled_skills:
+        if disabled_skills is not None:
             payload["disabledSkills"] = disabled_skills
         if disabled_mcp_servers is not None:
             payload["disabledMcpServers"] = disabled_mcp_servers
@@ -4154,8 +5250,8 @@ class CopilotClient:
         if memory is not None:
             payload["memory"] = _memory_to_wire(memory)
 
-        if canvases:
-            payload["canvases"] = [c.to_dict() for c in canvases]
+        if canvas_definitions:
+            payload["canvases"] = [c.to_dict() for c in canvas_definitions]
         if open_canvases:
             payload["openCanvases"] = [inst.to_dict() for inst in open_canvases]
         if request_canvas_renderer is not None:
@@ -4181,14 +5277,40 @@ class CopilotClient:
         # Create and register the session before issuing the RPC so that
         # events emitted by the CLI (e.g. session.start) are not dropped.
         setup_start = time.perf_counter()
-        session = CopilotSession(
-            session_id,
-            rpc_client,
-            workspace_path=None,
-            managed_settings_enabled=enable_managed_settings is True
-            or managed_settings is not None,
-        )
+        operation_session_id = session_id
+        initialization_lock = None
+        if (
+            auto_mode_recovery
+            and not self._session_fs_config
+            and _is_abbreviated_uuid_prefix(session_id)
+        ):
+            initialization_lock = await self._acquire_session_initialization(
+                operation_session_id, rpc_client, wait_for_resumes=auto_mode_recovery
+            )
+            try:
+                # Resolve persisted uniqueness without changing the resident callbacks.
+                # Pin the full ID so resume cannot resolve an ambiguous prefix later.
+                resolved = await ServerRpc(rpc_client).sessions.find_by_prefix(
+                    SessionsFindByPrefixRequest(prefix=session_id, config_dir=config_directory)
+                )
+                if not resolved.session_id:
+                    raise RuntimeError(f"no unique session matches prefix {session_id!r}")
+                session_id = resolved.session_id
+                payload["sessionId"] = session_id
+            except BaseException:
+                initialization_lock.release()
+                raise
+        elif auto_mode_recovery and not self._session_fs_config:
+            session_id = self._resident_session_id(session_id, rpc_client)
+        session = None
         try:
+            session = CopilotSession(
+                session_id,
+                rpc_client,
+                workspace_path=None,
+                managed_settings_enabled=enable_managed_settings is True
+                or managed_settings is not None,
+            )
             if self._session_fs_config:
                 if create_session_fs_handler is None:
                     raise ValueError(
@@ -4223,62 +5345,120 @@ class CopilotClient:
                             "does not implement SessionFsBinaryProvider"
                         )
                 session._client_session_apis.session_fs = create_session_fs_adapter(fs_provider)
-        except BaseException:
-            session._mark_disconnected()
-            raise
-        session._register_tools(tools)
-        session._register_commands(commands)
-        session._register_skill_provider(skill_provider)
-        session._register_permission_handler(on_permission_request)
-        session._register_mcp_auth_handler(on_mcp_auth_request)
-        if on_user_input_request:
-            session._register_user_input_handler(on_user_input_request)
-        if on_elicitation_request:
-            session._register_elicitation_handler(on_elicitation_request)
-        if on_exit_plan_mode_request:
-            session._register_exit_plan_mode_handler(on_exit_plan_mode_request)
-        if on_auto_mode_switch_request:
-            session._register_auto_mode_switch_handler(on_auto_mode_switch_request)
-        if canvas_handler is not None:
-            session._register_canvas_handler(canvas_handler)
-        session._register_bearer_token_providers(
-            _collect_bearer_token_callbacks(provider, providers)
-        )
-        if hooks:
-            session._register_hooks(hooks)
-        if transform_callbacks:
-            session._register_transform_callbacks(transform_callbacks)
-        if on_event:
-            session.on(on_event)
-        try:
-            replaced_session = self._register_session(session)
-        except BaseException:
-            session._mark_disconnected()
-            raise
-        log_timing(
-            logger,
-            logging.DEBUG,
-            "CopilotClient.resume_session local setup complete",
-            setup_start,
-            session_id=session_id,
-            tools_count=len(tools or []),
-            commands_count=len(commands or []),
-            has_hooks=hooks is not None,
-        )
-        github_token_provider_registration_id = self._register_github_token_provider(
-            github_token_provider, session_id
-        )
-        if github_token_provider_registration_id is not None:
-            payload["gitHubTokenProviderRegistrationId"] = github_token_provider_registration_id
-            session._set_disconnect_callback(
-                lambda: self._unregister_github_token_provider(
-                    github_token_provider_registration_id
+            session._register_tools(tool_definitions)
+            session._register_commands(commands)
+            session._register_skill_provider(skill_provider)
+            session._register_memory_store(store_memory)
+            session._register_permission_handler(on_permission_request)
+            session._register_mcp_auth_handler(on_mcp_auth_request)
+            if on_user_input_request:
+                session._register_user_input_handler(on_user_input_request)
+            if on_shell_authentication_request:
+                session._register_shell_authentication_handler(on_shell_authentication_request)
+            if on_elicitation_request:
+                session._register_elicitation_handler(on_elicitation_request)
+            if on_exit_plan_mode_request:
+                session._register_exit_plan_mode_handler(on_exit_plan_mode_request)
+            if on_auto_mode_switch_request:
+                session._register_auto_mode_switch_handler(on_auto_mode_switch_request)
+            if canvas_handler is not None:
+                session._register_canvas_handler(canvas_handler)
+            session._register_bearer_token_providers(_collect_bearer_token_callbacks(providers))
+            if hook_handlers:
+                session._register_hooks(hook_handlers)
+            if transform_callbacks:
+                session._register_transform_callbacks(transform_callbacks)
+            if on_event:
+                session.on(on_event)
+            if initialization_lock is None:
+                initialization_lock = await self._acquire_session_initialization(
+                    operation_session_id, rpc_client, wait_for_resumes=auto_mode_recovery
                 )
+            log_timing(
+                logger,
+                logging.DEBUG,
+                "CopilotClient.resume_session local setup complete",
+                setup_start,
+                session_id=session_id,
+                tools_count=len(tool_definitions or []),
+                commands_count=len(commands or []),
+                has_hooks=hook_handlers is not None,
             )
+            github_token_provider_registration_id = self._register_github_token_provider(
+                github_token_provider, session_id
+            )
+            if github_token_provider_registration_id is not None:
+                payload["gitHubTokenProviderRegistrationId"] = github_token_provider_registration_id
+                session._set_disconnect_callback(
+                    lambda: self._unregister_github_token_provider(
+                        github_token_provider_registration_id
+                    )
+                )
+            replaced_session = self._register_session(session)
+            with self._sessions_lock:
+                self._resume_predecessors[session] = replaced_session
+        except BaseException:
+            if session is not None:
+                session._mark_disconnected()
+            if initialization_lock is not None:
+                initialization_lock.release()
+            raise
 
+        ordinary_resume: asyncio.Future[None] | None = None
+        ordinary_resume_session_id = operation_session_id
+        if not auto_mode_recovery:
+            # Ordinary resumes keep their existing concurrent callback-registration behavior.
+            ordinary_resume = asyncio.get_running_loop().create_future()
+            with self._sessions_lock:
+                self._ordinary_session_resumes.setdefault(operation_session_id, set()).add(
+                    ordinary_resume
+                )
+            initialization_lock.release()
+            initialization_lock = None
+        keep_resumed_session_on_recovery_rejection = False
         try:
             rpc_start = time.perf_counter()
-            response = await rpc_client.request("session.resume", payload)
+            response = await rpc_client.request("session.resume", _group_session_payload(payload))
+            canonical_id = response.get("sessionId")
+            if isinstance(canonical_id, str) and canonical_id and canonical_id != session_id:
+                # Resolve admission before publishing the canonical owner. Never
+                # remove an attachment that replaced this provisional registration.
+                if not _session_ids_overlap(operation_session_id, canonical_id):
+                    if initialization_lock is not None:
+                        initialization_lock.release()
+                        initialization_lock = None
+                    initialization_lock = await self._acquire_session_initialization(
+                        canonical_id, rpc_client, wait_for_resumes=auto_mode_recovery
+                    )
+                with self._sessions_lock:
+                    replaced_session = self._rollback_resume_predecessor(session)
+                    if self._sessions.get(session_id) is session:
+                        if replaced_session is None:
+                            del self._sessions[session_id]
+                        else:
+                            self._sessions[session_id] = replaced_session
+                    self._resume_predecessors[session] = None
+                    if ordinary_resume is not None:
+                        resumes = self._ordinary_session_resumes[ordinary_resume_session_id]
+                        resumes.remove(ordinary_resume)
+                        if not resumes:
+                            del self._ordinary_session_resumes[ordinary_resume_session_id]
+                        self._ordinary_session_resumes.setdefault(canonical_id, set()).add(
+                            ordinary_resume
+                        )
+                        ordinary_resume_session_id = canonical_id
+                session_id = canonical_id
+                session.session_id = canonical_id
+                session._rpc = None
+                replaced_session = self._register_session(session)
+                with self._sessions_lock:
+                    self._resume_predecessors[session] = replaced_session
+                self._assign_github_token_provider(
+                    github_token_provider_registration_id, canonical_id
+                )
+                if ordinary_resume is not None and initialization_lock is not None:
+                    initialization_lock.release()
+                    initialization_lock = None
             log_timing(
                 logger,
                 logging.DEBUG,
@@ -4287,6 +5467,7 @@ class CopilotClient:
                 session_id=session_id,
             )
             session._workspace_path = response.get("workspacePath")
+            session.permission_mode_result = _permission_mode_result(response)
             recovery = response.get("transcriptRecovery")
             if recovery is not None:
                 session.transcript_recovery = TranscriptRecoveryReport(
@@ -4296,6 +5477,14 @@ class CopilotClient:
                 )
             capabilities = response.get("capabilities")
             session._set_capabilities(capabilities)
+            if auto_mode_recovery:
+                keep_resumed_session_on_recovery_rejection = (
+                    replaced_session is not None
+                    and ((capabilities or {}).get("ui") or {}).get("autoModeRecovery") is not True
+                )
+                await self._require_auto_mode_recovery(
+                    session, detach_on_failure=replaced_session is None
+                )
             open_canvases_raw = response.get("openCanvases")
             if isinstance(open_canvases_raw, list):
                 session._set_open_canvases(
@@ -4306,17 +5495,60 @@ class CopilotClient:
                     "session.eventLog.registerInterest",
                     {"sessionId": session.session_id, "eventType": "mcp.oauth_required"},
                 )
+            options_patch = await self._apply_post_create_options_patch(
+                session,
+                mode,
+                skip_custom_instructions,
+                custom_agents_local_only,
+                coauthor_enabled,
+                manage_schedule_enabled,
+                included_builtin_skills,
+            )
+            self._commit_github_token_provider(session_id, github_token_provider_registration_id)
+            self._ahp_hosts.capture(session, payload, options_patch)
         except BaseException as exc:
             # The runtime keeps the resident session's bindings when a resume
-            # fails, so its callbacks must keep reaching the replaced session.
+            # fails, except when a successful resume was rejected only because
+            # the runtime did not acknowledge Auto recovery.
             with self._sessions_lock:
-                if self._sessions.get(session_id) is session:
-                    if replaced_session is not None:
+                replaced_session = self._rollback_resume_predecessor(session)
+                retiring = self._session_admission_closed or self._client is not rpc_client
+                cleanup_owns_session = self._sessions.get(
+                    session_id
+                ) is session and session_id in self._auto_mode_recovery_cleanups.get(rpc_client, {})
+                if self._sessions.get(session_id) is session and not cleanup_owns_session:
+                    if (
+                        not retiring
+                        and replaced_session is not None
+                        and not replaced_session._destroyed
+                        and not keep_resumed_session_on_recovery_rejection
+                    ):
                         self._sessions[session_id] = replaced_session
-                    else:
+                    elif not keep_resumed_session_on_recovery_rejection:
                         del self._sessions[session_id]
-            session._mark_disconnected()
-            self._unregister_github_token_provider(github_token_provider_registration_id)
+                restored = self._sessions.get(session_id) is replaced_session
+                owner = self._sessions.get(session_id)
+                retained = False
+                while owner is not None and owner in self._resume_predecessors:
+                    owner = self._resume_predecessors[owner]
+                    if owner is replaced_session:
+                        retained = True
+                        break
+            if (
+                not restored
+                and not retained
+                and (retiring or not keep_resumed_session_on_recovery_rejection)
+                and replaced_session is not None
+                and replaced_session._client is rpc_client
+            ):
+                replaced_session._mark_disconnected()
+            if keep_resumed_session_on_recovery_rejection:
+                self._commit_github_token_provider(
+                    session_id, github_token_provider_registration_id
+                )
+            elif not cleanup_owns_session:
+                session._mark_disconnected()
+                self._unregister_github_token_provider(github_token_provider_registration_id)
             if not isinstance(exc, asyncio.CancelledError):
                 log_timing(
                     logger,
@@ -4327,18 +5559,18 @@ class CopilotClient:
                     session_id=session_id,
                 )
             raise
-
-        await self._apply_post_create_options_patch(
-            session,
-            mode,
-            skip_custom_instructions,
-            custom_agents_local_only,
-            coauthor_enabled,
-            manage_schedule_enabled,
-            included_builtin_skills,
-        )
-        self._commit_github_token_provider(session_id, github_token_provider_registration_id)
-        self._ahp_hosts.capture(session, payload)
+        finally:
+            with self._sessions_lock:
+                self._resume_predecessors.pop(session, None)
+            if ordinary_resume is not None:
+                with self._sessions_lock:
+                    resumes = self._ordinary_session_resumes[ordinary_resume_session_id]
+                    resumes.remove(ordinary_resume)
+                    if not resumes:
+                        del self._ordinary_session_resumes[ordinary_resume_session_id]
+                ordinary_resume.set_result(None)
+            if initialization_lock is not None:
+                initialization_lock.release()
 
         log_timing(
             logger,
@@ -4360,77 +5592,72 @@ class CopilotClient:
         from .host import _validate_options
 
         _validate_options(options)
-        if self._state != "connected":
-            await self.start()
-        if self._client is None:
-            raise RuntimeError("Client not connected")
-        return await self._ahp_hosts.start(self._client, options)
+        client = await self._started_client()
+        return await self._ahp_hosts.start(client, options)
 
-    async def ping(self, message: str | None = None) -> PingResponse:
+    async def ping(self, message: str | None = None) -> PingResult:
         """
         Send a ping request to the server to verify connectivity.
+
+        Starts the client if needed.
 
         Args:
             message: Optional message to include in the ping.
 
         Returns:
-            A PingResponse object containing the ping response.
+            A generated PingResult containing the ping response.
 
         Raises:
-            RuntimeError: If the client is not connected.
+            RuntimeError: If startup fails, shutdown is in progress, or the connection is lost.
 
         Example:
             >>> response = await client.ping("health check")
             >>> print(f"Server responded at {response.timestamp}")
         """
-        if not self._client:
-            raise RuntimeError("Client not connected")
-
-        result = await self._client.request("ping", {"message": message})
-        return PingResponse.from_dict(result)
+        return await _ping(await self._started_client(), message)
 
     async def get_status(self) -> GetStatusResponse:
         """
         Get CLI status including version and protocol information.
 
+        Starts the client if needed.
+
         Returns:
             A GetStatusResponse object containing version and protocolVersion.
 
         Raises:
-            RuntimeError: If the client is not connected.
+            RuntimeError: If startup fails, shutdown is in progress, or the connection is lost.
 
         Example:
             >>> status = await client.get_status()
             >>> print(f"CLI version: {status.version}")
         """
-        if not self._client:
-            raise RuntimeError("Client not connected")
-
-        result = await self._client.request("status.get", {})
+        client = await self._started_client()
+        result = await client.request("status.get", {})
         return GetStatusResponse.from_dict(result)
 
     async def get_auth_status(self) -> GetAuthStatusResponse:
         """
         Get current authentication status.
 
+        Starts the client if needed.
+
         Returns:
             A GetAuthStatusResponse object containing authentication state.
 
         Raises:
-            RuntimeError: If the client is not connected.
+            RuntimeError: If startup fails, shutdown is in progress, or the connection is lost.
 
         Example:
             >>> auth = await client.get_auth_status()
-            >>> if auth.isAuthenticated:
+            >>> if auth.is_authenticated:
             ...     print(f"Logged in as {auth.login}")
         """
-        if not self._client:
-            raise RuntimeError("Client not connected")
-
-        result = await self._client.request("auth.getStatus", {})
+        client = await self._started_client()
+        result = await client.request("auth.getStatus", {})
         return GetAuthStatusResponse.from_dict(result)
 
-    async def list_models(self) -> list[ModelInfo]:
+    async def list_models(self) -> list[Model]:
         """
         List available models with their metadata.
 
@@ -4439,13 +5666,15 @@ class CopilotClient:
 
         If a custom ``on_list_models`` handler was provided in the client options,
         it is called instead of querying the CLI server. The handler may be sync
-        or async.
+        or async and remains available during shutdown. Otherwise, starts the client
+        if needed.
 
         Returns:
-            A list of ModelInfo objects with model details.
+            A list of generated Model objects with model details.
 
         Raises:
-            RuntimeError: If the client is not connected (when no custom handler is set).
+            RuntimeError: If startup fails, shutdown is in progress, or the connection
+                is retired (when no custom handler is set).
             Exception: If not authenticated.
 
         Example:
@@ -4453,38 +5682,79 @@ class CopilotClient:
             >>> for model in models:
             ...     print(f"{model.id}: {model.name}")
         """
-        # Use asyncio lock to prevent race condition with concurrent calls
-        async with self._models_cache_lock:
-            # Check cache (already inside lock)
-            if self._models_cache is not None:
-                return list(self._models_cache)  # Return a copy to prevent cache mutation
+        # Bind this call once. A retired queue must never initiate another startup.
+        client = await self._started_client() if not self._on_list_models else None
+        shutdown_generation = self._shutdown_generation
 
-            if self._on_list_models:
-                # Use custom handler instead of CLI RPC
-                result = self._on_list_models()
-                if inspect.isawaitable(result):
-                    models = cast(list[ModelInfo], await result)
-                else:
-                    models = cast(list[ModelInfo], result)
+        def assert_current_connection() -> None:
+            if client is not None:
+                self._assert_not_stopping()
+                if (
+                    shutdown_generation != self._shutdown_generation
+                    or self._client is not client
+                    or self._connection_lost
+                ):
+                    raise RuntimeError("Client disconnected while listing models")
+
+        while True:
+            assert_current_connection()
+            # Use asyncio lock to prevent race condition with concurrent calls
+            lock = self._models_cache_lock
+            generation = self._models_cache_generation
+            async with lock:
+                assert_current_connection()
+                if generation != self._models_cache_generation:
+                    if client is not None:
+                        raise RuntimeError("Client disconnected while listing models")
+                    # The cache and its queue were retired while this call waited.
+                    continue
+                outcome = (
+                    self._start_outcome
+                    if client is not None and self._start_lock.locked()
+                    else None
+                )
+                if outcome is None:
+                    return await self._list_models_locked(client, generation)
+            # Join an observed attempt outside the cache lock, without lazy restarting.
+            failure = await asyncio.shield(outcome)
+            if isinstance(failure, asyncio.CancelledError):
+                raise failure
+            if failure is not None:
+                raise RuntimeError(f"Client failed to start: {failure}") from failure
+
+    async def _list_models_locked(
+        self, client: JsonRpcClient | None, generation: int
+    ) -> list[Model]:
+        # Check cache (already inside lock)
+        if self._models_cache is not None:
+            return list(self._models_cache)  # Return a copy to prevent cache mutation
+
+        if self._on_list_models:
+            # Use custom handler instead of CLI RPC
+            result = self._on_list_models()
+            if inspect.isawaitable(result):
+                models = cast(list[Model], await result)
             else:
-                if not self._client:
-                    raise RuntimeError("Client not connected")
+                models = cast(list[Model], result)
+        else:
+            assert client is not None
+            # Cache miss - fetch from backend while holding lock
+            response = await client.request("models.list", {})
+            models_data = response.get("models", [])
+            models = [Model.from_dict(model) for model in models_data]
 
-                # Cache miss - fetch from backend while holding lock
-                response = await self._client.request("models.list", {})
-                models_data = response.get("models", [])
-                models = [ModelInfo.from_dict(model) for model in models_data]
-
-            # Update cache before releasing lock (copy to prevent external mutation)
+        # Update cache before releasing lock (copy to prevent external mutation)
+        if generation == self._models_cache_generation:
             self._models_cache = list(models)
 
-            return list(models)  # Return a copy to prevent cache mutation
+        return list(models)  # Return a copy to prevent cache mutation
 
     async def list_sessions(self, filter: SessionListFilter | None = None) -> list[SessionMetadata]:
         """
         List all available sessions known to the server.
 
         Returns metadata about each session including ID, timestamps, and summary.
+        Starts the client if needed.
 
         Args:
             filter: Optional filter to narrow down the list of sessions by working directory,
@@ -4494,7 +5764,7 @@ class CopilotClient:
             A list of SessionMetadata objects.
 
         Raises:
-            RuntimeError: If the client is not connected.
+            RuntimeError: If startup fails, shutdown is in progress, or the connection is lost.
 
         Example:
             >>> sessions = await client.list_sessions()
@@ -4504,14 +5774,13 @@ class CopilotClient:
             >>> from copilot.client import SessionListFilter
             >>> filtered = await client.list_sessions(SessionListFilter(repository="owner/repo"))
         """
-        if not self._client:
-            raise RuntimeError("Client not connected")
+        client = await self._started_client()
 
         payload: dict = {}
         if filter is not None:
             payload["filter"] = filter.to_dict()
 
-        response = await self._client.request("session.list", payload)
+        response = await client.request("session.list", payload)
         sessions_data = response.get("sessions", [])
         return [SessionMetadata.from_dict(session) for session in sessions_data]
 
@@ -4521,6 +5790,7 @@ class CopilotClient:
 
         This provides an efficient O(1) lookup of a single session's metadata
         instead of listing all sessions. Returns None if the session is not found.
+        Starts the client if needed.
 
         Args:
             session_id: The ID of the session to look up.
@@ -4529,17 +5799,15 @@ class CopilotClient:
             A SessionMetadata object, or None if the session was not found.
 
         Raises:
-            RuntimeError: If the client is not connected.
+            RuntimeError: If startup fails, shutdown is in progress, or the connection is lost.
 
         Example:
             >>> metadata = await client.get_session_metadata("session-123")
             >>> if metadata:
             ...     print(f"Session started at: {metadata.start_time}")
         """
-        if not self._client:
-            raise RuntimeError("Client not connected")
-
-        response = await self._client.request("session.getMetadata", {"sessionId": session_id})
+        client = await self._started_client()
+        response = await client.request("session.getMetadata", {"sessionId": session_id})
         session_data = response.get("session")
         if session_data is None:
             return None
@@ -4553,32 +5821,40 @@ class CopilotClient:
         Unlike :meth:`CopilotSession.disconnect`, which only releases in-memory
         resources and preserves session data for later resumption, this method
         is irreversible. The session cannot be resumed after deletion.
+        Starts the client if needed.
 
         Args:
             session_id: The ID of the session to delete.
 
         Raises:
-            RuntimeError: If the client is not connected or deletion fails.
+            RuntimeError: If startup or deletion fails, shutdown is in progress,
+                or the connection is lost.
 
         Example:
             >>> await client.delete_session("session-123")
         """
-        if not self._client:
-            raise RuntimeError("Client not connected")
+        rpc_client = await self._started_client_in_order()
+        initialization = await self._acquire_session_initialization(
+            session_id, rpc_client, wait_for_resumes=True
+        )
+        try:
+            response = await rpc_client.request("session.delete", {"sessionId": session_id})
 
-        response = await self._client.request("session.delete", {"sessionId": session_id})
+            success = response.get("success", False)
+            if not success:
+                error = response.get("error", "Unknown error")
+                raise RuntimeError(f"Failed to delete session {session_id}: {error}")
 
-        success = response.get("success", False)
-        if not success:
-            error = response.get("error", "Unknown error")
-            raise RuntimeError(f"Failed to delete session {session_id}: {error}")
-
-        # Remove from local sessions map if present
-        with self._sessions_lock:
-            session = self._sessions.pop(session_id, None)
-        if session is not None:
-            session._clear_skill_provider()
-            session._run_disconnect_callback()
+            with self._sessions_lock:
+                session = self._sessions.get(session_id)
+                if session is not None and session._client is rpc_client:
+                    del self._sessions[session_id]
+                else:
+                    session = None
+            if session is not None:
+                session._mark_disconnected()
+        finally:
+            initialization.release()
 
     async def get_last_session_id(self) -> str | None:
         """
@@ -4586,23 +5862,22 @@ class CopilotClient:
 
         This is useful for resuming the last conversation when the session ID
         was not stored.
+        Starts the client if needed.
 
         Returns:
             The session ID, or None if no sessions exist.
 
         Raises:
-            RuntimeError: If the client is not connected.
+            RuntimeError: If startup fails, shutdown is in progress, or the connection is lost.
 
         Example:
             >>> last_id = await client.get_last_session_id()
             >>> if last_id:
-            ...     config = {"on_permission_request": PermissionHandler.approve_all}
-            ...     session = await client.resume_session(last_id, config)
+            ...     config = {"permissions": {"on_request": PermissionHandler.approve_all}}
+            ...     session = await client.resume_session(last_id, **config)
         """
-        if not self._client:
-            raise RuntimeError("Client not connected")
-
-        response = await self._client.request("session.getLastId", {})
+        client = await self._started_client()
+        response = await client.request("session.getLastId", {})
         return response.get("sessionId")
 
     async def get_foreground_session_id(self) -> str | None:
@@ -4611,22 +5886,21 @@ class CopilotClient:
 
         This is only available when connecting to a server running in TUI+server mode
         (--ui-server).
+        Starts the client if needed.
 
         Returns:
             The session ID, or None if no foreground session is set.
 
         Raises:
-            RuntimeError: If the client is not connected.
+            RuntimeError: If startup fails, shutdown is in progress, or the connection is lost.
 
         Example:
             >>> session_id = await client.get_foreground_session_id()
             >>> if session_id:
             ...     print(f"TUI is displaying session: {session_id}")
         """
-        if not self._client:
-            raise RuntimeError("Client not connected")
-
-        response = await self._client.request("session.getForeground", {})
+        client = await self._started_client()
+        response = await client.request("session.getForeground", {})
         return response.get("sessionId")
 
     async def set_foreground_session_id(self, session_id: str) -> None:
@@ -4635,20 +5909,20 @@ class CopilotClient:
 
         This is only available when connecting to a server running in TUI+server mode
         (--ui-server).
+        Starts the client if needed.
 
         Args:
             session_id: The ID of the session to display in the TUI.
 
         Raises:
-            RuntimeError: If the client is not connected or the operation fails.
+            RuntimeError: If startup or the operation fails, shutdown is in progress,
+                or the connection is lost.
 
         Example:
             >>> await client.set_foreground_session_id("session-123")
         """
-        if not self._client:
-            raise RuntimeError("Client not connected")
-
-        response = await self._client.request("session.setForeground", {"sessionId": session_id})
+        client = await self._started_client()
+        response = await client.request("session.setForeground", {"sessionId": session_id})
 
         success = response.get("success", False)
         if not success:
@@ -4694,10 +5968,10 @@ class CopilotClient:
             >>> unsubscribe = client.on_lifecycle(
             ...     "session.foreground", lambda e: print(e.session_id)
             ... )
-            >>>
+
             >>> # Subscribe to all events
             >>> unsubscribe = client.on_lifecycle(lambda e: print(f"{e.type}: {e.session_id}"))
-            >>>
+
             >>> # Later, to stop receiving events:
             >>> unsubscribe()
         """
@@ -4805,9 +6079,10 @@ class CopilotClient:
                         "This runtime does not support Entra client configuration."
                     ) from err
                 # Legacy server without `connect`; fall back to `ping`. A token, if any,
-                # is silently dropped — the legacy server can't enforce one.
+                # is silently dropped — the legacy server can't enforce one. ping() would
+                # wait for the start() running this, so use the connection directly.
                 used_fallback_ping = True
-                ping_result = await self.ping()
+                ping_result = await _ping(self._client, None)
                 server_version = ping_result.protocol_version
             else:
                 raise
@@ -4838,56 +6113,6 @@ class CopilotClient:
             used_fallback_ping=used_fallback_ping,
         )
 
-    def _convert_provider_to_wire_format(
-        self, provider: ProviderConfig | dict[str, Any]
-    ) -> dict[str, Any]:
-        """
-        Convert provider config from snake_case to camelCase wire format.
-
-        Args:
-            provider: The provider configuration in snake_case format.
-
-        Returns:
-            The provider configuration in camelCase wire format.
-        """
-        wire_provider: dict[str, Any] = {"type": provider.get("type")}
-        if "base_url" in provider:
-            wire_provider["baseUrl"] = provider["base_url"]
-        if "api_key" in provider:
-            wire_provider["apiKey"] = provider["api_key"]
-        if "api_key_command" in provider:
-            wire_provider["apiKeyCommand"] = provider["api_key_command"]
-        if "wire_api" in provider:
-            wire_provider["wireApi"] = provider["wire_api"]
-        if "transport" in provider:
-            wire_provider["transport"] = provider["transport"]
-        if "model_provider" in provider:
-            wire_provider["modelProvider"] = provider["model_provider"]
-        if "bearer_token" in provider:
-            wire_provider["bearerToken"] = provider["bearer_token"]
-        if provider.get("bearer_token_provider") is not None:
-            wire_provider["hasBearerTokenProvider"] = True
-        if "headers" in provider:
-            wire_provider["headers"] = provider["headers"]
-        if "model_id" in provider:
-            wire_provider["modelId"] = provider["model_id"]
-        if "wire_model" in provider:
-            wire_provider["wireModel"] = provider["wire_model"]
-        if "max_prompt_tokens" in provider:
-            wire_provider["maxPromptTokens"] = provider["max_prompt_tokens"]
-        if "max_context_window_tokens" in provider:
-            wire_provider["maxContextWindowTokens"] = provider["max_context_window_tokens"]
-        if "max_output_tokens" in provider:
-            wire_provider["maxOutputTokens"] = provider["max_output_tokens"]
-        if "azure" in provider:
-            azure = provider["azure"]
-            wire_azure: dict[str, Any] = {}
-            if "api_version" in azure:
-                wire_azure["apiVersion"] = azure["api_version"]
-            if wire_azure:
-                wire_provider["azure"] = wire_azure
-        return wire_provider
-
     def _convert_named_provider_to_wire_format(
         self, provider: NamedProviderConfig | dict[str, Any]
     ) -> dict[str, Any]:
@@ -4899,12 +6124,18 @@ class CopilotClient:
             wire["type"] = provider["type"]
         if "wire_api" in provider:
             wire["wireApi"] = provider["wire_api"]
+        if "transport" in provider:
+            wire["transport"] = provider["transport"]
+        if "local_model" in provider:
+            wire["localModel"] = provider["local_model"]
         if "model_provider" in provider:
             wire["modelProvider"] = provider["model_provider"]
         if "base_url" in provider:
             wire["baseUrl"] = provider["base_url"]
         if "api_key" in provider:
             wire["apiKey"] = provider["api_key"]
+        if "api_key_command" in provider:
+            wire["apiKeyCommand"] = provider["api_key_command"]
         if "bearer_token" in provider:
             wire["bearerToken"] = provider["bearer_token"]
         if provider.get("bearer_token_provider") is not None:
@@ -4929,6 +6160,10 @@ class CopilotClient:
             wire["id"] = model["id"]
         if "provider" in model:
             wire["provider"] = model["provider"]
+        if "auto_local" in model:
+            wire["autoLocal"] = model["auto_local"]
+        if "metadata" in model:
+            wire["metadata"] = model["metadata"]
         if "wire_model" in model:
             wire["wireModel"] = model["wire_model"]
         if "model_id" in model:
@@ -4942,7 +6177,7 @@ class CopilotClient:
         if "max_output_tokens" in model:
             wire["maxOutputTokens"] = model["max_output_tokens"]
         if "capabilities" in model:
-            wire["capabilities"] = _capabilities_to_dict(model["capabilities"])
+            wire["capabilities"] = model["capabilities"].to_dict()
         return wire
 
     def _convert_custom_agent_to_wire_format(
@@ -5013,25 +6248,50 @@ class CopilotClient:
         assert isinstance(self._connection, ChildProcessRuntimeConnection)
         conn = self._connection
         opts = self._options
-        use_stdio = isinstance(conn, StdioRuntimeConnection)
-        tcp_port = conn.port if isinstance(conn, TcpRuntimeConnection) else 0
+        use_stdio = isinstance(conn, SpawnedStdioRuntimeConnection)
+        tcp_port = conn.port if isinstance(conn, SpawnedTcpRuntimeConnection) else 0
 
         cli_path = conn.path
         assert cli_path is not None  # resolved in __init__
+        # A supplied environment replaces inheritance, even when empty.
+        env = _normalize_environment(conn.env if conn.env is not None else os.environ)
+        cwd = conn.working_directory or os.getcwd()
 
-        # Verify CLI exists
-        if not os.path.exists(cli_path):
+        # Verify CLI exists. The child starts in cwd, and node resolves a relative
+        # script from there, as POSIX does a relative program, so check that file.
+        # Node normalizes script paths after entering cwd (physical on POSIX);
+        # native executable paths keep their traversal.
+        # Windows resolves a relative program from this process's directory, as does
+        # the check below. A bare name keeps its PATH lookup.
+        if (
+            os.path.dirname(cli_path)
+            and not os.path.isabs(cli_path)
+            and (cli_path.endswith(".js") or sys.platform != "win32")
+        ):
+            launched_cli_path = os.path.join(cwd, cli_path)
+            if cli_path.endswith(".js"):
+                script_cwd = os.path.realpath(cwd) if sys.platform != "win32" else cwd
+                launched_cli_path = os.path.abspath(os.path.join(script_cwd, cli_path))
+            if not os.path.exists(launched_cli_path):
+                raise RuntimeError(f"Copilot CLI not found at {launched_cli_path}")
+            if cli_path.endswith(".js"):
+                cli_path = launched_cli_path
+        elif (
+            sys.platform == "win32"
+            and not os.path.dirname(cli_path)
+            and not cli_path.endswith(".js")
+        ) or not os.path.exists(cli_path):
             original_path = cli_path
-            if (cli_path := shutil.which(cli_path)) is None:
+            if (cli_path := _find_executable(cli_path, env, cwd)) is None:
                 raise RuntimeError(f"Copilot CLI not found at {original_path}")
 
         # Start with user-provided args, then add SDK-managed args
         args = list(conn.args) + [
             "--headless",
             "--no-auto-update",
-            "--log-level",
-            opts.log_level,
         ]
+        if opts.log_level is not None:
+            args.extend(["--log-level", opts.log_level])
 
         # Add auth-related flags
         if opts.github_token:
@@ -5045,9 +6305,21 @@ class CopilotClient:
         # If cli_path is a .js file, run it with node
         # Note that we can't rely on the shebang as Windows doesn't support it
         if cli_path.endswith(".js"):
-            args = ["node", cli_path] + args
+            if sys.platform == "win32":
+                cli_path = os.path.abspath(cli_path)
+            node = _find_executable("node", env, cwd)
+            if node is None:
+                raise RuntimeError("Node.js not found on the configured PATH")
+            args = [node, cli_path] + args
         else:
             args = [cli_path] + args
+        # Windows refuses to start a program named only by the command line once its
+        # path reaches MAX_PATH, even with long paths enabled. Naming it as the
+        # executable passes it as CreateProcess's application name, which has no such
+        # limit. Only the runtime this SDK provisioned is started this way.
+        executable = (
+            cli_path if self._cli_path_source == "downloaded" and args[0] == cli_path else None
+        )
         logger.info(
             "CopilotClient._start_cli_server starting Copilot CLI",
             extra={
@@ -5059,16 +6331,8 @@ class CopilotClient:
             },
         )
 
-        # Get environment variables. Per-connection env (ChildProcessRuntimeConnection.env)
-        # takes precedence over the client-level env; the constructor already rejects
-        # setting both. When neither is set, inherit the current process environment.
-        conn_env = conn.env if isinstance(conn, ChildProcessRuntimeConnection) else None
-        if conn_env is not None:
-            env = dict(conn_env)
-        elif opts.env is None:
-            env = dict(os.environ)
-        else:
-            env = dict(opts.env)
+        if opts.internal_test_options is not None:
+            env.update(opts.internal_test_options._to_environment())
         # Set auth token in environment if provided
         if opts.github_token:
             env["COPILOT_SDK_AUTH_TOKEN"] = opts.github_token
@@ -5085,32 +6349,10 @@ class CopilotClient:
         if opts.base_directory:
             env["COPILOT_HOME"] = opts.base_directory
 
-        # Set OpenTelemetry environment variables if telemetry config is provided
-        telemetry = opts.telemetry
-        if telemetry is not None:
-            env["COPILOT_OTEL_ENABLED"] = "true"
-            if "otlp_endpoint" in telemetry:
-                env["OTEL_EXPORTER_OTLP_ENDPOINT"] = telemetry["otlp_endpoint"]
-            if "otlp_protocol" in telemetry:
-                env["OTEL_EXPORTER_OTLP_PROTOCOL"] = telemetry["otlp_protocol"]
-            if "file_path" in telemetry:
-                env["COPILOT_OTEL_FILE_EXPORTER_PATH"] = telemetry["file_path"]
-            if "exporter_type" in telemetry:
-                env["COPILOT_OTEL_EXPORTER_TYPE"] = telemetry["exporter_type"]
-            if "source_name" in telemetry:
-                env["COPILOT_OTEL_SOURCE_NAME"] = telemetry["source_name"]
-            if "capture_content" in telemetry:
-                env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT"] = (
-                    "SPAN_ONLY" if telemetry["capture_content"] else "NO_CONTENT"
-                )
-                env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = str(
-                    telemetry["capture_content"]
-                ).lower()
+        _apply_telemetry_environment(env, opts.telemetry)
 
         # On Windows, hide the console window to avoid distracting users in GUI apps
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-
-        cwd = opts.working_directory or os.getcwd()
 
         # Choose transport mode
         spawn_start = time.perf_counter()
@@ -5119,6 +6361,7 @@ class CopilotClient:
             # Use regular Popen with pipes (buffering=0 for unbuffered)
             self._process = subprocess.Popen(
                 args,
+                executable=executable,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -5133,6 +6376,7 @@ class CopilotClient:
                 args.extend(["--port", str(tcp_port)])
             self._process = subprocess.Popen(
                 args,
+                executable=executable,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -5156,13 +6400,84 @@ class CopilotClient:
         loop = asyncio.get_event_loop()
         process = self._process  # Capture for closure
 
+        # Nothing else reads the child's stderr in TCP mode, and a full pipe blocks the
+        # CLI, so drain it for the child's whole life, logging it as the stdio transport
+        # does. Keep a bounded tail for both startup and later RPC failures.
+        stderr_output = ""
+        stderr_lock = threading.Lock()
+        stderr = process.stderr
+        assert stderr is not None  # spawned with stderr=subprocess.PIPE
+
+        def drain_stderr() -> None:
+            nonlocal stderr_output
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            partial_line = ""
+            streaming_line = False
+            try:
+                while True:
+                    chunk = os.read(stderr.fileno(), 4096)
+                    text = decoder.decode(chunk, final=not chunk)
+                    with stderr_lock:
+                        stderr_output = (stderr_output + text)[-64 * 1024 :]
+                    lines = (partial_line + text).split("\n")
+                    for line in lines[:-1]:
+                        logger.warning("[CLI] %s", line.rstrip())
+                        streaming_line = False
+                    partial_line = lines[-1]
+                    # Preserve short lines across reads, but never let an unterminated
+                    # diagnostic grow the buffer or stop being logged once it is long.
+                    if partial_line and (streaming_line or len(partial_line) >= 4096 or not chunk):
+                        logger.warning("[CLI] %s", partial_line.rstrip())
+                        partial_line = ""
+                        streaming_line = True
+                    if not chunk:
+                        break
+            except Exception:
+                logger.debug("Error reading Copilot CLI stderr", exc_info=True)
+
+        stderr_thread = threading.Thread(target=drain_stderr, daemon=True)
+        stderr_thread.start()
+
+        def with_stderr(message: str) -> str:
+            with stderr_lock:
+                output = stderr_output.strip()
+            if output:
+                message += f"\nstderr: {output}"
+            return message
+
+        def process_exit_error(*, before_port: bool = False) -> str:
+            return_code = process.poll()
+            if return_code is None:
+                # Socket/stdout EOF can precede child exit. Bound the grace period
+                # so a disconnected but live child cannot hold pending RPCs forever.
+                try:
+                    return_code = process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    if not before_port:
+                        return with_stderr("Connection to CLI server closed unexpectedly")
+                    return with_stderr("CLI process closed stdout before announcing port")
+            stderr_thread.join(timeout=1.0)
+            message = (
+                "CLI process exited before announcing port" if before_port else "CLI process exited"
+            )
+            if return_code is not None:
+                message += (
+                    f" (exit code {return_code})" if before_port else f" with code {return_code}"
+                )
+            return with_stderr(message)
+
+        self._tcp_process_exit_error = process_exit_error
+
+        def startup_exit_error() -> str:
+            return process_exit_error(before_port=True)
+
         async def read_port():
             if not process or not process.stdout:
                 raise RuntimeError("Process not started or stdout not available")
             while True:
                 line = await loop.run_in_executor(None, process.stdout.readline)
                 if not line:
-                    raise RuntimeError("CLI process exited before announcing port")
+                    raise RuntimeError(await loop.run_in_executor(None, startup_exit_error))
 
                 line_str = line.decode() if isinstance(line, bytes) else line
                 logger.debug("[CLI] %s", line_str.rstrip())
@@ -5182,7 +6497,7 @@ class CopilotClient:
                 port=self._runtime_port,
             )
         except TimeoutError:
-            raise RuntimeError("Timeout waiting for CLI server to start")
+            raise RuntimeError(with_stderr("Timeout waiting for CLI server to start"))
 
     async def _start_inprocess_ffi(self) -> None:
         """Host the runtime in-process via the native FFI library.
@@ -5202,7 +6517,9 @@ class CopilotClient:
         )
 
         opts = self._options
-        args: list[str] = ["--log-level", opts.log_level]
+        args: list[str] = []
+        if opts.log_level is not None:
+            args.extend(["--log-level", opts.log_level])
         if opts.github_token:
             args.extend(["--auth-token-env", "COPILOT_SDK_AUTH_TOKEN"])
         if not opts.use_logged_in_user:
@@ -5212,13 +6529,44 @@ class CopilotClient:
         if self._cli_login_sync_integration_id is not None:
             args.append(f"--cli-login-sync-integration-id={self._cli_login_sync_integration_id}")
 
-        environment: dict[str, str] = {}
+        environment = {}
+        for key, value in os.environ.items():
+            try:
+                key.encode("utf-8")
+            except UnicodeEncodeError:
+                continue
+            if sys.platform == "win32":
+                key = key.upper()
+            try:
+                value.encode("utf-8")
+            except UnicodeEncodeError:
+                # Match the native startup snapshot's explicit-setting precedence.
+                if key not in {
+                    "http_proxy",
+                    "HTTP_PROXY",
+                    "https_proxy",
+                    "HTTPS_PROXY",
+                    "COPILOT_PROXY_KERBEROS_SPN",
+                    "TMPDIR",
+                }:
+                    continue
+                value = "\ufffd"
+            environment[key] = value
+        if opts.internal_test_options is not None:
+            environment.update(
+                {
+                    key.upper() if sys.platform == "win32" else key: value
+                    for key, value in opts.internal_test_options._to_environment().items()
+                }
+            )
         if opts.github_token:
             environment["COPILOT_SDK_AUTH_TOKEN"] = opts.github_token
         if opts.base_directory:
             environment["COPILOT_HOME"] = opts.base_directory
+            environment["COPILOT_CACHE_HOME"] = str(Path(opts.base_directory) / "cache")
         if opts.mode == "empty":
             environment["COPILOT_DISABLE_KEYTAR"] = "1"
+        _apply_telemetry_environment(environment, opts.telemetry)
 
         host = FfiRuntimeHost.create(
             runtime_path,
@@ -5255,7 +6603,9 @@ class CopilotClient:
             RuntimeError: If the connection fails.
         """
         setup_start = time.perf_counter()
-        if isinstance(self._connection, (StdioRuntimeConnection, InProcessRuntimeConnection)):
+        if isinstance(
+            self._connection, (SpawnedStdioRuntimeConnection, InProcessRuntimeConnection)
+        ):
             # The in-process FFI host exposes a process-like adapter (stdin/stdout),
             # so the same stdio JSON-RPC wiring drives it unchanged.
             await self._connect_via_stdio()
@@ -5288,6 +6638,12 @@ class CopilotClient:
         self._client.set_notification_handler(self._handle_notification)
         self._client.set_request_handler("userInput.request", self._handle_user_input_request)
         self._client.set_request_handler(
+            "shellAuthentication.request", self._handle_shell_authentication_request
+        )
+        self._client.set_request_handler(
+            "shellAuthentication.cancel", self._handle_shell_authentication_cancel
+        )
+        self._client.set_request_handler(
             "exitPlanMode.request", self._handle_exit_plan_mode_request
         )
         self._client.set_request_handler(
@@ -5297,8 +6653,9 @@ class CopilotClient:
             "systemMessage.transform", self._handle_system_message_transform
         )
         self._register_session_scoped_request_handlers()
-        register_client_session_api_handlers(self._client, self._get_client_session_handlers)
+        self._register_client_session_api_handlers()
         self._register_client_global_handlers()
+        self._register_session_callback_scopes()
 
         # Start listening for messages
         loop = asyncio.get_running_loop()
@@ -5342,9 +6699,12 @@ class CopilotClient:
                 port=self._runtime_port,
             )
         except OSError as e:
-            raise RuntimeError(
+            message = (
                 f"Failed to connect to CLI server at {self._actual_host}:{self._runtime_port}: {e}"
             )
+            if self._tcp_process_exit_error is not None:
+                message += "\n" + await asyncio.to_thread(self._tcp_process_exit_error)
+            raise RuntimeError(message) from e
 
         # Create a file-like wrapper for the socket
         sock_file = sock.makefile("rwb", buffering=0)
@@ -5386,12 +6746,18 @@ class CopilotClient:
                 pass
 
         self._process = SocketWrapper(sock_file, sock)
-        self._client = JsonRpcClient(self._process)
+        self._client = JsonRpcClient(self._process, process_exit_error=self._tcp_process_exit_error)
         self._client.on_close = self._handle_connection_close
         self._rpc = ServerRpc(self._client)
 
         self._client.set_notification_handler(self._handle_notification)
         self._client.set_request_handler("userInput.request", self._handle_user_input_request)
+        self._client.set_request_handler(
+            "shellAuthentication.request", self._handle_shell_authentication_request
+        )
+        self._client.set_request_handler(
+            "shellAuthentication.cancel", self._handle_shell_authentication_cancel
+        )
         self._client.set_request_handler(
             "exitPlanMode.request", self._handle_exit_plan_mode_request
         )
@@ -5402,8 +6768,9 @@ class CopilotClient:
             "systemMessage.transform", self._handle_system_message_transform
         )
         self._register_session_scoped_request_handlers()
-        register_client_session_api_handlers(self._client, self._get_client_session_handlers)
+        self._register_client_session_api_handlers()
         self._register_client_global_handlers()
+        self._register_session_callback_scopes()
 
         # Start listening for messages
         loop = asyncio.get_running_loop()
@@ -5418,14 +6785,17 @@ class CopilotClient:
         coauthor_enabled: bool | None,
         manage_schedule_enabled: bool | None,
         included_builtin_skills: list[str] | None = None,
-    ) -> None:
+        *,
+        delete_on_failure: bool = False,
+    ) -> dict[str, Any] | None:
         """Apply empty-mode safe defaults (or caller-supplied overrides in
-        copilot-cli mode) via ``session.options.update`` after create/resume.
+        coding-agent mode) via ``session.options.update`` after create/resume.
 
         If the patch is rejected, tear the session down so empty-mode callers
         never end up with a permissive session.
+        Returns the applied patch, or ``None`` if none was sent.
         """
-        from .generated.rpc import SessionInstalledPlugin, SessionUpdateOptionsParams
+        from ._generated.rpc import SessionUpdateOptionsParams
 
         patch = _post_create_options_patch(
             mode,
@@ -5436,39 +6806,27 @@ class CopilotClient:
             included_builtin_skills,
         )
         if patch is None:
-            return
+            return None
 
-        params = SessionUpdateOptionsParams()
-        if "skipCustomInstructions" in patch:
-            params.skip_custom_instructions = patch["skipCustomInstructions"]
-        if "customAgentsLocalOnly" in patch:
-            params.custom_agents_local_only = patch["customAgentsLocalOnly"]
-        if "coauthorEnabled" in patch:
-            params.coauthor_enabled = patch["coauthorEnabled"]
-        if "manageScheduleEnabled" in patch:
-            params.manage_schedule_enabled = patch["manageScheduleEnabled"]
-        if "installedPlugins" in patch:
-            params.installed_plugins = [
-                SessionInstalledPlugin.from_dict(p) if isinstance(p, dict) else p
-                for p in patch["installedPlugins"]
-            ]
-        if "includedBuiltinSkills" in patch:
-            skills = patch["includedBuiltinSkills"]
-            params.included_builtin_skills = list(skills) if skills is not None else None
+        params = SessionUpdateOptionsParams.from_dict(patch)
 
         try:
             await session.rpc.options.update(params)
-        except BaseException:
-            with self._sessions_lock:
-                self._sessions.pop(session.session_id, None)
+        except BaseException as error:
             try:
-                await session.disconnect()
-            except BaseException:
+                await self._cleanup_failed_session(
+                    session,
+                    delete_on_failure=delete_on_failure,
+                    wait=not (delete_on_failure and isinstance(error, asyncio.CancelledError)),
+                )
+            except BaseException as cleanup_error:
                 logger.debug(
                     "Error disconnecting session after options update failure",
                     exc_info=True,
                 )
+                raise error from cleanup_error
             raise
+        return patch
 
     async def _set_session_fs_provider(self) -> None:
         if not self._session_fs_config or not self._client:
@@ -5500,9 +6858,9 @@ class CopilotClient:
         github_telemetry_adapter = None
         if self._on_github_telemetry is not None:
             github_telemetry_adapter = _GitHubTelemetryAdapter(self._on_github_telemetry)
-        kerberos_auth_adapter = (
-            _KerberosAuthAdapter(self._options.kerberos_auth)
-            if self._options.kerberos_auth is not None
+        network_adapter = self._network_adapter = (
+            _NetworkAdapter(self._network)
+            if self._network is not None and self._network_registration is not None
             else None
         )
         register_client_global_api_handlers(
@@ -5510,18 +6868,28 @@ class CopilotClient:
             ClientGlobalApiHandlers(
                 hooks=_HooksAdapter(self._get_session),
                 extension_launch_provider=self._options.extension_launch_provider,
-                kerberos_auth=kerberos_auth_adapter,
+                network=network_adapter,
                 llm_inference=self._llm_inference_adapter,
                 git_hub_telemetry=github_telemetry_adapter,
                 git_hub_token=self._github_token_provider_adapter,
                 ui_thread=_UiThreadAdapter(self),
             ),
         )
-        if kerberos_auth_adapter is not None:
-            # The runtime sends ``$/cancelRequest`` when it stops waiting for a token; a
-            # cancellable handler lets that cancel an async callback still in flight.
+        # The runtime sends ``$/cancelRequest`` when it stops waiting for an answer; a
+        # cancellable handler lets that cancel an async callback still in flight.
+        if network_adapter is not None:
             self._client.set_request_handler(
-                "kerberosAuth.acquire", kerberos_auth_adapter.handle_request, cancellable=True
+                "network.resolveProxy", network_adapter.handle_resolve_proxy, cancellable=True
+            )
+            self._client.set_request_handler(
+                "network.authenticateNegotiate",
+                network_adapter.handle_authenticate_negotiate,
+                cancellable=True,
+            )
+            self._client.set_request_handler(
+                "network.authenticateBasic",
+                network_adapter.handle_authenticate_basic,
+                cancellable=True,
             )
         if self._ffi_host is not None:
             self._ffi_host.configure_ui_thread(
@@ -5544,6 +6912,15 @@ class CopilotClient:
             if entra_token_adapter is not None:
                 entra_token_adapter.close_connection()
             installation_confirmation_adapter.close_connection()
+            if network_adapter is not None:
+                # Cancel this connection's own callbacks: a reconnect may already have
+                # replaced the client's adapter.
+                loop = client._loop
+                if loop is not None and not loop.is_closed():
+                    try:
+                        loop.call_soon_threadsafe(network_adapter.cancel_pending)
+                    except RuntimeError:
+                        logger.debug("Event loop closed while handling connection loss")
             if self._client is client:
                 self._handle_connection_close()
 
@@ -5577,14 +6954,20 @@ class CopilotClient:
         return registration_id
 
     def _handle_connection_close(self) -> None:
-        self._state = "disconnected"
         with self._sessions_lock:
+            self._state = "disconnected"
+            if not self._session_admission_closed:
+                self._connection_lost = True
+                self._shutdown_generation += 1
             self._session_admission_closed = True
+            if self._client is not None:
+                self._auto_mode_recovery_cleanups.pop(self._client, None)
             sessions = list(self._sessions.values())
         with self._github_token_providers_lock:
             self._github_token_providers.clear()
         for session in sessions:
             session._clear_skill_provider()
+            session._register_memory_store(None)
         client = self._client
         llm_inference_adapter = self._llm_inference_adapter
         loop = client._loop if client is not None else None
@@ -5596,6 +6979,7 @@ class CopilotClient:
                     llm_inference_adapter.cancel_pending()
                 for session in sessions:
                     session._cancel_pending_external_tools()
+                self._cancel_pending_shell_authentication_requests()
 
             try:
                 loop.call_soon_threadsafe(cancel_pending_external_tools)
@@ -5631,6 +7015,226 @@ class CopilotClient:
                     registration.session_id = session_id
                     registration.committed = True
 
+    def _reserve_inline_session_initialization(
+        self, session_id: str, rpc_client: JsonRpcClient
+    ) -> Callable[[], None]:
+        # Reader callbacks cannot await an operation whose RPC needs this same reader.
+        with self._sessions_lock:
+            busy = any(
+                lock.users and _session_ids_overlap(candidate, session_id)
+                for candidate, lock in self._session_initializations.items()
+            )
+            busy = busy or any(
+                _session_ids_overlap(candidate, session_id)
+                and any(not resume.done() for resume in pending)
+                for candidate, pending in self._ordinary_session_resumes.items()
+            )
+            busy = busy or any(
+                _session_ids_overlap(candidate, session_id) and not cleanup.done()
+                for candidate, cleanup in self._auto_mode_recovery_cleanups.get(
+                    rpc_client, {}
+                ).items()
+            )
+            if busy:
+                raise RuntimeError(
+                    f"Cannot initialize server-assigned session {session_id} "
+                    "while another session operation is active"
+                )
+            lock = self._session_initializations.get(session_id)
+            if lock is None:
+                lock = _SessionInitializationLock()
+                self._session_initializations[session_id] = lock
+            reservation: ConcurrentFuture[None] = ConcurrentFuture()
+            lock.inline_reservation = reservation
+            lock.users += 1
+
+        def release() -> None:
+            with self._sessions_lock:
+                lock.inline_reservation = None
+                lock.users -= 1
+            reservation.set_result(None)
+
+        return release
+
+    async def _acquire_session_initialization(
+        self, session_id: str, rpc_client: JsonRpcClient, *, wait_for_resumes: bool = False
+    ) -> _SessionInitialization:
+        with self._sessions_lock:
+            locks = {
+                candidate: lock
+                for candidate, lock in self._session_initializations.items()
+                if _session_ids_overlap(candidate, session_id)
+            }
+            waiting_ids = {candidate for candidate, lock in locks.items() if lock.users}
+            waiting_ids.update(
+                candidate
+                for candidate, pending in self._ordinary_session_resumes.items()
+                if _session_ids_overlap(candidate, session_id)
+                and (wait_for_resumes or candidate != session_id)
+                and any(not resume.done() for resume in pending)
+            )
+            waiting_ids.update(
+                candidate
+                for candidate, cleanup in self._auto_mode_recovery_cleanups.get(
+                    rpc_client, {}
+                ).items()
+                if _session_ids_overlap(candidate, session_id) and not cleanup.done()
+            )
+            if any(
+                active
+                and any(_session_ids_overlap(candidate, waiting_id) for waiting_id in waiting_ids)
+                for candidate, active in self._active_session_callbacks.items()
+            ):
+                raise RuntimeError(
+                    f"Cannot initialize session {session_id} during an active session callback"
+                )
+            if session_id not in locks:
+                locks[session_id] = _SessionInitializationLock()
+                self._session_initializations[session_id] = locks[session_id]
+            for lock in locks.values():
+                lock.users += 1
+        acquired = _SessionInitialization([locks[candidate] for candidate in sorted(locks)])
+        try:
+            for lock in acquired._locks:
+                await lock.acquire()
+                acquired.acquired += 1
+            # Ordinary resumes release initialization before RPC, but their
+            # aliases still reserve the binding through canonical publication.
+            with self._sessions_lock:
+                resumes = tuple(
+                    resume
+                    for candidate, pending in self._ordinary_session_resumes.items()
+                    if _session_ids_overlap(candidate, session_id)
+                    and (wait_for_resumes or candidate != session_id)
+                    for resume in pending
+                )
+            if resumes:
+                await asyncio.shield(asyncio.gather(*resumes))
+            with self._sessions_lock:
+                cleanups = tuple(
+                    cleanup
+                    for candidate, cleanup in self._auto_mode_recovery_cleanups.get(
+                        rpc_client, {}
+                    ).items()
+                    if _session_ids_overlap(candidate, session_id)
+                )
+            for cleanup in cleanups:
+                # Keep provisional ownership and its eventual detach ahead of same-ID reuse.
+                await asyncio.shield(cleanup)
+        except BaseException:
+            acquired.release()
+            raise
+        return acquired
+
+    def _resident_session_id(self, session_id: str, rpc_client: JsonRpcClient) -> str:
+        if not _is_uuid_session_id(session_id):
+            return session_id
+        with self._sessions_lock:
+            if session_id in self._sessions:
+                return session_id
+            matches = {
+                candidate
+                for candidate in (
+                    self._sessions.keys()
+                    | self._ordinary_session_resumes.keys()
+                    | self._auto_mode_recovery_cleanups.get(rpc_client, {}).keys()
+                )
+                if _session_ids_overlap(candidate, session_id) and len(candidate) >= len(session_id)
+            }
+            return next(iter(matches)) if len(matches) == 1 else session_id
+
+    async def _require_auto_mode_recovery(
+        self,
+        session: CopilotSession,
+        *,
+        detach_on_failure: bool = True,
+        delete_on_failure: bool = False,
+    ) -> None:
+        if (session.capabilities.get("ui") or {}).get("autoModeRecovery") is True:
+            return
+        error = RuntimeError("The runtime does not support auto_mode_recovery")
+        if detach_on_failure:
+            try:
+                await self._cleanup_failed_session(session, delete_on_failure=delete_on_failure)
+            except Exception as cleanup_error:
+                raise error from cleanup_error
+        raise error
+
+    async def _cleanup_failed_session(
+        self, session: CopilotSession, *, delete_on_failure: bool = False, wait: bool = True
+    ) -> None:
+        with self._sessions_lock:
+            # ID-only detach must never remove a replacement's runtime bindings.
+            if (
+                self._session_admission_closed
+                or self._client is not session._client
+                or self._sessions.get(session.session_id) is not session
+            ):
+                return
+            finished = asyncio.get_running_loop().create_future()
+            cleanups = self._auto_mode_recovery_cleanups.setdefault(session._client, {})
+            cleanups[session.session_id] = finished
+
+        async def detach() -> None:
+            cleanup_error: BaseException | None = None
+            try:
+                detach_error: Exception | None = None
+                try:
+                    await asyncio.wait_for(session._detach_runtime(), timeout=10)
+                except Exception as error:
+                    detach_error = error
+                if delete_on_failure:
+                    try:
+                        response = await asyncio.wait_for(
+                            session._client.request(
+                                "session.delete", {"sessionId": session.session_id}
+                            ),
+                            timeout=10,
+                        )
+                        if not response.get("success", False):
+                            raise RuntimeError(
+                                f"Failed to delete cloud session {session.session_id}: "
+                                f"{response.get('error', 'Unknown error')}"
+                            )
+                    except Exception as error:
+                        if detach_error is not None:
+                            raise ExceptionGroup(
+                                "Failed to detach and delete rejected cloud session",
+                                [detach_error, error],
+                            )
+                        raise
+                if detach_error is not None:
+                    raise detach_error
+            except asyncio.CancelledError as error:
+                cleanup_error = error
+                logger.warning("Auto recovery enrollment cleanup was cancelled")
+                raise
+            except Exception as error:
+                cleanup_error = error
+                logger.warning("Auto recovery enrollment cleanup failed", exc_info=True)
+                raise
+            finally:
+                session._mark_disconnected()
+                with self._sessions_lock:
+                    if self._sessions.get(session.session_id) is session:
+                        del self._sessions[session.session_id]
+                    if cleanup_error is None and cleanups.get(session.session_id) is finished:
+                        del cleanups[session.session_id]
+                if not finished.done():
+                    if cleanup_error is None:
+                        finished.set_result(None)
+                    else:
+                        finished.set_exception(cleanup_error)
+                        finished.exception()
+
+        cleanup = asyncio.create_task(detach())
+        self._auto_mode_recovery_cleanup_tasks.add(cleanup)
+        cleanup.add_done_callback(self._auto_mode_recovery_cleanup_tasks.discard)
+        # Observe failures even when cancellation stopped the caller's wait.
+        cleanup.add_done_callback(lambda task: None if task.cancelled() else task.exception())
+        if wait:
+            await asyncio.shield(cleanup)
+
     def _register_session(self, session: CopilotSession) -> CopilotSession | None:
         with self._sessions_lock:
             if (
@@ -5639,9 +7243,28 @@ class CopilotClient:
                 or self._client is not session._client
             ):
                 raise RuntimeError("Client not connected")
+            if session.session_id in self._auto_mode_recovery_cleanups.get(session._client, {}):
+                raise RuntimeError(
+                    "Session is still detaching after rejected Auto recovery enrollment"
+                )
             previous = self._sessions.get(session.session_id)
+            session._set_release_from_client(self._forget_session)
             self._sessions[session.session_id] = session
             return previous
+
+    def _rollback_resume_predecessor(self, session: CopilotSession) -> CopilotSession | None:
+        # Called with _sessions_lock held. Later attempts must skip a failed provisional.
+        predecessor = self._resume_predecessors.pop(session)
+        for pending, previous in self._resume_predecessors.items():
+            if previous is session:
+                self._resume_predecessors[pending] = predecessor
+        return predecessor
+
+    def _forget_session(self, session: CopilotSession) -> None:
+        """Stop tracking a disconnected session unless a later create or resume replaced it."""
+        with self._sessions_lock:
+            if self._sessions.get(session.session_id) is session:
+                del self._sessions[session.session_id]
 
     def _get_session(self, session_id: str) -> CopilotSession | None:
         with self._sessions_lock:
@@ -5671,11 +7294,55 @@ class CopilotClient:
         self._client.set_request_handler(
             "skillProvider.read", self._handle_skill_provider_read, cancellable=True
         )
+        # Internal experimental callback backing ``MemoryConfiguration.store_memory``.
+        self._client.set_request_handler(
+            "memoryStore.store", self._handle_memory_store, cancellable=True
+        )
 
     async def _set_llm_inference_provider(self) -> None:
         if self._request_handler is None or self._rpc is None:
             return
         await self._rpc.llm_inference.set_provider()
+
+    def _register_client_session_api_handlers(self) -> None:
+        rpc_client = self._client
+        if rpc_client is None:
+            return
+        register_client_session_api_handlers(rpc_client, self._get_client_session_handlers)
+
+    def _register_session_callback_scopes(self) -> None:
+        rpc_client = self._client
+        if rpc_client is None:
+            return
+        for method, handler in list(rpc_client.request_handlers.items()):
+
+            async def scoped_handler(params: dict, handler=handler):
+                session_id = params.get("sessionId")
+                if isinstance(session_id, str):
+                    with self._sessions_lock:
+                        self._active_session_callbacks[session_id] = (
+                            self._active_session_callbacks.get(session_id, 0) + 1
+                        )
+                try:
+                    result = handler(params)
+                    return await result if inspect.isawaitable(result) else result
+                finally:
+                    if isinstance(session_id, str):
+                        with self._sessions_lock:
+                            remaining = self._active_session_callbacks[session_id] - 1
+                            if remaining:
+                                self._active_session_callbacks[session_id] = remaining
+                            else:
+                                del self._active_session_callbacks[session_id]
+
+            def dispatch_handler(params: dict, handler=handler, scoped_handler=scoped_handler):
+                if isinstance(params.get("sessionId"), str):
+                    return scoped_handler(params)
+                # Ordered connection handlers must prepare synchronously.
+                return handler(params)
+
+            # Keep cancellation and ordered-dispatch metadata from registration.
+            rpc_client.request_handlers[method] = dispatch_handler
 
     def _get_client_session_handlers(self, session_id: str) -> ClientSessionApiHandlers:
         with self._sessions_lock:
@@ -5698,6 +7365,20 @@ class CopilotClient:
         if session is None:
             raise JsonRpcError(-32603, f"Session not found: {session_id}")
         return await session._handle_skill_provider_read(name)
+
+    async def _handle_memory_store(self, params: dict) -> None:
+        memory = StoredMemory(
+            session_id=_required_string_param(params, "sessionId"),
+            subject=_required_string_param(params, "subject"),
+            fact=_required_string_param(params, "fact"),
+            citations=_required_string_param(params, "citations"),
+            reason=_required_string_param(params, "reason"),
+        )
+        session = self._get_session(memory["session_id"])
+        if session is None:
+            raise JsonRpcError(-32603, "Memory store owner is unavailable")
+        await session._handle_memory_store(memory)
+        return None
 
     async def _handle_user_input_request(self, params: dict) -> dict:
         """
@@ -5724,7 +7405,79 @@ class CopilotClient:
             raise ValueError(f"unknown session {session_id}")
 
         result = await session._handle_user_input_request(params)
-        return {"answer": result["answer"], "wasFreeform": result["wasFreeform"]}
+        reply: dict[str, Any] = {"answer": result["answer"], "wasFreeform": result["wasFreeform"]}
+        decision_context = result.get("decisionContext")
+        if decision_context is not None:
+            reply["decisionContext"] = decision_context.to_dict()
+        return reply
+
+    async def _handle_shell_authentication_request(self, params: dict) -> dict:
+        """Handle a ``shellAuthentication.request`` from the runtime: a shell command
+        the agent runs asks for a password or another answer. Anything that
+        isn't the handler's answer cancels the prompt."""
+        session_id = params.get("sessionId")
+        request_id = params.get("requestId")
+        program = params.get("program")
+        prompt = params.get("prompt")
+        input_kind = params.get("inputKind")
+        if (
+            not isinstance(session_id, str)
+            or not isinstance(request_id, str)
+            or not isinstance(program, str)
+            or not isinstance(prompt, str)
+            or input_kind not in ("secret", "text", "confirm")
+        ):
+            return {"action": "cancel"}
+        key = (session_id, request_id)
+        with self._sessions_lock:
+            session = self._sessions.get(session_id)
+            # A request queued before the connection closed must not open a
+            # prompt that nothing can answer or cancel.
+            if (
+                session is None
+                or self._session_admission_closed
+                or key in self._pending_shell_authentication_requests
+            ):
+                return {"action": "cancel"}
+            cancelled = asyncio.Event()
+            self._pending_shell_authentication_requests[key] = cancelled
+        request: ShellAuthenticationRequest = {
+            "requestId": request_id,
+            "program": program,
+            "prompt": prompt,
+            "inputKind": input_kind,
+            "command": params["command"] if isinstance(params.get("command"), str) else "",
+            "cwd": params["cwd"] if isinstance(params.get("cwd"), str) else "",
+        }
+        try:
+            return dict(await session._handle_shell_authentication_request(request, cancelled))
+        finally:
+            with self._sessions_lock:
+                if self._pending_shell_authentication_requests.get(key) is cancelled:
+                    del self._pending_shell_authentication_requests[key]
+
+    async def _handle_shell_authentication_cancel(self, params: dict) -> dict:
+        """Handle a ``shellAuthentication.cancel`` from the runtime: the answer to an
+        open prompt is no longer needed."""
+        session_id = params.get("sessionId")
+        request_id = params.get("requestId")
+        if isinstance(session_id, str) and isinstance(request_id, str):
+            with self._sessions_lock:
+                cancelled = self._pending_shell_authentication_requests.get(
+                    (session_id, request_id)
+                )
+            if cancelled is not None:
+                cancelled.set()
+        return {}
+
+    def _cancel_pending_shell_authentication_requests(self) -> None:
+        """Cancel every open secret prompt once the runtime can no longer use an
+        answer. Runs on the connection's event loop."""
+        with self._sessions_lock:
+            pending = list(self._pending_shell_authentication_requests.values())
+            self._pending_shell_authentication_requests.clear()
+        for cancelled in pending:
+            cancelled.set()
 
     async def _handle_exit_plan_mode_request(self, params: dict) -> dict:
         """Handle an exitPlanMode.request callback from the CLI server."""
@@ -5743,7 +7496,11 @@ class CopilotClient:
         if not session:
             raise ValueError(f"unknown session {session_id}")
 
-        return dict(await session._handle_exit_plan_mode_request(params))
+        reply: dict[str, Any] = dict(await session._handle_exit_plan_mode_request(params))
+        decision_context = reply.pop("decisionContext", None)
+        if decision_context is not None:
+            reply["decisionContext"] = decision_context.to_dict()
+        return reply
 
     async def _handle_auto_mode_switch_request(self, params: dict) -> dict:
         """Handle an autoModeSwitch.request callback from the CLI server."""

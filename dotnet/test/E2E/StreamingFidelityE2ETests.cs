@@ -1,19 +1,19 @@
-﻿/*---------------------------------------------------------------------------------------------
+/*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.Test.Harness;
+using Microsoft.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 public class StreamingFidelityE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "streaming_fidelity", output)
 {
     [Fact]
     public async Task Should_Produce_Delta_Events_When_Streaming_Is_Enabled()
     {
-        var session = await CreateSessionAsync(new SessionConfig { Streaming = true });
+        var session = await CreateSessionAsync(new CreateSessionOptions { Events = new SessionEventOptions { Streaming = true } });
 
         var events = new List<SessionEvent>();
         session.On<SessionEvent>(evt => { lock (events) { events.Add(evt); } });
@@ -52,7 +52,7 @@ public class StreamingFidelityE2ETests(E2ETestFixture fixture, ITestOutputHelper
     [Trait(E2ETestTraits.Backend, E2ETestTraits.CapiOnly)]
     public async Task Should_Not_Produce_Deltas_When_Streaming_Is_Disabled()
     {
-        var session = await CreateSessionAsync(new SessionConfig { Streaming = false });
+        var session = await CreateSessionAsync(new CreateSessionOptions { Events = new SessionEventOptions { Streaming = false } });
 
         var events = new List<SessionEvent>();
         session.On<SessionEvent>(evt => { lock (events) { events.Add(evt); } });
@@ -77,14 +77,14 @@ public class StreamingFidelityE2ETests(E2ETestFixture fixture, ITestOutputHelper
     [Fact]
     public async Task Should_Produce_Deltas_After_Session_Resume()
     {
-        var session = await CreateSessionAsync(new SessionConfig { Streaming = false });
+        var session = await CreateSessionAsync(new CreateSessionOptions { Events = new SessionEventOptions { Streaming = false } });
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 3 + 6?" });
         await session.DisposeAsync();
 
         // Resume using a new client
         using var newClient = Ctx.CreateClient();
         var session2 = await Ctx.ResumeSessionAsync(newClient, session.SessionId,
-            new ResumeSessionConfig { OnPermissionRequest = PermissionHandler.ApproveAll, Streaming = true });
+            new ResumeSessionOptions { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Events = new SessionEventOptions { Streaming = true } });
 
         var events = new List<SessionEvent>();
         session2.On<SessionEvent>(evt => { lock (events) { events.Add(evt); } });
@@ -115,14 +115,14 @@ public class StreamingFidelityE2ETests(E2ETestFixture fixture, ITestOutputHelper
     [Trait(E2ETestTraits.Backend, E2ETestTraits.CapiOnly)]
     public async Task Should_Not_Produce_Deltas_After_Session_Resume_With_Streaming_Disabled()
     {
-        var session = await CreateSessionAsync(new SessionConfig { Streaming = true });
+        var session = await CreateSessionAsync(new CreateSessionOptions { Events = new SessionEventOptions { Streaming = true } });
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 3 + 6?" });
         await session.DisposeAsync();
 
         // Resume using a new client with streaming DISABLED
         using var newClient = Ctx.CreateClient();
         var session2 = await Ctx.ResumeSessionAsync(newClient, session.SessionId,
-            new ResumeSessionConfig { OnPermissionRequest = PermissionHandler.ApproveAll, Streaming = false });
+            new ResumeSessionOptions { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Events = new SessionEventOptions { Streaming = false } });
 
         var events = new List<SessionEvent>();
         session2.On<SessionEvent>(evt => { lock (events) { events.Add(evt); } });
@@ -153,12 +153,8 @@ public class StreamingFidelityE2ETests(E2ETestFixture fixture, ITestOutputHelper
         await using var isolatedCtx = await E2ETestContext.CreateAsync();
         await isolatedCtx.ConfigureForTestAsync("streaming_fidelity", nameof(Should_Emit_Streaming_Deltas_With_Reasoning_Effort_Configured));
         var isolatedClient = isolatedCtx.CreateClient();
-        await using var session = await isolatedCtx.CreateSessionAsync(isolatedClient, new SessionConfig
-        {
-            Model = "gpt-5.4",
-            Streaming = true,
-            ReasoningEffort = "high",
-        });
+        await using var session = await isolatedCtx.CreateSessionAsync(isolatedClient, new CreateSessionOptions
+        { Model = "gpt-5.4", Events = new SessionEventOptions { Streaming = true }, Inference = new SessionInferenceOptions { ReasoningEffort = "high" } });
 
         var events = new List<SessionEvent>();
         session.On<SessionEvent>(evt => { lock (events) { events.Add(evt); } });
@@ -186,7 +182,7 @@ public class StreamingFidelityE2ETests(E2ETestFixture fixture, ITestOutputHelper
     [Fact]
     public async Task Should_Emit_AssistantMessageStart_Before_Deltas_With_Matching_MessageId()
     {
-        var session = await CreateSessionAsync(new SessionConfig { Streaming = true });
+        var session = await CreateSessionAsync(new CreateSessionOptions { Events = new SessionEventOptions { Streaming = true } });
 
         var events = new List<SessionEvent>();
         session.On<SessionEvent>(evt => { lock (events) { events.Add(evt); } });

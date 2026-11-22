@@ -7,10 +7,10 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
-using GitHub.Copilot.Rpc;
+using Microsoft.Copilot.Rpc;
 using Environment = System.Environment;
 
-namespace GitHub.Copilot.Test.Harness;
+namespace Microsoft.Copilot.Test.Harness;
 
 public sealed class E2ETestContext : IAsyncDisposable
 {
@@ -35,6 +35,7 @@ public sealed class E2ETestContext : IAsyncDisposable
     private readonly List<CopilotClient> _transientClients = [];
     private readonly List<CopilotSession> _testSessions = [];
     private readonly Dictionary<CopilotClient, string> _extensionSdkPaths = [];
+    private readonly Dictionary<CopilotClient, string> _inProcessWorkingDirectories = [];
 
     private E2ETestContext(string homeDir, string workDir, string proxyUrl, ReplayProxy proxy, string repoRoot)
     {
@@ -53,12 +54,6 @@ public sealed class E2ETestContext : IAsyncDisposable
 
     internal static async Task<E2ETestContext> CreateAsync(ReplayProxy proxy, string homeDir, string workDir)
     {
-        // A previous in-process context may have left this process's cwd inside a work
-        // directory that has since been deleted. getcwd() then fails, which breaks
-        // Process.Start below while it resolves the proxy executable. Repoint the cwd at
-        // the ambient value first; SetCurrentDirectory succeeds even if the old cwd is gone.
-        InProcessEnvIsolation.RestoreAmbientWorkingDirectory();
-
         var repoRoot = FindRepoRoot();
 
         // Resolve symlinks (e.g., macOS /var -> /private/var) so paths
@@ -73,9 +68,7 @@ public sealed class E2ETestContext : IAsyncDisposable
             Directory.CreateDirectory(workDir);
 
             context.ProxyUrl = await proxy.StartAsync();
-            // Creating an in-process fixture applies this URL before its first
-            // test-specific configuration is posted, so early runtime requests need
-            // an empty but valid replay state.
+            // Early runtime requests need a valid replay state before a test is configured.
             await proxy.ConfigureAsync(
                 Path.Combine(workDir, "__unconfigured__.yaml"),
                 workDir,
@@ -239,9 +232,9 @@ public sealed class E2ETestContext : IAsyncDisposable
             replayOnly);
     }
 
-    public Task<List<ParsedHttpExchange>> GetExchangesAsync()
+    public Task<List<ParsedHttpExchange>> GetExchangesAsync(CancellationToken cancellationToken = default)
     {
-        return _proxy.GetExchangesAsync();
+        return _proxy.GetExchangesAsync(cancellationToken);
     }
 
     public Task SetCopilotUserByTokenAsync(string token, CopilotUserConfig response)
@@ -306,53 +299,43 @@ public sealed class E2ETestContext : IAsyncDisposable
         return env!;
     }
 
-    private static string? GetEffectiveGitHubTokenForTests()
-    {
-        return Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true"
-            ? DefaultGitHubToken
-            : Environment.GetEnvironmentVariable("GITHUB_TOKEN");
-    }
-
     public CopilotClient CreateClient(
         CopilotClientOptions? options = null,
         bool autoInjectGitHubToken = true,
         bool persistent = false,
-        IReadOnlyDictionary<string, string>? environment = null)
+        IReadOnlyDictionary<string, string>? environment = null,
+        string? workingDirectory = null)
     {
-        options ??= new CopilotClientOptions();
+        options ??= new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent };
+        options.Runtime ??= RuntimeConnection.ForDefault();
 
-        options.Logger ??= Logger;
-        if (DiagnosticsEnabled)
+        (options.Runtime as OwnedRuntimeConnection)?.BaseDirectory ??= HomeDir;
+        options.Observability.Logger ??= Logger;
+        if (DiagnosticsEnabled && options.Runtime is not TcpRuntimeConnection)
         {
-            options.LogLevel = CopilotLogLevel.Debug;
+            options.Observability.LogLevel = CopilotLogLevel.Debug;
         }
 
-        // Resolve the working directory the worker should run in. Child-process and
-        // URI transports take it as a per-client option; the in-process transport
-        // rejects a per-client WorkingDirectory (the native host spawns the worker
-        // without a cwd parameter), so — mirroring the Node/Rust harnesses — we point
-        // THIS process's cwd at the desired directory before the worker spawns and
-        // clear the per-client option. InProcessEnvIsolationAttribute.After restores
-        // the cwd after the test.
-        var desiredWorkingDirectory = options.WorkingDirectory ?? WorkDir;
+        // In-process clients receive their working directory through session options,
+        // never by changing the test process's cwd.
+        var desiredWorkingDirectory = workingDirectory
+            ?? (options.Runtime as ChildProcessRuntimeConnection)?.WorkingDirectory
+            ?? WorkDir;
 
-        // Tests must supply environment via the 'environment' parameter, which the
-        // harness routes to the right place per transport (the connection for
-        // child-process transports, the host process for in-process). Setting
-        // options.Environment directly bypasses that routing and is unsupported
-        // in-process, so reject it here.
-        if (options.Environment is not null)
+        // Accept a complete child environment from exactly one source.
+        if (environment is not null && (options.Runtime as ChildProcessRuntimeConnection)?.Environment is not null)
         {
             throw new ArgumentException(
-                "Do not set options.Environment in E2E tests; pass the 'environment' parameter to CreateClient instead.",
+                "Supply the process environment on the connection or the harness parameter, not both.",
                 nameof(options));
         }
 
         // The full environment the client runs with: harness defaults (proxy
         // redirect, isolated home, cleared HMAC/tokens, etc.) unless the test
         // supplied a complete replacement.
-        var env = environment is not null
-            ? environment.ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
+        var processEnvironment = environment ?? (options.Runtime as ChildProcessRuntimeConnection)?.Environment;
+        var env = processEnvironment is not null
+            ? processEnvironment.ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
             : GetEnvironment();
         var extensionSdkPath = Environment.GetEnvironmentVariable("COPILOT_EXTENSION_SDK_PATH");
         var extensionsEnabled = env.TryGetValue("COPILOT_CLI_ENABLED_FEATURE_FLAGS", out var featureFlags)
@@ -360,62 +343,63 @@ public sealed class E2ETestContext : IAsyncDisposable
                 .Select(flag => flag.Trim())
                 .Where(flag => flag.Length > 0)
                 .Contains("EXTENSIONS", StringComparer.OrdinalIgnoreCase);
-        if (extensionsEnabled && !string.IsNullOrEmpty(extensionSdkPath))
+        ConfigureExtensionLaunchProvider(options, extensionsEnabled, extensionSdkPath);
+
+        if (options.Runtime is ChildProcessRuntimeConnection runtime && runtime.Path is null)
         {
-            options.ExtensionLaunchProvider ??= new TestExtensionLaunchProvider(Path.GetDirectoryName(extensionSdkPath)!);
+            runtime.Path = GetCliPath();
         }
 
-        // When the test doesn't pin a transport, leave Connection null so
-        // CopilotClient honors COPILOT_SDK_DEFAULT_CONNECTION (stdio by default,
-        // or in-process); the CI matrix uses this to run the suite under both.
-        // Tests that need a specific transport set options.Connection directly.
-        switch (options.Connection)
+        if (IsInProcess(options.Runtime))
         {
-            case null when !IsInProcess(null):
-                // No explicit connection and not the in-process default: the
-                // default resolves to stdio, so materialize it here so the
-                // environment can be attached to the connection below.
-                options.Connection = RuntimeConnection.ForStdio(path: GetCliPath());
-                break;
-            case null:
-                // In-process default: leave Connection unset so CopilotClient's
-                // ResolveDefaultConnection honors COPILOT_SDK_DEFAULT_CONNECTION.
-                break;
-            case ChildProcessRuntimeConnection child when child.Path is null:
-                child.Path = GetCliPath();
-                break;
+            if (environment is not null)
+                throw new ArgumentException("Process environment overrides require a spawned connection.", nameof(environment));
         }
-
-        if (IsInProcess(options.Connection))
-        {
-            options.WorkingDirectory = null;
-            ApplyInProcessEnvironment(env, desiredWorkingDirectory);
-        }
-        else if (options.Connection is ChildProcessRuntimeConnection child)
+        else if (options.Runtime is ChildProcessRuntimeConnection child)
         {
             // Child-process transport: hand the environment to the spawned child
             // via the connection, where per-client environment is coherent.
             child.Environment = env;
-            options.WorkingDirectory = desiredWorkingDirectory;
-        }
-        else
-        {
-            // URI / existing-runtime transport: per-client WorkingDirectory applies normally.
-            options.WorkingDirectory = desiredWorkingDirectory;
+            child.WorkingDirectory = desiredWorkingDirectory;
         }
 
-        // Auto-inject auth token unless connecting to an existing runtime via URI.
-        var isExistingRuntime = options.Connection is UriRuntimeConnection;
+        // Auto-inject auth token unless connecting to an existing runtime.
+        var isExistingRuntime = options.Runtime is TcpRuntimeConnection;
+        if (!isExistingRuntime && options.InternalTestOptions is null)
+        {
+            options.InternalTestOptions = new InternalTestOptions
+            {
+                CopilotApiUrl = env.TryGetValue("COPILOT_API_URL", out var copilotApiUrl) ? copilotApiUrl : null,
+                GitHubApiUrl = env.TryGetValue("COPILOT_DEBUG_GITHUB_API_URL", out var githubApiUrl) ? githubApiUrl : null,
+                ProxyUrl = env.TryGetValue("HTTPS_PROXY", out var proxyUrl) ? proxyUrl : null,
+                NoProxy = env.TryGetValue("NO_PROXY", out var noProxy) ? noProxy : null,
+                CaCertificatePath = env.TryGetValue("NODE_EXTRA_CA_CERTS", out var caCertificatePath) ? caCertificatePath : null,
+            };
+            foreach (var key in new[]
+            {
+                "COPILOT_API_URL", "COPILOT_DEBUG_GITHUB_API_URL",
+                "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+                "NO_PROXY", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
+                "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO",
+            })
+            {
+                env.Remove(key);
+            }
+        }
         if (autoInjectGitHubToken
-            && string.IsNullOrEmpty(options.GitHubToken)
+            && string.IsNullOrEmpty(options.GitHub.Token)
             && !isExistingRuntime)
         {
-            options.GitHubToken = GetEffectiveGitHubTokenForTests();
+            options.GitHub.Token = env.TryGetValue("GITHUB_TOKEN", out var token) ? token : null;
         }
 
         var client = new CopilotClient(options);
         lock (_clientsLock)
         {
+            if (IsInProcess(options.Runtime))
+            {
+                _inProcessWorkingDirectories[client] = options.SessionFs?.InitialWorkingDirectory ?? desiredWorkingDirectory;
+            }
             if (extensionsEnabled && !string.IsNullOrEmpty(extensionSdkPath))
             {
                 _extensionSdkPaths[client] = extensionSdkPath;
@@ -434,9 +418,10 @@ public sealed class E2ETestContext : IAsyncDisposable
 
     public async Task<CopilotSession> CreateSessionAsync(
         CopilotClient client,
-        SessionConfig? config = null)
+        CreateSessionOptions? config = null)
     {
-        config ??= new SessionConfig();
+        config ??= new CreateSessionOptions();
+        ApplyWorkingDirectory(client, config);
         ApplyExtensionSdkPath(client, config);
         E2ETestBackendConfiguration.Current.ApplyProvider(config, ProxyUrl);
         var session = await client.CreateSessionAsync(config);
@@ -450,9 +435,9 @@ public sealed class E2ETestContext : IAsyncDisposable
     public async Task<CopilotSession> ResumeSessionAsync(
         CopilotClient client,
         string sessionId,
-        ResumeSessionConfig? config = null)
+        ResumeSessionOptions? config = null)
     {
-        config ??= new ResumeSessionConfig();
+        config ??= new ResumeSessionOptions();
         ApplyExtensionSdkPath(client, config);
         E2ETestBackendConfiguration.Current.ApplyProvider(config, ProxyUrl);
         var session = await client.ResumeSessionAsync(sessionId, config);
@@ -463,9 +448,9 @@ public sealed class E2ETestContext : IAsyncDisposable
         return session;
     }
 
-    private void ApplyExtensionSdkPath(CopilotClient client, SessionConfigBase config)
+    private void ApplyExtensionSdkPath(CopilotClient client, SessionOptionsBase config)
     {
-        if (!string.IsNullOrEmpty(config.ExtensionSdkPath))
+        if (!string.IsNullOrEmpty(config.Extensions.SdkPath))
         {
             return;
         }
@@ -473,8 +458,21 @@ public sealed class E2ETestContext : IAsyncDisposable
         {
             if (_extensionSdkPaths.TryGetValue(client, out var extensionSdkPath))
             {
-                config.ExtensionSdkPath = extensionSdkPath;
+                config.Extensions.SdkPath = extensionSdkPath;
             }
+        }
+    }
+
+    internal static void ConfigureExtensionLaunchProvider(
+        CopilotClientOptions options,
+        bool extensionsEnabled,
+        string? extensionSdkPath)
+    {
+        if (extensionsEnabled
+            && !string.IsNullOrEmpty(extensionSdkPath)
+            && options.Runtime is not TcpRuntimeConnection)
+        {
+            options.Extensions.LaunchProvider ??= new TestExtensionLaunchProvider(Path.GetDirectoryName(extensionSdkPath)!);
         }
     }
 
@@ -498,27 +496,19 @@ public sealed class E2ETestContext : IAsyncDisposable
             });
     }
 
-    internal void PrepareForTest()
+    private void ApplyWorkingDirectory(CopilotClient client, CreateSessionOptions config)
     {
-        if (UsesInProcessTransport)
+        if (config.Cloud is not null)
         {
-            ApplyInProcessEnvironment(GetEnvironment(), WorkDir);
+            return;
         }
-    }
-
-    private static void ApplyInProcessEnvironment(IReadOnlyDictionary<string, string> environment, string workingDirectory)
-    {
-        // Runtime code runs host-side in this process and reads its ambient environment,
-        // so restore the per-test redirects and isolated home after the assembly-level
-        // isolation attribute reset them at the end of the preceding test.
-        foreach (var (name, value) in environment)
+        lock (_clientsLock)
         {
-            InProcessEnvIsolation.Apply(name, value);
+            if (_inProcessWorkingDirectories.TryGetValue(client, out var workingDirectory))
+            {
+                config.WorkingDirectory ??= workingDirectory;
+            }
         }
-
-        // The worker inherits the host process cwd because the native host has no
-        // per-client working-directory parameter.
-        InProcessEnvIsolation.SetWorkingDirectory(workingDirectory);
     }
 
     public void UntrackClient(CopilotClient client)
@@ -527,6 +517,7 @@ public sealed class E2ETestContext : IAsyncDisposable
         {
             _persistentClients.Remove(client);
             _transientClients.Remove(client);
+            _inProcessWorkingDirectories.Remove(client);
         }
     }
 
@@ -544,6 +535,10 @@ public sealed class E2ETestContext : IAsyncDisposable
             _testSessions.Clear();
             transientClients = [.. _transientClients];
             _transientClients.Clear();
+            foreach (var client in transientClients)
+            {
+                _inProcessWorkingDirectories.Remove(client);
+            }
         }
 
         foreach (var session in testSessions)
@@ -593,6 +588,7 @@ public sealed class E2ETestContext : IAsyncDisposable
             clients = [.. _persistentClients.Concat(_transientClients)];
             _persistentClients.Clear();
             _transientClients.Clear();
+            _inProcessWorkingDirectories.Clear();
         }
 
         foreach (var session in testSessions)
@@ -622,14 +618,6 @@ public sealed class E2ETestContext : IAsyncDisposable
         // Skip writing snapshots in CI to avoid corrupting them on test failures
         var isCI = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"));
         try { await _proxy.StopAsync(skipWritingCache: isCI); } catch (Exception ex) { errors.Add(ex); }
-
-        // The in-process worker inherits this process's cwd, so ApplyInProcessEnvironment
-        // may have pointed it at WorkDir. The assembly-level isolation attribute only
-        // restores it around tests that actually execute, so a statically skipped test
-        // can leave the cwd inside a directory this method is about to delete. Every
-        // later Process.Start would then fail resolving its executable because getcwd()
-        // returns ENOENT. Repoint the cwd before deleting anything.
-        InProcessEnvIsolation.RestoreAmbientWorkingDirectory();
 
         try { await DeleteDirectoryAsync(HomeDir); } catch (Exception ex) when (IsTransientCleanupException(ex)) { errors.Add(ex); }
         try { await DeleteDirectoryAsync(WorkDir); } catch (Exception ex) when (IsTransientCleanupException(ex)) { errors.Add(ex); }
@@ -695,8 +683,9 @@ public sealed class E2ETestContext : IAsyncDisposable
         }
         if (connection is null)
         {
-            return string.Equals(
-                Environment.GetEnvironmentVariable("COPILOT_SDK_DEFAULT_CONNECTION"),
+            var value = Environment.GetEnvironmentVariable("COPILOT_SDK_DEFAULT_CONNECTION");
+            return string.IsNullOrEmpty(value) || string.Equals(
+                value,
                 "inprocess",
                 StringComparison.OrdinalIgnoreCase);
         }
@@ -705,10 +694,7 @@ public sealed class E2ETestContext : IAsyncDisposable
 
     private static async Task StopClientForCleanupAsync(CopilotClient client)
     {
-        var isInProcess = string.Equals(
-            Environment.GetEnvironmentVariable("COPILOT_SDK_DEFAULT_CONNECTION"),
-            "inprocess",
-            StringComparison.OrdinalIgnoreCase);
+        var isInProcess = IsInProcess(null);
         if (isInProcess)
         {
             var gracefulStop = client.StopAsync();

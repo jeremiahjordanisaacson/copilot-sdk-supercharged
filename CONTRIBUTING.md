@@ -192,7 +192,7 @@ cd python && uv run pytest && uv run ruff check .
 cd go && go test ./... && golangci-lint run ./...
 
 # .NET
-cd dotnet && dotnet test test/GitHub.Copilot.SDK.Test.csproj
+cd dotnet && dotnet test test/Microsoft.Copilot.SDK.Test.csproj
 
 # Java
 cd java && mvn test

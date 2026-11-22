@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
-	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
+	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
 type ahpTestLog struct {
@@ -36,7 +36,7 @@ func (b *ahpTestLog) text() string {
 
 func TestAhpHostRequiresExplicitTransport(t *testing.T) {
 	for _, options := range []*AhpHostOptions{nil, {}} {
-		client := NewClient(nil)
+		client := NewClient(&ClientOptions{Mode: ModeCodingAgent})
 		if _, err := client.StartAhpHost(t.Context(), options); err == nil || !strings.Contains(err.Error(), "requires localServer or githubEnvironment") {
 			t.Fatalf("expected missing transport error, got %v", err)
 		}
@@ -280,7 +280,7 @@ func TestAhpCancelledStartupDisposesAfterStartCompletes(t *testing.T) {
 func ahpFixture(t *testing.T) (*Client, *jsonrpc2.Client, *atomic.Int32) {
 	t.Helper()
 	transport, server, _ := newRuntimeShutdownRpcPair(t)
-	client := NewClient(nil)
+	client := NewClient(&ClientOptions{Mode: ModeCodingAgent})
 	client.client, client.RPC, client.state = transport, rpc.NewServerRPC(transport), stateConnected
 	client.setupNotificationHandler()
 	t.Cleanup(func() { client.ForceStop(); server.Stop() })
@@ -381,7 +381,7 @@ func TestAhpFactoriesPreserveSettingsAndReleaseExactOriginal(t *testing.T) {
 				},
 				ResumeSession: func(ctx context.Context, request AhpSessionResumeRequest) (*Session, error) {
 					factoryCtx <- ctx
-					session, err := client.ResumeSessionWithOptions(ctx, request.SessionID, request.Config)
+					session, err := client.ResumeSession(ctx, request.SessionID, request.Config)
 					original <- session
 					return session, err
 				},
@@ -392,10 +392,13 @@ func TestAhpFactoriesPreserveSettingsAndReleaseExactOriginal(t *testing.T) {
 			}
 			config := map[string]any{
 				"sessionId": "original", "workingDirectory": "/workspace",
-				"additionalDirectories": []string{}, "gitHubToken": "test-auth",
-				"mcpOAuthTokenStorage": "in-memory", "enableMcpApps": enabled, "streaming": enabled,
-				"enableExperimentalMode": false,
+				"additionalDirectories":  []string{},
+				"gitHubToken":            "test-auth",
+				"mcpOAuthTokenStorage":   "in-memory",
+				"enableMcpApps":          enabled,
+				"streaming":              enabled,
 				"infiniteSessions":       map[string]any{"enabled": false, "backgroundCompactionThreshold": 0.7},
+				"enableExperimentalMode": false,
 				"featureFlags":           map[string]any{"Arbitrary.MixedCase": true},
 			}
 			if resume {
@@ -442,22 +445,23 @@ func TestAhpRejectsChangedBooleanSettings(t *testing.T) {
 					ResumeSession: func(ctx context.Context, request AhpSessionResumeRequest) (*Session, error) {
 						switch setting {
 						case "streaming":
-							request.Config.Streaming = Bool(!expected)
+							request.Config.Events.Streaming = Bool(!expected)
 						case "enableMcpApps":
-							request.Config.EnableMCPApps = !expected
+							request.Config.MCP.EnableApps = !expected
 						case "suppressResumeEvent":
 							request.Config.SuppressResumeEvent = !expected
 						}
-						return client.ResumeSessionWithOptions(ctx, request.SessionID, request.Config)
+						return client.ResumeSession(ctx, request.SessionID, request.Config)
 					},
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
+				config := map[string]any{"sessionId": "changed", setting: expected}
 				_, err = server.Request(t.Context(), "host.materializeSession", &rpc.HostSessionCreateCallback{
 					Authentication: rpc.HostSessionAuthenticationGitHub{Identity: "123"},
 					HostID:         host.HostID, HandoffID: "changed", Resume: Bool(true),
-					Config: map[string]any{"sessionId": "changed", setting: expected},
+					Config: config,
 				})
 				if err == nil || !strings.Contains(err.Error(), "preserve") {
 					t.Fatalf("expected configuration preservation error, got %v", err)

@@ -29,7 +29,7 @@ func TestSession_RetirementClearsCallbackRoots(t *testing.T) {
 	})
 	session.registerAutoModeSwitchHandler(func(AutoModeSwitchRequest, AutoModeSwitchInvocation) (AutoModeSwitchResponse, error) {
 		return AutoModeSwitchResponseNo, nil
-	})
+	}, false)
 	hooks := &SessionHooks{OnSessionEnd: func(SessionEndHookInput, HookInvocation) (*SessionEndHookOutput, error) {
 		return nil, nil
 	}}

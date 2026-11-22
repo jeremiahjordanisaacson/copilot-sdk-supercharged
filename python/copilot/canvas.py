@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
-from .generated.rpc import (
+from ._generated.rpc import (
     CanvasAction,
     CanvasHostContext,
     CanvasHostContextCapabilities,
@@ -163,7 +163,7 @@ class CanvasError(Exception):
         return cls(
             "canvas_handler_unset",
             "No CanvasHandler installed on this session; "
-            "install one via SessionConfig.canvas_handler before creating the session.",
+            "install one via canvases.handler before creating the session.",
         )
 
 
@@ -192,6 +192,7 @@ class CanvasHandler(ABC):
 
         The returned value is sent to the model as the ``invoke_canvas_action``
         tool result. To return text and images, as tool handlers do, return a
+        :class:`~copilot.tools.ToolResult` with ``binary_results_for_llm``, or a
         tool-result dict in wire form (``textResultForLlm``, ``resultType`` and
         ``binaryResultsForLlm``); any other value is rendered to the model as
         JSON text.

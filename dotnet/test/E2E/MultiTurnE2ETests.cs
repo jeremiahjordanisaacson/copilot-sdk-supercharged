@@ -5,7 +5,7 @@
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.Test.E2E;
+namespace Microsoft.Copilot.Test.E2E;
 
 /// <summary>
 /// Verifies that information produced in one turn (e.g., the contents of a file
