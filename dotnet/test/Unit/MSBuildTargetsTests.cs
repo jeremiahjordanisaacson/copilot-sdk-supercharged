@@ -403,13 +403,14 @@ public class MSBuildTargetsTests
         Assert.True(renamedPack.Succeeded, renamedPack.FailureMessage());
 
         // NuGet imports build/<PackageId>.props and .targets only under the package's own id.
+        // This fork's default package id is CopilotSDK.Supercharged (see src/Microsoft.Copilot.SDK.csproj).
         var defaultEntries = sandbox.GetPackageEntries("default-package");
-        Assert.Contains("build/Microsoft.Copilot.SDK.props", defaultEntries);
-        Assert.Contains("build/Microsoft.Copilot.SDK.targets", defaultEntries);
+        Assert.Contains("build/CopilotSDK.Supercharged.props", defaultEntries);
+        Assert.Contains("build/CopilotSDK.Supercharged.targets", defaultEntries);
         var renamedEntries = sandbox.GetPackageEntries("renamed-package");
         Assert.Contains("build/Example.Copilot.SDK.props", renamedEntries);
         Assert.Contains("build/Example.Copilot.SDK.targets", renamedEntries);
-        Assert.DoesNotContain(renamedEntries, entry => entry.StartsWith("build/Microsoft.Copilot.SDK.", StringComparison.Ordinal));
+        Assert.DoesNotContain(renamedEntries, entry => entry.StartsWith("build/CopilotSDK.Supercharged.", StringComparison.Ordinal));
     }
 
     [Fact]

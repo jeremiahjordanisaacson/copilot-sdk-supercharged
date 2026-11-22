@@ -1,4 +1,4 @@
-"""Verify the importable package reports the renamed distribution's version."""
+"""Verify the importable package reports this fork's distribution version."""
 
 import os
 import subprocess
@@ -7,7 +7,9 @@ from pathlib import Path
 
 
 def test_version_uses_microsoft_distribution_metadata(tmp_path: Path):
-    for name, version in [("microsoft-copilot-sdk", "1.2.3"), ("copilot-sdk", "9.9.9")]:
+    # This fork publishes as copilot-sdk-supercharged; other distributions sharing the
+    # `copilot` import package must not supply the version.
+    for name, version in [("copilot-sdk-supercharged", "1.2.3"), ("microsoft-copilot-sdk", "9.9.9")]:
         metadata = tmp_path / f"{name.replace('-', '_')}-{version}.dist-info"
         metadata.mkdir()
         (metadata / "METADATA").write_text(

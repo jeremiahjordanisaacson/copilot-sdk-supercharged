@@ -39,6 +39,16 @@ jobs:
           echo "Publishing version: $VERSION"
           sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
 
+      - name: Pin Copilot runtime version
+        # Source checkouts keep CLI_VERSION = None (no automatic download). Published
+        # packages pin the runtime the SDK was tested with, so the default in-process
+        # connection can download it on first use.
+        run: |
+          CLI_VERSION=$(python -c "import json; print(json.load(open('../nodejs/package.json'))['copilotCliVersion'])")
+          sed -i "s/^CLI_VERSION: str | None = None$/CLI_VERSION: str | None = \"$CLI_VERSION\"/" copilot/_cli_version.py
+          grep -qx "CLI_VERSION: str | None = \"$CLI_VERSION\"" copilot/_cli_version.py
+          echo "Pinned Copilot runtime $CLI_VERSION"
+
       - name: Build package
         run: python -m build
 

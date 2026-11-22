@@ -1,0 +1,139 @@
+name: "Test: Core SDKs"
+
+# Upstream (github/copilot-sdk) now publishes SDK snapshots without its test
+# infrastructure, so this fork runs build, lint, and unit tests for the four core
+# SDKs here. Tests that need upstream's unpublished replay-proxy scripts, a
+# downloaded in-process runtime, or a newer runtime than the pinned one are
+# excluded explicitly below; the 36 additional SDKs run E2E in
+# additional-sdk-tests.yml.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'nodejs/**'
+      - 'python/**'
+      - 'go/**'
+      - 'dotnet/**'
+      - 'test/harness/**'
+      - 'sdk-protocol-version.json'
+      - '.github/workflows/core-sdk-tests.yml'
+      - '!**/*.md'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'nodejs/**'
+      - 'python/**'
+      - 'go/**'
+      - 'dotnet/**'
+      - 'test/harness/**'
+      - 'sdk-protocol-version.json'
+      - '.github/workflows/core-sdk-tests.yml'
+      - '!**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-sdk-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nodejs:
+    name: "Test: Node.js SDK"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: nodejs
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+
+  python:
+    name: "Test: Python SDK"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --all-extras --dev
+      - run: uv run ruff format --check .
+      - run: uv run ruff check
+      - name: Unit tests
+        # Deselected: in-process tests need a downloaded native runtime, and the
+        # stdio shutdown tests need upstream's unpublished test/harness runtime script.
+        run: >-
+          uv run pytest -q --ignore=e2e -n 4 --timeout 120
+          --deselect test_client.py::test_internal_test_options_override_only_owned_runtime
+          --deselect test_client.py::test_telemetry_configures_only_owned_runtime
+          --deselect test_client.py::test_default_connection
+          --deselect test_client.py::test_explicit_connection_ignores_invalid_default_override
+          --deselect test_client.py::test_inprocess_ui_thread_rpc_waits_for_scheduler
+          --deselect test_client.py::test_inprocess_ui_thread_rpc_rejects_out_of_range_action_ids
+          --deselect test_client.py::test_inprocess_forwards_integration_id_to_native_host
+          --deselect test_client.py::test_inprocess_scopes_environment_with_platform_casing
+          --deselect test_stdio_shutdown.py
+
+  go:
+    name: "Test: Go SDK"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - run: go build ./...
+      # The FFI host converts runtime handles deliberately; upstream lints it with golangci-lint.
+      - run: go vet -unsafeptr=false ./...
+      - name: Unit tests
+        # Skipped: stdio shutdown tests need upstream's unpublished harness runtime
+        # script, and settings tests need a newer runtime than the pinned one.
+        run: |
+          go test -count=1 -timeout 20m \
+            -skip 'TestDirectShutdownDrainsAfterChildExit|TestSpawnedJavaScriptUsesChildPath|TestOwnedStdioShutdown|TestSettings' \
+            $(go list ./... | grep -v '/internal/e2e')
+
+  dotnet:
+    name: "Test: .NET SDK"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: dotnet
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - run: dotnet build test/Microsoft.Copilot.SDK.Test.csproj -p:CopilotSkipCliDownload=true
+      - name: Unit tests
+        # Excluded: E2E and fixture tests need upstream's unpublished replay-proxy
+        # scripts, and FFI lifetime tests need a downloaded native runtime.
+        run: >-
+          dotnet test test/Microsoft.Copilot.SDK.Test.csproj --no-build -f net10.0
+          -p:CopilotSkipCliDownload=true
+          --filter "FullyQualifiedName!~.E2E.&FullyQualifiedName!~ReplayProxyTests&FullyQualifiedName!~E2ETestFixtureTests&FullyQualifiedName!~ConnectionToken&FullyQualifiedName!~StdioShutdownTests&FullyQualifiedName!~ClientSessionLifetimeTests.Stdio_&FullyQualifiedName!~FfiRuntimeHostLifetimeTests"
