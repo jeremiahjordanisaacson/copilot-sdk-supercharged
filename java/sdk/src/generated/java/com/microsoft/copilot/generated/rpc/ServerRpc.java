@@ -25,6 +25,10 @@ public final class ServerRpc {
 
     private final RpcCaller caller;
 
+    /** API methods for the {@code host} namespace. */
+    public final ServerHostApi host;
+    /** API methods for the {@code remoteHosts} namespace. */
+    final ServerRemoteHostsApi remoteHosts;
     /** API methods for the {@code plugins} namespace. */
     public final ServerPluginsApi plugins;
     /** API methods for the {@code skills} namespace. */
@@ -65,8 +69,6 @@ public final class ServerRpc {
     public final ServerManagedSettingsApi managedSettings;
     /** API methods for the {@code environments} namespace. */
     public final ServerEnvironmentsApi environments;
-    /** API methods for the {@code host} namespace. */
-    public final ServerHostApi host;
     /** API methods for the {@code hooks} namespace. */
     public final ServerHooksApi hooks;
     /** API methods for the {@code models} namespace. */
@@ -129,6 +131,10 @@ public final class ServerRpc {
     final ServerCloudTasksApi cloudTasks;
     /** API methods for the {@code cafeMetrics} namespace. */
     final ServerCafeMetricsApi cafeMetrics;
+    /** API methods for the {@code acp} namespace. */
+    final ServerAcpApi acp;
+    /** API methods for the {@code mcpSource} namespace. */
+    final ServerMcpSourceApi mcpSource;
 
     /**
      * Creates a new server RPC client.
@@ -137,6 +143,8 @@ public final class ServerRpc {
      */
     public ServerRpc(RpcCaller caller) {
         this.caller = caller;
+        this.host = new ServerHostApi(caller);
+        this.remoteHosts = new ServerRemoteHostsApi(caller);
         this.plugins = new ServerPluginsApi(caller);
         this.skills = new ServerSkillsApi(caller);
         this.account = new ServerAccountApi(caller);
@@ -157,7 +165,6 @@ public final class ServerRpc {
         this.permissions = new ServerPermissionsApi(caller);
         this.managedSettings = new ServerManagedSettingsApi(caller);
         this.environments = new ServerEnvironmentsApi(caller);
-        this.host = new ServerHostApi(caller);
         this.hooks = new ServerHooksApi(caller);
         this.models = new ServerModelsApi(caller);
         this.azureMl = new ServerAzureMlApi(caller);
@@ -189,6 +196,8 @@ public final class ServerRpc {
         this.gitHubRelease = new ServerGitHubReleaseApi(caller);
         this.cloudTasks = new ServerCloudTasksApi(caller);
         this.cafeMetrics = new ServerCafeMetricsApi(caller);
+        this.acp = new ServerAcpApi(caller);
+        this.mcpSource = new ServerMcpSourceApi(caller);
     }
 
     /**

@@ -196,7 +196,7 @@ bench = false
 [[bin]]
 name = "copilot-connectors-runtime-fixture"
 path = "tests/fixtures/connector-runtime/src/main.rs"
-required-features = ["test-support", "in-process"]
+required-features = ["test-support", "in-process", "network-forwarding"]
 test = false
 bench = false
 

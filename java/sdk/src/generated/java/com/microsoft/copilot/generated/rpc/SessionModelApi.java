@@ -218,6 +218,22 @@ public final class SessionModelApi {
     }
 
     /**
+     * Describes this client's Copilot model catalog using the session's original authentication and integration. Remote clients can enrich host models without forwarding this request to that host or changing its advertised membership. The result preserves raw CAPI descriptions, including billing.token_prices, capability flags, and snake_case limits. Unlike models.list and session.model.list, it does not normalize model fields. Sessions without Copilot authentication or with a custom provider return an empty list. Omitted skipCache preserves existing cache behavior.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<ModelDescribeClientCatalogResult> describeClientCatalog(SessionModelDescribeClientCatalogParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.model.describeClientCatalog", _p, ModelDescribeClientCatalogResult.class);
+    }
+
+    /**
      * Lists models available to this session using its own auth and integration context. Connected hosts (CLI TUI, GitHub App) should call this through the session client so remote sessions return the remote CLI's available models rather than the caller's.
      * <p>
      * Invokes the method with no params, applying the runtime defaults.

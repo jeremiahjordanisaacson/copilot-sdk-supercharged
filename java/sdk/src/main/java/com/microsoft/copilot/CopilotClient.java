@@ -1048,7 +1048,7 @@ public final class CopilotClient implements AutoCloseable {
                         });
             }
 
-            return shutdownFuture.handleAsync((ignored, error) -> {
+            return shutdownFuture.whenCompleteAsync((ignored, error) -> {
                 boolean preserveDetachedServices = gracefulRuntimeShutdown && error == null
                         && runtimeConnection instanceof SpawnedTcpRuntimeConnection;
                 if (gracefulRuntimeShutdown && connection.process != null
@@ -1072,7 +1072,6 @@ public final class CopilotClient implements AutoCloseable {
                 if (connection.runtimeHost != null) {
                     closeRuntimeHost(connection.runtimeHost);
                 }
-                return (Void) null;
             }, SHUTDOWN_DISPATCHER);
         }).thenCompose(result -> result);
     }

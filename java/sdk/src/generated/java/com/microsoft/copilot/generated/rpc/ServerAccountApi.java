@@ -22,9 +22,13 @@ public final class ServerAccountApi {
 
     private final RpcCaller caller;
 
+    /** API methods for the {@code account.deviceCodeLogin} sub-namespace. */
+    final ServerAccountDeviceCodeLoginApi deviceCodeLogin;
+
     /** @param caller the RPC transport function */
     ServerAccountApi(RpcCaller caller) {
         this.caller = caller;
+        this.deviceCodeLogin = new ServerAccountDeviceCodeLoginApi(caller);
     }
 
     /**
@@ -104,6 +108,28 @@ public final class ServerAccountApi {
     @CopilotExperimental
     public CompletableFuture<AccountLogoutResult> logout(AccountLogoutParams params) {
         return caller.invoke("account.logout", params, AccountLogoutResult.class);
+    }
+
+    /**
+     * Resolves relay endpoints through the original account owner before any session exists. Requires a usable GitHub credential and preserves the owner's captured environment.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<AccountRelayBootstrapConfig> getRelayBootstrapConfig() {
+        return caller.invoke("account.getRelayBootstrapConfig", java.util.Map.of(), AccountRelayBootstrapConfig.class);
+    }
+
+    /**
+     * Returns the active account's GitHub API URL when its current credential is usable, or null when no authenticated credential exists. Resolves credentials through the original account owner.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<String> getGitHubApiUrlIfAuthenticated() {
+        return caller.invoke("account.getGitHubApiUrlIfAuthenticated", java.util.Map.of(), String.class);
     }
 
     /**

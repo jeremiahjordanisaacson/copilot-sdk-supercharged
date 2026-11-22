@@ -3262,6 +3262,254 @@ pub struct HistoryCompactContextWindow {
 }
 crate::record_serde::wire_record!(HistoryCompactContextWindow { conversation_tokens: "conversationTokens" if is_none, current_tokens: "currentTokens", messages_length: "messagesLength", system_tokens: "systemTokens" if is_none, token_limit: "tokenLimit", tool_definitions_tokens: "toolDefinitionsTokens" if is_none });
 
+/// A tool request from an external conversation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryImportToolRequest {
+    /// Original tool arguments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "HistoryImportToolRequest::deserialize_present_nullable"
+    )]
+    pub arguments: Option<Option<serde_json::Value>>,
+    /// Original tool name.
+    pub name: String,
+    /// Identifier shared with the invocation and result.
+    pub tool_call_id: String,
+}
+
+impl HistoryImportToolRequest {
+    fn deserialize_present_nullable<'de, D, T>(
+        deserializer: D,
+    ) -> Result<Option<Option<T>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(Some)
+    }
+}
+
+/// An assistant message from an external conversation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HistoryImportAssistantMessage {
+    /// Original assistant message text.
+    pub content: String,
+    /// Identifier of this message.
+    pub message_id: String,
+    /// Model that produced the original message.
+    pub model: Option<String>,
+    /// Original tool requests, which the runtime does not execute.
+    pub tool_requests: Option<Vec<HistoryImportToolRequest>>,
+    /// Identifier shared with records from the original turn.
+    pub turn_id: Option<String>,
+}
+crate::record_serde::wire_record!(HistoryImportAssistantMessage { content: "content", message_id: "messageId", model: "model" if is_none, tool_requests: "toolRequests" if is_none, turn_id: "turnId" if is_none });
+
+/// An inline attachment from an external conversation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HistoryImportAttachment {
+    /// Base64-encoded attachment bytes.
+    pub data: String,
+    /// Name shown with the attachment.
+    pub display_name: String,
+    /// Original MIME type.
+    pub mime_type: String,
+    /// Attachment format.
+    pub r#type: HistoryImportAttachmentType,
+}
+crate::record_serde::wire_record!(HistoryImportAttachment {
+    data: "data",
+    display_name: "displayName",
+    mime_type: "mimeType",
+    r#type: "type"
+});
+
+/// A user message from an external conversation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HistoryImportUserMessage {
+    /// Inline attachments from the original message.
+    pub attachments: Option<Vec<HistoryImportAttachment>>,
+    /// Original user message text.
+    pub content: String,
+}
+crate::record_serde::wire_record!(HistoryImportUserMessage { attachments: "attachments" if is_none, content: "content" });
+
+/// An imported user message and its attachments.
+#[derive(Debug, Clone, Default)]
+pub struct HistoryImportConversationEventUserMessage {
+    /// Original conversation record payload.
+    pub data: HistoryImportUserMessage,
+    /// Original conversation record type.
+    pub r#type: HistoryImportConversationEventUserMessageType,
+}
+crate::record_serde::wire_record!(HistoryImportConversationEventUserMessage {
+    data: "data",
+    r#type: "type"
+});
+
+/// An imported assistant message and its tool requests.
+#[derive(Debug, Clone, Default)]
+pub struct HistoryImportConversationEventAssistantMessage {
+    /// Original conversation record payload.
+    pub data: HistoryImportAssistantMessage,
+    /// Original conversation record type.
+    pub r#type: HistoryImportConversationEventAssistantMessageType,
+}
+crate::record_serde::wire_record!(HistoryImportConversationEventAssistantMessage {
+    data: "data",
+    r#type: "type"
+});
+
+/// A tool invocation from an external conversation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryImportToolInvocation {
+    /// Original tool arguments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "HistoryImportToolInvocation::deserialize_present_nullable"
+    )]
+    pub arguments: Option<Option<serde_json::Value>>,
+    /// Identifier shared with the tool request and result.
+    pub tool_call_id: String,
+    /// Original tool name.
+    pub tool_name: String,
+    /// Identifier shared with records from the original turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+}
+
+impl HistoryImportToolInvocation {
+    fn deserialize_present_nullable<'de, D, T>(
+        deserializer: D,
+    ) -> Result<Option<Option<T>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(Some)
+    }
+}
+
+/// An imported tool invocation, which the runtime does not execute.
+#[derive(Debug, Clone, Default)]
+pub struct HistoryImportConversationEventToolExecutionStart {
+    /// Original conversation record payload.
+    pub data: HistoryImportToolInvocation,
+    /// Original conversation record type.
+    pub r#type: HistoryImportConversationEventToolExecutionStartType,
+}
+crate::record_serde::wire_record!(HistoryImportConversationEventToolExecutionStart {
+    data: "data",
+    r#type: "type"
+});
+
+/// Failure from an imported tool invocation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HistoryImportToolError {
+    /// Original error code, when present.
+    pub code: Option<String>,
+    /// Original error message, including any associated output.
+    pub message: String,
+}
+crate::record_serde::wire_record!(HistoryImportToolError { code: "code" if is_none, message: "message" });
+
+/// Text output from an imported tool invocation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HistoryImportToolOutput {
+    /// Original tool output text.
+    pub content: String,
+}
+crate::record_serde::wire_record!(HistoryImportToolOutput { content: "content" });
+
+/// An imported tool completion with a text result or an error.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HistoryImportToolCompletion {
+    /// Original error for a failed invocation.
+    pub error: Option<HistoryImportToolError>,
+    /// Original text output for a successful invocation.
+    pub result: Option<HistoryImportToolOutput>,
+    /// Whether the original tool invocation succeeded.
+    pub success: bool,
+    /// Identifier shared with the imported tool invocation.
+    pub tool_call_id: String,
+    /// Identifier shared with other records from the original turn.
+    pub turn_id: Option<String>,
+}
+crate::record_serde::wire_record!(HistoryImportToolCompletion { error: "error" if is_none, result: "result" if is_none, success: "success", tool_call_id: "toolCallId", turn_id: "turnId" if is_none });
+
+/// An imported tool result.
+#[derive(Debug, Clone, Default)]
+pub struct HistoryImportConversationEventToolExecutionComplete {
+    /// Original conversation record payload.
+    pub data: HistoryImportToolCompletion,
+    /// Original conversation record type.
+    pub r#type: HistoryImportConversationEventToolExecutionCompleteType,
+}
+crate::record_serde::wire_record!(HistoryImportConversationEventToolExecutionComplete {
+    data: "data",
+    r#type: "type"
+});
+
 /// A root user turn that the session can rewind to.
 ///
 /// <div class="warning">
@@ -3980,6 +4228,140 @@ crate::record_serde::wire_record!(McpHostState {
     pending_connections: "pendingConnections"
 });
 
+/// Serializable snapshot of a host-owned IDE client.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientSnapshot {
+    /// Actual backing-server capabilities as JSON.
+    pub capabilities_json: String,
+    /// Serializable configuration, without live client or transport objects.
+    pub config_json: Option<String>,
+    /// Logical server name.
+    pub server_name: String,
+    /// Backing server version.
+    pub server_version: String,
+    /// Complete MCP tool descriptors as JSON.
+    pub tools_json: String,
+}
+crate::record_serde::wire_record!(McpIdeClientSnapshot { capabilities_json: "capabilitiesJson", config_json: "configJson" if is_none, server_name: "serverName", server_version: "serverVersion", tools_json: "toolsJson" });
+
+/// Installs a callback identity before the graph starts the server.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationRegister {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationRegisterAction,
+    /// Unique callback identity retained by the original SDK host.
+    pub callback_id: String,
+    /// The current backing-client snapshot.
+    pub snapshot: McpIdeClientSnapshot,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationRegister {
+    action: "action",
+    callback_id: "callbackId",
+    snapshot: "snapshot"
+});
+
+/// Replaces descriptors only while the registration token matches.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationRefresh {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationRefreshAction,
+    /// Unique callback identity of the installed registration.
+    pub callback_id: String,
+    /// The current backing-client snapshot.
+    pub snapshot: McpIdeClientSnapshot,
+    /// Opaque graph ownership token.
+    pub token: String,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationRefresh {
+    action: "action",
+    callback_id: "callbackId",
+    snapshot: "snapshot",
+    token: "token"
+});
+
+/// Stops the graph before the host drops its callback identity.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationRemove {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationRemoveAction,
+    /// Logical server name.
+    pub server_name: String,
+    /// Opaque graph ownership token.
+    pub token: String,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationRemove {
+    action: "action",
+    server_name: "serverName",
+    token: "token"
+});
+
+/// Invalidates the matching registration's resource or prompt projection.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationListChanged {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationListChangedAction,
+    /// Resources or prompts.
+    pub kind: String,
+    /// Logical server name.
+    pub server_name: String,
+    /// Opaque graph ownership token.
+    pub token: String,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationListChanged {
+    action: "action",
+    kind: "kind",
+    server_name: "serverName",
+    token: "token"
+});
+
+/// Routes a backing client's notification under its registration token.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationNotification {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationNotificationAction,
+    /// Notification method.
+    pub method: String,
+    /// Notification parameters as JSON.
+    pub params_json: String,
+    /// Logical server name.
+    pub server_name: String,
+    /// Opaque graph ownership token.
+    pub token: String,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationNotification {
+    action: "action",
+    method: "method",
+    params_json: "paramsJson",
+    server_name: "serverName",
+    token: "token"
+});
+
+/// Sends progress only for this callback identity's active call.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationProgress {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationProgressAction,
+    /// Callback identity that owns the active call.
+    pub callback_id: String,
+    /// Complete MCP progress notification as JSON.
+    pub notification_json: String,
+    /// Active tool-call correlation token.
+    pub token: i64,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationProgress {
+    action: "action",
+    callback_id: "callbackId",
+    notification_json: "notificationJson",
+    token: "token"
+});
+
 /// Normalized MCP Apps discovery metadata from a tool's `_meta.ui` block.
 ///
 /// <div class="warning">
@@ -4411,6 +4793,21 @@ crate::record_serde::wire_record!(McpServerToolTokenBreakdown {
     tools: "tools",
     total_tokens: "totalTokens"
 });
+
+/// Metadata controlling an MCP task's lifetime.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpTaskMetadata {
+    /// Task time-to-live.
+    pub ttl: Option<i64>,
+}
+crate::record_serde::wire_record!(McpTaskMetadata { ttl: "ttl" if is_none });
 
 /// One actionable semantic import diagnostic.
 ///
@@ -5091,6 +5488,110 @@ crate::record_serde::wire_record!(PluginPolicyDiagnostic {
     level: "level",
     message: "message"
 });
+
+/// Context used for effective plugin resolution.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIPluginActivationContext {
+    /// Repository root, when present.
+    pub git_root: Option<String>,
+    /// Working directory requested by the caller.
+    pub requested_working_directory: String,
+    /// Working directory used by the resolver.
+    pub resolved_working_directory: String,
+    /// Settings root used by the resolver.
+    pub settings_root: String,
+    /// Whether repository plugin inputs are trusted.
+    pub trusted: bool,
+    /// Root covered by workspace trust, when present.
+    pub trust_root: Option<String>,
+    /// Runtime source of the trust decision.
+    pub trust_source: String,
+}
+crate::record_serde::wire_record!(UIPluginActivationContext { git_root: "gitRoot" if is_none, requested_working_directory: "requestedWorkingDirectory", resolved_working_directory: "resolvedWorkingDirectory", settings_root: "settingsRoot", trusted: "trusted", trust_root: "trustRoot" if is_none, trust_source: "trustSource" });
+
+/// Source and reason for a plugin activation decision.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIPluginActivationDecision {
+    /// Whether the plugin is active.
+    pub active: bool,
+    /// Whether the inventory entry comes from persistent configuration.
+    pub persisted: bool,
+    /// Installed plugin descriptor.
+    pub plugin: InstalledPlugin,
+    /// Runtime explanation of the decision.
+    pub reason: String,
+    /// Configuration layer that selected the plugin.
+    pub source: Option<String>,
+}
+crate::record_serde::wire_record!(UIPluginActivationDecision { active: "active", persisted: "persisted", plugin: "plugin", reason: "reason", source: "source" if is_none });
+
+/// A plugin resolution warning ready for display.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIPluginActivationWarning {
+    /// Expected plugin directory, when present.
+    pub expected_dir: Option<String>,
+    /// Warning classification.
+    pub kind: String,
+    /// Configuration layer.
+    pub layer: String,
+    /// Marketplace name.
+    pub marketplace: String,
+    /// Marketplace directory.
+    pub marketplace_dir: String,
+    /// Human-readable warning.
+    pub message: String,
+    /// Plugin name for a plugin-specific warning.
+    pub plugin: Option<String>,
+}
+crate::record_serde::wire_record!(UIPluginActivationWarning { expected_dir: "expectedDir" if is_none, kind: "kind", layer: "layer", marketplace: "marketplace", marketplace_dir: "marketplaceDir", message: "message", plugin: "plugin" if is_none });
+
+/// Effective plugin activation resolved by the runtime.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIPluginActivationSnapshot {
+    /// Resolution context.
+    pub context: UIPluginActivationContext,
+    /// Identity of the resolved activation.
+    pub fingerprint: String,
+    /// Activation decisions for every considered plugin.
+    pub inventory: Vec<UIPluginActivationDecision>,
+    /// Active plugin inventory.
+    pub plugins: Vec<InstalledPlugin>,
+    /// Repository-owned live plugin directories, when known.
+    pub repository_live_plugin_paths: Option<Vec<String>>,
+    /// Classification of a failed resolution, when present.
+    pub resolution_failure: Option<String>,
+    /// Marketplace resolution warnings.
+    pub warnings: Vec<UIPluginActivationWarning>,
+}
+crate::record_serde::wire_record!(UIPluginActivationSnapshot { context: "context", fingerprint: "fingerprint", inventory: "inventory", plugins: "plugins", repository_live_plugin_paths: "repositoryLivePluginPaths" if is_none, resolution_failure: "resolutionFailure" if is_none, warnings: "warnings" });
 
 /// Opt into native CAPI image generation.
 ///
@@ -5799,6 +6300,350 @@ pub struct SubagentSettingsConfig {
     pub max_depth: Option<i32>,
 }
 crate::record_serde::wire_record!(SubagentSettingsConfig { agents: "agents" if is_none, context_management_tools: "contextManagementTools" if is_none, disabled_subagents: "disabledSubagents" if is_none, max_concurrency: "maxConcurrency" if is_none, max_depth: "maxDepth" if is_none });
+
+/// Current state of a background sidekick agent.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIBackgroundAgentTask {
+    /// Start of the current active period in milliseconds since the Unix epoch.
+    pub active_started_at: Option<f64>,
+    /// Accumulated active time in milliseconds.
+    pub active_time_ms: Option<f64>,
+    /// Agent type.
+    pub agent_type: String,
+    /// Whether the task can move to background execution.
+    pub can_promote_to_background: Option<bool>,
+    /// Completion time in milliseconds since the Unix epoch.
+    pub completed_at: Option<f64>,
+    /// Task description.
+    pub description: String,
+    /// Friendly display name.
+    pub display_name: Option<String>,
+    /// Failure text, when present.
+    pub error: Option<String>,
+    /// Synchronous or background execution.
+    pub execution_mode: Option<String>,
+    /// Registry task identity.
+    pub id: String,
+    /// Idle start time in milliseconds since the Unix epoch.
+    pub idle_since: Option<f64>,
+    /// Most recent agent response.
+    pub latest_response: Option<String>,
+    /// Requested model override.
+    pub model_override: Option<String>,
+    /// Most recent prompt.
+    pub prompt: String,
+    /// Model selected by the runtime.
+    pub resolved_model: Option<String>,
+    /// Completed result, when present.
+    pub result: Option<String>,
+    /// Event source when the task derives from history.
+    pub source: Option<String>,
+    /// Start time in milliseconds since the Unix epoch.
+    pub started_at: f64,
+    /// Current lifecycle status.
+    pub status: String,
+    /// Tool call associated with the agent.
+    pub tool_call_id: String,
+    /// Task kind, always agent.
+    pub r#type: UIBackgroundAgentTaskType,
+}
+crate::record_serde::wire_record!(UIBackgroundAgentTask { active_started_at: "activeStartedAt" if is_none, active_time_ms: "activeTimeMs" if is_none, agent_type: "agentType", can_promote_to_background: "canPromoteToBackground" if is_none, completed_at: "completedAt" if is_none, description: "description", display_name: "displayName" if is_none, error: "error" if is_none, execution_mode: "executionMode" if is_none, id: "id", idle_since: "idleSince" if is_none, latest_response: "latestResponse" if is_none, model_override: "modelOverride" if is_none, prompt: "prompt", resolved_model: "resolvedModel" if is_none, result: "result" if is_none, source: "source" if is_none, started_at: "startedAt", status: "status", tool_call_id: "toolCallId", r#type: "type" });
+
+/// Form fields retained in their declared order for an attached view.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIElicitationSnapshotSchema {
+    /// Form field definitions in their declared order.
+    pub properties: indexmap::IndexMap<String, serde_json::Value>,
+    /// Names of required form fields.
+    pub required: Option<Vec<String>>,
+    /// Schema type indicator, always object.
+    pub r#type: UIElicitationSnapshotSchemaType,
+}
+crate::record_serde::wire_record!(UIElicitationSnapshotSchema { properties: "properties", required: "required" if is_none, r#type: "type" });
+
+/// An MCP form elicitation prompt with its default mode made explicit.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UIFormElicitationPrompt {
+    /// MCP request metadata.
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<HashMap<String, serde_json::Value>>,
+    /// Message that explains the requested information.
+    pub message: String,
+    /// Elicitation mode, always form.
+    pub mode: UIFormElicitationPromptMode,
+    /// Schema of the form fields.
+    pub requested_schema: UIElicitationSnapshotSchema,
+    /// MCP task metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<McpTaskMetadata>,
+    /// MCP extension properties not declared by this SDK.
+    #[serde(flatten)]
+    pub additional_properties: HashMap<String, serde_json::Value>,
+}
+
+/// An MCP URL elicitation prompt.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UIUrlElicitationPrompt {
+    /// MCP request metadata.
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<HashMap<String, serde_json::Value>>,
+    /// MCP identity of the browser request.
+    pub elicitation_id: String,
+    /// Message that explains the browser action.
+    pub message: String,
+    /// Elicitation mode, always URL.
+    pub mode: UIUrlElicitationPromptMode,
+    /// MCP task metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<McpTaskMetadata>,
+    /// Browser destination supplied by the MCP server.
+    pub url: String,
+    /// MCP extension properties not declared by this SDK.
+    #[serde(flatten)]
+    pub additional_properties: HashMap<String, serde_json::Value>,
+}
+
+/// An unanswered elicitation request.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UIPendingElicitation {
+    /// MCP source of the request, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elicitation_source: Option<String>,
+    /// Runtime-verified display name of the source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elicitation_source_display_name: Option<String>,
+    /// Original form or URL prompt.
+    pub request: UIElicitationPrompt,
+    /// Runtime identity accepted by the elicitation response method.
+    pub request_id: RequestId,
+}
+
+/// A plan that awaits approval.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIPlanApprovalPrompt {
+    /// Available actions.
+    pub actions: Vec<UIExitPlanModeAction>,
+    /// Model that authored the plan.
+    pub model: Option<String>,
+    /// Full plan content.
+    pub plan_content: String,
+    /// Action selected by default.
+    pub recommended_action: UIExitPlanModeAction,
+    /// Runtime identity of this request.
+    pub request_id: RequestId,
+    /// Plan summary.
+    pub summary: String,
+}
+crate::record_serde::wire_record!(UIPlanApprovalPrompt { actions: "actions", model: "model" if is_none, plan_content: "planContent", recommended_action: "recommendedAction", request_id: "requestId", summary: "summary" });
+
+/// An unanswered plan-approval request.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIPendingPlanApproval {
+    /// Original plan and available actions.
+    pub request: UIPlanApprovalPrompt,
+    /// Runtime identity accepted by the plan-approval response method.
+    pub request_id: RequestId,
+}
+crate::record_serde::wire_record!(UIPendingPlanApproval {
+    request: "request",
+    request_id: "requestId"
+});
+
+/// A question shown to the user.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIUserInputPrompt {
+    /// Whether a custom answer is allowed.
+    pub allow_freeform: Option<bool>,
+    /// Suggested answers, when present.
+    pub choices: Option<Vec<String>>,
+    /// Question text.
+    pub question: String,
+    /// Tool call that requested the answer.
+    pub tool_call_id: Option<String>,
+}
+crate::record_serde::wire_record!(UIUserInputPrompt { allow_freeform: "allowFreeform" if is_none, choices: "choices" if is_none, question: "question", tool_call_id: "toolCallId" if is_none });
+
+/// An unanswered user-input request.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIPendingUserInput {
+    /// Original question and available answers.
+    pub request: UIUserInputPrompt,
+    /// Runtime identity accepted by the user-input response method.
+    pub request_id: RequestId,
+}
+crate::record_serde::wire_record!(UIPendingUserInput {
+    request: "request",
+    request_id: "requestId"
+});
+
+/// Trust inputs retained by the runtime's plugin policy.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIPluginTrustContext {
+    /// Persisted or authoritative trust mode.
+    pub mode: String,
+    /// Host that supplied the authoritative decision.
+    pub source: Option<String>,
+    /// Authoritative trust decision, when supplied.
+    pub trusted: Option<bool>,
+}
+crate::record_serde::wire_record!(UIPluginTrustContext { mode: "mode", source: "source" if is_none, trusted: "trusted" if is_none });
+
+/// Runtime-owned plugin discovery and trust policy.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIPluginActivationPolicy {
+    /// Additional caller-supplied ambient plugin inputs.
+    pub ambient_plugins: Option<Vec<InstalledPlugin>>,
+    /// Host enablement overrides, when supplied.
+    pub base_enabled_plugins: Option<HashMap<String, bool>>,
+    /// Session enablement defaults, when supplied.
+    pub default_enabled_plugins: Option<HashMap<String, bool>>,
+    /// Explicit plugin-directory inputs.
+    pub explicit_plugins: Vec<InstalledPlugin>,
+    /// Whether ambient plugin discovery is enabled.
+    pub include_ambient: bool,
+    /// Trust context used by the policy.
+    pub trust: UIPluginTrustContext,
+}
+crate::record_serde::wire_record!(UIPluginActivationPolicy { ambient_plugins: "ambientPlugins" if is_none, base_enabled_plugins: "baseEnabledPlugins" if is_none, default_enabled_plugins: "defaultEnabledPlugins" if is_none, explicit_plugins: "explicitPlugins", include_ambient: "includeAmbient", trust: "trust" });
+
+/// A timestamped service message.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIServiceLogEntry {
+    /// Display message.
+    pub message: String,
+    /// Time in milliseconds since the Unix epoch.
+    pub timestamp: f64,
+}
+crate::record_serde::wire_record!(UIServiceLogEntry {
+    message: "message",
+    timestamp: "timestamp"
+});
+
+/// Current state of a long-lived service.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIServiceTask {
+    /// Completion time in milliseconds since the Unix epoch.
+    pub completed_at: Option<f64>,
+    /// Display description.
+    pub description: String,
+    /// Failure text, when present.
+    pub error: Option<String>,
+    /// Registry task identity.
+    pub id: String,
+    /// Recent display messages.
+    pub log: Vec<UIServiceLogEntry>,
+    /// Current completion percentage.
+    pub percentage: Option<f64>,
+    /// Current initialization phase.
+    pub phase: Option<String>,
+    /// Whether the service can accept work.
+    pub ready: bool,
+    /// Identity of the service instance.
+    pub service_id: String,
+    /// Service kind, such as LSP.
+    pub service_kind: String,
+    /// Start time in milliseconds since the Unix epoch.
+    pub started_at: f64,
+    /// Current lifecycle status.
+    pub status: String,
+    /// Task kind, always service.
+    pub r#type: UIServiceTaskType,
+}
+crate::record_serde::wire_record!(UIServiceTask { completed_at: "completedAt" if is_none, description: "description", error: "error" if is_none, id: "id", log: "log", percentage: "percentage" if is_none, phase: "phase" if is_none, ready: "ready", service_id: "serviceId", service_kind: "serviceKind", started_at: "startedAt", status: "status", r#type: "type" });
 
 /// Requested and resolved context configuration observed when a direct workflow agent launched.
 ///
@@ -9941,6 +10786,131 @@ impl<'de> Deserialize<'de> for HistoryFileRestoreSkipReason {
     }
 }
 
+/// The supported imported attachment format.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum HistoryImportAttachmentType {
+    #[serde(rename = "blob")]
+    Blob,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for HistoryImportAttachmentType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "HistoryImportAttachmentType",
+            &["blob", "Unknown"],
+            Some(1),
+        )?;
+        Ok(match index {
+            0 => Self::Blob,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// Original conversation record type.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum HistoryImportConversationEventUserMessageType {
+    #[serde(rename = "user.message")]
+    #[default]
+    UserMessage,
+}
+impl<'de> Deserialize<'de> for HistoryImportConversationEventUserMessageType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "HistoryImportConversationEventUserMessageType",
+            &["user.message"],
+            None,
+        )?;
+        Ok(Self::UserMessage)
+    }
+}
+
+/// Original conversation record type.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum HistoryImportConversationEventAssistantMessageType {
+    #[serde(rename = "assistant.message")]
+    #[default]
+    AssistantMessage,
+}
+impl<'de> Deserialize<'de> for HistoryImportConversationEventAssistantMessageType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "HistoryImportConversationEventAssistantMessageType",
+            &["assistant.message"],
+            None,
+        )?;
+        Ok(Self::AssistantMessage)
+    }
+}
+
+/// Original conversation record type.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum HistoryImportConversationEventToolExecutionStartType {
+    #[serde(rename = "tool.execution_start")]
+    #[default]
+    ToolExecutionStart,
+}
+impl<'de> Deserialize<'de> for HistoryImportConversationEventToolExecutionStartType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "HistoryImportConversationEventToolExecutionStartType",
+            &["tool.execution_start"],
+            None,
+        )?;
+        Ok(Self::ToolExecutionStart)
+    }
+}
+
+/// Original conversation record type.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum HistoryImportConversationEventToolExecutionCompleteType {
+    #[serde(rename = "tool.execution_complete")]
+    #[default]
+    ToolExecutionComplete,
+}
+impl<'de> Deserialize<'de> for HistoryImportConversationEventToolExecutionCompleteType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "HistoryImportConversationEventToolExecutionCompleteType",
+            &["tool.execution_complete"],
+            None,
+        )?;
+        Ok(Self::ToolExecutionComplete)
+    }
+}
+
+/// Conversation records that can enter a session without model or tool execution.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum HistoryImportConversationEvent {
+    UserMessage(HistoryImportConversationEventUserMessage),
+    AssistantMessage(HistoryImportConversationEventAssistantMessage),
+    ToolExecutionStart(HistoryImportConversationEventToolExecutionStart),
+    ToolExecutionComplete(HistoryImportConversationEventToolExecutionComplete),
+}
+
 /// Reason a rewind read (rewind points, file-restore preview, or session diff) could not be answered from the session's file-change captures.
 ///
 /// <div class="warning">
@@ -10474,6 +11444,139 @@ impl<'de> Deserialize<'de> for OptionsUpdateToolFilterPrecedence {
     }
 }
 
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationRegisterAction {
+    #[serde(rename = "register")]
+    #[default]
+    Register,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationRegisterAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationRegisterAction",
+            &["register"],
+            None,
+        )?;
+        Ok(Self::Register)
+    }
+}
+
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationRefreshAction {
+    #[serde(rename = "refresh")]
+    #[default]
+    Refresh,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationRefreshAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationRefreshAction",
+            &["refresh"],
+            None,
+        )?;
+        Ok(Self::Refresh)
+    }
+}
+
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationRemoveAction {
+    #[serde(rename = "remove")]
+    #[default]
+    Remove,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationRemoveAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationRemoveAction",
+            &["remove"],
+            None,
+        )?;
+        Ok(Self::Remove)
+    }
+}
+
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationListChangedAction {
+    #[serde(rename = "listChanged")]
+    #[default]
+    ListChanged,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationListChangedAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationListChangedAction",
+            &["listChanged"],
+            None,
+        )?;
+        Ok(Self::ListChanged)
+    }
+}
+
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationNotificationAction {
+    #[serde(rename = "notification")]
+    #[default]
+    Notification,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationNotificationAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationNotificationAction",
+            &["notification"],
+            None,
+        )?;
+        Ok(Self::Notification)
+    }
+}
+
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationProgressAction {
+    #[serde(rename = "progress")]
+    #[default]
+    Progress,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationProgressAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationProgressAction",
+            &["progress"],
+            None,
+        )?;
+        Ok(Self::Progress)
+    }
+}
+
+/// Original-host operations for a session-owned IDE bridge.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum McpIdeClientOperation {
+    Register(McpIdeClientOperationRegister),
+    Refresh(McpIdeClientOperationRefresh),
+    Remove(McpIdeClientOperationRemove),
+    ListChanged(McpIdeClientOperationListChanged),
+    Notification(McpIdeClientOperationNotification),
+    Progress(McpIdeClientOperationProgress),
+}
+
 /// Consumer allowed to call an MCP tool.
 ///
 /// <div class="warning">
@@ -10821,6 +11924,99 @@ impl<'de> Deserialize<'de> for McpSetEnvValueModeDetails {
         Ok(match index {
             0 => Self::Direct,
             1 => Self::Indirect,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// Scope for one user-requested cloud memory import.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum MemoryImportScope {
+    /// Store the memory for the current user.
+    #[serde(rename = "user")]
+    User,
+    /// Store the memory for the session's resolved repository.
+    #[serde(rename = "repository")]
+    Repository,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for MemoryImportScope {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "MemoryImportScope",
+            &["user", "repository", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::User,
+            1 => Self::Repository,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// Outcome of an explicit cloud memory import.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum MemoryImportStatus {
+    /// The service stored the memory.
+    #[serde(rename = "imported")]
+    Imported,
+    /// The service rejected a conflicting memory.
+    #[serde(rename = "conflict")]
+    Conflict,
+    /// Policy or configuration disables memory storage.
+    #[serde(rename = "disabled")]
+    Disabled,
+    /// Cloud memory storage is unavailable.
+    #[serde(rename = "unavailable")]
+    Unavailable,
+    /// The service could not store the memory.
+    #[serde(rename = "failed")]
+    Failed,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for MemoryImportStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "MemoryImportStatus",
+            &[
+                "imported",
+                "conflict",
+                "disabled",
+                "unavailable",
+                "failed",
+                "Unknown",
+            ],
+            Some(5),
+        )?;
+        Ok(match index {
+            0 => Self::Imported,
+            1 => Self::Conflict,
+            2 => Self::Disabled,
+            3 => Self::Unavailable,
+            4 => Self::Failed,
             _ => Self::Unknown,
         })
     }
@@ -12145,6 +13341,97 @@ impl<'de> Deserialize<'de> for SubagentSettingsEntryContextTier {
     }
 }
 
+/// Task kind, always agent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum UIBackgroundAgentTaskType {
+    #[serde(rename = "agent")]
+    #[default]
+    Agent,
+}
+impl<'de> Deserialize<'de> for UIBackgroundAgentTaskType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "UIBackgroundAgentTaskType",
+            &["agent"],
+            None,
+        )?;
+        Ok(Self::Agent)
+    }
+}
+
+/// Elicitation mode, always form.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum UIFormElicitationPromptMode {
+    #[serde(rename = "form")]
+    #[default]
+    Form,
+}
+impl<'de> Deserialize<'de> for UIFormElicitationPromptMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "UIFormElicitationPromptMode",
+            &["form"],
+            None,
+        )?;
+        Ok(Self::Form)
+    }
+}
+
+/// Schema type indicator, always object.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum UIElicitationSnapshotSchemaType {
+    #[serde(rename = "object")]
+    #[default]
+    Object,
+}
+impl<'de> Deserialize<'de> for UIElicitationSnapshotSchemaType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "UIElicitationSnapshotSchemaType",
+            &["object"],
+            None,
+        )?;
+        Ok(Self::Object)
+    }
+}
+
+/// Elicitation mode, always URL.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum UIUrlElicitationPromptMode {
+    #[serde(rename = "url")]
+    #[default]
+    Url,
+}
+impl<'de> Deserialize<'de> for UIUrlElicitationPromptMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "UIUrlElicitationPromptMode",
+            &["url"],
+            None,
+        )?;
+        Ok(Self::Url)
+    }
+}
+
+/// A form or URL elicitation prompt.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum UIElicitationPrompt {
+    Form(UIFormElicitationPrompt),
+    Url(UIUrlElicitationPrompt),
+}
+
 /// The user's response: accept (submitted), decline (rejected), or cancel (dismissed)
 ///
 /// <div class="warning">
@@ -12183,6 +13470,76 @@ impl<'de> Deserialize<'de> for UIElicitationResponseAction {
             2 => Self::Cancel,
             _ => Self::Unknown,
         })
+    }
+}
+
+/// The action the user selected. Defaults to 'autopilot' when autoApproveEdits is true, otherwise 'interactive'.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum UIExitPlanModeAction {
+    /// Exit plan mode without starting implementation.
+    #[serde(rename = "exit_only")]
+    ExitOnly,
+    /// Exit plan mode and continue interactively.
+    #[serde(rename = "interactive")]
+    Interactive,
+    /// Exit plan mode and continue in autopilot mode.
+    #[serde(rename = "autopilot")]
+    Autopilot,
+    /// Exit plan mode and continue in autopilot mode with parallel subagent execution.
+    #[serde(rename = "autopilot_fleet")]
+    AutopilotFleet,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for UIExitPlanModeAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "UIExitPlanModeAction",
+            &[
+                "exit_only",
+                "interactive",
+                "autopilot",
+                "autopilot_fleet",
+                "Unknown",
+            ],
+            Some(4),
+        )?;
+        Ok(match index {
+            0 => Self::ExitOnly,
+            1 => Self::Interactive,
+            2 => Self::Autopilot,
+            3 => Self::AutopilotFleet,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// Task kind, always service.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum UIServiceTaskType {
+    #[serde(rename = "service")]
+    #[default]
+    Service,
+}
+impl<'de> Deserialize<'de> for UIServiceTaskType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "UIServiceTaskType",
+            &["service"],
+            None,
+        )?;
+        Ok(Self::Service)
     }
 }
 

@@ -31,6 +31,22 @@ public final class SessionHistoryApi {
     }
 
     /**
+     * Appends imported user messages, assistant messages, tool invocations, and tool results without running a model or executing tools. Validates the batch before appending, generates native event IDs and timestamps, and flushes the configured event writer before returning. Call before sending new prompts.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<Void> importConversation(SessionHistoryImportConversationParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.history.importConversation", _p, Void.class);
+    }
+
+    /**
      * Compacts the session history to reduce context usage.
      * <p>
      * Invokes the method with no params, applying the runtime defaults.

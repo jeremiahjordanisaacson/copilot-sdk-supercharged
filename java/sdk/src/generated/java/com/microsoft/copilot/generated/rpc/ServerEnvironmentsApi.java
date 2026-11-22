@@ -8,6 +8,7 @@
 package com.microsoft.copilot.generated.rpc;
 
 import com.microsoft.copilot.CopilotExperimental;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import javax.annotation.processing.Generated;
 
@@ -35,6 +36,19 @@ public final class ServerEnvironmentsApi {
     @CopilotExperimental
     public CompletableFuture<EnvironmentsListResult> list(EnvironmentsListParams params) {
         return caller.invoke("environments.list", params, EnvironmentsListResult.class);
+    }
+
+    /**
+     * Lists GitHub Mission Control environments visible to the authenticated identity. Does not require a running host and excludes host relay credentials.
+     * <p>
+     * Accepts the extensible request, including inputs added after the params record.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<EnvironmentsListResult> list(EnvironmentsListRequest request) {
+        return caller.invoke("environments.list", Objects.requireNonNull(request, "request"), EnvironmentsListResult.class);
     }
 
     /**

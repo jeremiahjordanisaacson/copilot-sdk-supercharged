@@ -30,7 +30,11 @@ public record Extension(
     /** Current status: running, dormant, disabled, failed, or starting */
     @JsonProperty("status") ExtensionStatus status,
     /** Process ID if the extension is running */
-    @JsonProperty("pid") Long pid
+    @JsonProperty("pid") Long pid,
+    /** Absolute executable module path discovered by the runtime. */
+    @JsonProperty("modulePath") String modulePath,
+    /** Runtime-owned process log path, when available. */
+    @JsonProperty("logPath") String logPath
 ) {
 
     /**
@@ -38,6 +42,18 @@ public record Extension(
      * Use {@link #builder()} for named construction.
      */
     public Extension {}
+
+    /**
+     * Creates a record without optional runtime metadata.
+     * @param id the {@code id} property
+     * @param name the {@code name} property
+     * @param source the {@code source} property
+     * @param status the {@code status} property
+     * @param pid the {@code pid} property
+     */
+    public Extension(String id, String name, ExtensionSource source, ExtensionStatus status, Long pid) {
+        this(id, name, source, status, pid, null, null);
+    }
 
     /**
      * Returns a named builder.
@@ -57,6 +73,8 @@ public record Extension(
         private ExtensionSource source;
         private ExtensionStatus status;
         private Long pid;
+        private String modulePath;
+        private String logPath;
 
         /**
          * Sets the {@code id} property.
@@ -114,6 +132,28 @@ public record Extension(
         }
 
         /**
+         * Sets the {@code modulePath} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder modulePath(String value) {
+            this.modulePath = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code logPath} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder logPath(String value) {
+            this.logPath = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
@@ -124,7 +164,7 @@ public record Extension(
             if (name == null) throw new IllegalStateException("Missing required property: name");
             if (source == null) throw new IllegalStateException("Missing required property: source");
             if (status == null) throw new IllegalStateException("Missing required property: status");
-            return new Extension(id, name, source, status, pid);
+            return new Extension(id, name, source, status, pid, modulePath, logPath);
         }
     }
 }

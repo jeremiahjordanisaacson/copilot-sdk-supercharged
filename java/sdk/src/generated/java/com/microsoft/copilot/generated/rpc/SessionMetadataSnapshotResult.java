@@ -27,6 +27,8 @@ import javax.annotation.processing.Generated;
 public record SessionMetadataSnapshotResult(
     /** The unique identifier of the session */
     @JsonProperty("sessionId") String sessionId,
+    /** Opaque ID for the live runtime generation. Attachments to the same generation share this ID. Replacement changes it. Older runtimes can omit it. */
+    @JsonProperty("runtimeInstanceId") String runtimeInstanceId,
     /** ISO 8601 timestamp of when the session started */
     @JsonProperty("startTime") OffsetDateTime startTime,
     /** ISO 8601 timestamp of when the session's persisted state was last modified on disk. For new sessions, equals startTime. For resumed sessions, reflects the previous modification time at construction. */
@@ -248,6 +250,29 @@ public record SessionMetadataSnapshotResult(
     public SessionMetadataSnapshotResult {}
 
     /**
+     * Creates a record without optional runtime metadata.
+     * @param sessionId the {@code sessionId} property
+     * @param startTime the {@code startTime} property
+     * @param modifiedTime the {@code modifiedTime} property
+     * @param isRemote the {@code isRemote} property
+     * @param alreadyInUse the {@code alreadyInUse} property
+     * @param workspacePath the {@code workspacePath} property
+     * @param initialName the {@code initialName} property
+     * @param clientName the {@code clientName} property
+     * @param remoteMetadata the {@code remoteMetadata} property
+     * @param summary the {@code summary} property
+     * @param workingDirectory the {@code workingDirectory} property
+     * @param currentMode the {@code currentMode} property
+     * @param selectedModel the {@code selectedModel} property
+     * @param sessionLimits the {@code sessionLimits} property
+     * @param indexedSearch the {@code indexedSearch} property
+     * @param workspace the {@code workspace} property
+     */
+    public SessionMetadataSnapshotResult(String sessionId, OffsetDateTime startTime, OffsetDateTime modifiedTime, Boolean isRemote, Boolean alreadyInUse, String workspacePath, String initialName, String clientName, MetadataSnapshotRemoteMetadata remoteMetadata, String summary, String workingDirectory, MetadataSnapshotCurrentMode currentMode, String selectedModel, SessionLimitsConfig sessionLimits, IndexedSearchState indexedSearch, SessionMetadataSnapshotResultWorkspace workspace) {
+        this(sessionId, null, startTime, modifiedTime, isRemote, alreadyInUse, workspacePath, initialName, clientName, remoteMetadata, summary, workingDirectory, currentMode, selectedModel, sessionLimits, indexedSearch, workspace);
+    }
+
+    /**
      * Returns a named builder.
      * @return a new builder
      * @since 2.0.0
@@ -261,12 +286,13 @@ public record SessionMetadataSnapshotResult(
     public static final class Builder {
         private Builder() {}
         private String sessionId;
+        private String runtimeInstanceId;
         private OffsetDateTime startTime;
         private OffsetDateTime modifiedTime;
         private Boolean isRemote;
         private Boolean alreadyInUse;
         private String workspacePath;
-        private boolean $presence5;
+        private boolean $presence6;
         private String initialName;
         private String clientName;
         private MetadataSnapshotRemoteMetadata remoteMetadata;
@@ -275,10 +301,10 @@ public record SessionMetadataSnapshotResult(
         private MetadataSnapshotCurrentMode currentMode;
         private String selectedModel;
         private SessionLimitsConfig sessionLimits;
-        private boolean $presence13;
+        private boolean $presence14;
         private IndexedSearchState indexedSearch;
         private SessionMetadataSnapshotResultWorkspace workspace;
-        private boolean $presence15;
+        private boolean $presence16;
 
         /**
          * Sets the {@code sessionId} property.
@@ -288,6 +314,17 @@ public record SessionMetadataSnapshotResult(
          */
         public Builder sessionId(String value) {
             this.sessionId = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code runtimeInstanceId} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder runtimeInstanceId(String value) {
+            this.runtimeInstanceId = value;
             return this;
         }
 
@@ -343,7 +380,7 @@ public record SessionMetadataSnapshotResult(
          */
         public Builder workspacePath(String value) {
             this.workspacePath = value;
-            this.$presence5 = true;
+            this.$presence6 = true;
             return this;
         }
 
@@ -432,7 +469,7 @@ public record SessionMetadataSnapshotResult(
          */
         public Builder sessionLimits(SessionLimitsConfig value) {
             this.sessionLimits = value;
-            this.$presence13 = true;
+            this.$presence14 = true;
             return this;
         }
 
@@ -455,7 +492,7 @@ public record SessionMetadataSnapshotResult(
          */
         public Builder workspace(SessionMetadataSnapshotResultWorkspace value) {
             this.workspace = value;
-            this.$presence15 = true;
+            this.$presence16 = true;
             return this;
         }
 
@@ -471,12 +508,12 @@ public record SessionMetadataSnapshotResult(
             if (modifiedTime == null) throw new IllegalStateException("Missing required property: modifiedTime");
             if (isRemote == null) throw new IllegalStateException("Missing required property: isRemote");
             if (alreadyInUse == null) throw new IllegalStateException("Missing required property: alreadyInUse");
-            if (!$presence5) throw new IllegalStateException("Missing required property: workspacePath");
+            if (!$presence6) throw new IllegalStateException("Missing required property: workspacePath");
             if (workingDirectory == null) throw new IllegalStateException("Missing required property: workingDirectory");
             if (currentMode == null) throw new IllegalStateException("Missing required property: currentMode");
-            if (!$presence13) throw new IllegalStateException("Missing required property: sessionLimits");
-            if (!$presence15) throw new IllegalStateException("Missing required property: workspace");
-            return new SessionMetadataSnapshotResult(sessionId, startTime, modifiedTime, isRemote, alreadyInUse, workspacePath, initialName, clientName, remoteMetadata, summary, workingDirectory, currentMode, selectedModel, sessionLimits, indexedSearch, workspace);
+            if (!$presence14) throw new IllegalStateException("Missing required property: sessionLimits");
+            if (!$presence16) throw new IllegalStateException("Missing required property: workspace");
+            return new SessionMetadataSnapshotResult(sessionId, runtimeInstanceId, startTime, modifiedTime, isRemote, alreadyInUse, workspacePath, initialName, clientName, remoteMetadata, summary, workingDirectory, currentMode, selectedModel, sessionLimits, indexedSearch, workspace);
         }
     }
 }

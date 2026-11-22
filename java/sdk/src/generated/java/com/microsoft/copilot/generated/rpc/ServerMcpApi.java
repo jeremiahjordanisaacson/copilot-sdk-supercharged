@@ -66,7 +66,7 @@ public final class ServerMcpApi {
      * @since 1.0.0
      */
     @CopilotExperimental
-    public CompletableFuture<McpDiscoverResult> discover(McpDiscoverRequest request) {
+    public CompletableFuture<McpDiscoverResult> discoverWithOptions(McpDiscoverRequest request) {
         return caller.invoke("mcp.discover", Objects.requireNonNull(request, "request"), McpDiscoverResult.class);
     }
 

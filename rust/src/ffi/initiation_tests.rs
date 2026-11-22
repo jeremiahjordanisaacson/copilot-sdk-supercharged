@@ -115,7 +115,7 @@ impl Peer {
         let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = mpsc::unbounded_channel();
         let callback = Box::into_raw(Box::new(CallbackState {
-            tx,
+            tx: Mutex::new(Some(tx)),
             closing: AtomicBool::new(false),
         }));
         let native = Arc::new(Native {
@@ -136,6 +136,7 @@ impl Peer {
             owns_host,
             connection_write: write,
             connection_close: close,
+            connection_close_and_wait: None,
             connection_set_ui_thread_handler: configure_ui,
             connection_run_ui_action: run_ui,
             server_id: AtomicU32::new(id),
@@ -143,6 +144,9 @@ impl Peer {
             callback_state: AtomicPtr::new(callback),
             closed: AtomicBool::new(false),
             operation_lock: Mutex::new(()),
+            foreground_order: Arc::new(tokio::sync::Mutex::new(())),
+            protocol_peers: Mutex::new(Some(Vec::new())),
+            cleanup_done: tokio::sync::watch::channel(false).0,
             library_path: PathBuf::from("test-ingress-runtime"),
         });
         let sender = shared.clone();

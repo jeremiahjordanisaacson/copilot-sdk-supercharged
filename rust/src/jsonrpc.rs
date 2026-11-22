@@ -732,6 +732,8 @@ pub struct JsonRpcClient {
     raw_requests: Arc<AtomicUsize>,
     request_tx: mpsc::UnboundedSender<JsonRpcRequest>,
     request_handlers: RequestHandlers,
+    #[cfg(all(copilot_cli_host, feature = "in-process"))]
+    notification_subscriptions: Arc<crate::native_cli::NotificationSubscriptions>,
     connection_closed: CancellationToken,
     pub(crate) cancellable_requests: Arc<CancellableRequests>,
     read_task: Mutex<Option<JoinHandle<()>>>,
@@ -771,6 +773,17 @@ impl JsonRpcClient {
         host_notifications: Option<mpsc::UnboundedSender<JsonRpcNotification>>,
     ) -> Self {
         let connection_closed = CancellationToken::new();
+        #[cfg(all(copilot_cli_host, feature = "in-process"))]
+        let notification_subscriptions =
+            Arc::new(crate::native_cli::NotificationSubscriptions::default());
+        #[cfg(all(copilot_cli_host, feature = "in-process"))]
+        let notification_tx: NotificationSink = {
+            let subscriptions = notification_subscriptions.clone();
+            Box::new(move |notification| {
+                subscriptions.dispatch(&notification);
+                notification_tx(notification);
+            })
+        };
         let (write_tx, write_task) = match writer {
             MessageWriter::Stream(writer) => {
                 let (write_tx, write_rx) = mpsc::unbounded_channel::<WriteCommand>();
@@ -798,6 +811,8 @@ impl JsonRpcClient {
             raw_requests: Arc::new(AtomicUsize::new(0)),
             request_tx,
             request_handlers: Arc::new(RwLock::new(HashMap::new())),
+            #[cfg(all(copilot_cli_host, feature = "in-process"))]
+            notification_subscriptions: notification_subscriptions.clone(),
             connection_closed,
             cancellable_requests: Arc::new(CancellableRequests::default()),
             read_task: Mutex::new(None),
@@ -825,6 +840,8 @@ impl JsonRpcClient {
                     (connection_closed, cancellable_requests, raw_requests),
                 )
                 .await;
+                #[cfg(all(copilot_cli_host, feature = "in-process"))]
+                notification_subscriptions.close();
             }
             .instrument(reader_span),
         );
@@ -835,6 +852,8 @@ impl JsonRpcClient {
 
     pub(crate) fn force_close(&self) {
         self.connection_closed.cancel();
+        #[cfg(all(copilot_cli_host, feature = "in-process"))]
+        self.notification_subscriptions.close();
         self.cancellable_requests.clear();
         let handlers = std::mem::take(&mut *self.request_handlers.write());
         drop(handlers);
@@ -858,6 +877,14 @@ impl JsonRpcClient {
 
     pub(crate) fn connection_closed_token(&self) -> CancellationToken {
         self.connection_closed.child_token()
+    }
+
+    #[cfg(all(copilot_cli_host, feature = "in-process"))]
+    pub(crate) fn subscribe_notifications(
+        &self,
+        methods: &[&str],
+    ) -> Result<crate::native_cli::NotificationSubscription, Error> {
+        self.notification_subscriptions.subscribe(methods)
     }
 
     /// Ends the connection as the end of the CLI's output does, after the
@@ -1050,6 +1077,25 @@ impl JsonRpcClient {
                         Self::fail_pending_requests(&pending_requests, &error);
                     }
                     JsonRpcMessage::Notification(notification) => {
+                        let handler = request_handlers.read().get(&notification.method).cloned();
+                        if let Some(handler) = handler {
+                            let response =
+                                handler(notification.params.clone().unwrap_or(Value::Null));
+                            let closed = connection_closed.clone();
+                            tokio::spawn(async move {
+                                tokio::select! {
+                                    biased;
+                                    _ = closed.cancelled() => {},
+                                    result = AssertUnwindSafe(response).catch_unwind() => {
+                                        match result {
+                                            Ok(Ok(_)) => {},
+                                            Ok(Err(error)) => warn!(%error, "notification callback failed"),
+                                            Err(_) => warn!("notification callback panicked"),
+                                        }
+                                    }
+                                }
+                            });
+                        }
                         if notification.method == "$/cancelRequest" {
                             if let Some(id) = notification
                                 .params

@@ -69,7 +69,9 @@ class StdioShutdownIT {
             }
             assertFalse(stopping.isDone(), "Shutdown must not return before EOF-driven cleanup completes");
             Files.writeString(release, "");
-            stopping.get();
+            var error = assertThrows(ExecutionException.class, stopping::get);
+            assertInstanceOf(JsonRpcException.class, error.getCause());
+            assertEquals("Intentional shutdown failure", error.getCause().getMessage());
             fixture.assertCleanExit();
         }
     }

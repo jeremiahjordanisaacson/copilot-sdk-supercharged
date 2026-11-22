@@ -626,6 +626,183 @@ where
 }
 
 #[tokio::test]
+async fn metadata_details_preserve_runtime_generation_and_legacy_results() {
+    let (session, mut server) = create_session_pair().await;
+    let rpc = session.rpc();
+    let metadata = rpc.metadata();
+    let respond = async {
+        for runtime_instance_id in [Some("runtime-generation"), None] {
+            for _ in 0..2 {
+                let request = server.read_request().await;
+                assert_eq!(request["method"], "session.metadata.snapshot");
+                assert_eq!(
+                    request["params"],
+                    serde_json::json!({"sessionId": session.id()})
+                );
+                let mut result = serde_json::json!({
+                    "sessionId": session.id(), "alreadyInUse": false,
+                    "currentMode": "interactive", "isRemote": false,
+                    "modifiedTime": "2026-11-21T00:00:00Z",
+                    "startTime": "2026-11-21T00:00:00Z",
+                    "workingDirectory": "/workspace", "sessionLimits": null,
+                    "workspace": null, "workspacePath": null
+                });
+                if let Some(id) = runtime_instance_id {
+                    result["runtimeInstanceId"] = serde_json::json!(id);
+                }
+                server.respond(&request, result).await;
+            }
+        }
+    };
+    timeout(TIMEOUT, async {
+        tokio::join!(
+            async {
+                for expected in [Some("runtime-generation"), None] {
+                    let details = metadata.snapshot_details().await.unwrap();
+                    assert_eq!(details.session_id, session.id());
+                    assert_eq!(details.runtime_instance_id.as_deref(), expected);
+                    let legacy: copilot_sdk::rpc::SessionMetadataSnapshot =
+                        metadata.snapshot().await.unwrap();
+                    assert_eq!(legacy.session_id, details.session_id);
+                    assert_eq!(legacy.working_directory, details.working_directory);
+                }
+            },
+            respond
+        );
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn objective_details_preserve_resume_state_and_legacy_results() {
+    let (session, mut server) = create_session_pair().await;
+    let rpc = session.rpc();
+    let objective = rpc.autopilot_objective();
+    let respond = async {
+        for state in [
+            serde_json::json!({
+                "id": 1, "objective": "Verify details", "status": "active",
+                "turnCount": 2, "creditCountNanoAiu": "0",
+                "createdAt": "2026-11-21T00:00:00Z", "resumeCount": 3
+            }),
+            serde_json::json!({
+                "id": 1, "objective": "Verify details", "status": "active",
+                "turnCount": 2, "creditCountNanoAiu": "0"
+            }),
+            Value::Null,
+        ] {
+            for _ in 0..2 {
+                let request = server.read_request().await;
+                assert_eq!(request["method"], "session.autopilotObjective.getState");
+                assert_eq!(
+                    request["params"],
+                    serde_json::json!({"sessionId": session.id()})
+                );
+                server
+                    .respond(&request, serde_json::json!({"state": state.clone()}))
+                    .await;
+            }
+        }
+    };
+    timeout(TIMEOUT, async {
+        tokio::join!(
+            async {
+                for (has_state, created_at, resume_count) in [
+                    (true, Some("2026-11-21T00:00:00Z"), Some(3)),
+                    (true, None, None),
+                    (false, None, None),
+                ] {
+                    let details = objective.get_state_details().await.unwrap();
+                    assert_eq!(details.state.is_some(), has_state);
+                    if let Some(state) = &details.state {
+                        assert_eq!(state.created_at.as_deref(), created_at);
+                        assert_eq!(state.resume_count, resume_count);
+                    }
+                    let legacy: copilot_sdk::rpc::AutopilotObjectiveGetStateResult =
+                        objective.get_state().await.unwrap();
+                    assert_eq!(legacy.state.is_some(), has_state);
+                    assert_eq!(
+                        legacy.state.map(|state| (state.id, state.objective)),
+                        details.state.map(|state| (state.id, state.objective))
+                    );
+                }
+            },
+            respond
+        );
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn extension_inventory_preserves_typed_paths() {
+    let (session, mut server) = create_session_pair().await;
+    let rpc = session.rpc();
+    let extensions = rpc.extensions();
+    let respond = async {
+        for method in ["session.extensions.list", "session.extensions.reconcile"] {
+            let request = server.read_request().await;
+            assert_eq!(request["method"], method);
+            assert_eq!(
+                request["params"],
+                serde_json::json!({"sessionId": session.id()})
+            );
+            server
+                .respond(
+                    &request,
+                    serde_json::json!({
+                        "configured": true,
+                        "explicitOptOut": false,
+                        "extensions": [{
+                            "id": "project:typed", "name": "typed", "source": "project",
+                            "status": "running", "pid": 42,
+                            "modulePath": "/workspace/extension.mjs",
+                            "logPath": "/workspace/extension.log"
+                        }, {
+                            "id": "project:legacy", "name": "legacy", "source": "project",
+                            "status": "dormant"
+                        }]
+                    }),
+                )
+                .await;
+        }
+    };
+    let (inventories, ()) = timeout(TIMEOUT, async {
+        tokio::join!(
+            async {
+                [
+                    extensions.list_details().await.unwrap(),
+                    extensions.reconcile_details().await.unwrap(),
+                ]
+            },
+            respond
+        )
+    })
+    .await
+    .unwrap();
+    for inventory in inventories {
+        assert_eq!(inventory.configured, Some(true));
+        assert_eq!(inventory.explicit_opt_out, Some(false));
+        assert_eq!(inventory.extensions.len(), 2);
+        let extension = &inventory.extensions[0];
+        assert_eq!(extension.id, "project:typed");
+        assert_eq!(extension.pid, Some(42));
+        assert_eq!(extension.status, copilot_sdk::rpc::ExtensionStatus::Running);
+        assert_eq!(
+            extension.module_path.as_deref(),
+            Some("/workspace/extension.mjs")
+        );
+        assert_eq!(
+            extension.log_path.as_deref(),
+            Some("/workspace/extension.log")
+        );
+        assert_eq!(inventory.extensions[1].module_path, None);
+        assert_eq!(inventory.extensions[1].log_path, None);
+    }
+}
+
+#[tokio::test]
 async fn github_token_provider_uses_global_registration_and_maps_results() {
     let (client, mut server) = make_client_and_server("github-token-session");
     let (args_tx, mut args_rx) = tokio::sync::mpsc::unbounded_channel();

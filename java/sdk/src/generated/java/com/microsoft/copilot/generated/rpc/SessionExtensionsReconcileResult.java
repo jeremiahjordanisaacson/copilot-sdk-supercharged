@@ -26,7 +26,11 @@ import javax.annotation.processing.Generated;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record SessionExtensionsReconcileResult(
     /** Discovered extensions and their current status */
-    @JsonProperty("extensions") List<Extension> extensions
+    @JsonProperty("extensions") List<Extension> extensions,
+    /** Whether the runtime installed an extension service, including an empty catalog. */
+    @JsonProperty("configured") Boolean configured,
+    /** Whether the latest explicit create or resume choice disabled extensions. */
+    @JsonProperty("explicitOptOut") Boolean explicitOptOut
 ) {
 
     /**
@@ -34,6 +38,14 @@ public record SessionExtensionsReconcileResult(
      * Use {@link #builder()} for named construction.
      */
     public SessionExtensionsReconcileResult {}
+
+    /**
+     * Creates a record without optional runtime metadata.
+     * @param extensions the {@code extensions} property
+     */
+    public SessionExtensionsReconcileResult(List<Extension> extensions) {
+        this(extensions, null, null);
+    }
 
     /**
      * Returns a named builder.
@@ -49,6 +61,8 @@ public record SessionExtensionsReconcileResult(
     public static final class Builder {
         private Builder() {}
         private List<Extension> extensions;
+        private Boolean configured;
+        private Boolean explicitOptOut;
 
         /**
          * Sets the {@code extensions} property.
@@ -62,6 +76,28 @@ public record SessionExtensionsReconcileResult(
         }
 
         /**
+         * Sets the {@code configured} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder configured(Boolean value) {
+            this.configured = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code explicitOptOut} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder explicitOptOut(Boolean value) {
+            this.explicitOptOut = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
@@ -69,7 +105,7 @@ public record SessionExtensionsReconcileResult(
          */
         public SessionExtensionsReconcileResult build() {
             if (extensions == null) throw new IllegalStateException("Missing required property: extensions");
-            return new SessionExtensionsReconcileResult(extensions);
+            return new SessionExtensionsReconcileResult(extensions, configured, explicitOptOut);
         }
     }
 }

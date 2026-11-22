@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.copilot.AllowCopilotExperimental;
@@ -33,6 +34,33 @@ import com.microsoft.copilot.generated.SessionManagedSettingsResolvedEvent.Sessi
  * of the generated code without requiring network access.
  */
 class GeneratedRpcRecordsCoverageTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"form", "url"})
+    void elicitationPromptPreservesMcpExtensions(String mode) throws Exception {
+        var mapper = new ObjectMapper();
+        var wire = mapper.createObjectNode().put("mode", mode).put("message", "MCP request");
+        if (mode.equals("form")) {
+            wire.set("requestedSchema", mapper.readTree("""
+                    {"type":"object","properties":{}}
+                    """));
+        } else {
+            wire.put("url", "https://example.com/authorize").put("elicitationId", "browser-request");
+        }
+        wire.set("x-vendor", mapper.readTree("""
+                {"nested":[{"enabled":true},null,42],"label":"extension"}
+                """));
+        wire.putNull("x-null");
+        wire.put("x-count", 3);
+
+        var prompt = mapper.treeToValue(wire, UIElicitationPrompt.class);
+        if (mode.equals("form")) {
+            assertInstanceOf(UIElicitationPromptForm.class, prompt);
+        } else {
+            assertInstanceOf(UIElicitationPromptUrl.class, prompt);
+        }
+        assertEquals(wire, mapper.valueToTree(prompt));
+    }
 
     static Stream<Arguments> customizationBuilders() {
         return Stream.of(

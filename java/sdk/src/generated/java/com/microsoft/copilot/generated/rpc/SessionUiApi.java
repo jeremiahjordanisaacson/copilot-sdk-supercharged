@@ -31,6 +31,17 @@ public final class SessionUiApi {
     }
 
     /**
+     * Reads transient prompts and native service state for an attached conversation view.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<SessionUiSnapshotResult> snapshot() {
+        return caller.invoke("session.ui.snapshot", java.util.Map.of("sessionId", this.sessionId), SessionUiSnapshotResult.class);
+    }
+
+    /**
      * Runs a transient no-tools model query against the current conversation context.
      * <p>
      * Note: the {@code sessionId} field in the params record is overridden

@@ -42,6 +42,8 @@ from copilot._generated.rpc import (
 from copilot._jsonrpc import JsonRpcClient
 from copilot.rpc import (
     AccountsGetActiveResult,
+    AutopilotObjectiveState,
+    AutopilotObjectiveStatus,
     BuiltinToolInputSchemaType,
     CatalogInvalidRequestError,
     CommandsApi,
@@ -678,6 +680,40 @@ async def test_host_shutdown_handler_round_trips_empty_acknowledgement():
     client._send_message.assert_awaited_once_with(
         {"jsonrpc": "2.0", "id": "shutdown", "result": {}}
     )
+
+
+def test_autopilot_objective_state_preserves_existing_positional_parameters():
+    state = AutopilotObjectiveState(
+        "0", 1, "task", AutopilotObjectiveStatus.PAUSED, 0, None, None, "autopilot_off"
+    )
+    wire = {
+        "creditCountNanoAiu": "0",
+        "id": 1,
+        "objective": "task",
+        "status": "paused",
+        "turnCount": 0,
+        "pauseReason": "autopilot_off",
+    }
+    assert state.pause_reason == "autopilot_off"
+    assert state.credit_limit is None
+    assert state.to_dict() == wire
+    assert AutopilotObjectiveState.from_dict(wire) == state
+
+    extended = AutopilotObjectiveState(
+        "0",
+        1,
+        "task",
+        AutopilotObjectiveStatus.PAUSED,
+        0,
+        None,
+        None,
+        "autopilot_off",
+        created_at="2026-11-14T17:00:00Z",
+        resume_count=2,
+    )
+    extended_wire = {**wire, "createdAt": "2026-11-14T17:00:00Z", "resumeCount": 2}
+    assert extended.to_dict() == extended_wire
+    assert AutopilotObjectiveState.from_dict(extended_wire) == extended
 
 
 def test_sandbox_config_round_trips_allow_bypass_and_omits_when_absent():

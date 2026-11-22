@@ -160,6 +160,22 @@ public final class SessionMcpApi {
     }
 
     /**
+     * Releases a session-only MCP disable after the host saves that choice in its settings. The live server stays disabled. Later reloads use the saved settings instead of the released override.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<Void> releaseSessionDisable(SessionMcpReleaseSessionDisableParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.mcp.releaseSessionDisable", _p, Void.class);
+    }
+
+    /**
      * Reloads MCP server connections for the session.
      *
      * @apiNote This method is experimental and may change in a future version.
@@ -318,6 +334,22 @@ public final class SessionMcpApi {
         com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
         _p.put("sessionId", this.sessionId);
         return caller.invoke("session.mcp.stopServer", _p, Void.class);
+    }
+
+    /**
+     * Stops the session's MCP servers owned by one plugin. Only the original embedding host may perform this control.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<Void> stopPluginServers(SessionMcpStopPluginServersParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.mcp.stopPluginServers", _p, Void.class);
     }
 
     /**

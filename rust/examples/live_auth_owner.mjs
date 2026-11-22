@@ -26,7 +26,7 @@ const { values } = parseArgs({
 if (values.help || !values.root) {
     console.log(
         "Usage: node src/sdk/rust/examples/live_auth_owner.mjs --root <isolated-directory> " +
-            "[--runtime <runtime.node>] [--cli-native <cli-native.node>] [--scenario live|recovery|session|hmac|api-token|cycle|isolation|subscriptions|utility|background|catalog|server-catalog|independent-utility]\n" +
+            "[--runtime <runtime.node>] [--cli-native <cli-native.node>] [--scenario live|configured|recovery|session|hmac|api-token|cycle|isolation|subscriptions|utility|background|catalog|server-catalog|independent-utility]\n" +
             "Use a dedicated directory. This offline example uses synthetic credentials only.",
     );
 } else {
@@ -48,7 +48,25 @@ function deepFreeze(value) {
 }
 
 async function main() {
-    assert(["live", "recovery", "session", "hmac", "api-token", "cycle", "isolation", "subscriptions", "utility", "background", "catalog", "server-catalog", "independent-utility"].includes(values.scenario), "Unknown scenario");
+    assert(
+        [
+            "live",
+            "configured",
+            "recovery",
+            "session",
+            "hmac",
+            "api-token",
+            "cycle",
+            "isolation",
+            "subscriptions",
+            "utility",
+            "background",
+            "catalog",
+            "server-catalog",
+            "independent-utility",
+        ].includes(values.scenario),
+        "Unknown scenario",
+    );
     const repository = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
     const libc =
         process.platform === "linux" && !process.report.getReport().header.glibcVersionRuntime ? "musl" : "gnu";
@@ -96,7 +114,19 @@ async function main() {
     // The N-API owner and the Rust SDK must load this exact runtime image.
     const runtime = require(runtimeImage);
     const cliNative = require(await realpath(cliNativePath));
-    const sessionFixture = ["session", "hmac", "api-token", "cycle", "isolation", "subscriptions", "utility", "background", "catalog", "server-catalog", "independent-utility"].includes(values.scenario)
+    const sessionFixture = [
+        "session",
+        "hmac",
+        "api-token",
+        "cycle",
+        "isolation",
+        "subscriptions",
+        "utility",
+        "background",
+        "catalog",
+        "server-catalog",
+        "independent-utility",
+    ].includes(values.scenario)
         ? await createSessionFixture(root)
         : undefined;
     if (sessionFixture) {
@@ -108,10 +138,12 @@ async function main() {
         configDir,
         disableAutoLogin: !sessionFixture,
         startupEnvironment: {
-            ...(["utility", "background"].includes(values.scenario) ? {
-                UTILITY_EXPLICIT_TOKEN: "ghs_synthetic_utility_explicit",
-                UTILITY_SECOND_TOKEN: "ghs_synthetic_utility_second",
-            } : {}),
+            ...(["utility", "background"].includes(values.scenario)
+                ? {
+                      UTILITY_EXPLICIT_TOKEN: "ghs_synthetic_utility_explicit",
+                      UTILITY_SECOND_TOKEN: "ghs_synthetic_utility_second",
+                  }
+                : {}),
             ...(values.scenario === "hmac"
                 ? { CAPI_HMAC_KEY: "sdk-owner-hmac-key", COPILOT_API_URL: sessionFixture.url }
                 : values.scenario === "api-token"
@@ -144,10 +176,14 @@ async function main() {
             GH_CONFIG_DIR: join(home, "gh"),
         },
     });
+    if (values.scenario === "configured") {
+        process.env.AGENT_GITHUB_TOKEN = "ghs_synthetic_ambient_token";
+    }
     const options = deepFreeze({
         configDir,
         disableAutoLogin: true,
         runtimeLibraryPath: runtimeImage,
+        ...(values.scenario === "configured" ? { githubTokenEnv: "AGENT_GITHUB_TOKEN" } : {}),
     });
     const originalAuthOptions = structuredClone(authOptions);
     const originalOptions = structuredClone(options);
@@ -184,7 +220,13 @@ async function main() {
         }
 
         // There is no serverId: the Rust SDK owns startup and admits this original owner.
-        await cliNative.cliRuntimeStart(entrypoint, options, owner);
+        if (values.scenario === "configured") {
+            cliNative.cliRuntimeConfigure(entrypoint, options, owner);
+            assert.equal(cliNative.cliRuntimeConnectionId(), null, "Configuration must not start an engine");
+            await cliNative.cliRuntimeStartConfigured(false);
+        } else {
+            await cliNative.cliRuntimeStart(entrypoint, options, owner);
+        }
         const current = JSON.parse(await cliNative.cliRuntimeCall("account.getCurrentAuth", "{}"));
         assert.equal(
             values.scenario === "hmac" ? current.authInfo?.type : current.authInfo?.host,
@@ -261,12 +303,16 @@ async function main() {
                 },
                 userMessage: "Show independent utility authentication",
             });
-            assert.equal(explicit.value, "Independent Utility Authentication", JSON.stringify({
-                outcome: explicit,
-                requests: sessionFixture.requestCount(),
-                paths: sessionFixture.requestPaths(),
-                completions: sessionFixture.completionCount(),
-            }));
+            assert.equal(
+                explicit.value,
+                "Independent Utility Authentication",
+                JSON.stringify({
+                    outcome: explicit,
+                    requests: sessionFixture.requestCount(),
+                    paths: sessionFixture.requestPaths(),
+                    completions: sessionFixture.completionCount(),
+                }),
+            );
             assert(sessionFixture.completionCount() > 0, "An independent credential must still dispatch");
             console.log("Explicit utility: independent completion succeeded");
         } else if (values.scenario === "utility") {
@@ -299,211 +345,228 @@ async function main() {
             sessionFixture.assertCredential("ghs_synthetic_utility_second");
             console.log("Utility catalog: independent after owner revocation");
         } else {
-        if (sessionFixture) {
-            sessionId = await createExampleSession(cliNative, root);
-            assert.equal(typeof sessionId, "string", "SDK create must return a session identity");
-            console.log("SDK session: created");
-            const list = async () =>
-                JSON.parse(
+            if (sessionFixture) {
+                sessionId = await createExampleSession(cliNative, root);
+                assert.equal(typeof sessionId, "string", "SDK create must return a session identity");
+                console.log("SDK session: created");
+                const list = async () =>
+                    JSON.parse(
+                        await cliNative.cliRuntimeCall(
+                            "session.model.list",
+                            JSON.stringify({ sessionId, skipCache: true }),
+                        ),
+                    );
+                const initial = await list();
+                if (values.scenario === "hmac") sessionFixture.assertHmac();
+                else sessionFixture.assertCredential("ghs_synthetic_original_owner");
+                assert(
+                    initial.list.some((model) => model.id === "gpt-5.5"),
+                    `The session must read the local model catalog: ${JSON.stringify(initial)}`,
+                );
+                console.log(
+                    values.scenario === "hmac"
+                        ? "Session request: signed HMAC without OAuth"
+                        : "Session request: original credential",
+                );
+                if (values.scenario !== "hmac") {
+                    inheritedSessionId = await createExampleSession(cliNative, root);
+                }
+                owner.bindSession(sessionId);
+                owner.bindSession(sessionId);
+                console.log("Foreground binding: repeated without recursion");
+                if (values.scenario === "api-token") {
+                    await cliNative.cliRuntimeCall(
+                        "session.gitHubAuth.setCredentials",
+                        JSON.stringify({
+                            sessionId,
+                            credentials: { type: "copilot-api-token", host: "https://owner.example" },
+                        }),
+                    );
+                    await list();
+                    sessionFixture.assertCredential("sdk-owner-api-token");
+                    console.log("Explicit API-token selection: environment credential");
+                } else if (values.scenario !== "hmac") {
+                    await sessionFixture.renew();
+                    await list();
+                    sessionFixture.assertCredential("ghs_synthetic_renewed_owner");
+                    console.log("Session renewal: refreshed credential");
+                    const replacement = {
+                        type: "env",
+                        host: "https://owner.example",
+                        envVar: "GH_TOKEN",
+                        token: "ghs_synthetic_explicit_replacement",
+                        copilotUser: { login: "sdk-owner-example" },
+                    };
+                    const setCredentials = (credentials) =>
+                        cliNative.cliRuntimeCall(
+                            "session.gitHubAuth.setCredentials",
+                            JSON.stringify({ sessionId, credentials }),
+                        );
+                    await setCredentials(replacement);
+                    await list();
+                    sessionFixture.assertCredential(replacement.token);
+                    console.log("Explicit credential update: supplied token");
+                    await setCredentials(null);
+                    const status = JSON.parse(
+                        await cliNative.cliRuntimeCall("session.gitHubAuth.getStatus", JSON.stringify({ sessionId })),
+                    );
+                    assert.equal(status.isAuthenticated, false, "An explicit clear must report no authentication");
+                    const count = sessionFixture.requestCount();
+                    await assert.rejects(list, "An explicit clear must reject authenticated model discovery");
+                    assert.equal(
+                        sessionFixture.requestCount(),
+                        count,
+                        "An explicit clear must reject before HTTP dispatch",
+                    );
+                    console.log("Explicit credential clear: rejected before dispatch");
+                    await setCredentials(replacement);
+
+                    // Each addon image owns its SDK client; both clients load the same runtime image.
+                    const secondaryPath = join(root, "cli-native-secondary.node");
+                    await copyFile(cliNativePath, secondaryPath);
+                    secondary = require(secondaryPath);
+                    const secondaryConfig = join(root, "secondary-config");
+                    await mkdir(secondaryConfig, { recursive: true });
+                    secondaryOwner = new runtime.ProcessAuthHandle(
+                        deepFreeze({
+                            ...authOptions,
+                            configDir: secondaryConfig,
+                            startupEnvironment: {
+                                ...authOptions.startupEnvironment,
+                                AGENT_GITHUB_TOKEN: "ghs_synthetic_independent_owner",
+                            },
+                        }),
+                    );
+                    await secondary.cliRuntimeStart(
+                        entrypoint,
+                        deepFreeze({ ...options, configDir: secondaryConfig }),
+                        secondaryOwner,
+                    );
+                    secondaryOwner.bindSession(inheritedSessionId);
+                    secondarySessionId = await createExampleSession(secondary, root);
+                    await secondary.cliRuntimeCall(
+                        "session.model.list",
+                        JSON.stringify({ sessionId: secondarySessionId, skipCache: true }),
+                    );
+                    sessionFixture.assertCredential(replacement.token);
+                    console.log("Cross-owner SDK request: original live authority");
+                    if (values.scenario === "cycle") {
+                        let rejected = false;
+                        try {
+                            owner.bindSession(secondarySessionId);
+                        } catch (error) {
+                            assert.match(error.message, /cyclic.*auth|auth.*cycle/i);
+                            rejected = true;
+                        }
+                        // Exercise the published graph even if an old addon accepts the cycle.
+                        await cliNative.cliRuntimeCall("account.getCurrentAuth", "{}");
+                        assert(rejected, "A reciprocal foreground binding must reject a resolver cycle");
+                        console.log("Cyclic foreground binding: rejected");
+                        secondaryOwner.bindSession();
+                        await list();
+                        sessionFixture.assertCredential(replacement.token);
+                        await secondary.cliRuntimeCall(
+                            "session.model.list",
+                            JSON.stringify({ sessionId: secondarySessionId, skipCache: true }),
+                        );
+                        sessionFixture.assertCredential("ghs_synthetic_independent_owner");
+                        secondaryOwner.bindSession(inheritedSessionId);
+                        await secondary.cliRuntimeCall(
+                            "session.model.list",
+                            JSON.stringify({ sessionId: secondarySessionId, skipCache: true }),
+                        );
+                        sessionFixture.assertCredential(replacement.token);
+                        console.log("Rejected cycle: original binding and fresh requests preserved");
+                    }
+                }
+            }
+
+            owner.dispose();
+            revoked = true;
+            // A live ambient credential must not replace the revoked original owner.
+            process.env.AGENT_GITHUB_TOKEN = "ghs_synthetic_ambient_replacement";
+            process.env.COPILOT_GITHUB_TOKEN = "ghs_synthetic_ambient_replacement";
+            process.env.GH_TOKEN = "ghs_synthetic_ambient_replacement";
+            process.env.COPILOT_GH_HOST = "https://ambient.example";
+            await assert.rejects(
+                async () => cliNative.cliRuntimeCall("account.getCurrentAuth", "{}"),
+                /auth owner.*(?:not active|no longer available)/i,
+                "A revoked owner must reject SDK auth instead of using ambient credentials",
+            );
+            console.log("Revoked SDK auth: rejected");
+            if (sessionFixture) {
+                if (inheritedSessionId) {
                     await cliNative.cliRuntimeCall(
                         "session.model.list",
                         JSON.stringify({ sessionId, skipCache: true }),
-                    ),
-                );
-            const initial = await list();
-            if (values.scenario === "hmac") sessionFixture.assertHmac();
-            else sessionFixture.assertCredential("ghs_synthetic_original_owner");
-            assert(
-                initial.list.some((model) => model.id === "gpt-5.5"),
-                `The session must read the local model catalog: ${JSON.stringify(initial)}`,
-            );
-            console.log(
-                values.scenario === "hmac"
-                    ? "Session request: signed HMAC without OAuth"
-                    : "Session request: original credential",
-            );
-            if (values.scenario !== "hmac") {
-                inheritedSessionId = await createExampleSession(cliNative, root);
-            }
-            owner.bindSession(sessionId);
-            owner.bindSession(sessionId);
-            console.log("Foreground binding: repeated without recursion");
-            if (values.scenario === "api-token") {
-                await cliNative.cliRuntimeCall(
-                    "session.gitHubAuth.setCredentials",
-                    JSON.stringify({
-                        sessionId,
-                        credentials: { type: "copilot-api-token", host: "https://owner.example" },
-                    }),
-                );
-                await list();
-                sessionFixture.assertCredential("sdk-owner-api-token");
-                console.log("Explicit API-token selection: environment credential");
-            } else if (values.scenario !== "hmac") {
-                await sessionFixture.renew();
-                await list();
-                sessionFixture.assertCredential("ghs_synthetic_renewed_owner");
-                console.log("Session renewal: refreshed credential");
-                const replacement = {
-                    type: "env",
-                    host: "https://owner.example",
-                    envVar: "GH_TOKEN",
-                    token: "ghs_synthetic_explicit_replacement",
-                    copilotUser: { login: "sdk-owner-example" },
-                };
-                const setCredentials = (credentials) =>
-                    cliNative.cliRuntimeCall(
-                        "session.gitHubAuth.setCredentials",
-                        JSON.stringify({ sessionId, credentials }),
                     );
-                await setCredentials(replacement);
-                await list();
-                sessionFixture.assertCredential(replacement.token);
-                console.log("Explicit credential update: supplied token");
-                await setCredentials(null);
-                const status = JSON.parse(
-                    await cliNative.cliRuntimeCall("session.gitHubAuth.getStatus", JSON.stringify({ sessionId })),
-                );
-                assert.equal(status.isAuthenticated, false, "An explicit clear must report no authentication");
+                    sessionFixture.assertCredential(
+                        values.scenario === "api-token" ? "sdk-owner-api-token" : "ghs_synthetic_explicit_replacement",
+                    );
+                    console.log("Explicit session override: independent after owner revocation");
+                }
                 const count = sessionFixture.requestCount();
-                await assert.rejects(list, "An explicit clear must reject authenticated model discovery");
+                await assert.rejects(
+                    async () =>
+                        cliNative.cliRuntimeCall(
+                            "session.model.list",
+                            JSON.stringify({
+                                sessionId: inheritedSessionId ?? sessionId,
+                                skipCache: true,
+                            }),
+                        ),
+                    /auth owner.*(?:not active|no longer available)/i,
+                    "A revoked owner must not authorize a session request",
+                );
                 assert.equal(
                     sessionFixture.requestCount(),
                     count,
-                    "An explicit clear must reject before HTTP dispatch",
+                    "Revocation must stop the request before HTTP dispatch",
                 );
-                console.log("Explicit credential clear: rejected before dispatch");
-                await setCredentials(replacement);
-
-                // Each addon image owns its SDK client; both clients load the same runtime image.
-                const secondaryPath = join(root, "cli-native-secondary.node");
-                await copyFile(cliNativePath, secondaryPath);
-                secondary = require(secondaryPath);
-                const secondaryConfig = join(root, "secondary-config");
-                await mkdir(secondaryConfig, { recursive: true });
-                secondaryOwner = new runtime.ProcessAuthHandle(
-                    deepFreeze({
-                        ...authOptions,
-                        configDir: secondaryConfig,
-                        startupEnvironment: {
-                            ...authOptions.startupEnvironment,
-                            AGENT_GITHUB_TOKEN: "ghs_synthetic_independent_owner",
-                        },
-                    }),
-                );
-                await secondary.cliRuntimeStart(
-                    entrypoint,
-                    deepFreeze({ ...options, configDir: secondaryConfig }),
-                    secondaryOwner,
-                );
-                secondaryOwner.bindSession(inheritedSessionId);
-                secondarySessionId = await createExampleSession(secondary, root);
-                await secondary.cliRuntimeCall(
-                    "session.model.list",
-                    JSON.stringify({ sessionId: secondarySessionId, skipCache: true }),
-                );
-                sessionFixture.assertCredential(replacement.token);
-                console.log("Cross-owner SDK request: original live authority");
-                if (values.scenario === "cycle") {
-                    let rejected = false;
-                    try {
-                        owner.bindSession(secondarySessionId);
-                    } catch (error) {
-                        assert.match(error.message, /cyclic.*auth|auth.*cycle/i);
-                        rejected = true;
-                    }
-                    // Exercise the published graph even if an old addon accepts the cycle.
-                    await cliNative.cliRuntimeCall("account.getCurrentAuth", "{}");
-                    assert(rejected, "A reciprocal foreground binding must reject a resolver cycle");
-                    console.log("Cyclic foreground binding: rejected");
-                    secondaryOwner.bindSession();
-                    await list();
-                    sessionFixture.assertCredential(replacement.token);
-                    await secondary.cliRuntimeCall(
-                        "session.model.list",
-                        JSON.stringify({ sessionId: secondarySessionId, skipCache: true }),
+                console.log("Revoked session request: rejected");
+                if (secondarySessionId) {
+                    await assert.rejects(
+                        async () =>
+                            secondary.cliRuntimeCall(
+                                "session.model.list",
+                                JSON.stringify({ sessionId: secondarySessionId, skipCache: true }),
+                            ),
+                        /auth owner.*(?:not active|no longer available)/i,
+                        "A different foreground owner must not bypass the original owner's revocation",
                     );
-                    sessionFixture.assertCredential("ghs_synthetic_independent_owner");
-                    secondaryOwner.bindSession(inheritedSessionId);
-                    await secondary.cliRuntimeCall(
-                        "session.model.list",
-                        JSON.stringify({ sessionId: secondarySessionId, skipCache: true }),
+                    assert.equal(
+                        sessionFixture.requestCount(),
+                        count,
+                        "Cross-owner revocation must reject before HTTP",
                     );
-                    sessionFixture.assertCredential(replacement.token);
-                    console.log("Rejected cycle: original binding and fresh requests preserved");
+                    console.log("Cross-owner revocation: rejected before dispatch");
+                }
+                await cliNative.cliRuntimeCall("session.shutdown", JSON.stringify({ sessionId }));
+                sessionId = undefined;
+                if (values.scenario !== "hmac") {
+                    const independent = JSON.parse(
+                        await cliNative.cliRuntimeCall(
+                            "session.create",
+                            JSON.stringify({
+                                github: { token: "ghs_synthetic_explicit_session" },
+                                workingDirectory: root,
+                                git: { enableHostGitOperations: false },
+                                mcp: { disabledServers: ["github-mcp-server"] },
+                                skills: { enabled: false },
+                                hooks: { enableRepositoryHooks: false },
+                                enableConfigDiscovery: false,
+                            }),
+                        ),
+                    );
+                    sessionId = independent.sessionId;
+                    await cliNative.cliRuntimeCall(
+                        "session.model.list",
+                        JSON.stringify({ sessionId, skipCache: true }),
+                    );
+                    sessionFixture.assertCredential("ghs_synthetic_explicit_session");
+                    console.log("Explicit session request: independent credential");
                 }
             }
-        }
-
-        owner.dispose();
-        revoked = true;
-        // A live ambient credential must not replace the revoked original owner.
-        process.env.AGENT_GITHUB_TOKEN = "ghs_synthetic_ambient_replacement";
-        process.env.COPILOT_GITHUB_TOKEN = "ghs_synthetic_ambient_replacement";
-        process.env.GH_TOKEN = "ghs_synthetic_ambient_replacement";
-        process.env.COPILOT_GH_HOST = "https://ambient.example";
-        await assert.rejects(
-            async () => cliNative.cliRuntimeCall("account.getCurrentAuth", "{}"),
-            /auth owner.*(?:not active|no longer available)/i,
-            "A revoked owner must reject SDK auth instead of using ambient credentials",
-        );
-        console.log("Revoked SDK auth: rejected");
-        if (sessionFixture) {
-            if (inheritedSessionId) {
-                await cliNative.cliRuntimeCall("session.model.list", JSON.stringify({ sessionId, skipCache: true }));
-                sessionFixture.assertCredential(
-                    values.scenario === "api-token" ? "sdk-owner-api-token" : "ghs_synthetic_explicit_replacement",
-                );
-                console.log("Explicit session override: independent after owner revocation");
-            }
-            const count = sessionFixture.requestCount();
-            await assert.rejects(
-                async () =>
-                    cliNative.cliRuntimeCall("session.model.list", JSON.stringify({
-                        sessionId: inheritedSessionId ?? sessionId,
-                        skipCache: true,
-                    })),
-                /auth owner.*(?:not active|no longer available)/i,
-                "A revoked owner must not authorize a session request",
-            );
-            assert.equal(sessionFixture.requestCount(), count, "Revocation must stop the request before HTTP dispatch");
-            console.log("Revoked session request: rejected");
-            if (secondarySessionId) {
-                await assert.rejects(
-                    async () =>
-                        secondary.cliRuntimeCall(
-                            "session.model.list",
-                            JSON.stringify({ sessionId: secondarySessionId, skipCache: true }),
-                        ),
-                    /auth owner.*(?:not active|no longer available)/i,
-                    "A different foreground owner must not bypass the original owner's revocation",
-                );
-                assert.equal(sessionFixture.requestCount(), count, "Cross-owner revocation must reject before HTTP");
-                console.log("Cross-owner revocation: rejected before dispatch");
-            }
-            await cliNative.cliRuntimeCall("session.shutdown", JSON.stringify({ sessionId }));
-            sessionId = undefined;
-            if (values.scenario !== "hmac") {
-                const independent = JSON.parse(
-                    await cliNative.cliRuntimeCall(
-                        "session.create",
-                        JSON.stringify({
-                            github: { token: "ghs_synthetic_explicit_session" },
-                            workingDirectory: root,
-                            git: { enableHostGitOperations: false },
-                            enableMcp: false,
-                            skills: { enabled: false },
-                            enableHooks: false,
-                            enableConfigDiscovery: false,
-                        }),
-                    ),
-                );
-                sessionId = independent.sessionId;
-                await cliNative.cliRuntimeCall("session.model.list", JSON.stringify({ sessionId, skipCache: true }));
-                sessionFixture.assertCredential("ghs_synthetic_explicit_session");
-                console.log("Explicit session request: independent credential");
-            }
-        }
         }
     } catch (error) {
         errors.push(error);
@@ -586,22 +649,23 @@ async function verifyCredentialIsolation(cli, root, fixture) {
         for (let index = 0; index < 2; index++) {
             sessions.push(await createExampleSession(cli, root));
         }
-        const list = (sessionId) => cli.cliRuntimeCall(
-            "session.model.list",
-            JSON.stringify({ sessionId, skipCache: true }),
-        );
+        const list = (sessionId) =>
+            cli.cliRuntimeCall("session.model.list", JSON.stringify({ sessionId, skipCache: true }));
         await list(sessions[1]);
         fixture.assertCredential("ghs_synthetic_original_owner");
-        await cli.cliRuntimeCall("session.gitHubAuth.setCredentials", JSON.stringify({
-            sessionId: sessions[0],
-            credentials: {
-                type: "env",
-                host: "https://owner.example",
-                envVar: "GH_TOKEN",
-                token: "ghs_synthetic_session_override",
-                copilotUser: { login: "sdk-owner-example" },
-            },
-        }));
+        await cli.cliRuntimeCall(
+            "session.gitHubAuth.setCredentials",
+            JSON.stringify({
+                sessionId: sessions[0],
+                credentials: {
+                    type: "env",
+                    host: "https://owner.example",
+                    envVar: "GH_TOKEN",
+                    token: "ghs_synthetic_session_override",
+                    copilotUser: { login: "sdk-owner-example" },
+                },
+            }),
+        );
         await list(sessions[0]);
         fixture.assertCredential("ghs_synthetic_session_override");
         console.log("Explicit session override: supplied credential");
@@ -616,15 +680,20 @@ async function verifyCredentialIsolation(cli, root, fixture) {
 }
 
 async function createExampleSession(cli, root, options = {}) {
-    const created = JSON.parse(await cli.cliRuntimeCall("session.create", JSON.stringify({
-        workingDirectory: root,
-        git: { enableHostGitOperations: false },
-        enableMcp: false,
-        skills: { enabled: false },
-        enableHooks: false,
-        enableConfigDiscovery: false,
-        ...options,
-    })));
+    const created = JSON.parse(
+        await cli.cliRuntimeCall(
+            "session.create",
+            JSON.stringify({
+                workingDirectory: root,
+                git: { enableHostGitOperations: false },
+                mcp: { disabledServers: ["github-mcp-server"] },
+                skills: { enabled: false },
+                hooks: { enableRepositoryHooks: false },
+                enableConfigDiscovery: false,
+                ...options,
+            }),
+        ),
+    );
     return created.sessionId;
 }
 
@@ -634,32 +703,37 @@ async function verifyCatalogSelection(cli, owner, root, fixture) {
         for (const plan of ["free", "pro"]) {
             const sessionId = await createExampleSession(cli, root);
             sessions.push(sessionId);
-            await cli.cliRuntimeCall("session.gitHubAuth.setCredentials", JSON.stringify({
-                sessionId,
-                credentials: {
-                    type: "env",
-                    host: "https://owner.example",
-                    envVar: "GH_TOKEN",
-                    token: `ghs_synthetic_catalog_${plan}`,
-                    copilotUser: {
-                        login: `catalog-${plan}`,
-                        copilot_plan: plan === "pro" ? "individual" : "free",
-                        ...(plan === "free" ? { access_type_sku: "free_limited_copilot" } : {}),
+            await cli.cliRuntimeCall(
+                "session.gitHubAuth.setCredentials",
+                JSON.stringify({
+                    sessionId,
+                    credentials: {
+                        type: "env",
+                        host: "https://owner.example",
+                        envVar: "GH_TOKEN",
+                        token: `ghs_synthetic_catalog_${plan}`,
+                        copilotUser: {
+                            login: `catalog-${plan}`,
+                            copilot_plan: plan === "pro" ? "individual" : "free",
+                            ...(plan === "free" ? { access_type_sku: "free_limited_copilot" } : {}),
+                        },
                     },
-                },
-            }));
+                }),
+            );
         }
         owner.bindSession(sessions[0]);
         const freeAuth = await owner.current();
         assert.equal(freeAuth.authInfo.copilotUser?.copilot_plan, "free", JSON.stringify(freeAuth));
         const sessionId = await createExampleSession(cli, root);
         sessions.push(sessionId);
-        const list = async () => JSON.parse(await cli.cliRuntimeCall(
-            "session.model.list", JSON.stringify({ sessionId, skipCache: true }),
-        ));
+        const list = async () =>
+            JSON.parse(await cli.cliRuntimeCall("session.model.list", JSON.stringify({ sessionId, skipCache: true })));
         const hasProModel = (result) => result.list.some((model) => model.id === "gpt-5.5");
         const initial = await list();
-        assert(!hasProModel(initial), `The free account must not advertise a Pro-only model: ${JSON.stringify(initial)}`);
+        assert(
+            !hasProModel(initial),
+            `The free account must not advertise a Pro-only model: ${JSON.stringify(initial)}`,
+        );
         owner.bindSession(sessions[1]);
         assert(hasProModel(await list()), "The catalog must use the live Pro account metadata");
         fixture.assertCredential("ghs_synthetic_catalog_pro");
@@ -691,7 +765,10 @@ async function verifyDependentSubscription(cli, runtime, owner, root, authOption
                 return await Promise.race([
                     subscription.next(),
                     new Promise((_, reject) => {
-                        timer = setTimeout(() => reject(new Error("Dependent auth subscription did not follow its owner")), 5000);
+                        timer = setTimeout(
+                            () => reject(new Error("Dependent auth subscription did not follow its owner")),
+                            5000,
+                        );
                     }),
                 ]);
             } finally {
@@ -699,21 +776,29 @@ async function verifyDependentSubscription(cli, runtime, owner, root, authOption
             }
         };
         const initial = await nextEvent();
-        const setCredentials = (login, sessionId = sessions[1]) => cli.cliRuntimeCall("session.gitHubAuth.setCredentials", JSON.stringify({
-            sessionId,
-            credentials: {
-                type: "env",
-                host: "https://owner.example",
-                envVar: "GH_TOKEN",
-                token: "ghs_synthetic_subscription_override",
-                copilotUser: { login },
-            },
-        }));
+        const setCredentials = (login, sessionId = sessions[1]) =>
+            cli.cliRuntimeCall(
+                "session.gitHubAuth.setCredentials",
+                JSON.stringify({
+                    sessionId,
+                    credentials: {
+                        type: "env",
+                        host: "https://owner.example",
+                        envVar: "GH_TOKEN",
+                        token: "ghs_synthetic_subscription_override",
+                        copilotUser: { login },
+                    },
+                }),
+            );
         await setCredentials("subscription-rebound");
         owner.bindSession(sessions[1]);
         const current = await observer.current();
         assert.notDeepEqual(current, initial.state, "The live owner must select the other account");
-        assert.deepEqual((await nextEvent()).state, current, "The dependent subscription must publish the rebound account");
+        assert.deepEqual(
+            (await nextEvent()).state,
+            current,
+            "The dependent subscription must publish the rebound account",
+        );
         console.log("Dependent subscription: rebound account delivered");
         await setCredentials("subscription-updated");
         assert.deepEqual((await nextEvent()).state, await observer.current());
@@ -772,26 +857,33 @@ async function createSessionFixture(root) {
             beforeCatalog = undefined;
             callback?.();
             response.end(JSON.stringify(path === "/meta" ? { models } : models));
-        }
-        else if (path === "/responses") {
+        } else if (path === "/responses") {
             response.setHeader("Content-Type", "text/event-stream");
-            response.end(`data: ${JSON.stringify({
-                type: "response.completed",
-                response: {
-                    id: "local-utility-completion",
-                    model: "gpt-5.5",
-                    output: [{
-                        type: "message",
-                        id: "local-utility-message",
-                        role: "assistant",
-                        status: "completed",
-                        content: [{ type: "output_text", text: "<session-title>Independent Utility Authentication</session-title>" }],
-                    }],
-                    usage: { input_tokens: 4, output_tokens: 4, total_tokens: 8 },
-                },
-            })}\n\n`);
-        }
-        else {
+            response.end(
+                `data: ${JSON.stringify({
+                    type: "response.completed",
+                    response: {
+                        id: "local-utility-completion",
+                        model: "gpt-5.5",
+                        output: [
+                            {
+                                type: "message",
+                                id: "local-utility-message",
+                                role: "assistant",
+                                status: "completed",
+                                content: [
+                                    {
+                                        type: "output_text",
+                                        text: "<session-title>Independent Utility Authentication</session-title>",
+                                    },
+                                ],
+                            },
+                        ],
+                        usage: { input_tokens: 4, output_tokens: 4, total_tokens: 8 },
+                    },
+                })}\n\n`,
+            );
+        } else {
             unknownPaths.push(path);
             response.writeHead(404);
             response.end(JSON.stringify({ error: "Unexpected local fixture request" }));
@@ -807,7 +899,9 @@ async function createSessionFixture(root) {
         requestCount: () => requests.length,
         requestPaths: () => requests.map((request) => request.path),
         completionCount: () => requests.filter((request) => request.path === "/responses").length,
-        beforeCatalog(callback) { beforeCatalog = callback; },
+        beforeCatalog(callback) {
+            beforeCatalog = callback;
+        },
         assertCredential(token) {
             const request = requests.findLast((request) => request.path === "/models" || request.path === "/meta");
             assert(request, "The real session must make an authenticated model request");

@@ -8,7 +8,8 @@ use serde_json::json;
 
 use super::{
     acquire_session_initialization, build_mode_post_create_patch, has_managed_settings,
-    is_autopilot_continuation_idle, permission_request_data, permission_response_params,
+    is_autopilot_continuation_idle, merge_cli_session_options, permission_request_data,
+    permission_response_params,
 };
 use crate::handler::PermissionResult;
 use crate::types::{
@@ -141,6 +142,158 @@ async fn initialization_cleanup_fence_survives_release_and_clear() {
     }
     client.force_stop();
     assert_eq!(client.inner.router.initialization_count(), 1);
+}
+
+#[test]
+fn cli_merge_accepts_unset_registrations_without_replacing_sdk_ownership() {
+    let registrations = json!({
+        "sessionId": "sdk-generated-id",
+        "tools": [{"name": "sdk-tool"}],
+        "requestUserInput": true,
+    });
+    let mut params = registrations.clone();
+    merge_cli_session_options(
+        &mut params,
+        json!({
+            "sessionId": null,
+            "tools": null,
+            "hooks": null,
+            "requestUserInput": null,
+            "githubTokenProviderRegistrationId": null,
+            "managedSandboxEnabled": null,
+        }),
+    )
+    .expect("null declarations must leave SDK registrations intact");
+    let mut expected = registrations;
+    expected["managedSandboxEnabled"] = serde_json::Value::Null;
+    assert_eq!(params, expected);
+}
+
+#[test]
+fn cli_merge_rejects_replacement_identity_and_callback_registrations() {
+    for options in [
+        json!({"sessionId": "replacement-id"}),
+        json!({"requestUserInput": false}),
+    ] {
+        let mut params = json!({
+            "sessionId": "sdk-generated-id",
+            "requestUserInput": true,
+        });
+        let error = merge_cli_session_options(&mut params, options)
+            .expect_err("serialized options cannot replace SDK registrations");
+        assert!(
+            error
+                .to_string()
+                .contains("must use SDK callback configuration"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn cli_merge_preserves_grouped_registrations_and_applies_host_policy() {
+    let registrations = json!({
+        "sessionId": "sdk-generated-id",
+        "tools": {"definitions": [{"name": "sdk-tool"}]},
+        "hooks": {"hasHandlers": true},
+        "interaction": {"requestUserInput": true},
+        "permissions": {"request": true},
+        "github": {"tokenProviderRegistrationId": "sdk-provider"},
+    });
+    let mut params = registrations.clone();
+    merge_cli_session_options(
+        &mut params,
+        json!({
+            "tools": {"definitions": null, "availableTools": ["sdk-tool"]},
+            "hooks": {"hasHandlers": null, "enableRepositoryHooks": false},
+            "interaction": {"requestUserInput": true, "runningInInteractiveMode": true},
+            "permissions": null,
+            "github": {"tokenProviderRegistrationId": null, "fetchManagedSettings": true},
+            "events": {"streaming": true},
+        }),
+    )
+    .unwrap();
+    let mut expected = registrations;
+    expected["tools"]["availableTools"] = json!(["sdk-tool"]);
+    expected["hooks"]["enableRepositoryHooks"] = json!(false);
+    expected["interaction"]["runningInInteractiveMode"] = json!(true);
+    expected["github"]["fetchManagedSettings"] = json!(true);
+    expected["events"] = json!({"streaming": true});
+    assert_eq!(params, expected);
+}
+
+#[cfg(feature = "local-runtime")]
+#[tokio::test]
+async fn cli_preparation_preserves_runtime_owned_auth_identity_on_create_and_resume() {
+    let (client, _peer) = initialization_client();
+    let options = json!({
+        "sessionId": "cli-owned-session",
+        "github": {
+            "authInfo": {
+                "type": "env",
+                "host": "https://github.com",
+                "envVar": "GITHUB_TOKEN",
+            },
+            "fetchManagedSettings": true,
+        },
+    });
+    for prepared in [
+        client.prepare_cli_session(
+            options.clone(),
+            crate::CreateSessionOptions::default(),
+            true,
+        ),
+        client.prepare_cli_resume_session(
+            options.clone(),
+            crate::ResumeSessionOptions::new(SessionId::from("cli-owned-session")),
+            true,
+            false,
+        ),
+    ] {
+        let prepared = prepared.expect("CLI preparation must not decode identity as credentials");
+        let (fetch_managed_settings, request) = match &prepared.kind {
+            super::PreparedKind::CliCreate { config, options } => {
+                (config.github.fetch_managed_settings, options)
+            }
+            super::PreparedKind::CliResume { config, options } => {
+                (config.github.fetch_managed_settings, options)
+            }
+            _ => panic!("expected CLI session preparation"),
+        };
+        assert_eq!(fetch_managed_settings, Some(true));
+        assert_eq!(request["options"], options);
+    }
+    client.force_stop();
+}
+
+#[test]
+fn cli_merge_rejects_grouped_callback_replacements() {
+    for options in [
+        json!({"tools": {"definitions": [{"name": "unregistered-tool"}]}}),
+        json!({"canvases": {"provider": {"id": "unregistered-renderer"}}}),
+        json!({"hooks": {"hasHandlers": false}}),
+        json!({"interaction": {"requestUserInput": false}}),
+        json!({"interaction": {"commands": [{"name": "unregistered-command"}]}}),
+        json!({"permissions": {"request": false}}),
+        json!({"skills": {"hasProvider": true}}),
+        json!({"state": {"hasMemoryStore": true}}),
+        json!({"github": {"tokenProviderRegistrationId": "unregistered-provider"}}),
+    ] {
+        let mut params = json!({
+            "tools": {"definitions": [{"name": "sdk-tool"}]},
+            "hooks": {"hasHandlers": true},
+            "interaction": {"requestUserInput": true},
+            "permissions": {"request": true},
+        });
+        let error = merge_cli_session_options(&mut params, options)
+            .expect_err("serialized groups cannot replace SDK callback registrations");
+        assert!(
+            error
+                .to_string()
+                .contains("must use SDK callback configuration"),
+            "{error}"
+        );
+    }
 }
 
 #[test]

@@ -14,10 +14,26 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.copilot.generated.UserMessageEvent.UserMessageEventData;
 import com.microsoft.copilot.generated.rpc.QueuePendingItems;
+import com.microsoft.copilot.generated.rpc.SessionSendParams;
 
+@com.microsoft.copilot.AllowCopilotExperimental
 class MessageIdentitySerializationTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    @Test
+    void testPublishedSendSourceAccessorsPreserveWireProvenance() throws Exception {
+        var request = SessionSendParams.builder().prompt("hello").source("command-review").build();
+
+        assertEquals("command-review", request.source());
+        assertEquals(MAPPER.readTree("""
+                {"prompt": "hello", "source": "command-review"}
+                """), MAPPER.valueToTree(request));
+        assertFalse(java.util.Arrays.stream(SessionSendParams.class.getMethods())
+                .anyMatch(method -> method.getName().equals("getSendAdmissionId")
+                        || method.getName().equals("setSendAdmissionId")
+                        || method.getName().equals("sendAdmissionId")));
+    }
 
     @Test
     void testQueuePendingMessageIdUsesCamelCaseAndIsOptional() throws Exception {

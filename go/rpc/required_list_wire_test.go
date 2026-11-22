@@ -121,6 +121,10 @@ func TestRequiredListsNilSentAsEmpty(t *testing.T) {
 			_, err := (*ExtensionsAPI)(ses).SendAttachmentsToMessage(ctx, &SendAttachmentsToMessageParams{})
 			return err
 		}},
+		{"session.history.importConversation", []string{"events"}, func(ctx context.Context, srv *serverAPI, ses *sessionAPI) error {
+			_, err := (*HistoryAPI)(ses).ImportConversation(ctx, &SessionHistoryImportConversationRequest{})
+			return err
+		}},
 		{"session.plugins.disable", []string{"names"}, func(ctx context.Context, srv *serverAPI, ses *sessionAPI) error {
 			_, err := (*PluginsAPI)(ses).Disable(ctx, &SessionPluginsDisableRequest{})
 			return err
@@ -283,5 +287,13 @@ func TestRequiredListNilLeavesCallerRequest(t *testing.T) {
 	})
 	if request.SessionIDs != nil {
 		t.Errorf("caller's SessionIDs = %#v, want nil", request.SessionIDs)
+	}
+	historyRequest := &SessionHistoryImportConversationRequest{}
+	captureParams(t, "session.history.importConversation", func(ctx context.Context, srv *serverAPI, ses *sessionAPI) error {
+		_, err := (*HistoryAPI)(ses).ImportConversation(ctx, historyRequest)
+		return err
+	})
+	if historyRequest.Events != nil {
+		t.Errorf("caller's Events = %#v, want nil", historyRequest.Events)
 	}
 }

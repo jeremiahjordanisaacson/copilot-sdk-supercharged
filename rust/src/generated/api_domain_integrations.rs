@@ -553,6 +553,29 @@ impl std::fmt::Debug for DiscoveredMcpServer {
     }
 }
 
+/// Discovered extension metadata, including source-qualified ID, name, discovery source, status, and optional process ID.
+///
+/// Expanded projection for the existing `Client::call` API. It includes fields added after `Extension` was published.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct ExtensionDetails {
+    /// Source-qualified ID (e.g., 'project:my-ext', 'user:auth-helper', 'plugin:my-plugin:my-ext')
+    pub id: String,
+    /// Runtime-owned process log path, when available.
+    pub log_path: Option<String>,
+    /// Absolute executable module path discovered by the runtime.
+    pub module_path: Option<String>,
+    /// Extension name (directory name)
+    pub name: String,
+    /// Process ID if the extension is running
+    pub pid: Option<i64>,
+    /// Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/`<id>`/extensions/)
+    pub source: ExtensionSource,
+    /// Current status: running, dormant, disabled, failed, or starting
+    pub status: ExtensionStatus,
+}
+crate::record_serde::wire_record!(ExtensionDetails { id: "id", log_path: "logPath" if is_none, module_path: "modulePath" if is_none, name: "name", pid: "pid" if is_none, source: "source", status: "status" });
+
 /// Slim input shape for extension_context attachments; identity fields are runtime-derived.
 ///
 /// <div class="warning">
@@ -2012,7 +2035,7 @@ crate::record_serde::wire_record!(McpConfiguredServerList { servers: "servers" }
 /// </div>
 #[derive(Debug, Clone, Default)]
 pub(crate) struct McpConfigureGitHubRequest {
-    /// Opaque runtime auth info for GitHub MCP configuration. Marked internal: an in-process runtime shape (configureGitHubMcp is a no-op over the wire).
+    /// Credential-free authentication identity for GitHub MCP configuration. The field retains its legacy opaque schema for compatibility.
     #[doc(hidden)]
     pub(crate) auth_info: serde_json::Value,
 }
@@ -2638,6 +2661,64 @@ pub struct McpHeadersHandlePendingHeadersRefreshRequestResult {
 crate::record_serde::wire_record!(McpHeadersHandlePendingHeadersRefreshRequestResult {
     success: "success"
 });
+
+/// One callback routed only to the engine's original observer.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientCallback {
+    /// Unique live-client identity, independent of server name and graph token.
+    pub callback_id: String,
+    /// Tool, protocol, cancellation, or release operation as JSON.
+    pub request_json: String,
+    /// Canonical session that owns this client.
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(McpIdeClientCallback {
+    callback_id: "callbackId",
+    request_json: "requestJson",
+    session_id: "sessionId"
+});
+
+/// Serialized response from the original host's live IDE client.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientCallbackResult {
+    /// The backing client's result as JSON.
+    pub result_json: String,
+}
+crate::record_serde::wire_record!(McpIdeClientCallbackResult {
+    result_json: "resultJson"
+});
+
+/// Original-host request for a session-owned IDE bridge.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct McpIdeClientRequest {
+    /// The operation to apply to the original host's IDE bridge.
+    pub operation: McpIdeClientOperation,
+}
+
+/// Result of an original-host IDE operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientResult {
+    /// Whether this operation changed or addressed the current registration.
+    pub applied: bool,
+    /// Opaque token returned only after successful registration.
+    pub token: Option<String>,
+}
+crate::record_serde::wire_record!(McpIdeClientResult { applied: "applied", token: "token" if is_none });
 
 /// IDE metadata for an existing local MCP endpoint on the runtime host.
 ///
@@ -3320,6 +3401,22 @@ pub struct McpOauthAuthenticationStateChangedRequest {
 }
 crate::record_serde::wire_record!(McpOauthAuthenticationStateChangedRequest { refresh_session_token: "refreshSessionToken" if is_none, server_name: "serverName" if is_none });
 
+/// Authorization URL presented by the original SDK requester.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpOauthAuthorizationUrlCallback {
+    /// Authorization URL that the requester must present.
+    pub authorization_url: String,
+    /// Identity reserved by the original requester.
+    pub flow_id: String,
+    /// Session that owns the authentication attempt.
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(McpOauthAuthorizationUrlCallback {
+    authorization_url: "authorizationUrl",
+    flow_id: "flowId",
+    session_id: "sessionId"
+});
+
 /// Targets only the original prepared/applying owned login on this exact session requester.
 ///
 /// <div class="warning">
@@ -3472,6 +3569,28 @@ pub(crate) struct McpOauthFlowIdentityRequest {
     pub flow_id: String,
 }
 crate::record_serde::wire_record!(McpOauthFlowIdentityRequest { flow_id: "flowId" });
+
+/// Progress from an OAuth attempt to its original SDK requester.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpOauthFlowStatusCallback {
+    /// Identity reserved by the original requester.
+    pub flow_id: String,
+    /// Status detail for the host UI, or null when absent.
+    pub message: Option<String>,
+    /// Serialized device authorization details, or null when absent.
+    pub payload_json: Option<String>,
+    /// Session that owns the authentication attempt.
+    pub session_id: SessionId,
+    /// Current OAuth flow status.
+    pub status: String,
+}
+crate::record_serde::wire_record!(McpOauthFlowStatusCallback {
+    flow_id: "flowId",
+    message: "message",
+    payload_json: "payloadJson",
+    session_id: "sessionId",
+    status: "status"
+});
 
 #[derive(Debug, Clone, Default)]
 pub struct McpOauthPendingRequestResponseToken {
@@ -4357,6 +4476,23 @@ pub(crate) struct McpRegistrySearchResult {
 }
 crate::record_serde::wire_record!(McpRegistrySearchResult { servers: "servers" });
 
+/// An MCP server whose saved disable replaces its session-only override.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpReleaseSessionDisableRequest {
+    /// Name of the MCP server whose disable the host saved.
+    pub server_name: String,
+}
+crate::record_serde::wire_record!(McpReleaseSessionDisableRequest {
+    server_name: "serverName"
+});
+
 /// In-process MCP reload configuration.
 ///
 /// <div class="warning">
@@ -4381,10 +4517,12 @@ pub(crate) struct McpReloadConfig {
     pub include_workspace_sources: Option<bool>,
     pub mcp3p_enabled: Option<bool>,
     pub mcp_servers: HashMap<String, serde_json::Value>,
+    /// Reload reason for the runtime-owned registry policy check.
+    pub policy_check_trigger: Option<String>,
     pub secret_store: Option<serde_json::Value>,
     pub use_cached_tool_snapshots: Option<bool>,
 }
-crate::record_serde::wire_record!(McpReloadConfig { active_git_hub_token: "activeGitHubToken" if is_none, cli_enabled_servers: "cliEnabledServers" if is_none, config_filter: "configFilter" if is_none, configured_disabled_servers: "configuredDisabledServers" if is_none, disabled_servers: "disabledServers" if is_none, enabled_servers: "enabledServers" if is_none, force_restart: "forceRestart" if is_none, github_mcp_tool_options: "githubMcpToolOptions" if is_none, github_mcp_user_override: "githubMcpUserOverride" if is_none, include_workspace_sources: "includeWorkspaceSources" if is_none, mcp3p_enabled: "mcp3pEnabled" if is_none, mcp_servers: "mcpServers", secret_store: "secretStore" if is_none, use_cached_tool_snapshots: "useCachedToolSnapshots" if is_none });
+crate::record_serde::wire_record!(McpReloadConfig { active_git_hub_token: "activeGitHubToken" if is_none, cli_enabled_servers: "cliEnabledServers" if is_none, config_filter: "configFilter" if is_none, configured_disabled_servers: "configuredDisabledServers" if is_none, disabled_servers: "disabledServers" if is_none, enabled_servers: "enabledServers" if is_none, force_restart: "forceRestart" if is_none, github_mcp_tool_options: "githubMcpToolOptions" if is_none, github_mcp_user_override: "githubMcpUserOverride" if is_none, include_workspace_sources: "includeWorkspaceSources" if is_none, mcp3p_enabled: "mcp3pEnabled" if is_none, mcp_servers: "mcpServers", policy_check_trigger: "policyCheckTrigger" if is_none, secret_store: "secretStore" if is_none, use_cached_tool_snapshots: "useCachedToolSnapshots" if is_none });
 
 /// Opaque MCP reload configuration.
 ///
@@ -4972,6 +5110,35 @@ pub struct McpStartServersResult {
     pub filtered_servers: Vec<McpFilteredServer>,
 }
 crate::record_serde::wire_record!(McpStartServersResult { allowed_servers: "allowedServers" if is_none, failed_servers: "failedServers" if is_none, filtered_servers: "filteredServers" });
+
+/// Plugin identity for a scoped MCP server stop.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpStopPluginServersRequest {
+    /// Name of the plugin whose owned MCP servers must stop.
+    pub plugin_name: String,
+}
+crate::record_serde::wire_record!(McpStopPluginServersRequest {
+    plugin_name: "pluginName"
+});
+
+/// Acknowledges completion of the scoped plugin MCP server stop.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpStopPluginServersResult {}
 
 /// Server name and optional transport selector for an individual MCP server stop. Omit transport to stop the server by name.
 ///
@@ -5854,6 +6021,27 @@ pub struct PluginsReloadRequest {
     pub reload_mcp: Option<bool>,
 }
 crate::record_serde::wire_record!(PluginsReloadRequest { defer_repo_hooks: "deferRepoHooks" if is_none, reload_custom_agents: "reloadCustomAgents" if is_none, reload_extensions: "reloadExtensions" if is_none, reload_hooks: "reloadHooks" if is_none, reload_mcp: "reloadMcp" if is_none });
+
+/// Canonical activation after workspace consent and plugin policy reconciliation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PluginsResolveActivationResult {
+    /// Current activation, or null before activation resolves.
+    pub snapshot: Option<UIPluginActivationSnapshot>,
+    /// Whether the runtime trusts the workspace.
+    pub trusted: bool,
+    /// Current working directory of the session.
+    pub working_directory: String,
+    /// Authoritative workspace root, when known.
+    pub workspace_root: Option<String>,
+}
+crate::record_serde::wire_record!(PluginsResolveActivationResult { snapshot: "snapshot" if is_none, trusted: "trusted", working_directory: "workingDirectory", workspace_root: "workspaceRoot" if is_none });
 
 /// Name (or spec) of the plugin to uninstall.
 ///
@@ -7123,6 +7311,43 @@ pub struct SkillsRemoveSourceRequest {
 }
 crate::record_serde::wire_record!(SkillsRemoveSourceRequest { cwd: "cwd", inventory: "inventory" if is_none, skill_directories: "skillDirectories", target: "target" });
 
+/// Explicit host approval for account-authenticated MCP endpoints.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpGitHubAuthPrepareRequest {
+    /// Additional MCP configuration before approved servers leave ordinary configuration.
+    pub additional_config_json: String,
+    /// Explicit server-name and exact-origin approvals from the host command line.
+    pub specifications: Vec<String>,
+}
+crate::record_serde::wire_record!(McpGitHubAuthPrepareRequest {
+    additional_config_json: "additionalConfigJson",
+    specifications: "specifications"
+});
+
+/// Configuration after the original engine retains approved account-authenticated servers.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpGitHubAuthPrepareResult {
+    /// Remaining ordinary MCP configuration. Approval grants never leave the engine.
+    pub additional_config_json: String,
+}
+crate::record_serde::wire_record!(McpGitHubAuthPrepareResult {
+    additional_config_json: "additionalConfigJson"
+});
+
 /// Resolved plugin policy and authoritative failure posture. Fresh successful resolutions retain the original policy layers for mutation guards; cache-only inspection never changes retained policy.
 ///
 /// <div class="warning">
@@ -7577,6 +7802,23 @@ pub struct ExtensionsDiscoverResult {
 crate::record_serde::wire_record!(ExtensionsDiscoverResult {
     extensions: "extensions",
     mode: "mode"
+});
+
+/// Configuration after the original engine retains approved account-authenticated servers.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpSourcePrepareGitHubAuthResult {
+    /// Remaining ordinary MCP configuration. Approval grants never leave the engine.
+    pub additional_config_json: String,
+}
+crate::record_serde::wire_record!(McpSourcePrepareGitHubAuthResult {
+    additional_config_json: "additionalConfigJson"
 });
 
 /// Identifies the target session.

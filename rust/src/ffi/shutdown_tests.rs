@@ -84,6 +84,7 @@ fn async_stop_keeps_current_thread_executor_responsive_during_native_shutdown() 
                     owns_host: true,
                     connection_write,
                     connection_close,
+                    connection_close_and_wait: None,
                     connection_set_ui_thread_handler,
                     connection_run_ui_action,
                     server_id: AtomicU32::new(11),
@@ -91,6 +92,9 @@ fn async_stop_keeps_current_thread_executor_responsive_during_native_shutdown() 
                     callback_state: AtomicPtr::new(std::ptr::null_mut()),
                     closed: AtomicBool::new(false),
                     operation_lock: parking_lot::Mutex::new(()),
+                    foreground_order: Arc::new(tokio::sync::Mutex::new(())),
+                    protocol_peers: parking_lot::Mutex::new(Some(Vec::new())),
+                    cleanup_done: tokio::sync::watch::channel(false).0,
                     library_path: PathBuf::from("test-runtime"),
                 }));
                 client.inner.rpc.force_close();
@@ -130,6 +134,7 @@ fn attached_client_closes_only_its_connection() {
         owns_host: false,
         connection_write,
         connection_close,
+        connection_close_and_wait: None,
         connection_set_ui_thread_handler,
         connection_run_ui_action,
         server_id: AtomicU32::new(11),
@@ -137,6 +142,9 @@ fn attached_client_closes_only_its_connection() {
         callback_state: AtomicPtr::new(std::ptr::null_mut()),
         closed: AtomicBool::new(false),
         operation_lock: parking_lot::Mutex::new(()),
+        foreground_order: Arc::new(tokio::sync::Mutex::new(())),
+        protocol_peers: parking_lot::Mutex::new(Some(Vec::new())),
+        cleanup_done: tokio::sync::watch::channel(false).0,
         library_path: PathBuf::from("test-runtime"),
     };
     shared.close();
@@ -163,6 +171,7 @@ async fn stopping_attached_client_does_not_shutdown_the_cli_engine() {
         owns_host: false,
         connection_write,
         connection_close,
+        connection_close_and_wait: None,
         connection_set_ui_thread_handler,
         connection_run_ui_action,
         server_id: AtomicU32::new(11),
@@ -170,6 +179,9 @@ async fn stopping_attached_client_does_not_shutdown_the_cli_engine() {
         callback_state: AtomicPtr::new(std::ptr::null_mut()),
         closed: AtomicBool::new(false),
         operation_lock: parking_lot::Mutex::new(()),
+        foreground_order: Arc::new(tokio::sync::Mutex::new(())),
+        protocol_peers: parking_lot::Mutex::new(Some(Vec::new())),
+        cleanup_done: tokio::sync::watch::channel(false).0,
         library_path: PathBuf::from("test-runtime"),
     }));
     client

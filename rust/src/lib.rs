@@ -6,6 +6,8 @@
 #[cfg(feature = "in-process")]
 #[doc(hidden)]
 pub use ffi::{InProcessPermissionUpdate, InProcessSessionHost};
+#[cfg(feature = "in-process")]
+pub use ffi::{InProcessProtocolConnection, InProcessProtocolConnectionOptions};
 
 /// Experimental runtime-owned Agent Host Protocol listeners.
 pub mod ahp_host;
@@ -24,6 +26,9 @@ mod canvas_dispatch;
 #[cfg(feature = "local-runtime")]
 #[doc(hidden)]
 pub mod cli_host;
+/// Local process discovery for in-process SDK hosts.
+#[cfg(feature = "in-process")]
+pub mod discovery;
 /// Bundled CLI binary extraction and caching.
 #[cfg(feature = "bundled-cli")]
 pub(crate) mod embeddedcli;
@@ -68,7 +73,9 @@ pub mod permission;
 #[allow(dead_code)]
 #[path = "platform_dirs/mod.rs"]
 mod platform_dirs;
+mod process_telemetry;
 mod process_tree;
+pub use process_telemetry::InProcessHostTelemetry;
 /// BYOK bearer-token provider callbacks.
 pub mod provider_token;
 mod provider_token_dispatch;
@@ -185,6 +192,22 @@ pub use types::*;
 
 mod client_options;
 pub use client_options::*;
+
+/// Host-only plugin operations with parameterless public wire contracts.
+///
+/// These operations use the existing private SDK connection. Raw protocol peers
+/// cannot gain this host capability through request parameters.
+#[cfg(feature = "in-process")]
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub enum InProcessPluginHostOperation {
+    /// List installed plugins with the host's effective configuration.
+    List = 0,
+    /// Update installed plugins with the host's effective configuration.
+    UpdateAll = 1,
+    /// List marketplaces with the host's effective configuration.
+    ListMarketplaces = 2,
+}
 
 mod sdk_protocol_version;
 pub use sdk_protocol_version::{SDK_PROTOCOL_VERSION, get_sdk_protocol_version};
@@ -491,6 +514,10 @@ pub struct InProcessSessionBinding {
     /// The native resource ID, which may differ from the public session ID.
     pub native_session_id: String,
     /// The original session host registration token.
+    ///
+    /// An empty token requests a generation-scoped view from the original trusted
+    /// CLI owner. The runtime validates that parent's authority and its engine's live ownership.
+    /// This mode never registers or replaces callbacks.
     pub registration_token: String,
 }
 
@@ -679,6 +706,17 @@ struct StartupOptions {
     /// Only used with [`Transport::InProcess`].
     #[doc(hidden)]
     pub in_process_server_id: Option<u32>,
+    /// Explicit native grant for file logging to this exact path on this connection.
+    ///
+    /// Only used with [`Transport::InProcess`]. The SDK sends this grant through
+    /// the native ABI, not a diagnostic RPC. The path is not inferred from the
+    /// process environment. Each connection has one immutable logging target.
+    pub in_process_file_logging_path: Option<PathBuf>,
+    /// Whether an owned in-process host starts PowerShell discovery at startup.
+    ///
+    /// `None` preserves the runtime default. `Some(false)` lets the embedding
+    /// host defer discovery until its launch policy permits it.
+    pub in_process_eager_power_shell_resolution: Option<bool>,
     /// Bind an existing native session to the SDK engine with its original callback authority.
     /// Requires an attached in-process server and its already-loaded native image.
     pub in_process_session_binding: Option<InProcessSessionBinding>,
@@ -692,6 +730,10 @@ struct StartupOptions {
     /// native binder. The SDK retains it until its host closes. This cannot
     /// be combined with an attached server, a borrowed session, or [`Self::github_token`].
     pub in_process_auth_owner: Option<Arc<dyn InProcessAuthOwner>>,
+    /// Process facts and memory samples for an original owned in-process host.
+    ///
+    /// The provider replaces native-only process telemetry before initialization.
+    pub in_process_host_telemetry: Option<Arc<dyn InProcessHostTelemetry>>,
     /// Override the directory where the bundled CLI binary is extracted on
     /// first use.
     ///
@@ -874,6 +916,14 @@ impl std::fmt::Debug for StartupOptions {
             .field("telemetry", &self.telemetry)
             .field("base_directory", &self.base_directory)
             .field("in_process_server_id", &self.in_process_server_id)
+            .field(
+                "in_process_file_logging_path",
+                &self.in_process_file_logging_path.as_ref().map(|_| "<set>"),
+            )
+            .field(
+                "in_process_eager_power_shell_resolution",
+                &self.in_process_eager_power_shell_resolution,
+            )
             .field(
                 "in_process_runtime_library_path",
                 &self.in_process_runtime_library_path,
@@ -1177,9 +1227,12 @@ impl Default for StartupOptions {
             disable_client_telemetry: false,
             base_directory: None,
             in_process_server_id: None,
+            in_process_file_logging_path: None,
+            in_process_eager_power_shell_resolution: None,
             in_process_session_binding: None,
             in_process_runtime_library_path: None,
             in_process_auth_owner: None,
+            in_process_host_telemetry: None,
             bundled_cli_extract_directory: None,
             mode: ClientMode::CodingAgent,
             client_info: None,
@@ -1449,6 +1502,8 @@ struct ClientInner {
     installation_confirmation: Arc<installation_confirmation::InstallationConfirmationDispatcher>,
     /// Open shell password prompts, keyed by session and request.
     shell_authentication_requests: shell_authentication::PendingShellAuthenticationRequests,
+    #[cfg(feature = "local-runtime")]
+    send_admissions: cli_host::PendingSendAdmissions,
     entra_token: Arc<entra::EntraTokenDispatcher>,
     /// Connection-level GitHub telemetry forwarding callback, set from
     /// [`StartupOptions::on_github_telemetry`]. Drives the
@@ -1521,6 +1576,172 @@ impl Drop for StdioShutdownGuard<'_> {
 }
 
 impl Client {
+    /// Admit this owned engine's original connection for embedding callbacks.
+    ///
+    /// Register the four `embedder.*` request handlers before this call.
+    /// Callbacks dispose process resources or change visible UI; the runtime
+    /// keeps session ownership and shutdown. Borrowed engines cannot register.
+    #[cfg(feature = "in-process")]
+    pub async fn register_in_process_embedder_observer(&self) -> Result<()> {
+        let host = self.in_process_host()?;
+        tokio::task::spawn_blocking(move || host.register_embedder_observer())
+            .await
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?
+    }
+
+    #[cfg(feature = "in-process")]
+    fn in_process_host(&self) -> Result<Arc<ffi::FfiShared>> {
+        self.inner.ffi_host.lock().clone().ok_or_else(|| {
+            Error::with_message(ErrorKind::InvalidConfig, "client has no in-process server")
+        })
+    }
+
+    /// Publish this embedding host's foreground owner without requesting a UI switch.
+    ///
+    /// `None` clears the owner. This changes the existing engine's orphaning
+    /// state, unlike [`Self::set_foreground_session_id`], which requests a switch.
+    /// Calls reserve FIFO order immediately, even when their futures are polled
+    /// in a different order. Dropping an unsubmitted future cancels its reservation.
+    /// A submitted mutation keeps its place until the native call completes.
+    #[cfg(feature = "in-process")]
+    pub fn publish_in_process_foreground_session(
+        &self,
+        session_id: Option<&str>,
+    ) -> impl std::future::Future<Output = Result<bool>> + Send + 'static + use<> {
+        let publication = self.in_process_host().map(|host| {
+            let reservation = host.reserve_foreground_publication();
+            (host, reservation, session_id.map(str::to_owned))
+        });
+        async move {
+            let (host, reservation, session_id) = publication?;
+            let guard = reservation.await;
+            tokio::task::spawn_blocking(move || {
+                let _guard = guard;
+                host.publish_foreground_session(session_id.as_deref())
+            })
+            .await
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?
+        }
+    }
+
+    /// Read retention from this client's existing in-process engine.
+    ///
+    /// This does not create, resume, or retain the session.
+    #[cfg(feature = "in-process")]
+    pub async fn in_process_is_session_retained(&self, session_id: &str) -> Result<bool> {
+        let host = self.in_process_host()?;
+        let session_id = session_id.to_owned();
+        tokio::task::spawn_blocking(move || host.is_session_retained(&session_id))
+            .await
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?
+    }
+
+    /// Read whether the engine has a connection to this session.
+    ///
+    /// Connections in `ignored_connection_ids` do not count as owners.
+    #[cfg(feature = "in-process")]
+    pub async fn in_process_has_session_connection(
+        &self,
+        session_id: &str,
+        ignored_connection_ids: &[u32],
+    ) -> Result<bool> {
+        let host = self.in_process_host()?;
+        let session_id = session_id.to_owned();
+        let ignored_connection_ids = ignored_connection_ids.to_vec();
+        tokio::task::spawn_blocking(move || {
+            host.has_session_connection(&session_id, &ignored_connection_ids)
+        })
+        .await
+        .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?
+    }
+
+    /// Set an existing peer's default session on this client's in-process engine.
+    ///
+    /// The engine rejects connections that do not belong to it.
+    #[cfg(feature = "in-process")]
+    pub async fn set_in_process_connection_default_session_id(
+        &self,
+        connection_id: u32,
+        session_id: &str,
+    ) -> Result<bool> {
+        let host = self.in_process_host()?;
+        let session_id = session_id.to_owned();
+        tokio::task::spawn_blocking(move || {
+            host.set_connection_default_session(connection_id, &session_id)
+        })
+        .await
+        .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?
+    }
+
+    /// Apply native session defaults to this client's in-process server.
+    ///
+    /// The runtime validates these embedding-host overrides against its own
+    /// configuration. Omitted fields retain their native defaults. Invalid
+    /// overrides leave all defaults unchanged. This does not replace the engine,
+    /// its credential owner, or the caller's configuration.
+    #[cfg(feature = "in-process")]
+    pub async fn configure_in_process_server(
+        &self,
+        overrides: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<()> {
+        let host = self.in_process_host()?;
+        let payload = serde_json::to_vec(overrides)?;
+        tokio::task::spawn_blocking(move || host.configure_server_defaults(&payload))
+            .await
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?
+    }
+
+    /// Invoke a bounded plugin operation with legacy host-only options.
+    ///
+    /// This does not change public JSON-RPC arity or grant general CLI authority.
+    /// The runtime validates the private registration and preserves canonical
+    /// plugin policy, connection identity, and renewable authentication.
+    ///
+    /// Cancellation drops only the response receiver. An accepted operation
+    /// still completes its native callback and releases its callback state.
+    #[cfg(feature = "in-process")]
+    pub async fn call_in_process_plugin_host(
+        &self,
+        operation: InProcessPluginHostOperation,
+        params: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let host = self.in_process_host()?;
+        let envelope = host.call_plugin_host(operation, params).await?;
+        if envelope["ok"] == true {
+            Ok(envelope["result"].clone())
+        } else {
+            let error: JsonRpcError = serde_json::from_value(envelope["error"].clone())?;
+            Err(Self::call_error(error, None, false))
+        }
+    }
+
+    /// Open an independent inbound protocol peer on this client's in-process server.
+    ///
+    /// The peer uses the same engine, but no SDK response reader. An embedding
+    /// host can bridge its bytes to stdio or TCP without creating another client.
+    /// The client must use the in-process transport. Stopping this client closes
+    /// its peers; closing a peer never stops this client or its server.
+    #[cfg(feature = "in-process")]
+    pub async fn open_in_process_protocol_connection(
+        &self,
+        options: InProcessProtocolConnectionOptions,
+    ) -> Result<InProcessProtocolConnection> {
+        let parent = self.in_process_host()?;
+        ffi::open_protocol_connection(parent, options).await
+    }
+
+    /// Create a local discovery publisher owned by this in-process SDK host.
+    ///
+    /// Session updates read metadata through this client's original connection.
+    /// The runtime owns file writes, generations, heartbeats, and removal.
+    #[cfg(feature = "in-process")]
+    pub fn create_in_process_discovery_publisher(
+        &self,
+        configuration: discovery::DiscoveryPublisherConfig,
+    ) -> Result<discovery::DiscoveryPublisher> {
+        discovery::DiscoveryPublisher::create(self.clone(), configuration)
+    }
+
     #[doc(hidden)]
     /// The live server ID selected by the in-process transport.
     pub fn in_process_server_id(&self) -> Option<u32> {
@@ -1531,6 +1752,23 @@ impl Client {
         #[cfg(not(feature = "in-process"))]
         {
             None
+        }
+    }
+
+    #[doc(hidden)]
+    /// Whether this client owns the in-process host rather than an attached connection.
+    pub fn owns_in_process_host(&self) -> bool {
+        #[cfg(feature = "in-process")]
+        {
+            self.inner
+                .ffi_host
+                .lock()
+                .as_ref()
+                .is_some_and(|host| host.owns_host())
+        }
+        #[cfg(not(feature = "in-process"))]
+        {
+            false
         }
     }
 
@@ -1702,11 +1940,29 @@ impl Client {
                 "a live auth owner cannot be combined with github_token",
             ));
         }
+        if options.in_process_host_telemetry.is_some()
+            && (!matches!(options.transport, Transport::InProcess)
+                || options.in_process_server_id.is_some()
+                || options.in_process_session_binding.is_some())
+        {
+            return Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "process telemetry requires SDK-owned in-process startup",
+            ));
+        }
         if options.run_on_ui_thread.is_some() && !matches!(options.transport, Transport::InProcess)
         {
             return Err(Error::with_message(
                 ErrorKind::InvalidConfig,
                 "run_on_ui_thread is supported only with Transport::InProcess",
+            ));
+        }
+        if options.in_process_file_logging_path.is_some()
+            && !matches!(options.transport, Transport::InProcess)
+        {
+            return Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "in_process_file_logging_path is supported only with Transport::InProcess",
             ));
         }
         #[cfg(not(feature = "in-process"))]
@@ -2030,6 +2286,9 @@ impl Client {
                             .map(str::to_string),
                     );
                     args.extend(Self::session_idle_timeout_args(&options));
+                    if options.in_process_eager_power_shell_resolution == Some(false) {
+                        args.push("--no-eager-powershell-resolution".to_owned());
+                    }
                     if options.github_token.is_some() {
                         args.extend([
                             "--auth-token-env".to_string(),
@@ -2049,6 +2308,9 @@ impl Client {
                     let explicit_cli = std::env::var_os("COPILOT_CLI_PATH")
                         .map(PathBuf::from)
                         .filter(|path| path.is_file());
+                    if options.in_process_host_telemetry.is_some() {
+                        args.push("--defer-process-host-telemetry".to_owned());
+                    }
                     let host = crate::ffi::FfiHost::create(
                         program.as_deref(),
                         explicit_cli.as_deref(),
@@ -2060,6 +2322,7 @@ impl Client {
                             library_path: options.in_process_runtime_library_path.as_deref(),
                             session_binding: options.in_process_session_binding,
                             auth_owner: options.in_process_auth_owner,
+                            file_logging_path: options.in_process_file_logging_path.as_deref(),
                         },
                     )?;
                     let (reader, shared) = host.start().await?;
@@ -2115,6 +2378,10 @@ impl Client {
                         )?;
                     }
                     shared.configure_ui_thread(ui_handler.is_some())?;
+                    if let Some(provider) = options.in_process_host_telemetry {
+                        crate::process_telemetry::register(&client, provider)?;
+                        shared.configure_process_telemetry_host()?;
+                    }
                     *client.inner.ffi_host.lock() = Some(shared);
                     client
                 }
@@ -2243,6 +2510,7 @@ impl Client {
     /// The handler runs independently of the reader, so it may await ordinary
     /// SDK requests on this connection. Its result is written using the normal
     /// framed writer. Duplicate registrations are rejected.
+    /// Notifications use the same handler without writing a response.
     /// Use the supplied request-scoped client for SDK calls instead of capturing
     /// a client clone, which would create an ownership cycle in the registry.
     ///
@@ -2692,6 +2960,8 @@ impl Client {
                 installation_confirmation: installation_confirmation.clone(),
                 shell_authentication_requests:
                     shell_authentication::PendingShellAuthenticationRequests::default(),
+                #[cfg(feature = "local-runtime")]
+                send_admissions: cli_host::PendingSendAdmissions::default(),
                 entra_token: entra_token.clone(),
                 on_github_telemetry,
                 on_get_trace_context,
@@ -2713,6 +2983,8 @@ impl Client {
             client.spawn_child_exit_watcher();
         }
         client.register_ahp_session_factory()?;
+        #[cfg(feature = "local-runtime")]
+        cli_host::register_send_admission_handler(&client)?;
         if client
             .inner
             .entra
@@ -3478,17 +3750,6 @@ impl Client {
         self.inner.router.unregister_detached(session_id, token);
     }
 
-    /// Snapshot the session IDs currently registered on the router.
-    ///
-    /// Crate-internal so in-crate unit tests can assert registration
-    /// lifecycle without depending on the `test-support` feature, which
-    /// only gates the equivalent *public* test helper. Compiled only for
-    /// those two configurations — a default-feature build has no caller.
-    #[cfg(any(test, feature = "test-support"))]
-    pub(crate) fn registered_session_ids(&self) -> Vec<SessionId> {
-        self.inner.router.session_ids()
-    }
-
     pub(crate) fn register_github_token_provider(
         &self,
         provider: Arc<dyn GitHubTokenProvider>,
@@ -3785,7 +4046,7 @@ impl Client {
     /// notification router. This is test-harness plumbing, not part of the
     /// supported SDK API.
     pub fn registered_session_ids_for_test(&self) -> Vec<SessionId> {
-        self.registered_session_ids()
+        self.inner.router.session_ids()
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -4048,15 +4309,8 @@ impl Client {
         }
         self.inner.github_token_registry.clear();
 
-        let should_shutdown_runtime = self.inner.child.lock().is_some();
-        #[cfg(feature = "in-process")]
-        let should_shutdown_runtime = should_shutdown_runtime
-            || self
-                .inner
-                .ffi_host
-                .lock()
-                .as_ref()
-                .is_some_and(|host| host.owns_host());
+        let should_shutdown_runtime =
+            self.inner.child.lock().is_some() || self.owns_in_process_host();
         if should_shutdown_runtime {
             let runtime_shutdown_start = Instant::now();
             match tokio::time::timeout(RUNTIME_SHUTDOWN_TIMEOUT, self.rpc().runtime().shutdown())
@@ -4185,10 +4439,13 @@ impl Client {
         #[cfg(feature = "in-process")]
         {
             let host = self.inner.ffi_host.lock().take();
-            if let Some(host) = host
-                && let Err(error) = tokio::task::spawn_blocking(move || host.close()).await
-            {
-                errors.push(Error::new(ErrorKind::Io, error));
+            if let Some(host) = host {
+                if let Err(error) = host.close_protocol_peers().await {
+                    errors.push(error);
+                }
+                if let Err(error) = tokio::task::spawn_blocking(move || host.close()).await {
+                    errors.push(Error::new(ErrorKind::Io, error));
+                }
             }
         }
 

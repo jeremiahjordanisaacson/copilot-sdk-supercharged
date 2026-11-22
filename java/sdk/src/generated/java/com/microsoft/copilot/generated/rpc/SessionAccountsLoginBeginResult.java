@@ -27,6 +27,7 @@ public record SessionAccountsLoginBeginResult(
     /** Opaque flow id used to advance or cancel this login. */
     @JsonProperty("flowId") String flowId,
     /** The first step of the flow. */
+    @com.fasterxml.jackson.databind.annotation.JsonDeserialize(as = AuthLoginStep.class)
     @JsonProperty("step") Object step
 ) {
 
@@ -34,7 +35,7 @@ public record SessionAccountsLoginBeginResult(
      * Creates a record positionally.
      * Use {@link #builder()} for named construction.
      */
-    public SessionAccountsLoginBeginResult {}
+    public SessionAccountsLoginBeginResult { step = step == null || step instanceof AuthLoginStep ? (AuthLoginStep) step : RpcMapper.INSTANCE.convertValue(step, AuthLoginStep.class); }
 
     /**
      * Returns a named builder.

@@ -1205,6 +1205,81 @@ func TestClient_StopRequestsRuntimeShutdownForOwnedProcess(t *testing.T) {
 	server.Stop()
 }
 
+func TestClient_StopDrainsShutdownResponseAfterProcessExit(t *testing.T) {
+	for _, outcome := range []string{"response", "RPC error", "EOF", "timeout"} {
+		t.Run(outcome, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				rpcClient, server, _ := newRuntimeShutdownRpcPair(t)
+				done := make(chan struct{})
+				processErr := errors.New("CLI process exited unexpectedly")
+				rpcClient.SetProcessDone(done, &processErr)
+				client := &Client{
+					process:         &exec.Cmd{},
+					client:          rpcClient,
+					RPC:             rpc.NewServerRPC(rpcClient),
+					sessions:        make(map[string]*Session),
+					processDone:     done,
+					processErrorPtr: &processErr,
+				}
+				started := make(chan struct{})
+				release := make(chan struct{})
+				releaseReply := sync.OnceFunc(func() { close(release) })
+				defer func() {
+					releaseReply()
+					client.ForceStop()
+					server.Stop()
+				}()
+				server.SetRequestHandler("runtime.shutdown", func(json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
+					close(done)
+					close(started)
+					<-release
+					if outcome == "RPC error" {
+						return nil, &jsonrpc2.Error{Code: -32001, Message: "shutdown rejected"}
+					}
+					return []byte(`{}`), nil
+				})
+				stopped := make(chan error, 1)
+				go func() { stopped <- client.Stop() }()
+				<-started
+				synctest.Wait()
+				select {
+				case err := <-stopped:
+					t.Fatalf("Stop returned before the shutdown response or EOF: %v", err)
+				default:
+				}
+
+				switch outcome {
+				case "EOF":
+					server.Close()
+				case "timeout":
+					time.Sleep(runtimeShutdownTimeout)
+				default:
+					releaseReply()
+				}
+				err := <-stopped
+				switch outcome {
+				case "response":
+					if err != nil {
+						t.Fatalf("Stop rejected the final shutdown response: %v", err)
+					}
+				case "RPC error":
+					if err == nil || !strings.Contains(err.Error(), "shutdown rejected") {
+						t.Fatalf("Stop error = %v, want the final RPC error", err)
+					}
+				case "EOF":
+					if !errors.Is(err, processErr) {
+						t.Fatalf("Stop error = %v, want the process error after EOF", err)
+					}
+				case "timeout":
+					if err == nil || !strings.Contains(err.Error(), "timed out gracefully shutting down runtime") {
+						t.Fatalf("Stop error = %v, want the existing shutdown deadline", err)
+					}
+				}
+			})
+		})
+	}
+}
+
 func TestClient_StopShutsDownRuntimeWhenSessionDetachNeverAnswers(t *testing.T) {
 	previousTimeout := runtimeShutdownTimeout
 	runtimeShutdownTimeout = 200 * time.Millisecond

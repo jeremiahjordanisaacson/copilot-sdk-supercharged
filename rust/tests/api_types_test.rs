@@ -12,6 +12,264 @@ use copilot_sdk::rpc::{
 use copilot_sdk::session_events::{RecommendedAutoTier, UserMessageData};
 
 #[test]
+fn released_session_records_preserve_complete_struct_literals() {
+    use copilot_sdk::rpc::{
+        AutopilotObjectiveState, AutopilotObjectiveStatus, Extension, ExtensionSource,
+        ExtensionStatus,
+    };
+
+    let objective = AutopilotObjectiveState {
+        completion_summary: None,
+        credit_count_nano_aiu: "0".into(),
+        credit_limit: None,
+        id: 1,
+        objective: "Preserve Rust construction".into(),
+        pause_reason: None,
+        status: AutopilotObjectiveStatus::Paused,
+        turn_count: 0,
+    };
+    assert_eq!(
+        serde_json::to_value(objective).unwrap(),
+        serde_json::json!({
+            "creditCountNanoAiu": "0", "id": 1,
+            "objective": "Preserve Rust construction", "status": "paused", "turnCount": 0
+        })
+    );
+    let extension = Extension {
+        id: "project:legacy".into(),
+        name: "legacy".into(),
+        pid: None,
+        source: ExtensionSource::Project,
+        status: ExtensionStatus::Dormant,
+    };
+    assert_eq!(
+        serde_json::to_value(extension).unwrap(),
+        serde_json::json!({
+            "id": "project:legacy", "name": "legacy", "source": "project", "status": "dormant"
+        })
+    );
+}
+
+#[test]
+fn released_metadata_records_preserve_complete_struct_literals() {
+    use copilot_sdk::rpc::{SessionMetadataSnapshot, SessionMetadataSnapshotResult};
+
+    macro_rules! snapshot {
+        ($ty:ident) => {
+            $ty {
+                already_in_use: false,
+                client_name: None,
+                current_mode: Default::default(),
+                indexed_search: None,
+                initial_name: None,
+                is_remote: false,
+                modified_time: "2026-01-01T00:00:00Z".into(),
+                remote_metadata: None,
+                selected_model: None,
+                session_id: "released-session".into(),
+                session_limits: None,
+                start_time: "2026-01-01T00:00:00Z".into(),
+                summary: None,
+                working_directory: "/workspace".into(),
+                workspace: None,
+                workspace_path: None,
+            }
+        };
+    }
+    for snapshot in [
+        serde_json::to_value(snapshot!(SessionMetadataSnapshot)).unwrap(),
+        serde_json::to_value(snapshot!(SessionMetadataSnapshotResult)).unwrap(),
+    ] {
+        assert_eq!(snapshot["sessionId"], "released-session");
+        assert_eq!(snapshot["workingDirectory"], "/workspace");
+        assert!(snapshot.get("runtimeInstanceId").is_none());
+    }
+}
+
+#[test]
+fn expanded_session_records_retain_the_current_wire_fields() {
+    use copilot_sdk::rpc::{
+        AutopilotObjectiveStateDetails, ExtensionDetails, SessionMetadataSnapshotDetails,
+        SessionMetadataSnapshotResultDetails,
+    };
+
+    let objective: AutopilotObjectiveStateDetails = serde_json::from_value(serde_json::json!({
+        "id": 1, "objective": "Read current state", "status": "paused",
+        "turnCount": 3, "creditCountNanoAiu": "0",
+        "createdAt": "2026-01-01T00:00:00Z", "resumeCount": 2
+    }))
+    .unwrap();
+    assert_eq!(
+        objective.created_at.as_deref(),
+        Some("2026-01-01T00:00:00Z")
+    );
+    assert_eq!(objective.resume_count, Some(2));
+    let extension: ExtensionDetails = serde_json::from_value(serde_json::json!({
+        "id": "project:legacy", "name": "legacy", "source": "project", "status": "dormant",
+        "modulePath": "/workspace/extension.mjs", "logPath": "/workspace/extension.log"
+    }))
+    .unwrap();
+    assert_eq!(
+        extension.module_path.as_deref(),
+        Some("/workspace/extension.mjs")
+    );
+    assert_eq!(
+        extension.log_path.as_deref(),
+        Some("/workspace/extension.log")
+    );
+    let snapshot = serde_json::json!({
+        "alreadyInUse": false, "currentMode": "interactive", "isRemote": false,
+        "modifiedTime": "2026-01-01T00:00:00Z", "sessionId": "released-session",
+        "sessionLimits": null, "startTime": "2026-01-01T00:00:00Z",
+        "workingDirectory": "/workspace", "workspace": null, "workspacePath": null,
+        "runtimeInstanceId": "runtime-generation"
+    });
+    let details: SessionMetadataSnapshotDetails = serde_json::from_value(snapshot.clone()).unwrap();
+    let result: SessionMetadataSnapshotResultDetails = serde_json::from_value(snapshot).unwrap();
+    assert_eq!(
+        details.runtime_instance_id.as_deref(),
+        Some("runtime-generation")
+    );
+    assert_eq!(result.runtime_instance_id, details.runtime_instance_id);
+}
+
+#[test]
+fn elicitation_request_accepts_released_hash_map_input() {
+    use std::collections::HashMap;
+
+    use copilot_sdk::rpc::{UIElicitationRequest, UIElicitationSchema};
+
+    let request = UIElicitationRequest {
+        message: "Confirm the change".into(),
+        requested_schema: UIElicitationSchema {
+            properties: HashMap::from([(
+                "confirmed".into(),
+                serde_json::json!({"type": "boolean"}),
+            )]),
+            required: Some(vec!["confirmed".into()]),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(
+        serde_json::to_value(request).unwrap(),
+        serde_json::json!({
+            "message": "Confirm the change",
+            "requestedSchema": {
+                "type": "object",
+                "properties": {"confirmed": {"type": "boolean"}},
+                "required": ["confirmed"]
+            }
+        })
+    );
+}
+
+#[test]
+fn pending_elicitation_preserves_declared_form_field_order() {
+    use copilot_sdk::rpc::{UIElicitationPrompt, UIPendingElicitation};
+
+    let wire = r#"{
+        "requestId": "ordered-form",
+        "request": {
+            "mode": "form",
+            "message": "Complete the form",
+            "requestedSchema": {
+                "type": "object",
+                "properties": {
+                    "greeting": {"type": "string"},
+                    "count": {"type": "number"},
+                    "enabled": {"type": "boolean"},
+                    "color": {"type": "string"},
+                    "account": {"type": "string"},
+                    "firstName": {"type": "string"},
+                    "lastName": {"type": "string"},
+                    "email": {"type": "string"},
+                    "timezone": {"type": "string"},
+                    "notes": {"type": "string"}
+                }
+            }
+        }
+    }"#;
+    let pending: UIPendingElicitation = serde_json::from_str(wire).unwrap();
+    let UIElicitationPrompt::Form(form) = &pending.request else {
+        panic!("Expected a pending form");
+    };
+    let properties = &form.requested_schema.properties;
+    let expected = [
+        "greeting",
+        "count",
+        "enabled",
+        "color",
+        "account",
+        "firstName",
+        "lastName",
+        "email",
+        "timezone",
+        "notes",
+    ];
+    assert_eq!(
+        properties.keys().map(String::as_str).collect::<Vec<_>>(),
+        expected
+    );
+    let encoded = serde_json::to_value(pending).unwrap();
+    assert_eq!(
+        encoded,
+        serde_json::from_str::<serde_json::Value>(wire).unwrap()
+    );
+    assert_eq!(
+        encoded["request"]["requestedSchema"]["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        expected
+    );
+}
+
+#[test]
+fn elicitation_prompts_preserve_mcp_extensions() {
+    use copilot_sdk::rpc::UIElicitationPrompt;
+
+    let mut cases = Vec::new();
+    for (mode, properties) in [
+        (
+            "form",
+            serde_json::json!({"requestedSchema": {"type": "object", "properties": {}}}),
+        ),
+        (
+            "url",
+            serde_json::json!({
+                "url": "https://example.com/authorize",
+                "elicitationId": "browser-request"
+            }),
+        ),
+    ] {
+        let mut wire = serde_json::json!({
+            "mode": mode,
+            "message": "MCP request",
+            "x-vendor": {"nested": [{"enabled": true}, null, 42], "label": "extension"},
+            "x-null": null,
+            "x-count": 3
+        });
+        wire.as_object_mut()
+            .unwrap()
+            .extend(properties.as_object().unwrap().clone());
+        let prompt: UIElicitationPrompt = serde_json::from_value(wire.clone()).unwrap();
+        assert!(matches!(
+            (mode, &prompt),
+            ("form", UIElicitationPrompt::Form(_)) | ("url", UIElicitationPrompt::Url(_))
+        ));
+        cases.push((wire, serde_json::to_value(prompt).unwrap()));
+    }
+    assert_eq!(
+        cases.iter().map(|(wire, _)| wire).collect::<Vec<_>>(),
+        cases.iter().map(|(_, encoded)| encoded).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn mcp_discovery_debug_redacts_configuration_without_changing_wire() {
     use copilot_sdk::rpc::{McpDiscoverOptions, McpDiscoverResult};
 

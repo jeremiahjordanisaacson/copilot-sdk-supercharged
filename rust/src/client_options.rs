@@ -259,6 +259,10 @@ impl ClientOptions {
                 startup.run_on_ui_thread = inprocess.run_on_ui_thread;
                 startup.in_process_runtime_library_path = inprocess.runtime_library_path;
                 startup.in_process_auth_owner = inprocess.auth_owner;
+                startup.in_process_host_telemetry = inprocess.host_telemetry;
+                startup.in_process_eager_power_shell_resolution =
+                    inprocess.eager_power_shell_resolution;
+                startup.in_process_file_logging_path = inprocess.file_logging_path;
             }
             RuntimeConnection::AttachedInProcess(attached) => {
                 startup.transport = Transport::InProcess;
@@ -266,6 +270,7 @@ impl ClientOptions {
                 startup.in_process_runtime_library_path = Some(attached.runtime_library_path);
                 startup.in_process_session_binding = attached.session_binding;
                 startup.run_on_ui_thread = attached.run_on_ui_thread;
+                startup.in_process_file_logging_path = attached.file_logging_path;
             }
             RuntimeConnection::Tcp(tcp) => {
                 startup.transport = Transport::Tcp {
@@ -680,6 +685,28 @@ pub struct InProcessRuntimeOptions {
     /// native binder. The SDK retains it until its host closes. This cannot
     /// be combined with an attached server, a borrowed session, or [`ClientGitHubOptions::token`].
     pub auth_owner: Option<Arc<dyn InProcessAuthOwner>>,
+    /// Process facts and memory samples for this owned host.
+    ///
+    /// The SDK installs the provider before host initialization.
+    pub host_telemetry: Option<Arc<dyn InProcessHostTelemetry>>,
+    /// Whether the owned host starts PowerShell discovery at startup.
+    ///
+    /// `None` keeps the runtime default. `Some(false)` lets the embedding
+    /// host apply its launch policy before discovery starts.
+    pub eager_power_shell_resolution: Option<bool>,
+    /// Explicit native grant for this connection's exact file logging target.
+    ///
+    /// The SDK sends this immutable grant through the native ABI.
+    /// Spawned transports cannot carry this in-process grant:
+    ///
+    /// ```compile_fail
+    /// use copilot_sdk::SpawnedProcessOptions;
+    /// let options = SpawnedProcessOptions {
+    ///     file_logging_path: Some("connection.log".into()),
+    ///     ..Default::default()
+    /// };
+    /// ```
+    pub file_logging_path: Option<PathBuf>,
 }
 impl std::fmt::Debug for InProcessRuntimeOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -762,6 +789,10 @@ pub struct AttachedInProcessRuntimeOptions {
     pub session_binding: Option<InProcessSessionBinding>,
     /// Scheduling shared with the owning host.
     pub run_on_ui_thread: Option<Arc<dyn UiThreadHandler>>,
+    /// Explicit native grant for this connection's exact file logging target.
+    ///
+    /// This does not change the borrowed server's startup configuration.
+    pub file_logging_path: Option<PathBuf>,
 }
 
 /// Runtime selection with ownership-specific settings.

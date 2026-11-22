@@ -1262,41 +1262,94 @@ async fn stdio_exit_keeps_final_replies_and_bounds_unanswered_requests() {
     );
 }
 
-async fn wait_for_runtime_exit(client: &Client) {
-    #[cfg(unix)]
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn stdio_requests_survive_a_stopped_and_resumed_child() {
+    let fake = ExitHandoffCli::new();
+    let client = Client::start(fake.options())
+        .await
+        .expect("start exit fixture");
     let pid = client.pid().expect("owned runtime PID");
+    let signal_pid = i32::try_from(pid).unwrap();
+    let pending = client
+        .begin_call("ping", Some(json!({ "message": "pending-until-resume" })))
+        .expect("submit pending request");
+    wait_for_fixture_file(&fake.path("pending")).await;
+
+    assert_eq!(unsafe { libc::kill(signal_pid, libc::SIGSTOP) }, 0);
+    wait_for_child_status(pid, libc::WSTOPPED, |code| code == libc::CLD_STOPPED).await;
+    // The child cannot do I/O while stopped; let the watcher poll and let its
+    // one-second drain timer expire if it mistook the stop for an exit.
+    tokio::time::pause();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::time::resume();
+    std::fs::write(fake.path("release-pending"), "").expect("release pending reply");
+    assert_eq!(unsafe { libc::kill(signal_pid, libc::SIGCONT) }, 0);
+
+    let pending = tokio::time::timeout(Duration::from_secs(5), pending).await;
+    let next = tokio::time::timeout(Duration::from_secs(5), client.ping(Some("next"))).await;
+    client.force_stop();
+
+    assert_eq!(
+        pending
+            .expect("pending reply timed out")
+            .expect("pending request disconnected")["message"],
+        "pending-until-resume"
+    );
+    assert_eq!(
+        next.expect("next ping timed out")
+            .expect("next ping disconnected")
+            .message,
+        "next"
+    );
+}
+
+#[cfg(unix)]
+async fn wait_for_child_status(pid: u32, event: i32, matches_status: impl Fn(i32) -> bool) {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            #[cfg(unix)]
-            let exited = {
-                // Observe exit without releasing the process-group identity.
-                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-                let result = unsafe {
-                    libc::waitid(
-                        libc::P_PID,
-                        pid,
-                        &mut info,
-                        libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-                    )
-                };
-                if result != 0 {
-                    let error = std::io::Error::last_os_error();
-                    assert_eq!(
-                        error.kind(),
-                        std::io::ErrorKind::Interrupted,
-                        "observe runtime {pid} exit: {error}"
-                    );
-                    false
-                } else {
-                    info.si_signo == libc::SIGCHLD
-                }
+            // Observe without consuming the event or releasing group identity.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let result = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    pid,
+                    &mut info,
+                    event | libc::WNOHANG | libc::WNOWAIT,
+                )
             };
-            // On Windows the watcher uses try_wait, which clears the child ID.
-            #[cfg(not(unix))]
-            let exited = client.pid().is_none();
-            if exited {
-                return;
+            if result == 0 {
+                if info.si_signo == libc::SIGCHLD && matches_status(info.si_code) {
+                    return;
+                }
+            } else {
+                let error = std::io::Error::last_os_error();
+                assert_eq!(
+                    error.kind(),
+                    std::io::ErrorKind::Interrupted,
+                    "observe runtime {pid} status: {error}"
+                );
             }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("runtime {pid} did not report waitid event {event:#x}"));
+}
+
+async fn wait_for_runtime_exit(client: &Client) {
+    #[cfg(unix)]
+    wait_for_child_status(
+        client.pid().expect("owned runtime PID"),
+        libc::WEXITED,
+        |code| matches!(code, libc::CLD_EXITED | libc::CLD_KILLED | libc::CLD_DUMPED),
+    )
+    .await;
+
+    // On Windows the watcher uses try_wait, which clears the child ID.
+    #[cfg(not(unix))]
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while client.pid().is_some() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -1351,6 +1404,7 @@ function reply(id, result) {
     const body = JSON.stringify({ jsonrpc: "2.0", id, result });
     process.stdout.write("Content-Length: " + Buffer.byteLength(body) + "\r\n\r\n" + body);
 }
+let pendingPing;
 let input = Buffer.alloc(0);
 process.stdin.on("data", chunk => {
     input = Buffer.concat([input, chunk]);
@@ -1367,6 +1421,9 @@ process.stdin.on("data", chunk => {
             reply(request.id, {});
         } else if (request.params?.message === "pending") {
             fs.writeFileSync("pending", "accepted");
+        } else if (request.params?.message === "pending-until-resume") {
+            pendingPing = request;
+            fs.writeFileSync("pending", "accepted");
         } else if (request.params?.message === "final-and-exit") {
             // A reply larger than a pipe buffer, written just before the exit.
             const body = JSON.stringify({
@@ -1378,12 +1435,18 @@ process.stdin.on("data", chunk => {
                 "Content-Length: " + Buffer.byteLength(body) + "\r\n\r\n" + body,
                 () => process.exit(0),
             );
+        } else if (request.method === "ping" && request.params?.message === "next") {
+            reply(request.id, { message: request.params.message, timestamp: "0" });
         }
     }
 });
 process.stdin.on("end", () => fs.writeFileSync("eof", "closed"));
 setInterval(() => {
     if (fs.existsSync("exit")) process.exit(0);
+    if (pendingPing && fs.existsSync("release-pending")) {
+        reply(pendingPing.id, { message: pendingPing.params.message, timestamp: "0" });
+        pendingPing = undefined;
+    }
 }, 10);
 setTimeout(() => process.exit(1), 60000);
 "#;

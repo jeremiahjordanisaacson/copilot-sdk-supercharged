@@ -54,16 +54,19 @@ public class CompactionE2ETests(E2ETestFixture fixture, ITestOutputHelper output
             {
                 var events = await session.GetEventsAsync();
                 var exchanges = await Ctx.GetExchangesAsync();
-                Logger.LogWarning(
-                    "SDK compaction failure: firstResponse={FirstResponse}, secondResponse={SecondResponse}, firstResponseElapsedMs={FirstElapsedMs}, secondResponseElapsedMs={SecondElapsedMs}, startDelivered={StartDelivered}, completionDelivered={CompletionDelivered}, persistedEvents={Events}, requests={Requests}",
-                    firstResponse is not null,
-                    secondResponse is not null,
-                    firstResponseElapsedMs,
-                    secondResponseElapsedMs,
-                    compactionStarted.Task.Status == TaskStatus.RanToCompletion,
-                    compactionCompleted.Task.Status == TaskStatus.RanToCompletion,
-                    string.Join(", ", events.GroupBy(evt => evt.GetType().Name).Select(group => $"{group.Key}={group.Count()}")),
-                    string.Join(", ", exchanges.Select(exchange => $"model={exchange.Request.Model}; messages={exchange.Request.Messages.Count}; compaction={exchange.CompactionUsage is not null}")));
+                if (Logger.IsEnabled(LogLevel.Warning))
+                {
+                    Logger.LogWarning(
+                        "SDK compaction failure: firstResponse={FirstResponse}, secondResponse={SecondResponse}, firstResponseElapsedMs={FirstElapsedMs}, secondResponseElapsedMs={SecondElapsedMs}, startDelivered={StartDelivered}, completionDelivered={CompletionDelivered}, persistedEvents={Events}, requests={Requests}",
+                        firstResponse is not null,
+                        secondResponse is not null,
+                        firstResponseElapsedMs,
+                        secondResponseElapsedMs,
+                        compactionStarted.Task.Status == TaskStatus.RanToCompletion,
+                        compactionCompleted.Task.Status == TaskStatus.RanToCompletion,
+                        string.Join(", ", events.GroupBy(evt => evt.GetType().Name).Select(group => $"{group.Key}={group.Count()}")),
+                        string.Join(", ", exchanges.Select(exchange => $"model={exchange.Request.Model}; messages={exchange.Request.Messages.Count}; compaction={exchange.CompactionUsage is not null}")));
+                }
             }
             catch (Exception diagnosticError)
             {

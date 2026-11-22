@@ -14,11 +14,107 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	copilot "github.com/microsoft/copilot-sdk/go/v2"
 )
+
+func TestDirectShutdownDrainsAfterChildExit(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal("shutdown fixture requires Node.js:", err)
+	}
+	fixture, err := filepath.Abs("../test/harness/stdio-shutdown-runtime.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, outcome := range []string{"response", "RPC error", "EOF", "blocked callback", "caller cancellation"} {
+		t.Run(outcome, func(t *testing.T) {
+			t.Parallel()
+			mode := "shutdown-exit"
+			switch outcome {
+			case "RPC error":
+				mode = "shutdown-exit-error"
+			case "EOF":
+				mode = "shutdown-exit-eof"
+			}
+			directory := t.TempDir()
+			pidFile := filepath.Join(directory, "runtime.pid")
+			client := copilot.NewClient(&copilot.ClientOptions{
+				Mode: copilot.ModeCodingAgent,
+				Runtime: copilot.SpawnedStdioConnection{
+					Path: node,
+					Args: []string{fixture, filepath.Join(directory, "telemetry.jsonl"), mode, pidFile},
+				},
+				GitHub: copilot.ClientGitHubOptions{UseLoggedInUser: copilot.Bool(false)},
+			})
+			t.Cleanup(client.ForceStop)
+			entered, release, returned := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			releaseReader := sync.OnceFunc(func() { close(release) })
+			t.Cleanup(releaseReader)
+			unsubscribe := client.On(func(event copilot.SessionLifecycleEvent) {
+				if event.SessionID == "shutdown-drain" {
+					close(entered)
+					<-release
+					close(returned)
+				}
+			})
+			defer unsubscribe()
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			if err := client.Start(ctx); err != nil {
+				t.Fatal("Start failed:", err)
+			}
+			shutdownContext, cancelShutdown := context.WithCancel(context.Background())
+			defer cancelShutdown()
+			completed := make(chan error, 1)
+			go func() {
+				_, err := client.RPC.Runtime.Shutdown(shutdownContext)
+				completed <- err
+			}()
+			select {
+			case <-entered:
+			case err := <-completed:
+				t.Fatalf("shutdown completed before its lifecycle callback: %v", err)
+			case <-ctx.Done():
+				t.Fatal("shutdown lifecycle callback did not start:", ctx.Err())
+			}
+			assertShutdownChildExited(t, node, pidFile, "5000")
+			if outcome == "caller cancellation" {
+				cancelShutdown()
+			} else if outcome != "blocked callback" {
+				releaseReader()
+			}
+			select {
+			case err := <-completed:
+				switch outcome {
+				case "response":
+					if err != nil {
+						t.Fatalf("final shutdown response lost after child exit: %v", err)
+					}
+				case "RPC error":
+					if err == nil || !strings.Contains(err.Error(), "Intentional shutdown failure") {
+						t.Fatalf("shutdown error = %v, want the final RPC error", err)
+					}
+				case "caller cancellation":
+					if err != context.Canceled {
+						t.Fatalf("shutdown error = %v, want caller cancellation", err)
+					}
+				default:
+					if err == nil || !strings.Contains(err.Error(), "process exited") {
+						t.Fatalf("shutdown error = %v, want the child exit error", err)
+					}
+				}
+			case <-ctx.Done():
+				t.Fatal("direct shutdown remained blocked after child exit:", ctx.Err())
+			}
+			releaseReader()
+			<-returned
+		})
+	}
+}
 
 func TestSpawnedJavaScriptUsesChildPath(t *testing.T) {
 	node, err := exec.LookPath("node")
@@ -300,7 +396,9 @@ child.on("exit", (code) => process.exit(code ?? 1));
 			t.Parallel()
 			directory := t.TempDir()
 			pidFile := filepath.Join(directory, "runtime.pid")
+			traceFile := filepath.Join(directory, "trace.jsonl")
 			args := append(append([]string{}, row.before...), fixture, filepath.Join(directory, "telemetry.jsonl"), row.mode, pidFile, "--fixture-tcp")
+			args = append(args, "--fixture-trace", traceFile)
 			client := copilot.NewClient(&copilot.ClientOptions{
 				Mode:    copilot.ModeCodingAgent,
 				Runtime: copilot.SpawnedTCPConnection{Path: node, Args: args},
@@ -324,6 +422,8 @@ child.on("exit", (code) => process.exit(code ?? 1));
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			if err := client.Start(ctx); err != nil {
+				trace, traceErr := os.ReadFile(traceFile)
+				t.Logf("fixture trace (read error %v):\n%s", traceErr, trace)
 				t.Fatal("Start failed:", err)
 			}
 			started := time.Now()

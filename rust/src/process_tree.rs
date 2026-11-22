@@ -57,7 +57,12 @@ impl OwnedProcess {
                 )
             };
             if result == 0 {
-                return Ok(info.si_signo == libc::SIGCHLD);
+                // Darwin can report a stop even without WSTOPPED.
+                return Ok(info.si_signo == libc::SIGCHLD
+                    && matches!(
+                        info.si_code,
+                        libc::CLD_EXITED | libc::CLD_KILLED | libc::CLD_DUMPED
+                    ));
             }
             let error = io::Error::last_os_error();
             if error.kind() == io::ErrorKind::Interrupted {

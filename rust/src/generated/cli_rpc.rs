@@ -25,6 +25,13 @@ pub struct ClientRpc<'a> {
 }
 
 impl<'a> ClientRpc<'a> {
+    /// `acp.*` sub-namespace.
+    pub fn acp(&self) -> ClientRpcAcp<'a> {
+        ClientRpcAcp {
+            client: self.client,
+        }
+    }
+
     /// `agents.*` sub-namespace.
     pub fn agents(&self) -> ClientRpcAgents<'a> {
         ClientRpcAgents {
@@ -46,6 +53,13 @@ impl<'a> ClientRpc<'a> {
         }
     }
 
+    /// `mcpSource.*` sub-namespace.
+    pub fn mcp_source(&self) -> ClientRpcMcpSource<'a> {
+        ClientRpcMcpSource {
+            client: self.client,
+        }
+    }
+
     /// `providersSource.*` sub-namespace.
     pub fn providers_source(&self) -> ClientRpcProvidersSource<'a> {
         ClientRpcProvidersSource {
@@ -58,6 +72,58 @@ impl<'a> ClientRpc<'a> {
         ClientRpcSession {
             client: self.client,
         }
+    }
+}
+
+/// `acp.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcAcp<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcAcp<'a> {
+    /// Serves ACP through the original trusted SDK host's engine until its transport ends. Closes ACP sessions before completion. Refuses other peers and unrelated engines.
+    ///
+    /// Wire method: `acp.serve`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - ACP transport configuration for an existing in-process SDK engine.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn serve(&self, params: AcpServeRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::ACP_SERVE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Stops the original trusted SDK host's ACP transport and waits for its sessions to close.
+    ///
+    /// Wire method: `acp.shutdown`.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn shutdown(&self) -> Result<(), Error> {
+        let wire_params = serde_json::json!({});
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::ACP_SHUTDOWN, Some(wire_params))
+            .await?;
+        Ok(())
     }
 }
 
@@ -844,6 +910,43 @@ impl<'a> ClientRpcCafeMetrics<'a> {
     }
 }
 
+/// `mcpSource.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcMcpSource<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcMcpSource<'a> {
+    /// Validates explicit account-authenticated MCP approvals and retains opaque grants in the original engine before any session opens. Requires the private CLI host capability.
+    ///
+    /// Wire method: `mcpSource.prepareGitHubAuth`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Explicit host approval for account-authenticated MCP endpoints.
+    ///
+    /// # Returns
+    ///
+    /// Configuration after the original engine retains approved account-authenticated servers.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn prepare_git_hub_auth(
+        &self,
+        params: McpGitHubAuthPrepareRequest,
+    ) -> Result<McpGitHubAuthPrepareResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::MCPSOURCE_PREPAREGITHUBAUTH, Some(wire_params))
+            .await
+    }
+}
+
 /// `providersSource.*` RPCs.
 #[derive(Clone, Copy)]
 pub struct ClientRpcProvidersSource<'a> {
@@ -912,6 +1015,13 @@ impl<'a> ClientRpcSession<'a> {
     /// `session.mcp.*` sub-namespace.
     pub fn mcp(&self) -> ClientRpcSessionMcp<'a> {
         ClientRpcSessionMcp {
+            client: self.client,
+        }
+    }
+
+    /// `session.mcpSource.*` sub-namespace.
+    pub fn mcp_source(&self) -> ClientRpcSessionMcpSource<'a> {
+        ClientRpcSessionMcpSource {
             client: self.client,
         }
     }
@@ -1075,6 +1185,35 @@ impl<'a> ClientRpcSessionMcp<'a> {
         ClientRpcSessionMcpOauth {
             client: self.client,
         }
+    }
+
+    /// Configures the built-in GitHub MCP server for the session's current auth context.
+    ///
+    /// Wire method: `session.mcp.configureGitHub`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Credential-free authentication identity used to configure GitHub MCP.
+    ///
+    /// # Returns
+    ///
+    /// Result of configuring GitHub MCP.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn configure_git_hub(
+        &self,
+        params: McpConfigureGitHubRequest,
+    ) -> Result<McpConfigureGitHubResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SESSION_MCP_CONFIGUREGITHUB, Some(wire_params))
+            .await
     }
 }
 
@@ -1393,6 +1532,43 @@ impl<'a> ClientRpcSessionMcpOauth<'a> {
         let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::SESSION_MCP_OAUTH_STOREKEY, Some(wire_params))
+            .await
+    }
+}
+
+/// `session.mcpSource.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcSessionMcpSource<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcSessionMcpSource<'a> {
+    /// Manages the original trusted CLI host's live IDE client on the canonical session graph. Requires the private host capability and original session ownership; remote peers cannot confer first-party trust.
+    ///
+    /// Wire method: `session.mcpSource.ideClient`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Original-host request for a session-owned IDE bridge.
+    ///
+    /// # Returns
+    ///
+    /// Result of an original-host IDE operation.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn ide_client(
+        &self,
+        params: SessionMcpSourceIdeClientParams,
+    ) -> Result<McpIdeClientResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::SESSION_MCPSOURCE_IDECLIENT, Some(wire_params))
             .await
     }
 }

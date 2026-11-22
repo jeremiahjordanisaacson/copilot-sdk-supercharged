@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.DynamicTest;
@@ -30,8 +31,11 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.microsoft.copilot.generated.rpc.AuthLoginStepAwaiting;
 import com.microsoft.copilot.generated.rpc.SandboxConfig;
 import com.microsoft.copilot.generated.rpc.SandboxConfigUserPolicyFilesystem;
+import com.microsoft.copilot.generated.rpc.SessionAccountsLoginBeginResult;
+import com.microsoft.copilot.generated.rpc.SessionAccountsSwitchActiveParams;
 
 /**
  * Reflection-based Jackson round-trip test for all generated types in the
@@ -61,6 +65,23 @@ class GeneratedTypesJacksonRoundTripTest {
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
         return mapper;
+    }
+
+    @Test
+    void accountUnionsKeepTheirBuilderTypesAndTypedWireValues() throws IOException {
+        String loginJson = "{\"flowId\":\"flow\",\"step\":{\"kind\":\"awaiting\"}}";
+        var login = MAPPER.readValue(loginJson, SessionAccountsLoginBeginResult.class);
+        assertInstanceOf(AuthLoginStepAwaiting.class, login.step());
+        Object step = Map.of("kind", "awaiting");
+        var builtLogin = SessionAccountsLoginBeginResult.builder().flowId("flow").step(step).build();
+        assertEquals(MAPPER.readTree(loginJson), MAPPER.valueToTree(builtLogin));
+
+        String accountJson = "{\"sessionId\":\"session\",\"selectionId\":\"selected\"}";
+        var account = MAPPER.readValue(accountJson, SessionAccountsSwitchActiveParams.class);
+        assertEquals("selected", account.selectionId());
+        var builtAccount = SessionAccountsSwitchActiveParams.builder().sessionId("session").selectionId("selected")
+                .build();
+        assertEquals(MAPPER.readTree(accountJson), MAPPER.valueToTree(builtAccount));
     }
 
     @Test
@@ -250,18 +271,13 @@ class GeneratedTypesJacksonRoundTripTest {
     }
 
     @Test
-    void nondeprecatedRecordConstructorsAreCanonicalOnly() throws Exception {
+    void recordConstructorsMatchPublishedDescriptors() throws Exception {
         var records = discoverGeneratedClasses().stream().filter(Class::isRecord)
                 .filter(record -> Modifier.isPublic(record.getModifiers()))
                 .filter(GeneratedTypesJacksonRoundTripTest::isSelectedBuilderOwner).toList();
         assertFalse(records.isEmpty(), "Should discover generated records");
         for (Class<?> record : records) {
-            var parameters = java.util.Arrays.stream(record.getRecordComponents())
-                    .map(java.lang.reflect.RecordComponent::getType).toArray(Class<?>[]::new);
-            var canonical = record.getConstructor(parameters);
-            assertFalse(canonical.isAnnotationPresent(Deprecated.class), record.getName());
-            assertEquals(List.of(canonical), List.of(record.getConstructors()),
-                    "Optional positional constructors must not remain: " + record.getName());
+            GeneratedBuilderEvolutionTest.assertCanonicalAndPublishedConstructors(record);
         }
     }
 

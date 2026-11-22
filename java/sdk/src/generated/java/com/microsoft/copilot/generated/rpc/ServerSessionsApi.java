@@ -9,6 +9,7 @@ package com.microsoft.copilot.generated.rpc;
 
 import com.microsoft.copilot.CopilotExperimental;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import javax.annotation.processing.Generated;
 
@@ -119,6 +120,17 @@ public final class ServerSessionsApi {
     @CopilotExperimental
     public CompletableFuture<SessionsListResult> list(SessionsListParams params) {
         return caller.invoke("sessions.list", params == null ? java.util.Map.of() : params, SessionsListResult.class);
+    }
+
+    /**
+     * Lists canonical live session identities owned by this engine. Includes SDK and protocol sessions without scanning saved history or consulting terminal views.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SessionsListActiveResult> listActive() {
+        return caller.invoke("sessions.listActive", java.util.Map.of(), SessionsListActiveResult.class);
     }
 
     /**
@@ -320,6 +332,19 @@ public final class ServerSessionsApi {
     }
 
     /**
+     * Flushes a session's pending events to disk.
+     * <p>
+     * Accepts the extensible request, including inputs added after the params record.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<Void> save(SessionsSaveRequest request) {
+        return caller.invoke("sessions.save", Objects.requireNonNull(request, "request"), Void.class);
+    }
+
+    /**
      * Releases the in-use lock held by this process for a session.
      *
      * @apiNote This method is experimental and may change in a future version.
@@ -383,6 +408,19 @@ public final class ServerSessionsApi {
     @CopilotExperimental
     public CompletableFuture<Void> reloadPluginHooks(SessionsReloadPluginHooksParams params) {
         return caller.invoke("sessions.reloadPluginHooks", params, Void.class);
+    }
+
+    /**
+     * Reloads user, plugin, and (optionally) repo hooks on the active session.
+     * <p>
+     * Accepts the extensible request, including inputs added after the params record.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<Void> reloadPluginHooks(SessionsReloadPluginHooksRequest request) {
+        return caller.invoke("sessions.reloadPluginHooks", Objects.requireNonNull(request, "request"), Void.class);
     }
 
     /**

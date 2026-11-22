@@ -2457,6 +2457,68 @@ impl<'a> SessionUi<'a> {
     }
 }
 
+// SDK preparation also reads these settings before it serializes the request.
+// Keep those checks and the post-create patch aligned with the CLI wire options.
+#[cfg(feature = "local-runtime")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CliPreparationOptions {
+    session_id: Option<SessionId>,
+    tools: Option<crate::rpc::SessionOpenToolOptions>,
+    hooks: Option<crate::rpc::SessionOpenHookOptions>,
+    github: Option<CliPreparationGitHub>,
+    instructions: Option<crate::rpc::SessionOpenInstructionOptions>,
+    skills: Option<crate::rpc::SessionOpenSkillOptions>,
+    agents: Option<crate::rpc::SessionOpenAgentOptions>,
+    git: Option<crate::rpc::SessionOpenGitOptions>,
+    state: Option<CliPreparationState>,
+    policy: Option<CliPreparationPolicy>,
+}
+
+#[cfg(feature = "local-runtime")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CliPreparationGitHub {
+    fetch_managed_settings: Option<bool>,
+}
+
+#[cfg(feature = "local-runtime")]
+#[derive(serde::Deserialize)]
+struct CliPreparationState {
+    memory: Option<crate::types::MemoryConfiguration>,
+}
+
+#[cfg(feature = "local-runtime")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CliPreparationPolicy {
+    managed_settings: Option<crate::types::ManagedSettings>,
+}
+
+#[cfg(feature = "local-runtime")]
+macro_rules! apply_cli_preparation_options {
+    ($config:ident, $options:ident) => {
+        apply_cli_preparation_options!(@fields $config, $options, tools, available_tools, excluded_tools);
+        apply_cli_preparation_options!(@fields $config, $options, hooks, enable_repository_hooks);
+        apply_cli_preparation_options!(@fields $config, $options, github, fetch_managed_settings);
+        apply_cli_preparation_options!(@fields $config, $options, instructions, on_demand_discovery, skip_custom_instructions);
+        apply_cli_preparation_options!(@fields $config, $options, skills, enabled, included_builtin_skills);
+        apply_cli_preparation_options!(@fields $config, $options, agents, local_discovery_only);
+        apply_cli_preparation_options!(@fields $config, $options, git, coauthor_enabled);
+        apply_cli_preparation_options!(@fields $config, $options, state, memory);
+        apply_cli_preparation_options!(@fields $config, $options, policy, managed_settings);
+    };
+    (@fields $config:ident, $options:ident, $group:ident, $($field:ident),+) => {
+        if let Some(group) = &$options.$group {
+            $(
+                if let Some(value) = &group.$field {
+                    $config.$group.$field = Some(value.clone());
+                }
+            )+
+        }
+    };
+}
+
 impl Client {
     /// Prepare a new session without touching the transport.
     ///
@@ -2522,6 +2584,79 @@ impl Client {
         Ok(PreparedSession::new(
             self.clone(),
             PreparedKind::Create(Box::new(config)),
+            capacity,
+        ))
+    }
+
+    #[cfg(feature = "local-runtime")]
+    pub(crate) fn prepare_cli_session(
+        &self,
+        options: Value,
+        mut config: CreateSessionOptions,
+        emit_start: bool,
+    ) -> Result<PreparedSession, Error> {
+        let shared: CliPreparationOptions = serde_json::from_value(options.clone())?;
+        apply_cli_preparation_options!(config, shared);
+        if let Some(id) = &shared.session_id {
+            if let Some(configured) = &config.session_id
+                && configured != id
+            {
+                return Err(SessionErrorKind::SessionIdMismatch {
+                    requested: configured.clone(),
+                    returned: id.clone(),
+                }
+                .into());
+            }
+            config.session_id = Some(id.clone());
+        }
+        let capacity = resolve_event_buffer_capacity(config.events.buffer_capacity)?;
+        Ok(PreparedSession::new(
+            self.clone(),
+            PreparedKind::CliCreate {
+                config: Box::new(config),
+                options: serde_json::json!({
+                    "kind": "create",
+                    "options": options,
+                    "emitStart": emit_start,
+                }),
+            },
+            capacity,
+        ))
+    }
+
+    #[cfg(feature = "local-runtime")]
+    pub(crate) fn prepare_cli_resume_session(
+        &self,
+        options: Value,
+        mut config: ResumeSessionOptions,
+        emit_resume: bool,
+        suppress_workspace_metadata_writeback: bool,
+    ) -> Result<PreparedSession, Error> {
+        let shared: CliPreparationOptions = serde_json::from_value(options.clone())?;
+        apply_cli_preparation_options!(config, shared);
+        if let Some(id) = &shared.session_id
+            && id != config.session_id
+        {
+            return Err(SessionErrorKind::SessionIdMismatch {
+                requested: config.session_id.clone(),
+                returned: id.clone(),
+            }
+            .into());
+        }
+        let session_id = config.session_id.clone();
+        let capacity = resolve_event_buffer_capacity(config.events.buffer_capacity)?;
+        Ok(PreparedSession::new(
+            self.clone(),
+            PreparedKind::CliResume {
+                config: Box::new(config),
+                options: serde_json::json!({
+                    "kind": "resume",
+                    "sessionId": session_id,
+                    "options": options,
+                    "resume": emit_resume,
+                    "suppressResumeWorkspaceMetadataWriteback": suppress_workspace_metadata_writeback,
+                }),
+            },
             capacity,
         ))
     }
@@ -2625,10 +2760,18 @@ impl Client {
     ) -> BoxFuture<'_, Result<Session, Error>> {
         match kind {
             PreparedKind::Create(config) => {
-                Box::pin(self.start_prepared_create(*config, event_tx, shutdown))
+                Box::pin(self.start_prepared_create(*config, event_tx, shutdown, None))
             }
             PreparedKind::Resume(config) => {
-                Box::pin(self.start_prepared_resume(*config, event_tx, shutdown))
+                Box::pin(self.start_prepared_resume(*config, event_tx, shutdown, None))
+            }
+            #[cfg(feature = "local-runtime")]
+            PreparedKind::CliCreate { config, options } => {
+                Box::pin(self.start_prepared_create(*config, event_tx, shutdown, Some(options)))
+            }
+            #[cfg(feature = "local-runtime")]
+            PreparedKind::CliResume { config, options } => {
+                Box::pin(self.start_prepared_resume(*config, event_tx, shutdown, Some(options)))
             }
         }
     }
@@ -2638,6 +2781,7 @@ impl Client {
         mut config: CreateSessionOptions,
         event_tx: tokio::sync::broadcast::Sender<SessionEvent>,
         shutdown: CancellationToken,
+        cli_options: Option<Value>,
     ) -> Result<Session, Error> {
         let total_start = Instant::now();
         if config.cloud.is_some() && config.skills.provider.is_some() {
@@ -2740,6 +2884,38 @@ impl Client {
         self.validate_session_fs_provider(session_fs_provider.as_deref())?;
 
         let mut params = serde_json::to_value(&wire)?;
+        if let Some(options) = &cli_options {
+            merge_cli_session_options(&mut params, options["options"].clone())?;
+            params["emitStart"] = options["emitStart"].clone();
+        }
+        #[cfg(feature = "local-runtime")]
+        let _handoff_construction = if cli_options.is_some()
+            && let Some(handoff) = params
+                .as_object_mut()
+                .and_then(|params| params.remove("__cliRemoteHandoff"))
+        {
+            let library = self.in_process_library_path().ok_or_else(|| {
+                Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "CLI handoff requires in-process transport",
+                )
+            })?;
+            let connection_id = self.in_process_connection_id().ok_or_else(|| {
+                Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "The CLI connection is no longer active",
+                )
+            })?;
+            let construction = crate::ffi::prepare_host_session_construction(
+                &library,
+                connection_id,
+                &serde_json::json!({ "remoteHandoff": handoff }).to_string(),
+            )?;
+            params["hostConstructionToken"] = construction.token.into();
+            Some(construction)
+        } else {
+            None
+        };
         let trace_ctx = self.resolve_trace_context().await;
         inject_trace_context(&mut params, &trace_ctx);
 
@@ -2995,11 +3171,12 @@ impl Client {
         mut config: ResumeSessionOptions,
         event_tx: tokio::sync::broadcast::Sender<SessionEvent>,
         shutdown: CancellationToken,
+        mut cli_options: Option<Value>,
     ) -> Result<Session, Error> {
         let total_start = Instant::now();
         let mode = self.inner.mode;
         config.validate_auto_mode_recovery()?;
-        if config.interaction.auto_mode_recovery
+        if (config.interaction.auto_mode_recovery || cli_options.is_some())
             && !self.inner.session_fs_configured
             && is_abbreviated_uuid_prefix(config.session_id.as_str())
         {
@@ -3024,6 +3201,12 @@ impl Client {
                     returned: canonical,
                 }
                 .into());
+            }
+            if let Some(request) = &mut cli_options {
+                request["sessionId"] = serde_json::to_value(&canonical)?;
+                if request["options"].get("sessionId").is_some() {
+                    request["options"]["sessionId"] = serde_json::to_value(&canonical)?;
+                }
             }
             config.session_id = canonical;
         }
@@ -3100,6 +3283,14 @@ impl Client {
         self.validate_session_fs_provider(session_fs_provider.as_deref())?;
 
         let mut params = serde_json::to_value(&wire)?;
+        if let Some(options) = &cli_options {
+            merge_cli_session_options(&mut params, options["options"].clone())?;
+            if options["resume"] == false {
+                params["suppressResumeEvent"] = Value::Bool(true);
+            }
+            params["suppressResumeWorkspaceMetadataWriteback"] =
+                options["suppressResumeWorkspaceMetadataWriteback"].clone();
+        }
         let trace_ctx = self.resolve_trace_context().await;
         inject_trace_context(&mut params, &trace_ctx);
 
@@ -3399,6 +3590,16 @@ pub struct PreparedSession {
 enum PreparedKind {
     Create(Box<CreateSessionOptions>),
     Resume(Box<ResumeSessionOptions>),
+    #[cfg(feature = "local-runtime")]
+    CliCreate {
+        config: Box<CreateSessionOptions>,
+        options: Value,
+    },
+    #[cfg(feature = "local-runtime")]
+    CliResume {
+        config: Box<ResumeSessionOptions>,
+        options: Value,
+    },
 }
 
 impl PreparedSession {
@@ -3460,6 +3661,124 @@ impl PreparedSession {
         } = self;
         client.start_prepared(kind, event_tx, shutdown).await
     }
+}
+
+fn merge_cli_session_options(params: &mut Value, options: Value) -> Result<(), Error> {
+    let options = options.as_object().ok_or_else(|| {
+        Error::with_message(
+            ErrorKind::InvalidConfig,
+            "CLI session options must be an object",
+        )
+    })?;
+    let params = params.as_object_mut().ok_or_else(|| {
+        Error::with_message(
+            ErrorKind::InvalidConfig,
+            "SDK session parameters must be an object",
+        )
+    })?;
+    for (key, value) in options {
+        if matches!(
+            key.as_str(),
+            "tools"
+                | "inference"
+                | "experiments"
+                | "github"
+                | "agents"
+                | "permissions"
+                | "mcp"
+                | "skills"
+                | "instructions"
+                | "hooks"
+                | "plugins"
+                | "extensions"
+                | "filesystem"
+                | "git"
+                | "state"
+                | "events"
+                | "interaction"
+                | "execution"
+                | "policy"
+                | "canvases"
+                | "installations"
+                | "telemetry"
+        ) {
+            if value.is_null() {
+                continue;
+            }
+            let group = value.as_object().ok_or_else(|| {
+                Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    format!("CLI session option {key} must be an object"),
+                )
+            })?;
+            let target = params
+                .entry(key.clone())
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+                .ok_or_else(|| {
+                    Error::with_message(
+                        ErrorKind::InvalidConfig,
+                        format!("SDK session option {key} must be an object"),
+                    )
+                })?;
+            merge_cli_session_option_group(key, target, group)?;
+            continue;
+        }
+        // These declarations describe live registrations, not caller policy.
+        // Letting serialized options replace them would leave the runtime
+        // waiting for callbacks that the SDK never registered.
+        // Native optional fields use null for absent registrations.
+        if matches!(
+            key.as_str(),
+            "sessionId"
+                | "commands"
+                | "hasSkillProvider"
+                | "hasMemoryStore"
+                | "githubTokenProviderRegistrationId"
+        ) || key.starts_with("request")
+        {
+            if !value.is_null() && params.get(key) != Some(value) {
+                return Err(Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    format!("CLI session option {key} must use SDK callback configuration"),
+                ));
+            }
+            continue;
+        }
+        params.insert(key.clone(), value.clone());
+    }
+    Ok(())
+}
+
+fn merge_cli_session_option_group(
+    group: &str,
+    params: &mut serde_json::Map<String, Value>,
+    options: &serde_json::Map<String, Value>,
+) -> Result<(), Error> {
+    for (key, value) in options {
+        let registration = key.starts_with("request")
+            || matches!(
+                (group, key.as_str()),
+                ("tools" | "canvases", "definitions")
+                    | ("canvases", "provider")
+                    | ("interaction", "commands")
+                    | ("hooks", "hasHandlers")
+                    | ("skills", "hasProvider")
+                    | ("state", "hasMemoryStore")
+                    | ("github", "tokenProviderRegistrationId")
+            );
+        if registration {
+            if !value.is_null() && params.get(key) != Some(value) {
+                return Err(Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    format!("CLI session option {group}.{key} must use SDK callback configuration"),
+                ));
+            }
+        } else {
+            params.insert(key.clone(), value.clone());
+        }
+    }
+    Ok(())
 }
 
 type CommandHandlerMap = HashMap<String, Arc<dyn CommandHandler>>;

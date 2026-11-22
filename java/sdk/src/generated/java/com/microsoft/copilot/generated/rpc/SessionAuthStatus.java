@@ -23,6 +23,8 @@ import javax.annotation.processing.Generated;
 public record SessionAuthStatus(
     /** Whether the session has resolved authentication */
     @JsonProperty("isAuthenticated") Boolean isAuthenticated,
+    /** Whether the session can resolve a GitHub token. Returned by session.gitHubAuth.getStatus without exposing the credential. */
+    @JsonProperty("hasGitHubToken") Boolean hasGitHubToken,
     /** Authentication type */
     @JsonProperty("authType") AuthInfoType authType,
     /** Authentication host URL */
@@ -42,6 +44,19 @@ public record SessionAuthStatus(
     public SessionAuthStatus {}
 
     /**
+     * Creates a record without optional runtime metadata.
+     * @param isAuthenticated the {@code isAuthenticated} property
+     * @param authType the {@code authType} property
+     * @param host the {@code host} property
+     * @param login the {@code login} property
+     * @param statusMessage the {@code statusMessage} property
+     * @param copilotPlan the {@code copilotPlan} property
+     */
+    public SessionAuthStatus(Boolean isAuthenticated, AuthInfoType authType, String host, String login, String statusMessage, String copilotPlan) {
+        this(isAuthenticated, null, authType, host, login, statusMessage, copilotPlan);
+    }
+
+    /**
      * Returns a named builder.
      * @return a new builder
      * @since 2.0.0
@@ -55,6 +70,7 @@ public record SessionAuthStatus(
     public static final class Builder {
         private Builder() {}
         private Boolean isAuthenticated;
+        private Boolean hasGitHubToken;
         private AuthInfoType authType;
         private String host;
         private String login;
@@ -69,6 +85,17 @@ public record SessionAuthStatus(
          */
         public Builder isAuthenticated(Boolean value) {
             this.isAuthenticated = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code hasGitHubToken} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder hasGitHubToken(Boolean value) {
+            this.hasGitHubToken = value;
             return this;
         }
 
@@ -135,7 +162,7 @@ public record SessionAuthStatus(
          */
         public SessionAuthStatus build() {
             if (isAuthenticated == null) throw new IllegalStateException("Missing required property: isAuthenticated");
-            return new SessionAuthStatus(isAuthenticated, authType, host, login, statusMessage, copilotPlan);
+            return new SessionAuthStatus(isAuthenticated, hasGitHubToken, authType, host, login, statusMessage, copilotPlan);
         }
     }
 }

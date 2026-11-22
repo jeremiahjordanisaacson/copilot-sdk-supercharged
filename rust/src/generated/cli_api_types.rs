@@ -69,8 +69,16 @@ pub mod rpc_methods {
     pub const CAFEMETRICS_RECORDRESUMERESULT: &str = "cafeMetrics.recordResumeResult";
     /// `cafeMetrics.shutdown`
     pub const CAFEMETRICS_SHUTDOWN: &str = "cafeMetrics.shutdown";
+    /// `acp.serve`
+    pub const ACP_SERVE: &str = "acp.serve";
+    /// `acp.shutdown`
+    pub const ACP_SHUTDOWN: &str = "acp.shutdown";
+    /// `mcpSource.prepareGitHubAuth`
+    pub const MCPSOURCE_PREPAREGITHUBAUTH: &str = "mcpSource.prepareGitHubAuth";
     /// `session.mcp.externalClient.exchange`
     pub const SESSION_MCP_EXTERNALCLIENT_EXCHANGE: &str = "session.mcp.externalClient.exchange";
+    /// `session.mcp.configureGitHub`
+    pub const SESSION_MCP_CONFIGUREGITHUB: &str = "session.mcp.configureGitHub";
     /// `session.mcp.oauth.prepareFlow`
     pub const SESSION_MCP_OAUTH_PREPAREFLOW: &str = "session.mcp.oauth.prepareFlow";
     /// `session.mcp.oauth.cancelFlow`
@@ -108,7 +116,42 @@ pub mod rpc_methods {
     pub const SESSION_CAFEMETRICS_ATTACH: &str = "session.cafeMetrics.attach";
     /// `session.cafeMetrics.detach`
     pub const SESSION_CAFEMETRICS_DETACH: &str = "session.cafeMetrics.detach";
+    /// `session.mcpSource.ideClient`
+    pub const SESSION_MCPSOURCE_IDECLIENT: &str = "session.mcpSource.ideClient";
 }
+
+/// ACP transport configuration for an existing in-process SDK engine.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AcpServeRequest {
+    /// The host application version.
+    pub agent_version: String,
+    /// The session options resolved by the embedding host.
+    pub boot_options: Option<serde_json::Value>,
+    /// The TCP interface, or absent for loopback.
+    pub host: Option<String>,
+    /// The authentication command arguments.
+    pub login_args: Vec<String>,
+    /// The executable an editor can use to authenticate.
+    pub login_command: String,
+    /// The TCP port, required unless stdio is selected.
+    pub port: Option<i64>,
+    /// The SDK engine that owns the calling connection.
+    pub server_id: i64,
+    /// Whether to serve the process's standard input and output.
+    pub stdio: bool,
+    /// Whether the SDK client supplies the ACP telemetry callback.
+    pub telemetry: bool,
+    /// An absolute attachment directory, or absent for the platform default.
+    pub temp_dir: Option<String>,
+}
+crate::record_serde::wire_record!(AcpServeRequest { agent_version: "agentVersion", boot_options: "bootOptions" if is_none, host: "host" if is_none, login_args: "loginArgs", login_command: "loginCommand", port: "port" if is_none, server_id: "serverId", stdio: "stdio", telemetry: "telemetry", temp_dir: "tempDir" if is_none });
 
 /// The models a custom agent asks for, and the models actually available.
 ///
@@ -1165,6 +1208,21 @@ pub struct CafeMetricsStartResult {
 }
 crate::record_serde::wire_record!(CafeMetricsStartResult { reason: "reason" if is_none, started: "started" });
 
+/// Result of configuring GitHub MCP.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpConfigureGitHubResult {
+    /// Whether GitHub MCP configuration changed.
+    pub changed: bool,
+}
+crate::record_serde::wire_record!(McpConfigureGitHubResult { changed: "changed" });
+
 /// Operation-specific reply or a complete live-client callback frame.
 ///
 /// <div class="warning">
@@ -1206,6 +1264,46 @@ pub struct McpExternalClientSnapshot {
     pub tools: Vec<serde_json::Value>,
 }
 crate::record_serde::wire_record!(McpExternalClientSnapshot { config: "config" if is_none, instructions: "instructions" if is_none, server_capabilities: "serverCapabilities" if is_none, server_name: "serverName", server_version: "serverVersion", tools: "tools" });
+
+/// Result of an original-host IDE operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientResult {
+    /// Whether this operation changed or addressed the current registration.
+    pub applied: bool,
+    /// Opaque token returned only after successful registration.
+    pub token: Option<String>,
+}
+crate::record_serde::wire_record!(McpIdeClientResult { applied: "applied", token: "token" if is_none });
+
+/// Serializable snapshot of a host-owned IDE client.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientSnapshot {
+    /// Actual backing-server capabilities as JSON.
+    pub capabilities_json: String,
+    /// Serializable configuration, without live client or transport objects.
+    pub config_json: Option<String>,
+    /// Logical server name.
+    pub server_name: String,
+    /// Backing server version.
+    pub server_version: String,
+    /// Complete MCP tool descriptors as JSON.
+    pub tools_json: String,
+}
+crate::record_serde::wire_record!(McpIdeClientSnapshot { capabilities_json: "capabilitiesJson", config_json: "configJson" if is_none, server_name: "serverName", server_version: "serverVersion", tools_json: "toolsJson" });
 
 /// Token projection for the existing host-delegated provider.
 ///
@@ -1550,6 +1648,43 @@ crate::record_serde::wire_record!(SessionEventPublishResult {
     event_id: "eventId"
 });
 
+/// Explicit host approval for account-authenticated MCP endpoints.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpGitHubAuthPrepareRequest {
+    /// Additional MCP configuration before approved servers leave ordinary configuration.
+    pub additional_config_json: String,
+    /// Explicit server-name and exact-origin approvals from the host command line.
+    pub specifications: Vec<String>,
+}
+crate::record_serde::wire_record!(McpGitHubAuthPrepareRequest {
+    additional_config_json: "additionalConfigJson",
+    specifications: "specifications"
+});
+
+/// Configuration after the original engine retains approved account-authenticated servers.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpGitHubAuthPrepareResult {
+    /// Remaining ordinary MCP configuration. Approval grants never leave the engine.
+    pub additional_config_json: String,
+}
+crate::record_serde::wire_record!(McpGitHubAuthPrepareResult {
+    additional_config_json: "additionalConfigJson"
+});
+
 /// A session created at the remote source and its refreshed connection snapshot.
 ///
 /// <div class="warning">
@@ -1767,6 +1902,23 @@ pub struct CafeMetricsShutdownRequest {
 }
 crate::record_serde::wire_record!(CafeMetricsShutdownRequest { flush_only: "flushOnly" if is_none });
 
+/// Configuration after the original engine retains approved account-authenticated servers.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpSourcePrepareGitHubAuthResult {
+    /// Remaining ordinary MCP configuration. Approval grants never leave the engine.
+    pub additional_config_json: String,
+}
+crate::record_serde::wire_record!(McpSourcePrepareGitHubAuthResult {
+    additional_config_json: "additionalConfigJson"
+});
+
 /// Object envelope for one trusted live-client transport operation.
 ///
 /// <div class="warning">
@@ -1803,6 +1955,41 @@ pub struct SessionMcpExternalClientExchangeResult {
     pub value: serde_json::Value,
 }
 crate::record_serde::wire_record!(SessionMcpExternalClientExchangeResult { value: "value" });
+
+/// Credential-free authentication identity used to configure GitHub MCP.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpConfigureGitHubRequest {
+    /// Target session identifier
+    pub session_id: SessionId,
+    /// Credential-free authentication identity for GitHub MCP configuration. The field retains its legacy opaque schema for compatibility.
+    pub auth_info: serde_json::Value,
+}
+crate::record_serde::wire_record!(McpConfigureGitHubRequest {
+    session_id: "sessionId",
+    auth_info: "authInfo"
+});
+
+/// Result of configuring GitHub MCP.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionMcpConfigureGitHubResult {
+    /// Whether GitHub MCP configuration changed.
+    pub changed: bool,
+}
+crate::record_serde::wire_record!(SessionMcpConfigureGitHubResult { changed: "changed" });
 
 /// Correlation identity reserved before an effectful authentication request.
 ///
@@ -2344,6 +2531,151 @@ pub struct SessionCafeMetricsDetachParams {
 crate::record_serde::wire_record!(SessionCafeMetricsDetachParams {
     session_id: "sessionId"
 });
+
+/// Installs a callback identity before the graph starts the server.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationRegister {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationRegisterAction,
+    /// Unique callback identity retained by the original SDK host.
+    pub callback_id: String,
+    /// The current backing-client snapshot.
+    pub snapshot: McpIdeClientSnapshot,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationRegister {
+    action: "action",
+    callback_id: "callbackId",
+    snapshot: "snapshot"
+});
+
+/// Replaces descriptors only while the registration token matches.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationRefresh {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationRefreshAction,
+    /// Unique callback identity of the installed registration.
+    pub callback_id: String,
+    /// The current backing-client snapshot.
+    pub snapshot: McpIdeClientSnapshot,
+    /// Opaque graph ownership token.
+    pub token: String,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationRefresh {
+    action: "action",
+    callback_id: "callbackId",
+    snapshot: "snapshot",
+    token: "token"
+});
+
+/// Stops the graph before the host drops its callback identity.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationRemove {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationRemoveAction,
+    /// Logical server name.
+    pub server_name: String,
+    /// Opaque graph ownership token.
+    pub token: String,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationRemove {
+    action: "action",
+    server_name: "serverName",
+    token: "token"
+});
+
+/// Invalidates the matching registration's resource or prompt projection.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationListChanged {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationListChangedAction,
+    /// Resources or prompts.
+    pub kind: String,
+    /// Logical server name.
+    pub server_name: String,
+    /// Opaque graph ownership token.
+    pub token: String,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationListChanged {
+    action: "action",
+    kind: "kind",
+    server_name: "serverName",
+    token: "token"
+});
+
+/// Routes a backing client's notification under its registration token.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationNotification {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationNotificationAction,
+    /// Notification method.
+    pub method: String,
+    /// Notification parameters as JSON.
+    pub params_json: String,
+    /// Logical server name.
+    pub server_name: String,
+    /// Opaque graph ownership token.
+    pub token: String,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationNotification {
+    action: "action",
+    method: "method",
+    params_json: "paramsJson",
+    server_name: "serverName",
+    token: "token"
+});
+
+/// Sends progress only for this callback identity's active call.
+#[derive(Debug, Clone, Default)]
+pub struct McpIdeClientOperationProgress {
+    /// Operation on the original host's IDE client.
+    pub action: McpIdeClientOperationProgressAction,
+    /// Callback identity that owns the active call.
+    pub callback_id: String,
+    /// Complete MCP progress notification as JSON.
+    pub notification_json: String,
+    /// Active tool-call correlation token.
+    pub token: i64,
+}
+crate::record_serde::wire_record!(McpIdeClientOperationProgress {
+    action: "action",
+    callback_id: "callbackId",
+    notification_json: "notificationJson",
+    token: "token"
+});
+
+/// Original-host request for a session-owned IDE bridge.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionMcpSourceIdeClientParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+    /// The operation to apply to the original host's IDE bridge.
+    pub operation: McpIdeClientOperation,
+}
+
+/// Result of an original-host IDE operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionMcpSourceIdeClientResult {
+    /// Whether this operation changed or addressed the current registration.
+    pub applied: bool,
+    /// Opaque token returned only after successful registration.
+    pub token: Option<String>,
+}
+crate::record_serde::wire_record!(SessionMcpSourceIdeClientResult { applied: "applied", token: "token" if is_none });
 
 /// Authentication outcome for each protected resource.
 ///
@@ -3750,4 +4082,137 @@ impl<'de> Deserialize<'de> for SandboxTransportOwnerAhpKind {
 pub enum SandboxTransportOwner {
     LocalRpc(SandboxTransportOwnerLocalRpc),
     Ahp(SandboxTransportOwnerAhp),
+}
+
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationRegisterAction {
+    #[serde(rename = "register")]
+    #[default]
+    Register,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationRegisterAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationRegisterAction",
+            &["register"],
+            None,
+        )?;
+        Ok(Self::Register)
+    }
+}
+
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationRefreshAction {
+    #[serde(rename = "refresh")]
+    #[default]
+    Refresh,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationRefreshAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationRefreshAction",
+            &["refresh"],
+            None,
+        )?;
+        Ok(Self::Refresh)
+    }
+}
+
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationRemoveAction {
+    #[serde(rename = "remove")]
+    #[default]
+    Remove,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationRemoveAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationRemoveAction",
+            &["remove"],
+            None,
+        )?;
+        Ok(Self::Remove)
+    }
+}
+
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationListChangedAction {
+    #[serde(rename = "listChanged")]
+    #[default]
+    ListChanged,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationListChangedAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationListChangedAction",
+            &["listChanged"],
+            None,
+        )?;
+        Ok(Self::ListChanged)
+    }
+}
+
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationNotificationAction {
+    #[serde(rename = "notification")]
+    #[default]
+    Notification,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationNotificationAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationNotificationAction",
+            &["notification"],
+            None,
+        )?;
+        Ok(Self::Notification)
+    }
+}
+
+/// Operation on the original host's IDE client.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum McpIdeClientOperationProgressAction {
+    #[serde(rename = "progress")]
+    #[default]
+    Progress,
+}
+impl<'de> Deserialize<'de> for McpIdeClientOperationProgressAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "McpIdeClientOperationProgressAction",
+            &["progress"],
+            None,
+        )?;
+        Ok(Self::Progress)
+    }
+}
+
+/// Original-host operations for a session-owned IDE bridge.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum McpIdeClientOperation {
+    Register(McpIdeClientOperationRegister),
+    Refresh(McpIdeClientOperationRefresh),
+    Remove(McpIdeClientOperationRemove),
+    ListChanged(McpIdeClientOperationListChanged),
+    Notification(McpIdeClientOperationNotification),
+    Progress(McpIdeClientOperationProgress),
 }

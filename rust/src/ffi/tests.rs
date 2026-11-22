@@ -43,6 +43,7 @@ fn explicit_image_does_not_require_a_cli_entrypoint() {
             server_id: Some(42),
             library_path: Some(&image),
             session_binding: None,
+            file_logging_path: None,
         },
     )
     .err()
@@ -264,7 +265,7 @@ fn callback_state_is_retained_until_connection_close_succeeds() {
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let state_ptr = Box::into_raw(Box::new(CallbackState {
-        tx,
+        tx: parking_lot::Mutex::new(Some(tx)),
         closing: AtomicBool::new(false),
     }));
     let shared = FfiShared {
@@ -275,6 +276,7 @@ fn callback_state_is_retained_until_connection_close_succeeds() {
         owns_host: true,
         connection_write: test_connection_write,
         connection_close: test_connection_close,
+        connection_close_and_wait: None,
         connection_set_ui_thread_handler: test_set_ui_thread_handler,
         connection_run_ui_action: test_run_ui_action,
         server_id: AtomicU32::new(11),
@@ -282,6 +284,9 @@ fn callback_state_is_retained_until_connection_close_succeeds() {
         callback_state: AtomicPtr::new(state_ptr),
         closed: AtomicBool::new(false),
         operation_lock: parking_lot::Mutex::new(()),
+        foreground_order: Arc::new(tokio::sync::Mutex::new(())),
+        protocol_peers: parking_lot::Mutex::new(Some(Vec::new())),
+        cleanup_done: tokio::sync::watch::channel(false).0,
         library_path: PathBuf::from("test-runtime"),
     };
 

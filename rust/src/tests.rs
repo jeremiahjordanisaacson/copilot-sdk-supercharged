@@ -10,6 +10,29 @@ use crate::entra::{EntraTokenProviderArgs, EntraTokenProviderContext, EntraToken
 #[cfg(unix)]
 mod process_lifecycle;
 
+#[test]
+fn ui_elicitation_preserves_mcp_extension_wire_fields() {
+    use crate::generated::api_types::UIElicitationPrompt;
+
+    for mut request in [
+        serde_json::json!({
+            "mode": "form",
+            "message": "Choose a destination",
+            "requestedSchema": {"type": "object", "properties": {}}
+        }),
+        serde_json::json!({
+            "mode": "url",
+            "message": "Authorize the destination",
+            "elicitationId": "request-1",
+            "url": "https://example.com/authorize"
+        }),
+    ] {
+        request["customExtension"] = serde_json::json!({"routing": "preserved", "values": [1, 2]});
+        let prompt: UIElicitationPrompt = serde_json::from_value(request.clone()).unwrap();
+        assert_eq!(serde_json::to_value(prompt).unwrap(), request);
+    }
+}
+
 #[cfg(feature = "runtime")]
 #[tokio::test]
 async fn stderr_stream_logs_unterminated_output_before_eof_in_bounded_chunks() {
@@ -1985,6 +2008,8 @@ fn client_with_list_models_handler(handler: Arc<dyn ListModelsHandler>) -> Clien
             ),
             shell_authentication_requests:
                 shell_authentication::PendingShellAuthenticationRequests::default(),
+            #[cfg(feature = "local-runtime")]
+            send_admissions: cli_host::PendingSendAdmissions::default(),
             entra_token: Arc::new(entra::EntraTokenDispatcher::new(None)),
             on_github_telemetry: None,
             on_get_trace_context: None,

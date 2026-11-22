@@ -199,6 +199,38 @@ pub(crate) struct ModelClearStartupSeedResult {
 }
 crate::record_serde::wire_record!(ModelClearStartupSeedResult { cleared: "cleared" });
 
+/// Options for the client's session-authenticated description catalog.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ModelDescribeClientCatalogRequest {
+    /// Bypass the existing catalog cache. The default is false.
+    pub skip_cache: Option<bool>,
+}
+crate::record_serde::wire_record!(ModelDescribeClientCatalogRequest { skip_cache: "skipCache" if is_none });
+
+/// Raw CAPI model descriptions for client-side catalog enrichment.
+/// Unlike `models.list` and `session.model.list`, this result does not normalize model fields.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ModelDescribeClientCatalogResult {
+    /// Complete model descriptions with their original CAPI field names.
+    /// These include `billing.token_prices`, `capabilities.supports.tool_calls`, and snake_case token limits.
+    pub models: Vec<serde_json::Value>,
+}
+crate::record_serde::wire_record!(ModelDescribeClientCatalogResult { models: "models" });
+
 /// Conversation and changes for a utility-model branch slug.
 ///
 /// <div class="warning">

@@ -27,6 +27,17 @@ public final class ServerHostApi {
     }
 
     /**
+     * Reads or atomically creates the stable compute UUID used by hosted environments in the selected canonical settings document. Preserves concurrent edits and refuses malformed files or identities.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<HostComputeIdentityResult> getOrCreateComputeId(HostGetOrCreateComputeIdParams params) {
+        return caller.invoke("host.getOrCreateComputeId", params, HostComputeIdentityResult.class);
+    }
+
+    /**
      * Publishes an attached resident session for this listener's lifetime without copying it.
      *
      * @apiNote This method is experimental and may change in a future version.

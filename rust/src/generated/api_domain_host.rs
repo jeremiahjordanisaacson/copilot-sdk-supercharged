@@ -84,6 +84,53 @@ crate::record_serde::wire_record!(AccountDescribeAuthInfoResult {
     message: "message"
 });
 
+/// Advances a device authorization flow. A plaintext decision is accepted only after the runtime requests consent.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AccountDeviceCodeLoginAdvanceRequest {
+    /// Explicit storage decision after a needs-plaintext-consent result.
+    pub allow_plaintext: Option<bool>,
+    /// Identifier returned by deviceCodeLogin.begin.
+    pub flow_id: String,
+}
+crate::record_serde::wire_record!(AccountDeviceCodeLoginAdvanceRequest { allow_plaintext: "allowPlaintext" if is_none, flow_id: "flowId" });
+
+/// The GitHub host to authorize through this connection's original account owner.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AccountDeviceCodeLoginBeginRequest {
+    /// GitHub host for device authorization.
+    pub host: String,
+}
+crate::record_serde::wire_record!(AccountDeviceCodeLoginBeginRequest { host: "host" });
+
+/// An opaque device authorization identifier owned by this connection.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AccountDeviceCodeLoginRequest {
+    /// Identifier returned by deviceCodeLogin.begin.
+    pub flow_id: String,
+}
+crate::record_serde::wire_record!(AccountDeviceCodeLoginRequest { flow_id: "flowId" });
+
 /// Current authentication state
 ///
 /// <div class="warning">
@@ -669,6 +716,29 @@ pub struct AccountLogoutResult {
 }
 crate::record_serde::wire_record!(AccountLogoutResult {
     has_more_users: "hasMoreUsers"
+});
+
+/// Relay endpoints from the original account owner and its captured credential environment.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AccountRelayBootstrapConfig {
+    /// Mission Control endpoint, including a configured endpoint override.
+    pub mission_control_url: String,
+    /// GitHub host of the active account.
+    pub relay_host: String,
+    /// Whether an interactive flow can upgrade the active credential.
+    pub token_upgradeable: bool,
+}
+crate::record_serde::wire_record!(AccountRelayBootstrapConfig {
+    mission_control_url: "missionControlUrl",
+    relay_host: "relayHost",
+    token_upgradeable: "tokenUpgradeable"
 });
 
 /// The selected account and its credential-free identity metadata.
@@ -3238,6 +3308,759 @@ pub struct RemoteEnableResult {
 }
 crate::record_serde::wire_record!(RemoteEnableResult { remote_steerable: "remoteSteerable", started: "started" if is_none, url: "url" if is_none, warning: "warning" if is_none });
 
+/// Authenticate resources using the connection owner's renewable credential.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostAuthenticateResourcesRequest {
+    /// Additional protected resources to answer alongside advertised requirements.
+    pub extra_resources: Option<Vec<String>>,
+    /// Owned outgoing connection UUID.
+    pub host_id: String,
+}
+crate::record_serde::wire_record!(RemoteHostAuthenticateResourcesRequest { extra_resources: "extraResources" if is_none, host_id: "hostId" });
+
+/// Authentication outcome for one protected resource.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostResourceAuthentication {
+    /// Host failure detail when authentication failed.
+    pub error: Option<String>,
+    /// Whether the host accepted the credential.
+    pub ok: bool,
+    /// Protected resource URI.
+    pub resource: String,
+}
+crate::record_serde::wire_record!(RemoteHostResourceAuthentication { error: "error" if is_none, ok: "ok", resource: "resource" });
+
+/// Independent authentication outcomes; one failure does not hide other outcomes.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostAuthenticateResourcesResult {
+    /// One outcome for every resource answered.
+    pub resources: Vec<RemoteHostResourceAuthentication>,
+}
+crate::record_serde::wire_record!(RemoteHostAuthenticateResourcesResult {
+    resources: "resources"
+});
+
+/// Select a session from the engine's existing catalog.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandSelectSession {
+    /// Optional session identifier; absence selects the engine's default.
+    pub session_id: Option<SessionId>,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandSelectSessionType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandSelectSession { session_id: "sessionId" if is_none, r#type: "type" });
+
+/// Read the effective client identity assigned during connection.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandClientId {
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandClientIdType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandClientId { r#type: "type" });
+
+/// Prepare local controller attachments before they cross the remote boundary.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandPrepareAttachments {
+    /// Existing SDK attachment descriptions.
+    pub attachments: Vec<serde_json::Value>,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandPrepareAttachmentsType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandPrepareAttachments {
+    attachments: "attachments",
+    r#type: "type"
+});
+
+/// Start a remote turn exactly once.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandStartTurn {
+    /// Prepared AHP attachments.
+    pub attachments: Option<Vec<serde_json::Value>>,
+    /// Optional distinct model prompt.
+    pub model_text: Option<String>,
+    /// Display prompt.
+    pub text: String,
+    /// Optional caller-selected turn identifier.
+    pub turn_id: Option<String>,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandStartTurnType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandStartTurn { attachments: "attachments" if is_none, model_text: "modelText" if is_none, text: "text", turn_id: "turnId" if is_none, r#type: "type" });
+
+/// Cancel an existing remote turn.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandCancelTurn {
+    /// Turn identifier.
+    pub turn_id: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandCancelTurnType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandCancelTurn {
+    turn_id: "turnId",
+    r#type: "type"
+});
+
+/// Answer a pending tool approval.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandConfirmToolCall {
+    /// Approval decision.
+    pub approved: bool,
+    /// Permission context forwarded to the session owner.
+    pub decision_context: Option<serde_json::Value>,
+    /// Machine-readable decision reason.
+    pub reason: Option<String>,
+    /// User-visible reason.
+    pub reason_message: Option<String>,
+    /// Host-advertised option identifier.
+    pub selected_option_id: Option<String>,
+    /// Tool call identifier.
+    pub tool_call_id: String,
+    /// Turn identifier.
+    pub turn_id: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandConfirmToolCallType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandConfirmToolCall { approved: "approved", decision_context: "decisionContext" if is_none, reason: "reason" if is_none, reason_message: "reasonMessage" if is_none, selected_option_id: "selectedOptionId" if is_none, tool_call_id: "toolCallId", turn_id: "turnId", r#type: "type" });
+
+/// Answer approval for a tool result.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandConfirmToolResult {
+    /// Approval decision.
+    pub approved: bool,
+    /// Permission context.
+    pub decision_context: Option<serde_json::Value>,
+    /// Tool call identifier.
+    pub tool_call_id: String,
+    /// Turn identifier.
+    pub turn_id: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandConfirmToolResultType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandConfirmToolResult { approved: "approved", decision_context: "decisionContext" if is_none, tool_call_id: "toolCallId", turn_id: "turnId", r#type: "type" });
+
+/// Complete a tool call on its owning chat.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandCompleteToolCall {
+    /// AHP tool result.
+    pub result: serde_json::Value,
+    /// Tool call identifier.
+    pub tool_call_id: String,
+    /// Turn identifier.
+    pub turn_id: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandCompleteToolCallType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandCompleteToolCall {
+    result: "result",
+    tool_call_id: "toolCallId",
+    turn_id: "turnId",
+    r#type: "type"
+});
+
+/// Change the remote session mode.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandSetMode {
+    /// Remote mode identifier.
+    pub mode: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandSetModeType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandSetMode {
+    mode: "mode",
+    r#type: "type"
+});
+
+/// Set permitted model identifiers.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandSetAllowedModels {
+    /// Null restores the host's default model policy.
+    pub allowed_models: Option<Vec<String>>,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandSetAllowedModelsType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandSetAllowedModels { allowed_models: "allowedModels" if is_none, r#type: "type" });
+
+/// Read models through the remote owner.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandGetSessionModels {
+    /// Whether to bypass the host model cache.
+    pub skip_cache: bool,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandGetSessionModelsType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandGetSessionModels {
+    skip_cache: "skipCache",
+    r#type: "type"
+});
+
+/// Change the approval mode.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandSetApprovalMode {
+    /// Approval mode identifier.
+    pub mode: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandSetApprovalModeType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandSetApprovalMode {
+    mode: "mode",
+    r#type: "type"
+});
+
+/// Set the remote session's approve-all state.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandSetSessionApproveAll {
+    /// Whether approve-all is enabled.
+    pub enabled: bool,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandSetSessionApproveAllType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandSetSessionApproveAll {
+    enabled: "enabled",
+    r#type: "type"
+});
+
+/// Answer a pending plan approval.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandCompleteExitPlanInput {
+    /// Approval decision.
+    pub approved: bool,
+    /// Optional user feedback.
+    pub feedback: Option<String>,
+    /// Pending request identifier.
+    pub request_id: RequestId,
+    /// Selected host action.
+    pub selected_action: Option<String>,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandCompleteExitPlanInputType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandCompleteExitPlanInput { approved: "approved", feedback: "feedback" if is_none, request_id: "requestId", selected_action: "selectedAction" if is_none, r#type: "type" });
+
+/// Answer an interactive user question.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandCompleteUserInput {
+    /// User answer.
+    pub answer: String,
+    /// Whether the user dismissed the question.
+    pub dismissed: bool,
+    /// Whether the answer is text.
+    pub is_text: bool,
+    /// Optional question identifier.
+    pub question_id: Option<String>,
+    /// Pending request identifier.
+    pub request_id: RequestId,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandCompleteUserInputType,
+    /// Whether the answer came from a freeform entry.
+    pub was_freeform: bool,
+}
+crate::record_serde::wire_record!(RemoteHostCommandCompleteUserInput { answer: "answer", dismissed: "dismissed", is_text: "isText", question_id: "questionId" if is_none, request_id: "requestId", r#type: "type", was_freeform: "wasFreeform" });
+
+/// Select an AHP model.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandSetModel {
+    /// Host-advertised model selection.
+    pub model: serde_json::Value,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandSetModelType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandSetModel {
+    model: "model",
+    r#type: "type"
+});
+
+/// Publish shared composer text.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandSetDraftText {
+    /// Composer text.
+    pub text: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandSetDraftTextType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandSetDraftText {
+    text: "text",
+    r#type: "type"
+});
+
+/// Publish shared terminal view state.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandPublishViewState {
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandPublishViewStateType,
+    /// Application view projection.
+    pub view: serde_json::Value,
+}
+crate::record_serde::wire_record!(RemoteHostCommandPublishViewState {
+    r#type: "type",
+    view: "view"
+});
+
+/// Select a host agent.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandSelectAgent {
+    /// Agent URI; null selects the host default.
+    pub agent_uri: Option<String>,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandSelectAgentType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandSelectAgent { agent_uri: "agentUri" if is_none, r#type: "type" });
+
+/// Insert or replace a queued or steering message.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandSetPendingMessage {
+    /// Prepared AHP attachments.
+    pub attachments: Option<Vec<serde_json::Value>>,
+    /// Message identifier.
+    pub id: String,
+    /// AHP pending message kind.
+    pub kind: RemoteHostPendingMessageKind,
+    /// Optional distinct model prompt.
+    pub model_text: Option<String>,
+    /// Display prompt.
+    pub text: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandSetPendingMessageType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandSetPendingMessage { attachments: "attachments" if is_none, id: "id", kind: "kind", model_text: "modelText" if is_none, text: "text", r#type: "type" });
+
+/// Remove a queued or steering message.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandRemovePendingMessage {
+    /// Message identifier.
+    pub id: String,
+    /// AHP pending message kind.
+    pub kind: RemoteHostPendingMessageKind,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandRemovePendingMessageType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandRemovePendingMessage {
+    id: "id",
+    kind: "kind",
+    r#type: "type"
+});
+
+/// Read the remote session's changeset.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandSessionDiff {
+    /// Requested workspace diff mode.
+    pub mode: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandSessionDiffType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandSessionDiff {
+    mode: "mode",
+    r#type: "type"
+});
+
+/// Announce this client's presence.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandAnnounceActiveClient {
+    /// Optional client display name.
+    pub display_name: Option<String>,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandAnnounceActiveClientType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandAnnounceActiveClient { display_name: "displayName" if is_none, r#type: "type" });
+
+/// Withdraw this client's presence.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandRemoveActiveClient {
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandRemoveActiveClientType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandRemoveActiveClient { r#type: "type" });
+
+/// Change a remote session title.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandSetTitle {
+    /// New title.
+    pub title: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandSetTitleType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandSetTitle {
+    title: "title",
+    r#type: "type"
+});
+
+/// Read the owner-authoritative Autopilot objective.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandGetAutopilotObjectiveState {
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandGetAutopilotObjectiveStateType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandGetAutopilotObjectiveState { r#type: "type" });
+
+/// Disable the sandbox through its pending owner request.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandDisableSandboxForSession {
+    /// Permission decision context.
+    pub decision_context: Option<serde_json::Value>,
+    /// Pending request identifier.
+    pub request_id: RequestId,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandDisableSandboxForSessionType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandDisableSandboxForSession { decision_context: "decisionContext" if is_none, request_id: "requestId", r#type: "type" });
+
+/// Read the remote plan.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandGetPlan {
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandGetPlanType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandGetPlan { r#type: "type" });
+
+/// List checkpoint titles.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandListCheckpoints {
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandListCheckpointsType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandListCheckpoints { r#type: "type" });
+
+/// Read one checkpoint.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandReadCheckpoint {
+    /// Checkpoint number.
+    pub number: i64,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandReadCheckpointType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandReadCheckpoint {
+    number: "number",
+    r#type: "type"
+});
+
+/// List remote workspace files.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandListWorkspaceFiles {
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandListWorkspaceFilesType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandListWorkspaceFiles { r#type: "type" });
+
+/// Request remote composer completions.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandCompletions {
+    /// Cursor offset in UTF-16 code units.
+    pub offset: i64,
+    /// Composer text.
+    pub text: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandCompletionsType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandCompletions {
+    offset: "offset",
+    text: "text",
+    r#type: "type"
+});
+
+/// Associate local shell routing with the remote session.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandBindUserRequestedShell {
+    /// Native session identifier owned by the same runtime.
+    pub native_session_id: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandBindUserRequestedShellType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandBindUserRequestedShell {
+    native_session_id: "nativeSessionId",
+    r#type: "type"
+});
+
+/// Resolve a pending MCP resource approval through the session owner.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandAuthorizeMcpResource {
+    /// Existing resource authorization context.
+    pub context: serde_json::Value,
+    /// Native session identifier.
+    pub native_session_id: String,
+    /// Pending request identifier.
+    pub request_id: RequestId,
+    /// Protected resource URI.
+    pub resource: String,
+    /// Native operation executed by the owning remote connection.
+    pub r#type: RemoteHostCommandAuthorizeMcpResourceType,
+}
+crate::record_serde::wire_record!(RemoteHostCommandAuthorizeMcpResource {
+    context: "context",
+    native_session_id: "nativeSessionId",
+    request_id: "requestId",
+    resource: "resource",
+    r#type: "type"
+});
+
+/// Execute a closed native operation on an owned remote host.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteHostCommandRequest {
+    /// Native engine command; arbitrary protocol methods are not accepted.
+    pub command: RemoteHostCommand,
+    /// Owned outgoing connection UUID.
+    pub host_id: String,
+    /// AHP session or chat URI; absent only for connection-wide commands.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_uri: Option<String>,
+}
+
+/// Result of a closed native relay operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCommandResult {
+    /// Native operation result; null indicates an absent optional host feature.
+    pub value: serde_json::Value,
+}
+crate::record_serde::wire_record!(RemoteHostCommandResult { value: "value" });
+
+/// Connect directly without sharing a GitHub credential unless explicitly allowed.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostTransportDirect {
+    /// Explicit user permission to share the owner's GitHub credential with this endpoint.
+    pub authenticate_with_git_hub: Option<bool>,
+    /// Outgoing AHP transport selected by the application.
+    pub kind: RemoteHostTransportDirectKind,
+    /// Absolute WebSocket endpoint selected by the application.
+    pub url: String,
+}
+crate::record_serde::wire_record!(RemoteHostTransportDirect { authenticate_with_git_hub: "authenticateWithGitHub" if is_none, kind: "kind", url: "url" });
+
+/// Connect through the authenticated account's Mission Control environment.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostTransportMissionControl {
+    /// Mission Control service endpoint.
+    pub base_url: String,
+    /// Environment identifier, preserving its original case.
+    pub environment_id: String,
+    /// Outgoing AHP transport selected by the application.
+    pub kind: RemoteHostTransportMissionControlKind,
+}
+crate::record_serde::wire_record!(RemoteHostTransportMissionControl {
+    base_url: "baseUrl",
+    environment_id: "environmentId",
+    kind: "kind"
+});
+
+/// Allocate an inert outgoing connection under the calling SDK connection.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteHostCreateRequest {
+    /// Optional stable application client identity for the AHP handshake.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// Optional file logger owned by this SDK connection, with its filter and flush boundary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic_log_id: Option<String>,
+    /// Application-generated UUID, also usable to dispose a canceled creation.
+    pub host_id: String,
+    /// The single endpoint this connection may contact.
+    pub transport: RemoteHostTransport,
+}
+
+/// An allocated, inert outgoing connection.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCreateResult {
+    /// Initial effective client identity.
+    pub client_id: String,
+    /// Application-selected connection UUID.
+    pub host_id: String,
+    /// Correlation identifier for existing host event consumers.
+    pub relay_id: i64,
+    /// Canonical initial engine state.
+    pub state: serde_json::Value,
+}
+crate::record_serde::wire_record!(RemoteHostCreateResult {
+    client_id: "clientId",
+    host_id: "hostId",
+    relay_id: "relayId",
+    state: "state"
+});
+
+/// Create a session on the existing remote host.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCreateSessionRequest {
+    /// Owned outgoing connection UUID.
+    pub host_id: String,
+    /// Native AHP session options, including model, provider, directory, and project selection.
+    pub options: Option<serde_json::Value>,
+    /// Optional initial prompt, sent exactly once by the owning engine.
+    pub text: Option<String>,
+}
+crate::record_serde::wire_record!(RemoteHostCreateSessionRequest { host_id: "hostId", options: "options" if is_none, text: "text" if is_none });
+
+/// The created session and the refresh already performed by its owning engine.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostCreateSessionResult {
+    /// Effective client identity after the connection's negotiation.
+    pub client_id: String,
+    /// Canonical engine state after creation.
+    pub state: serde_json::Value,
+    /// Newly created AHP session URI.
+    pub uri: String,
+}
+crate::record_serde::wire_record!(RemoteHostCreateSessionResult {
+    client_id: "clientId",
+    state: "state",
+    uri: "uri"
+});
+
+/// Completion of an outgoing connection operation with no result.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteHostEmptyResult {}
+
+/// Address an outgoing connection owned by this SDK connection.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostRequest {
+    /// Outgoing connection UUID returned by create.
+    pub host_id: String,
+}
+crate::record_serde::wire_record!(RemoteHostRequest { host_id: "hostId" });
+
+/// A session action projected by the existing relay engine.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostSessionChanged {
+    /// Existing engine projection of the remote action.
+    pub dispatch: serde_json::Value,
+    /// Owned outgoing connection UUID.
+    pub host_id: String,
+    /// Subscribed AHP session URI.
+    pub session_uri: String,
+}
+crate::record_serde::wire_record!(RemoteHostSessionChanged {
+    dispatch: "dispatch",
+    host_id: "hostId",
+    session_uri: "sessionUri"
+});
+
+/// Operate on a session belonging to an owned outgoing connection.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostSessionRequest {
+    /// Owned outgoing connection UUID.
+    pub host_id: String,
+    /// AHP session URI advertised by that connection.
+    pub session_uri: String,
+}
+crate::record_serde::wire_record!(RemoteHostSessionRequest {
+    host_id: "hostId",
+    session_uri: "sessionUri"
+});
+
+/// Revisioned connection notification, delivered only to its owning SDK peer.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostStateChanged {
+    /// Owned outgoing connection UUID.
+    pub host_id: String,
+    /// Canonical engine state.
+    pub state: serde_json::Value,
+}
+crate::record_serde::wire_record!(RemoteHostStateChanged {
+    host_id: "hostId",
+    state: "state"
+});
+
+/// An outgoing connection's canonical engine snapshot.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostStateResult {
+    /// Effective client identity assigned by the same relay engine.
+    pub client_id: String,
+    /// The runtime engine's revisioned AHP state, not another session model.
+    pub state: serde_json::Value,
+}
+crate::record_serde::wire_record!(RemoteHostStateResult {
+    client_id: "clientId",
+    state: "state"
+});
+
 /// New remote-steerability state to persist as a `session.remote_steerable_changed` event.
 ///
 /// <div class="warning">
@@ -3887,6 +4710,255 @@ crate::record_serde::wire_record!(WorkspacesWriteAutopilotObjectiveResult {
     operation: "operation"
 });
 
+/// Result of a closed native relay operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostsCommandResult {
+    /// Native operation result; null indicates an absent optional host feature.
+    pub value: serde_json::Value,
+}
+crate::record_serde::wire_record!(RemoteHostsCommandResult { value: "value" });
+
+/// An allocated, inert outgoing connection.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostsCreateResult {
+    /// Initial effective client identity.
+    pub client_id: String,
+    /// Application-selected connection UUID.
+    pub host_id: String,
+    /// Correlation identifier for existing host event consumers.
+    pub relay_id: i64,
+    /// Canonical initial engine state.
+    pub state: serde_json::Value,
+}
+crate::record_serde::wire_record!(RemoteHostsCreateResult {
+    client_id: "clientId",
+    host_id: "hostId",
+    relay_id: "relayId",
+    state: "state"
+});
+
+/// An outgoing connection's canonical engine snapshot.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostsConnectResult {
+    /// Effective client identity assigned by the same relay engine.
+    pub client_id: String,
+    /// The runtime engine's revisioned AHP state, not another session model.
+    pub state: serde_json::Value,
+}
+crate::record_serde::wire_record!(RemoteHostsConnectResult {
+    client_id: "clientId",
+    state: "state"
+});
+
+/// An outgoing connection's canonical engine snapshot.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostsReconnectResult {
+    /// Effective client identity assigned by the same relay engine.
+    pub client_id: String,
+    /// The runtime engine's revisioned AHP state, not another session model.
+    pub state: serde_json::Value,
+}
+crate::record_serde::wire_record!(RemoteHostsReconnectResult {
+    client_id: "clientId",
+    state: "state"
+});
+
+/// An outgoing connection's canonical engine snapshot.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostsGetStateResult {
+    /// Effective client identity assigned by the same relay engine.
+    pub client_id: String,
+    /// The runtime engine's revisioned AHP state, not another session model.
+    pub state: serde_json::Value,
+}
+crate::record_serde::wire_record!(RemoteHostsGetStateResult {
+    client_id: "clientId",
+    state: "state"
+});
+
+/// An outgoing connection's canonical engine snapshot.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostsListSessionsResult {
+    /// Effective client identity assigned by the same relay engine.
+    pub client_id: String,
+    /// The runtime engine's revisioned AHP state, not another session model.
+    pub state: serde_json::Value,
+}
+crate::record_serde::wire_record!(RemoteHostsListSessionsResult {
+    client_id: "clientId",
+    state: "state"
+});
+
+/// Completion of an outgoing connection operation with no result.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteHostsDisposeResult {}
+
+/// Independent authentication outcomes; one failure does not hide other outcomes.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostsAuthenticateResourcesResult {
+    /// One outcome for every resource answered.
+    pub resources: Vec<RemoteHostResourceAuthentication>,
+}
+crate::record_serde::wire_record!(RemoteHostsAuthenticateResourcesResult {
+    resources: "resources"
+});
+
+/// The created session and the refresh already performed by its owning engine.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RemoteHostsCreateSessionResult {
+    /// Effective client identity after the connection's negotiation.
+    pub client_id: String,
+    /// Canonical engine state after creation.
+    pub state: serde_json::Value,
+    /// Newly created AHP session URI.
+    pub uri: String,
+}
+crate::record_serde::wire_record!(RemoteHostsCreateSessionResult {
+    client_id: "clientId",
+    state: "state",
+    uri: "uri"
+});
+
+/// Completion of an outgoing connection operation with no result.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteHostsDeleteSessionResult {}
+
+/// Completion of an outgoing connection operation with no result.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteHostsSubscribeSessionResult {}
+
+/// Completion of an outgoing connection operation with no result.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteHostsUnsubscribeSessionResult {}
+
+/// Relay endpoints from the original account owner and its captured credential environment.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AccountGetRelayBootstrapConfigResult {
+    /// Mission Control endpoint, including a configured endpoint override.
+    pub mission_control_url: String,
+    /// GitHub host of the active account.
+    pub relay_host: String,
+    /// Whether an interactive flow can upgrade the active credential.
+    pub token_upgradeable: bool,
+}
+crate::record_serde::wire_record!(AccountGetRelayBootstrapConfigResult {
+    mission_control_url: "missionControlUrl",
+    relay_host: "relayHost",
+    token_upgradeable: "tokenUpgradeable"
+});
+
+/// A started login flow: its opaque id and first step.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDeviceCodeLoginBeginResult {
+    /// Opaque flow id used to advance or cancel this login.
+    pub flow_id: String,
+    /// The first step of the flow.
+    pub step: AuthLoginStep,
+}
+
 /// A textual result of a Git operation.
 ///
 /// <div class="warning">
@@ -4477,6 +5549,16 @@ pub type ClientMetadata = HashMap<String, String>;
 ///
 /// </div>
 pub type AccountGetAllUsersResult = Vec<AccountAllUsers>;
+
+/// The authenticated account's GitHub API URL, or null when no usable credential exists.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+pub type AccountGetGitHubApiUrlIfAuthenticatedResult = Option<String>;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) enum AccountLoginProcessRequestOpenOperation {
@@ -5952,4 +7034,787 @@ impl<'de> Deserialize<'de> for RemoteSessionMode {
             _ => Self::Unknown,
         })
     }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandSelectSessionType {
+    #[serde(rename = "selectSession")]
+    #[default]
+    SelectSession,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandSelectSessionType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandSelectSessionType",
+            &["selectSession"],
+            None,
+        )?;
+        Ok(Self::SelectSession)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandClientIdType {
+    #[serde(rename = "clientId")]
+    #[default]
+    ClientId,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandClientIdType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandClientIdType",
+            &["clientId"],
+            None,
+        )?;
+        Ok(Self::ClientId)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandPrepareAttachmentsType {
+    #[serde(rename = "prepareAttachments")]
+    #[default]
+    PrepareAttachments,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandPrepareAttachmentsType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandPrepareAttachmentsType",
+            &["prepareAttachments"],
+            None,
+        )?;
+        Ok(Self::PrepareAttachments)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandStartTurnType {
+    #[serde(rename = "startTurn")]
+    #[default]
+    StartTurn,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandStartTurnType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandStartTurnType",
+            &["startTurn"],
+            None,
+        )?;
+        Ok(Self::StartTurn)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandCancelTurnType {
+    #[serde(rename = "cancelTurn")]
+    #[default]
+    CancelTurn,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandCancelTurnType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandCancelTurnType",
+            &["cancelTurn"],
+            None,
+        )?;
+        Ok(Self::CancelTurn)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandConfirmToolCallType {
+    #[serde(rename = "confirmToolCall")]
+    #[default]
+    ConfirmToolCall,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandConfirmToolCallType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandConfirmToolCallType",
+            &["confirmToolCall"],
+            None,
+        )?;
+        Ok(Self::ConfirmToolCall)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandConfirmToolResultType {
+    #[serde(rename = "confirmToolResult")]
+    #[default]
+    ConfirmToolResult,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandConfirmToolResultType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandConfirmToolResultType",
+            &["confirmToolResult"],
+            None,
+        )?;
+        Ok(Self::ConfirmToolResult)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandCompleteToolCallType {
+    #[serde(rename = "completeToolCall")]
+    #[default]
+    CompleteToolCall,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandCompleteToolCallType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandCompleteToolCallType",
+            &["completeToolCall"],
+            None,
+        )?;
+        Ok(Self::CompleteToolCall)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandSetModeType {
+    #[serde(rename = "setMode")]
+    #[default]
+    SetMode,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandSetModeType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandSetModeType",
+            &["setMode"],
+            None,
+        )?;
+        Ok(Self::SetMode)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandSetAllowedModelsType {
+    #[serde(rename = "setAllowedModels")]
+    #[default]
+    SetAllowedModels,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandSetAllowedModelsType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandSetAllowedModelsType",
+            &["setAllowedModels"],
+            None,
+        )?;
+        Ok(Self::SetAllowedModels)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandGetSessionModelsType {
+    #[serde(rename = "getSessionModels")]
+    #[default]
+    GetSessionModels,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandGetSessionModelsType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandGetSessionModelsType",
+            &["getSessionModels"],
+            None,
+        )?;
+        Ok(Self::GetSessionModels)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandSetApprovalModeType {
+    #[serde(rename = "setApprovalMode")]
+    #[default]
+    SetApprovalMode,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandSetApprovalModeType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandSetApprovalModeType",
+            &["setApprovalMode"],
+            None,
+        )?;
+        Ok(Self::SetApprovalMode)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandSetSessionApproveAllType {
+    #[serde(rename = "setSessionApproveAll")]
+    #[default]
+    SetSessionApproveAll,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandSetSessionApproveAllType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandSetSessionApproveAllType",
+            &["setSessionApproveAll"],
+            None,
+        )?;
+        Ok(Self::SetSessionApproveAll)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandCompleteExitPlanInputType {
+    #[serde(rename = "completeExitPlanInput")]
+    #[default]
+    CompleteExitPlanInput,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandCompleteExitPlanInputType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandCompleteExitPlanInputType",
+            &["completeExitPlanInput"],
+            None,
+        )?;
+        Ok(Self::CompleteExitPlanInput)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandCompleteUserInputType {
+    #[serde(rename = "completeUserInput")]
+    #[default]
+    CompleteUserInput,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandCompleteUserInputType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandCompleteUserInputType",
+            &["completeUserInput"],
+            None,
+        )?;
+        Ok(Self::CompleteUserInput)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandSetModelType {
+    #[serde(rename = "setModel")]
+    #[default]
+    SetModel,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandSetModelType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandSetModelType",
+            &["setModel"],
+            None,
+        )?;
+        Ok(Self::SetModel)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandSetDraftTextType {
+    #[serde(rename = "setDraftText")]
+    #[default]
+    SetDraftText,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandSetDraftTextType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandSetDraftTextType",
+            &["setDraftText"],
+            None,
+        )?;
+        Ok(Self::SetDraftText)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandPublishViewStateType {
+    #[serde(rename = "publishViewState")]
+    #[default]
+    PublishViewState,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandPublishViewStateType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandPublishViewStateType",
+            &["publishViewState"],
+            None,
+        )?;
+        Ok(Self::PublishViewState)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandSelectAgentType {
+    #[serde(rename = "selectAgent")]
+    #[default]
+    SelectAgent,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandSelectAgentType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandSelectAgentType",
+            &["selectAgent"],
+            None,
+        )?;
+        Ok(Self::SelectAgent)
+    }
+}
+
+/// AHP message queue selection.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostPendingMessageKind {
+    /// Steer the active turn.
+    #[serde(rename = "steering")]
+    Steering,
+    /// Dispatch after the active turn settles.
+    #[serde(rename = "queued")]
+    Queued,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for RemoteHostPendingMessageKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostPendingMessageKind",
+            &["steering", "queued", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::Steering,
+            1 => Self::Queued,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandSetPendingMessageType {
+    #[serde(rename = "setPendingMessage")]
+    #[default]
+    SetPendingMessage,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandSetPendingMessageType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandSetPendingMessageType",
+            &["setPendingMessage"],
+            None,
+        )?;
+        Ok(Self::SetPendingMessage)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandRemovePendingMessageType {
+    #[serde(rename = "removePendingMessage")]
+    #[default]
+    RemovePendingMessage,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandRemovePendingMessageType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandRemovePendingMessageType",
+            &["removePendingMessage"],
+            None,
+        )?;
+        Ok(Self::RemovePendingMessage)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandSessionDiffType {
+    #[serde(rename = "sessionDiff")]
+    #[default]
+    SessionDiff,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandSessionDiffType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandSessionDiffType",
+            &["sessionDiff"],
+            None,
+        )?;
+        Ok(Self::SessionDiff)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandAnnounceActiveClientType {
+    #[serde(rename = "announceActiveClient")]
+    #[default]
+    AnnounceActiveClient,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandAnnounceActiveClientType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandAnnounceActiveClientType",
+            &["announceActiveClient"],
+            None,
+        )?;
+        Ok(Self::AnnounceActiveClient)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandRemoveActiveClientType {
+    #[serde(rename = "removeActiveClient")]
+    #[default]
+    RemoveActiveClient,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandRemoveActiveClientType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandRemoveActiveClientType",
+            &["removeActiveClient"],
+            None,
+        )?;
+        Ok(Self::RemoveActiveClient)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandSetTitleType {
+    #[serde(rename = "setTitle")]
+    #[default]
+    SetTitle,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandSetTitleType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandSetTitleType",
+            &["setTitle"],
+            None,
+        )?;
+        Ok(Self::SetTitle)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandGetAutopilotObjectiveStateType {
+    #[serde(rename = "getAutopilotObjectiveState")]
+    #[default]
+    GetAutopilotObjectiveState,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandGetAutopilotObjectiveStateType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandGetAutopilotObjectiveStateType",
+            &["getAutopilotObjectiveState"],
+            None,
+        )?;
+        Ok(Self::GetAutopilotObjectiveState)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandDisableSandboxForSessionType {
+    #[serde(rename = "disableSandboxForSession")]
+    #[default]
+    DisableSandboxForSession,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandDisableSandboxForSessionType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandDisableSandboxForSessionType",
+            &["disableSandboxForSession"],
+            None,
+        )?;
+        Ok(Self::DisableSandboxForSession)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandGetPlanType {
+    #[serde(rename = "getPlan")]
+    #[default]
+    GetPlan,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandGetPlanType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandGetPlanType",
+            &["getPlan"],
+            None,
+        )?;
+        Ok(Self::GetPlan)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandListCheckpointsType {
+    #[serde(rename = "listCheckpoints")]
+    #[default]
+    ListCheckpoints,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandListCheckpointsType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandListCheckpointsType",
+            &["listCheckpoints"],
+            None,
+        )?;
+        Ok(Self::ListCheckpoints)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandReadCheckpointType {
+    #[serde(rename = "readCheckpoint")]
+    #[default]
+    ReadCheckpoint,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandReadCheckpointType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandReadCheckpointType",
+            &["readCheckpoint"],
+            None,
+        )?;
+        Ok(Self::ReadCheckpoint)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandListWorkspaceFilesType {
+    #[serde(rename = "listWorkspaceFiles")]
+    #[default]
+    ListWorkspaceFiles,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandListWorkspaceFilesType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandListWorkspaceFilesType",
+            &["listWorkspaceFiles"],
+            None,
+        )?;
+        Ok(Self::ListWorkspaceFiles)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandCompletionsType {
+    #[serde(rename = "completions")]
+    #[default]
+    Completions,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandCompletionsType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandCompletionsType",
+            &["completions"],
+            None,
+        )?;
+        Ok(Self::Completions)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandBindUserRequestedShellType {
+    #[serde(rename = "bindUserRequestedShell")]
+    #[default]
+    BindUserRequestedShell,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandBindUserRequestedShellType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandBindUserRequestedShellType",
+            &["bindUserRequestedShell"],
+            None,
+        )?;
+        Ok(Self::BindUserRequestedShell)
+    }
+}
+
+/// Native operation executed by the owning remote connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostCommandAuthorizeMcpResourceType {
+    #[serde(rename = "authorizeMcpResource")]
+    #[default]
+    AuthorizeMcpResource,
+}
+impl<'de> Deserialize<'de> for RemoteHostCommandAuthorizeMcpResourceType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostCommandAuthorizeMcpResourceType",
+            &["authorizeMcpResource"],
+            None,
+        )?;
+        Ok(Self::AuthorizeMcpResource)
+    }
+}
+
+/// A native relay operation, not an arbitrary remote JSON-RPC method.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RemoteHostCommand {
+    SelectSession(RemoteHostCommandSelectSession),
+    ClientId(RemoteHostCommandClientId),
+    PrepareAttachments(RemoteHostCommandPrepareAttachments),
+    StartTurn(RemoteHostCommandStartTurn),
+    CancelTurn(RemoteHostCommandCancelTurn),
+    ConfirmToolCall(RemoteHostCommandConfirmToolCall),
+    ConfirmToolResult(RemoteHostCommandConfirmToolResult),
+    CompleteToolCall(RemoteHostCommandCompleteToolCall),
+    SetMode(RemoteHostCommandSetMode),
+    SetAllowedModels(RemoteHostCommandSetAllowedModels),
+    GetSessionModels(RemoteHostCommandGetSessionModels),
+    SetApprovalMode(RemoteHostCommandSetApprovalMode),
+    SetSessionApproveAll(RemoteHostCommandSetSessionApproveAll),
+    CompleteExitPlanInput(RemoteHostCommandCompleteExitPlanInput),
+    CompleteUserInput(RemoteHostCommandCompleteUserInput),
+    SetModel(RemoteHostCommandSetModel),
+    SetDraftText(RemoteHostCommandSetDraftText),
+    PublishViewState(RemoteHostCommandPublishViewState),
+    SelectAgent(RemoteHostCommandSelectAgent),
+    SetPendingMessage(RemoteHostCommandSetPendingMessage),
+    RemovePendingMessage(RemoteHostCommandRemovePendingMessage),
+    SessionDiff(RemoteHostCommandSessionDiff),
+    AnnounceActiveClient(RemoteHostCommandAnnounceActiveClient),
+    RemoveActiveClient(RemoteHostCommandRemoveActiveClient),
+    SetTitle(RemoteHostCommandSetTitle),
+    GetAutopilotObjectiveState(RemoteHostCommandGetAutopilotObjectiveState),
+    DisableSandboxForSession(RemoteHostCommandDisableSandboxForSession),
+    GetPlan(RemoteHostCommandGetPlan),
+    ListCheckpoints(RemoteHostCommandListCheckpoints),
+    ReadCheckpoint(RemoteHostCommandReadCheckpoint),
+    ListWorkspaceFiles(RemoteHostCommandListWorkspaceFiles),
+    Completions(RemoteHostCommandCompletions),
+    BindUserRequestedShell(RemoteHostCommandBindUserRequestedShell),
+    AuthorizeMcpResource(RemoteHostCommandAuthorizeMcpResource),
+}
+
+/// Outgoing AHP transport selected by the application.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostTransportDirectKind {
+    #[serde(rename = "direct")]
+    #[default]
+    Direct,
+}
+impl<'de> Deserialize<'de> for RemoteHostTransportDirectKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostTransportDirectKind",
+            &["direct"],
+            None,
+        )?;
+        Ok(Self::Direct)
+    }
+}
+
+/// Outgoing AHP transport selected by the application.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum RemoteHostTransportMissionControlKind {
+    #[serde(rename = "missionControl")]
+    #[default]
+    MissionControl,
+}
+impl<'de> Deserialize<'de> for RemoteHostTransportMissionControlKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "RemoteHostTransportMissionControlKind",
+            &["missionControl"],
+            None,
+        )?;
+        Ok(Self::MissionControl)
+    }
+}
+
+/// Exactly one outgoing AHP transport.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RemoteHostTransport {
+    Direct(RemoteHostTransportDirect),
+    MissionControl(RemoteHostTransportMissionControl),
 }

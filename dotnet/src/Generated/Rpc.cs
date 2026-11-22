@@ -279,6 +279,1691 @@ internal sealed class ConnectRequest
     public string? Token { get; set; }
 }
 
+/// <summary>Stable compute identity stored atomically in the canonical settings document.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostGetOrCreateComputeIdResult
+{
+    /// <summary>Existing or newly allocated UUID; malformed existing identities are never replaced.</summary>
+    [JsonPropertyName("computeId")]
+    public string ComputeId { get; set; } = string.Empty;
+}
+
+/// <summary>Select the canonical settings document without normalizing its contents.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostGetOrCreateComputeIdRequest
+{
+    /// <summary>Explicit Copilot configuration directory; omission uses the SDK server's configured home.</summary>
+    [JsonPropertyName("configDir")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConfigDir { get; set; }
+}
+
+/// <summary>The existing runtime identity and its resource on the listener.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HostPublishSessionResult
+{
+    /// <summary>Canonical runtime ID of the published session.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>AHP resource URI for the session on this listener.</summary>
+    [JsonPropertyName("sessionUri")]
+    public string SessionUri { get; set; } = string.Empty;
+}
+
+/// <summary>Publishes a resident session attached to the listener's owning connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostPublishSessionRequest
+{
+    /// <summary>Listener UUID returned by host.start.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>Canonical runtime session ID attached to the listener's owning connection.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>Projection of the authoritative runtime credential transaction.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostCredentialLifecycleResult
+{
+    /// <summary>Pinned identity resolved through the original credential owner.</summary>
+    [JsonPropertyName("authInfo")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? AuthInfo { get; set; }
+
+    /// <summary>Whether the runtime transaction bound its registration.</summary>
+    [JsonPropertyName("committed")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Committed { get; set; }
+
+    /// <summary>Current registration when one exists.</summary>
+    [JsonPropertyName("registrationId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RegistrationId { get; set; }
+
+    /// <summary>Whether rollback restored the displaced mapping.</summary>
+    [JsonPropertyName("restored")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Restored { get; set; }
+
+    /// <summary>Whether resume retains the session's existing registration.</summary>
+    [JsonPropertyName("reusingSessionRegistration")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ReusingSessionRegistration { get; set; }
+
+    /// <summary>Opaque runtime transaction capability.</summary>
+    [JsonPropertyName("transactionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TransactionId { get; set; }
+}
+
+/// <summary>Private host protocol for one runtime-owned credential transaction. Only the admitted in-process CLI host can use this protocol.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostCredentialLifecycleRequest
+{
+    /// <summary>Credential lifecycle transition or host-owned credential observation.</summary>
+    [JsonPropertyName("action")]
+    public HostCredentialLifecycleAction Action { get; set; }
+
+    /// <summary>Whether the original connection owns a renewable SDK callback rather than a static token context.</summary>
+    [JsonPropertyName("callback")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Callback { get; set; }
+
+    /// <summary>Original callback connection. The runtime verifies that it belongs to this host's engine.</summary>
+    [JsonPropertyName("connectionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? ConnectionId { get; set; }
+
+    /// <summary>Registration retained by a resident ambient-auth rollback.</summary>
+    [JsonPropertyName("previousRegistrationId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PreviousRegistrationId { get; set; }
+
+    /// <summary>Existing credential registration, never a bearer token.</summary>
+    [JsonPropertyName("registrationId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RegistrationId { get; set; }
+
+    /// <summary>Whether begin resumes an existing session.</summary>
+    [JsonPropertyName("resume")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Resume { get; set; }
+
+    /// <summary>Session resolved by the original host lifecycle.</summary>
+    [JsonPropertyName("sessionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionId { get; set; }
+
+    /// <summary>Opaque runtime transaction capability returned by begin.</summary>
+    [JsonPropertyName("transactionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TransactionId { get; set; }
+}
+
+/// <summary>Publication withdrawal outcome; local history, worktrees and ongoing work are preserved.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HostUnpublishSessionResult
+{
+    /// <summary>True when a publication was removed; false when it was already absent.</summary>
+    [JsonPropertyName("unpublished")]
+    public bool Unpublished { get; set; }
+}
+
+/// <summary>Withdraws an application publication without deleting its underlying local session.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostUnpublishSessionRequest
+{
+    /// <summary>Listener UUID returned by host.start; the caller must own the live listener.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>Canonical session ID in the durable catalog, whether resident or dormant.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>Metadata advertised by the AHP host, not a guarantee that history can be resumed.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HostSessionSummary
+{
+    /// <summary>Optional activity description advertised by the host.</summary>
+    [JsonPropertyName("activity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Activity { get; set; }
+
+    /// <summary>Session creation time as an ISO 8601 timestamp.</summary>
+    [JsonPropertyName("createdAt")]
+    public string CreatedAt { get; set; } = string.Empty;
+
+    /// <summary>Last modification time as an ISO 8601 timestamp.</summary>
+    [JsonPropertyName("modifiedAt")]
+    public string ModifiedAt { get; set; } = string.Empty;
+
+    /// <summary>Stable AHP resource URI identifying the session on this host.</summary>
+    [JsonPropertyName("resource")]
+    public string Resource { get; set; } = string.Empty;
+
+    /// <summary>Unsigned 32-bit AHP session status bitset (0..=4294967295); unknown bits must be preserved.</summary>
+    [JsonPropertyName("status")]
+    public long Status { get; set; }
+
+    /// <summary>Authoritative title advertised by the host.</summary>
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+}
+
+/// <summary>The complete live and dormant advertised catalog, without subscribing to sessions.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HostListSessionsResult
+{
+    /// <summary>Complete advertised session summaries, in the host's catalog order.</summary>
+    [JsonPropertyName("sessions")]
+    public IList<HostSessionSummary> Sessions { get => field ??= []; set; }
+}
+
+/// <summary>Reads a running host's catalog or the runtime's saved default catalog.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostListSessionsRequest
+{
+    /// <summary>
+    /// Listener UUID returned by host.start; the caller must own it. Omit to read
+    /// the saved default compute-identity catalog without starting a listener.
+    /// </summary>
+    [JsonPropertyName("hostId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? HostId { get; set; }
+}
+
+/// <summary>The resident session the application has materialized on its own connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostCreateSessionResult
+{
+    /// <summary>Runtime session UUID materialized on the application's SDK connection.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>Trusted admission context, not inference authentication or session configuration.</summary>
+/// <remarks>Polymorphic base type discriminated by <c>mode</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonPolymorphic(
+    TypeDiscriminatorPropertyName = "mode",
+    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
+[JsonDerivedType(typeof(HostSessionAuthenticationGitHub), "github")]
+[JsonDerivedType(typeof(HostSessionAuthenticationCustom), "custom")]
+[JsonDerivedType(typeof(HostSessionAuthenticationNone), "none")]
+public partial class HostSessionAuthentication
+{
+    /// <summary>The type discriminator.</summary>
+    [JsonPropertyName("mode")]
+    public virtual string Mode { get; set; } = string.Empty;
+}
+
+
+/// <summary>A verified GitHub owner.</summary>
+/// <remarks>The <c>github</c> variant of <see cref="HostSessionAuthentication"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class HostSessionAuthenticationGitHub : HostSessionAuthentication
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Mode => "github";
+
+    /// <summary>Verified host account identity.</summary>
+    [JsonPropertyName("identity")]
+    public required string Identity { get; set; }
+}
+
+/// <summary>An application-validated owner.</summary>
+/// <remarks>The <c>custom</c> variant of <see cref="HostSessionAuthentication"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class HostSessionAuthenticationCustom : HostSessionAuthentication
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Mode => "custom";
+
+    /// <summary>Verified application identity.</summary>
+    [JsonPropertyName("identity")]
+    public required string Identity { get; set; }
+}
+
+/// <summary>Explicitly anonymous admission.</summary>
+/// <remarks>The <c>none</c> variant of <see cref="HostSessionAuthentication"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class HostSessionAuthenticationNone : HostSessionAuthentication
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Mode => "none";
+}
+
+/// <summary>One application-owned session handoff, requested by the supervised hosting participant.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostCreateSessionRequest
+{
+    /// <summary>Trusted admission identity supplied by the hosting participant. Required by the runtime before a handoff is admitted.</summary>
+    [JsonPropertyName("authentication")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HostSessionAuthentication? Authentication { get; set; }
+
+    /// <summary>Host-selected SDK creation or resume settings, without executable callbacks or tools.</summary>
+    [JsonPropertyName("config")]
+    public IDictionary<string, JsonElement> Config { get => field ??= new Dictionary<string, JsonElement>(); set; }
+
+    /// <summary>Unique identity for this participation, independent of the session lifetime.</summary>
+    [JsonPropertyName("handoffId")]
+    public string HandoffId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// For an explicit publication, borrow an existing owning-connection resident
+    /// instead of invoking the resume factory. Cold sessions still use the factory.
+    /// </summary>
+    [JsonPropertyName("preferResident")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? PreferResident { get; set; }
+
+    /// <summary>Resume an app-owned durable session instead of creating a new session.</summary>
+    [JsonPropertyName("resume")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Resume { get; set; }
+}
+
+/// <summary>Empty acknowledgement for a completed host lifecycle operation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostReleaseSessionResult
+{
+}
+
+/// <summary>Ends one participation, not the application's session lifetime.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostReleaseSessionRequest
+{
+    /// <summary>Identity of the participation to release without destroying the session.</summary>
+    [JsonPropertyName("handoffId")]
+    public string HandoffId { get; set; } = string.Empty;
+}
+
+/// <summary>Listener readiness, returned only after binding and the supervised participant's SDK handshake.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HostStartResult
+{
+    /// <summary>GitHub Mission Control environment ID, present when its relay transport is ready.</summary>
+    [JsonPropertyName("environmentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EnvironmentId { get; set; }
+
+    /// <summary>Caller-generated listener UUID.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>Separate host process ID, when provided by a legacy runtime. Absent for in-process listeners.</summary>
+    [JsonPropertyName("pid")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? Pid { get; set; }
+
+    /// <summary>Secret connection token, absent when authentication is disabled.</summary>
+    [JsonPropertyName("token")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Token { get; set; }
+
+    /// <summary>Actual bound WebSocket URL, including the allocated port.</summary>
+    [JsonPropertyName("url")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Url { get; set; }
+}
+
+/// <summary>Explicit host-wide session admission policy.</summary>
+/// <remarks>Polymorphic base type discriminated by <c>mode</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonPolymorphic(
+    TypeDiscriminatorPropertyName = "mode",
+    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
+[JsonDerivedType(typeof(HostAuthenticationGitHub), "github")]
+[JsonDerivedType(typeof(HostAuthenticationNone), "none")]
+[JsonDerivedType(typeof(HostAuthenticationCustom), "custom")]
+public partial class HostAuthentication
+{
+    /// <summary>The type discriminator.</summary>
+    [JsonPropertyName("mode")]
+    public virtual string Mode { get; set; } = string.Empty;
+}
+
+
+/// <summary>Admit the authenticated host's GitHub account.</summary>
+/// <remarks>The <c>github</c> variant of <see cref="HostAuthentication"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class HostAuthenticationGitHub : HostAuthentication
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Mode => "github";
+}
+
+/// <summary>Explicitly allow anonymous access.</summary>
+/// <remarks>The <c>none</c> variant of <see cref="HostAuthentication"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class HostAuthenticationNone : HostAuthentication
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Mode => "none";
+}
+
+/// <summary>Delegate token validation to the owning application.</summary>
+/// <remarks>The <c>custom</c> variant of <see cref="HostAuthentication"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class HostAuthenticationCustom : HostAuthentication
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Mode => "custom";
+
+    /// <summary>Stable nonempty owner identity; validated identities must match exactly.</summary>
+    [JsonPropertyName("requireIdentity")]
+    public required string RequireIdentity { get; set; }
+}
+
+/// <summary>GitHub Mission Control registration options. The compute ID is application-owned and stable.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HostGitHubEnvironmentOptions
+{
+    /// <summary>Stable application installation identity, reused across host restarts.</summary>
+    [JsonPropertyName("computeId")]
+    public string ComputeId { get; set; } = string.Empty;
+
+    /// <summary>Human-readable environment display name.</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Require sealed, connection-bound authentication (default true), independent of listener address. False permits unsealed direct credentials and unbound sealed relay credentials; use only when the caller fully controls and trusts the direct transport. Relay token encryption remains mandatory.</summary>
+    [JsonPropertyName("requireConnectionBinding")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RequireConnectionBinding { get; set; }
+}
+
+/// <summary>Local WebSocket transport options.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HostLocalServerOptions
+{
+    /// <summary>Listener hostname. Defaults to 127.0.0.1; explicit non-loopback binds are allowed.</summary>
+    [JsonPropertyName("hostname")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Hostname { get; set; }
+
+    /// <summary>Listener port. Omitted or zero requests an OS-allocated port.</summary>
+    [JsonPropertyName("port")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Port { get; set; }
+
+    /// <summary>Require token authentication (default true). Cannot be false with a token.</summary>
+    [JsonPropertyName("requireConnectionToken")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RequireConnectionToken { get; set; }
+
+    /// <summary>Nonempty connection token. Generated randomly when required and omitted.</summary>
+    [JsonPropertyName("token")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Token { get; set; }
+}
+
+/// <summary>Starts a supervised AHP host with at least one explicitly selected transport.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostStartRequest
+{
+    /// <summary>Whether remote clients may create new sessions. Defaults to denied when omitted. Does not restrict owner work, publication, or existing sessions.</summary>
+    [JsonPropertyName("allowCreatingNewSessions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AllowCreatingNewSessions { get; set; }
+
+    /// <summary>Explicit admission policy, required by the runtime before hosting. Optional in the wire DTO only to preserve generated client construction.</summary>
+    [JsonPropertyName("authentication")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HostAuthentication? Authentication { get; set; }
+
+    /// <summary>Stable application identity selecting its durable host catalog. Defaults to the persisted runtime compute GUID; must agree with githubEnvironment.computeId when both are supplied.</summary>
+    [JsonPropertyName("computeId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ComputeId { get; set; }
+
+    /// <summary>Registers a GitHub Mission Control environment and enables its relay transport.</summary>
+    [JsonPropertyName("githubEnvironment")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HostGitHubEnvironmentOptions? GitHubEnvironment { get; set; }
+
+    /// <summary>Caller-generated UUID identifying this connection-owned listener.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>Enables a local WebSocket listener.</summary>
+    [JsonPropertyName("localServer")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HostLocalServerOptions? LocalServer { get; set; }
+
+    /// <summary>Ask the owning application to resume its durable AHP sessions.</summary>
+    [JsonPropertyName("resumeFactory")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ResumeFactory { get; set; }
+
+    /// <summary>Ask the owning SDK application to materialize AHP sessions.</summary>
+    [JsonPropertyName("sessionFactory")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? SessionFactory { get; set; }
+
+    /// <summary>Absolute directory on the runtime host to serve through AHP. Defaults to the runtime's configured working directory. Does not change process or session working directories.</summary>
+    [JsonPropertyName("workspace")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Workspace { get; set; }
+}
+
+/// <summary>Empty acknowledgement for a completed host lifecycle operation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HostDisposeResult
+{
+}
+
+/// <summary>Stops a connection-owned listener and joins its teardown.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostDisposeRequest
+{
+    /// <summary>Listener UUID. Unknown or successfully stopped IDs are harmless.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+}
+
+/// <summary>Empty acknowledgement for a completed host lifecycle operation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HostSetSessionCreationPolicyResult
+{
+}
+
+/// <summary>Changes remote session creation admission without disconnecting clients.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostSetSessionCreationPolicyRequest
+{
+    /// <summary>After acknowledgement, subsequent remote creation admissions use this policy. Already-admitted requests may finish.</summary>
+    [JsonPropertyName("allowCreatingNewSessions")]
+    public bool AllowCreatingNewSessions { get; set; }
+
+    /// <summary>Listener UUID owned by the calling SDK connection.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+}
+
+/// <summary>Private credentials delivered only to a runtime-owned Mission Control hosting participant.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostGetEnvironmentCredentialsResult
+{
+    /// <summary>GitHub API base URL for the authenticated service.</summary>
+    [JsonPropertyName("githubApiUrl")]
+    public string GitHubApiUrl { get; set; } = string.Empty;
+
+    /// <summary>Hostname of the authenticated GitHub service.</summary>
+    [JsonPropertyName("githubHost")]
+    public string GitHubHost { get; set; } = string.Empty;
+
+    /// <summary>Mission Control API origin for environment registration and management.</summary>
+    [JsonPropertyName("missionControlUrl")]
+    public string MissionControlUrl { get; set; } = string.Empty;
+
+    /// <summary>Current bearer token for the authenticated GitHub identity.</summary>
+    [JsonPropertyName("token")]
+    public string Token { get; set; } = string.Empty;
+}
+
+/// <summary>Normalized local WebSocket listener settings.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HostLocalServerConfiguration
+{
+    /// <summary>Hostname or IP address to bind.</summary>
+    [JsonPropertyName("hostname")]
+    public string Hostname { get; set; } = string.Empty;
+
+    /// <summary>Port to bind, with zero requesting OS allocation.</summary>
+    [JsonPropertyName("port")]
+    public int Port { get; set; }
+
+    /// <summary>Whether the listener requires token authentication.</summary>
+    [JsonPropertyName("requireConnectionToken")]
+    public bool RequireConnectionToken { get; set; }
+
+    /// <summary>Secret connection token, absent when authentication is disabled.</summary>
+    [JsonPropertyName("token")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Token { get; set; }
+}
+
+/// <summary>Normalized listener settings delivered only to the supervised hosting participant.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostGetConfigurationResult
+{
+    /// <summary>Initial remote creation policy, independent of application session factories. Defaults to denied when omitted.</summary>
+    [JsonPropertyName("allowCreatingNewSessions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AllowCreatingNewSessions { get; set; }
+
+    /// <summary>Explicit host-wide admission policy. Always supplied by the runtime after validating host.start.</summary>
+    [JsonPropertyName("authentication")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HostAuthentication? Authentication { get; set; }
+
+    /// <summary>Requested GitHub Mission Control registration.</summary>
+    [JsonPropertyName("githubEnvironment")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HostGitHubEnvironmentOptions? GitHubEnvironment { get; set; }
+
+    /// <summary>Normalized local listener settings, absent for relay-only hosts.</summary>
+    [JsonPropertyName("localServer")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HostLocalServerConfiguration? LocalServer { get; set; }
+
+    /// <summary>Whether app-owned durable sessions are resumed by the owning application.</summary>
+    [JsonPropertyName("resumeFactory")]
+    public bool ResumeFactory { get; set; }
+
+    /// <summary>Whether session materialization is delegated to the owning application.</summary>
+    [JsonPropertyName("sessionFactory")]
+    public bool SessionFactory { get; set; }
+}
+
+/// <summary>Private credentials delivered only to a runtime-owned Mission Control hosting participant.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostGetAuthenticationCredentialsResult
+{
+    /// <summary>GitHub API base URL for the authenticated service.</summary>
+    [JsonPropertyName("githubApiUrl")]
+    public string GitHubApiUrl { get; set; } = string.Empty;
+
+    /// <summary>Hostname of the authenticated GitHub service.</summary>
+    [JsonPropertyName("githubHost")]
+    public string GitHubHost { get; set; } = string.Empty;
+
+    /// <summary>Mission Control API origin for environment registration and management.</summary>
+    [JsonPropertyName("missionControlUrl")]
+    public string MissionControlUrl { get; set; } = string.Empty;
+
+    /// <summary>Current bearer token for the authenticated GitHub identity.</summary>
+    [JsonPropertyName("token")]
+    public string Token { get; set; } = string.Empty;
+}
+
+/// <summary>A validated credential with a required, future RFC3339 expiration.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HostAuthenticationResult
+{
+    /// <summary>Required future expiration in RFC3339 format.</summary>
+    [JsonPropertyName("expiresAt")]
+    public string ExpiresAt { get; set; } = string.Empty;
+
+    /// <summary>Stable identity, required to match the configured owner exactly.</summary>
+    [JsonPropertyName("identity")]
+    public string Identity { get; set; } = string.Empty;
+}
+
+/// <summary>A decrypted credential presented by a supervised hosting participant.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostAuthenticateRequest
+{
+    /// <summary>Unique validation attempt, scoped to this host.</summary>
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = string.Empty;
+
+    /// <summary>Decrypted admission token, never an inference credential.</summary>
+    [JsonPropertyName("token")]
+    public string Token { get; set; } = string.Empty;
+}
+
+/// <summary>Empty acknowledgement for a completed host lifecycle operation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostCancelAuthenticationResult
+{
+}
+
+/// <summary>Cancels a pending validation on the supervised participant's connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostCancelAuthenticationRequest
+{
+    /// <summary>Validation attempt to cancel.</summary>
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = string.Empty;
+}
+
+/// <summary>Empty acknowledgement for a completed host lifecycle operation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostReadyResult
+{
+}
+
+/// <summary>Readiness reported by the supervised hosting participant on its own SDK connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostReadyRequest
+{
+    /// <summary>Actual bound WebSocket URL.</summary>
+    [JsonPropertyName("address")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Address { get; set; }
+
+    /// <summary>Registered environment ID, reported only once the relay transport is connected.</summary>
+    [JsonPropertyName("environmentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EnvironmentId { get; set; }
+
+    /// <summary>Configured secret token, absent when authentication is disabled.</summary>
+    [JsonPropertyName("token")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Token { get; set; }
+}
+
+/// <summary>Result of a closed native relay operation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsCommandResult
+{
+    /// <summary>Native operation result; null indicates an absent optional host feature.</summary>
+    [JsonPropertyName("value")]
+    public JsonElement Value { get; set; } = JsonElement.Parse("null");
+}
+
+/// <summary>A native relay operation, not an arbitrary remote JSON-RPC method.</summary>
+/// <remarks>Polymorphic base type discriminated by <c>type</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonPolymorphic(
+    TypeDiscriminatorPropertyName = "type",
+    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
+[JsonDerivedType(typeof(RemoteHostCommandSelectSession), "selectSession")]
+[JsonDerivedType(typeof(RemoteHostCommandClientId), "clientId")]
+[JsonDerivedType(typeof(RemoteHostCommandPrepareAttachments), "prepareAttachments")]
+[JsonDerivedType(typeof(RemoteHostCommandStartTurn), "startTurn")]
+[JsonDerivedType(typeof(RemoteHostCommandCancelTurn), "cancelTurn")]
+[JsonDerivedType(typeof(RemoteHostCommandConfirmToolCall), "confirmToolCall")]
+[JsonDerivedType(typeof(RemoteHostCommandConfirmToolResult), "confirmToolResult")]
+[JsonDerivedType(typeof(RemoteHostCommandCompleteToolCall), "completeToolCall")]
+[JsonDerivedType(typeof(RemoteHostCommandSetMode), "setMode")]
+[JsonDerivedType(typeof(RemoteHostCommandSetAllowedModels), "setAllowedModels")]
+[JsonDerivedType(typeof(RemoteHostCommandGetSessionModels), "getSessionModels")]
+[JsonDerivedType(typeof(RemoteHostCommandSetApprovalMode), "setApprovalMode")]
+[JsonDerivedType(typeof(RemoteHostCommandSetSessionApproveAll), "setSessionApproveAll")]
+[JsonDerivedType(typeof(RemoteHostCommandCompleteExitPlanInput), "completeExitPlanInput")]
+[JsonDerivedType(typeof(RemoteHostCommandCompleteUserInput), "completeUserInput")]
+[JsonDerivedType(typeof(RemoteHostCommandSetModel), "setModel")]
+[JsonDerivedType(typeof(RemoteHostCommandSetDraftText), "setDraftText")]
+[JsonDerivedType(typeof(RemoteHostCommandPublishViewState), "publishViewState")]
+[JsonDerivedType(typeof(RemoteHostCommandSelectAgent), "selectAgent")]
+[JsonDerivedType(typeof(RemoteHostCommandSetPendingMessage), "setPendingMessage")]
+[JsonDerivedType(typeof(RemoteHostCommandRemovePendingMessage), "removePendingMessage")]
+[JsonDerivedType(typeof(RemoteHostCommandSessionDiff), "sessionDiff")]
+[JsonDerivedType(typeof(RemoteHostCommandAnnounceActiveClient), "announceActiveClient")]
+[JsonDerivedType(typeof(RemoteHostCommandRemoveActiveClient), "removeActiveClient")]
+[JsonDerivedType(typeof(RemoteHostCommandSetTitle), "setTitle")]
+[JsonDerivedType(typeof(RemoteHostCommandGetAutopilotObjectiveState), "getAutopilotObjectiveState")]
+[JsonDerivedType(typeof(RemoteHostCommandDisableSandboxForSession), "disableSandboxForSession")]
+[JsonDerivedType(typeof(RemoteHostCommandGetPlan), "getPlan")]
+[JsonDerivedType(typeof(RemoteHostCommandListCheckpoints), "listCheckpoints")]
+[JsonDerivedType(typeof(RemoteHostCommandReadCheckpoint), "readCheckpoint")]
+[JsonDerivedType(typeof(RemoteHostCommandListWorkspaceFiles), "listWorkspaceFiles")]
+[JsonDerivedType(typeof(RemoteHostCommandCompletions), "completions")]
+[JsonDerivedType(typeof(RemoteHostCommandBindUserRequestedShell), "bindUserRequestedShell")]
+[JsonDerivedType(typeof(RemoteHostCommandAuthorizeMcpResource), "authorizeMcpResource")]
+public partial class RemoteHostCommand
+{
+    /// <summary>The type discriminator.</summary>
+    [JsonPropertyName("type")]
+    public virtual string Type { get; set; } = string.Empty;
+}
+
+
+/// <summary>Select a session from the engine's existing catalog.</summary>
+/// <remarks>The <c>selectSession</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandSelectSession : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "selectSession";
+
+    /// <summary>Optional session identifier; absence selects the engine's default.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("sessionId")]
+    public string? SessionId { get; set; }
+}
+
+/// <summary>Read the effective client identity assigned during connection.</summary>
+/// <remarks>The <c>clientId</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandClientId : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "clientId";
+}
+
+/// <summary>Prepare local controller attachments before they cross the remote boundary.</summary>
+/// <remarks>The <c>prepareAttachments</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandPrepareAttachments : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "prepareAttachments";
+
+    /// <summary>Existing SDK attachment descriptions.</summary>
+    [JsonPropertyName("attachments")]
+    public required IList<JsonElement> Attachments { get; set; }
+}
+
+/// <summary>Start a remote turn exactly once.</summary>
+/// <remarks>The <c>startTurn</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandStartTurn : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "startTurn";
+
+    /// <summary>Prepared AHP attachments.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("attachments")]
+    public IList<JsonElement>? Attachments { get; set; }
+
+    /// <summary>Optional distinct model prompt.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("modelText")]
+    public string? ModelText { get; set; }
+
+    /// <summary>Display prompt.</summary>
+    [JsonPropertyName("text")]
+    public required string Text { get; set; }
+
+    /// <summary>Optional caller-selected turn identifier.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("turnId")]
+    public string? TurnId { get; set; }
+}
+
+/// <summary>Cancel an existing remote turn.</summary>
+/// <remarks>The <c>cancelTurn</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandCancelTurn : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "cancelTurn";
+
+    /// <summary>Turn identifier.</summary>
+    [JsonPropertyName("turnId")]
+    public required string TurnId { get; set; }
+}
+
+/// <summary>Answer a pending tool approval.</summary>
+/// <remarks>The <c>confirmToolCall</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandConfirmToolCall : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "confirmToolCall";
+
+    /// <summary>Approval decision.</summary>
+    [JsonPropertyName("approved")]
+    public required bool Approved { get; set; }
+
+    /// <summary>Permission context forwarded to the session owner.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("decisionContext")]
+    public JsonElement? DecisionContext { get; set; }
+
+    /// <summary>Machine-readable decision reason.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+
+    /// <summary>User-visible reason.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("reasonMessage")]
+    public string? ReasonMessage { get; set; }
+
+    /// <summary>Host-advertised option identifier.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("selectedOptionId")]
+    public string? SelectedOptionId { get; set; }
+
+    /// <summary>Tool call identifier.</summary>
+    [JsonPropertyName("toolCallId")]
+    public required string ToolCallId { get; set; }
+
+    /// <summary>Turn identifier.</summary>
+    [JsonPropertyName("turnId")]
+    public required string TurnId { get; set; }
+}
+
+/// <summary>Answer approval for a tool result.</summary>
+/// <remarks>The <c>confirmToolResult</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandConfirmToolResult : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "confirmToolResult";
+
+    /// <summary>Approval decision.</summary>
+    [JsonPropertyName("approved")]
+    public required bool Approved { get; set; }
+
+    /// <summary>Permission context.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("decisionContext")]
+    public JsonElement? DecisionContext { get; set; }
+
+    /// <summary>Tool call identifier.</summary>
+    [JsonPropertyName("toolCallId")]
+    public required string ToolCallId { get; set; }
+
+    /// <summary>Turn identifier.</summary>
+    [JsonPropertyName("turnId")]
+    public required string TurnId { get; set; }
+}
+
+/// <summary>Complete a tool call on its owning chat.</summary>
+/// <remarks>The <c>completeToolCall</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandCompleteToolCall : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "completeToolCall";
+
+    /// <summary>AHP tool result.</summary>
+    [JsonPropertyName("result")]
+    public required JsonElement Result { get; set; }
+
+    /// <summary>Tool call identifier.</summary>
+    [JsonPropertyName("toolCallId")]
+    public required string ToolCallId { get; set; }
+
+    /// <summary>Turn identifier.</summary>
+    [JsonPropertyName("turnId")]
+    public required string TurnId { get; set; }
+}
+
+/// <summary>Change the remote session mode.</summary>
+/// <remarks>The <c>setMode</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandSetMode : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "setMode";
+
+    /// <summary>Remote mode identifier.</summary>
+    [JsonPropertyName("mode")]
+    public required string Mode { get; set; }
+}
+
+/// <summary>Set permitted model identifiers.</summary>
+/// <remarks>The <c>setAllowedModels</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandSetAllowedModels : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "setAllowedModels";
+
+    /// <summary>Null restores the host's default model policy.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("allowedModels")]
+    public IList<string>? AllowedModels { get; set; }
+}
+
+/// <summary>Read models through the remote owner.</summary>
+/// <remarks>The <c>getSessionModels</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandGetSessionModels : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "getSessionModels";
+
+    /// <summary>Whether to bypass the host model cache.</summary>
+    [JsonPropertyName("skipCache")]
+    public required bool SkipCache { get; set; }
+}
+
+/// <summary>Change the approval mode.</summary>
+/// <remarks>The <c>setApprovalMode</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandSetApprovalMode : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "setApprovalMode";
+
+    /// <summary>Approval mode identifier.</summary>
+    [JsonPropertyName("mode")]
+    public required string Mode { get; set; }
+}
+
+/// <summary>Set the remote session's approve-all state.</summary>
+/// <remarks>The <c>setSessionApproveAll</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandSetSessionApproveAll : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "setSessionApproveAll";
+
+    /// <summary>Whether approve-all is enabled.</summary>
+    [JsonPropertyName("enabled")]
+    public required bool Enabled { get; set; }
+}
+
+/// <summary>Answer a pending plan approval.</summary>
+/// <remarks>The <c>completeExitPlanInput</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandCompleteExitPlanInput : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "completeExitPlanInput";
+
+    /// <summary>Approval decision.</summary>
+    [JsonPropertyName("approved")]
+    public required bool Approved { get; set; }
+
+    /// <summary>Optional user feedback.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("feedback")]
+    public string? Feedback { get; set; }
+
+    /// <summary>Pending request identifier.</summary>
+    [JsonPropertyName("requestId")]
+    public required string RequestId { get; set; }
+
+    /// <summary>Selected host action.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("selectedAction")]
+    public string? SelectedAction { get; set; }
+}
+
+/// <summary>Answer an interactive user question.</summary>
+/// <remarks>The <c>completeUserInput</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandCompleteUserInput : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "completeUserInput";
+
+    /// <summary>User answer.</summary>
+    [JsonPropertyName("answer")]
+    public required string Answer { get; set; }
+
+    /// <summary>Whether the user dismissed the question.</summary>
+    [JsonPropertyName("dismissed")]
+    public required bool Dismissed { get; set; }
+
+    /// <summary>Whether the answer is text.</summary>
+    [JsonPropertyName("isText")]
+    public required bool IsText { get; set; }
+
+    /// <summary>Optional question identifier.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("questionId")]
+    public string? QuestionId { get; set; }
+
+    /// <summary>Pending request identifier.</summary>
+    [JsonPropertyName("requestId")]
+    public required string RequestId { get; set; }
+
+    /// <summary>Whether the answer came from a freeform entry.</summary>
+    [JsonPropertyName("wasFreeform")]
+    public required bool WasFreeform { get; set; }
+}
+
+/// <summary>Select an AHP model.</summary>
+/// <remarks>The <c>setModel</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandSetModel : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "setModel";
+
+    /// <summary>Host-advertised model selection.</summary>
+    [JsonPropertyName("model")]
+    public required JsonElement Model { get; set; }
+}
+
+/// <summary>Publish shared composer text.</summary>
+/// <remarks>The <c>setDraftText</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandSetDraftText : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "setDraftText";
+
+    /// <summary>Composer text.</summary>
+    [JsonPropertyName("text")]
+    public required string Text { get; set; }
+}
+
+/// <summary>Publish shared terminal view state.</summary>
+/// <remarks>The <c>publishViewState</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandPublishViewState : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "publishViewState";
+
+    /// <summary>Application view projection.</summary>
+    [JsonPropertyName("view")]
+    public required JsonElement View { get; set; }
+}
+
+/// <summary>Select a host agent.</summary>
+/// <remarks>The <c>selectAgent</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandSelectAgent : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "selectAgent";
+
+    /// <summary>Agent URI; null selects the host default.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("agentUri")]
+    public string? AgentUri { get; set; }
+}
+
+/// <summary>Insert or replace a queued or steering message.</summary>
+/// <remarks>The <c>setPendingMessage</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandSetPendingMessage : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "setPendingMessage";
+
+    /// <summary>Prepared AHP attachments.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("attachments")]
+    public IList<JsonElement>? Attachments { get; set; }
+
+    /// <summary>Message identifier.</summary>
+    [JsonPropertyName("id")]
+    public required string Id { get; set; }
+
+    /// <summary>AHP pending message kind.</summary>
+    [JsonPropertyName("kind")]
+    public required RemoteHostPendingMessageKind Kind { get; set; }
+
+    /// <summary>Optional distinct model prompt.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("modelText")]
+    public string? ModelText { get; set; }
+
+    /// <summary>Display prompt.</summary>
+    [JsonPropertyName("text")]
+    public required string Text { get; set; }
+}
+
+/// <summary>Remove a queued or steering message.</summary>
+/// <remarks>The <c>removePendingMessage</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandRemovePendingMessage : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "removePendingMessage";
+
+    /// <summary>Message identifier.</summary>
+    [JsonPropertyName("id")]
+    public required string Id { get; set; }
+
+    /// <summary>AHP pending message kind.</summary>
+    [JsonPropertyName("kind")]
+    public required RemoteHostPendingMessageKind Kind { get; set; }
+}
+
+/// <summary>Read the remote session's changeset.</summary>
+/// <remarks>The <c>sessionDiff</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandSessionDiff : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "sessionDiff";
+
+    /// <summary>Requested workspace diff mode.</summary>
+    [JsonPropertyName("mode")]
+    public required string Mode { get; set; }
+}
+
+/// <summary>Announce this client's presence.</summary>
+/// <remarks>The <c>announceActiveClient</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandAnnounceActiveClient : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "announceActiveClient";
+
+    /// <summary>Optional client display name.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; set; }
+}
+
+/// <summary>Withdraw this client's presence.</summary>
+/// <remarks>The <c>removeActiveClient</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandRemoveActiveClient : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "removeActiveClient";
+}
+
+/// <summary>Change a remote session title.</summary>
+/// <remarks>The <c>setTitle</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandSetTitle : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "setTitle";
+
+    /// <summary>New title.</summary>
+    [JsonPropertyName("title")]
+    public required string Title { get; set; }
+}
+
+/// <summary>Read the owner-authoritative Autopilot objective.</summary>
+/// <remarks>The <c>getAutopilotObjectiveState</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandGetAutopilotObjectiveState : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "getAutopilotObjectiveState";
+}
+
+/// <summary>Disable the sandbox through its pending owner request.</summary>
+/// <remarks>The <c>disableSandboxForSession</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandDisableSandboxForSession : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "disableSandboxForSession";
+
+    /// <summary>Permission decision context.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("decisionContext")]
+    public JsonElement? DecisionContext { get; set; }
+
+    /// <summary>Pending request identifier.</summary>
+    [JsonPropertyName("requestId")]
+    public required string RequestId { get; set; }
+}
+
+/// <summary>Read the remote plan.</summary>
+/// <remarks>The <c>getPlan</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandGetPlan : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "getPlan";
+}
+
+/// <summary>List checkpoint titles.</summary>
+/// <remarks>The <c>listCheckpoints</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandListCheckpoints : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "listCheckpoints";
+}
+
+/// <summary>Read one checkpoint.</summary>
+/// <remarks>The <c>readCheckpoint</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandReadCheckpoint : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "readCheckpoint";
+
+    /// <summary>Checkpoint number.</summary>
+    [JsonPropertyName("number")]
+    public required long Number { get; set; }
+}
+
+/// <summary>List remote workspace files.</summary>
+/// <remarks>The <c>listWorkspaceFiles</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandListWorkspaceFiles : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "listWorkspaceFiles";
+}
+
+/// <summary>Request remote composer completions.</summary>
+/// <remarks>The <c>completions</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandCompletions : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "completions";
+
+    /// <summary>Cursor offset in UTF-16 code units.</summary>
+    [JsonPropertyName("offset")]
+    public required long Offset { get; set; }
+
+    /// <summary>Composer text.</summary>
+    [JsonPropertyName("text")]
+    public required string Text { get; set; }
+}
+
+/// <summary>Associate local shell routing with the remote session.</summary>
+/// <remarks>The <c>bindUserRequestedShell</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandBindUserRequestedShell : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "bindUserRequestedShell";
+
+    /// <summary>Native session identifier owned by the same runtime.</summary>
+    [JsonPropertyName("nativeSessionId")]
+    public required string NativeSessionId { get; set; }
+}
+
+/// <summary>Resolve a pending MCP resource approval through the session owner.</summary>
+/// <remarks>The <c>authorizeMcpResource</c> variant of <see cref="RemoteHostCommand"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostCommandAuthorizeMcpResource : RemoteHostCommand
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "authorizeMcpResource";
+
+    /// <summary>Existing resource authorization context.</summary>
+    [JsonPropertyName("context")]
+    public required JsonElement Context { get; set; }
+
+    /// <summary>Native session identifier.</summary>
+    [JsonPropertyName("nativeSessionId")]
+    public required string NativeSessionId { get; set; }
+
+    /// <summary>Pending request identifier.</summary>
+    [JsonPropertyName("requestId")]
+    public required string RequestId { get; set; }
+
+    /// <summary>Protected resource URI.</summary>
+    [JsonPropertyName("resource")]
+    public required string Resource { get; set; }
+}
+
+/// <summary>Execute a closed native operation on an owned remote host.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsCommandRequest
+{
+    /// <summary>Native engine command; arbitrary protocol methods are not accepted.</summary>
+    [JsonPropertyName("command")]
+    public RemoteHostCommand Command { get => field ??= new(); set; }
+
+    /// <summary>Owned outgoing connection UUID.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>AHP session or chat URI; absent only for connection-wide commands.</summary>
+    [JsonPropertyName("sessionUri")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionUri { get; set; }
+}
+
+/// <summary>An allocated, inert outgoing connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsCreateResult
+{
+    /// <summary>Initial effective client identity.</summary>
+    [JsonPropertyName("clientId")]
+    public string ClientId { get; set; } = string.Empty;
+
+    /// <summary>Application-selected connection UUID.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>Correlation identifier for existing host event consumers.</summary>
+    [JsonPropertyName("relayId")]
+    public long RelayId { get; set; }
+
+    /// <summary>Canonical initial engine state.</summary>
+    [JsonPropertyName("state")]
+    public JsonElement State { get; set; } = JsonElement.Parse("null");
+}
+
+/// <summary>Exactly one outgoing AHP transport.</summary>
+/// <remarks>Polymorphic base type discriminated by <c>kind</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonPolymorphic(
+    TypeDiscriminatorPropertyName = "kind",
+    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
+[JsonDerivedType(typeof(RemoteHostTransportDirect), "direct")]
+[JsonDerivedType(typeof(RemoteHostTransportMissionControl), "missionControl")]
+public partial class RemoteHostTransport
+{
+    /// <summary>The type discriminator.</summary>
+    [JsonPropertyName("kind")]
+    public virtual string Kind { get; set; } = string.Empty;
+}
+
+
+/// <summary>Connect directly without sharing a GitHub credential unless explicitly allowed.</summary>
+/// <remarks>The <c>direct</c> variant of <see cref="RemoteHostTransport"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostTransportDirect : RemoteHostTransport
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Kind => "direct";
+
+    /// <summary>Explicit user permission to share the owner's GitHub credential with this endpoint.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("authenticateWithGitHub")]
+    public bool? AuthenticateWithGitHub { get; set; }
+
+    /// <summary>Absolute WebSocket endpoint selected by the application.</summary>
+    [JsonPropertyName("url")]
+    public required string Url { get; set; }
+}
+
+/// <summary>Connect through the authenticated account's Mission Control environment.</summary>
+/// <remarks>The <c>missionControl</c> variant of <see cref="RemoteHostTransport"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class RemoteHostTransportMissionControl : RemoteHostTransport
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Kind => "missionControl";
+
+    /// <summary>Mission Control service endpoint.</summary>
+    [JsonPropertyName("baseUrl")]
+    public required string BaseUrl { get; set; }
+
+    /// <summary>Environment identifier, preserving its original case.</summary>
+    [JsonPropertyName("environmentId")]
+    public required string EnvironmentId { get; set; }
+}
+
+/// <summary>Allocate an inert outgoing connection under the calling SDK connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsCreateRequest
+{
+    /// <summary>Optional stable application client identity for the AHP handshake.</summary>
+    [JsonPropertyName("clientId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ClientId { get; set; }
+
+    /// <summary>Optional file logger owned by this SDK connection, with its filter and flush boundary.</summary>
+    [JsonPropertyName("diagnosticLogId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DiagnosticLogId { get; set; }
+
+    /// <summary>Application-generated UUID, also usable to dispose a canceled creation.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>The single endpoint this connection may contact.</summary>
+    [JsonPropertyName("transport")]
+    public RemoteHostTransport Transport { get => field ??= new(); set; }
+}
+
+/// <summary>An outgoing connection's canonical engine snapshot.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsConnectResult
+{
+    /// <summary>Effective client identity assigned by the same relay engine.</summary>
+    [JsonPropertyName("clientId")]
+    public string ClientId { get; set; } = string.Empty;
+
+    /// <summary>The runtime engine's revisioned AHP state, not another session model.</summary>
+    [JsonPropertyName("state")]
+    public JsonElement State { get; set; } = JsonElement.Parse("null");
+}
+
+/// <summary>Address an outgoing connection owned by this SDK connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsConnectRequest
+{
+    /// <summary>Outgoing connection UUID returned by create.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+}
+
+/// <summary>An outgoing connection's canonical engine snapshot.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsReconnectResult
+{
+    /// <summary>Effective client identity assigned by the same relay engine.</summary>
+    [JsonPropertyName("clientId")]
+    public string ClientId { get; set; } = string.Empty;
+
+    /// <summary>The runtime engine's revisioned AHP state, not another session model.</summary>
+    [JsonPropertyName("state")]
+    public JsonElement State { get; set; } = JsonElement.Parse("null");
+}
+
+/// <summary>Address an outgoing connection owned by this SDK connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsReconnectRequest
+{
+    /// <summary>Outgoing connection UUID returned by create.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+}
+
+/// <summary>An outgoing connection's canonical engine snapshot.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsGetStateResult
+{
+    /// <summary>Effective client identity assigned by the same relay engine.</summary>
+    [JsonPropertyName("clientId")]
+    public string ClientId { get; set; } = string.Empty;
+
+    /// <summary>The runtime engine's revisioned AHP state, not another session model.</summary>
+    [JsonPropertyName("state")]
+    public JsonElement State { get; set; } = JsonElement.Parse("null");
+}
+
+/// <summary>Address an outgoing connection owned by this SDK connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsGetStateRequest
+{
+    /// <summary>Outgoing connection UUID returned by create.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+}
+
+/// <summary>An outgoing connection's canonical engine snapshot.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsListSessionsResult
+{
+    /// <summary>Effective client identity assigned by the same relay engine.</summary>
+    [JsonPropertyName("clientId")]
+    public string ClientId { get; set; } = string.Empty;
+
+    /// <summary>The runtime engine's revisioned AHP state, not another session model.</summary>
+    [JsonPropertyName("state")]
+    public JsonElement State { get; set; } = JsonElement.Parse("null");
+}
+
+/// <summary>Address an outgoing connection owned by this SDK connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsListSessionsRequest
+{
+    /// <summary>Outgoing connection UUID returned by create.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+}
+
+/// <summary>Completion of an outgoing connection operation with no result.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsDisposeResult
+{
+}
+
+/// <summary>Address an outgoing connection owned by this SDK connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsDisposeRequest
+{
+    /// <summary>Outgoing connection UUID returned by create.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+}
+
+/// <summary>Authentication outcome for one protected resource.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class RemoteHostResourceAuthentication
+{
+    /// <summary>Host failure detail when authentication failed.</summary>
+    [JsonPropertyName("error")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Error { get; set; }
+
+    /// <summary>Whether the host accepted the credential.</summary>
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+
+    /// <summary>Protected resource URI.</summary>
+    [JsonPropertyName("resource")]
+    public string Resource { get; set; } = string.Empty;
+}
+
+/// <summary>Independent authentication outcomes; one failure does not hide other outcomes.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsAuthenticateResourcesResult
+{
+    /// <summary>One outcome for every resource answered.</summary>
+    [JsonPropertyName("resources")]
+    public IList<RemoteHostResourceAuthentication> Resources { get => field ??= []; set; }
+}
+
+/// <summary>Authenticate resources using the connection owner's renewable credential.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsAuthenticateResourcesRequest
+{
+    /// <summary>Additional protected resources to answer alongside advertised requirements.</summary>
+    [JsonPropertyName("extraResources")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? ExtraResources { get; set; }
+
+    /// <summary>Owned outgoing connection UUID.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+}
+
+/// <summary>The created session and the refresh already performed by its owning engine.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsCreateSessionResult
+{
+    /// <summary>Effective client identity after the connection's negotiation.</summary>
+    [JsonPropertyName("clientId")]
+    public string ClientId { get; set; } = string.Empty;
+
+    /// <summary>Canonical engine state after creation.</summary>
+    [JsonPropertyName("state")]
+    public JsonElement State { get; set; } = JsonElement.Parse("null");
+
+    /// <summary>Newly created AHP session URI.</summary>
+    [JsonPropertyName("uri")]
+    public string Uri { get; set; } = string.Empty;
+}
+
+/// <summary>Create a session on the existing remote host.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsCreateSessionRequest
+{
+    /// <summary>Owned outgoing connection UUID.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>Native AHP session options, including model, provider, directory, and project selection.</summary>
+    [JsonPropertyName("options")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Options { get; set; }
+
+    /// <summary>Optional initial prompt, sent exactly once by the owning engine.</summary>
+    [JsonPropertyName("text")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Text { get; set; }
+}
+
+/// <summary>Completion of an outgoing connection operation with no result.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsDeleteSessionResult
+{
+}
+
+/// <summary>Operate on a session belonging to an owned outgoing connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsDeleteSessionRequest
+{
+    /// <summary>Owned outgoing connection UUID.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>AHP session URI advertised by that connection.</summary>
+    [JsonPropertyName("sessionUri")]
+    public string SessionUri { get; set; } = string.Empty;
+}
+
+/// <summary>Completion of an outgoing connection operation with no result.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsSubscribeSessionResult
+{
+}
+
+/// <summary>Operate on a session belonging to an owned outgoing connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsSubscribeSessionRequest
+{
+    /// <summary>Owned outgoing connection UUID.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>AHP session URI advertised by that connection.</summary>
+    [JsonPropertyName("sessionUri")]
+    public string SessionUri { get; set; } = string.Empty;
+}
+
+/// <summary>Completion of an outgoing connection operation with no result.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsUnsubscribeSessionResult
+{
+}
+
+/// <summary>Operate on a session belonging to an owned outgoing connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class RemoteHostsUnsubscribeSessionRequest
+{
+    /// <summary>Owned outgoing connection UUID.</summary>
+    [JsonPropertyName("hostId")]
+    public string HostId { get; set; } = string.Empty;
+
+    /// <summary>AHP session URI advertised by that connection.</summary>
+    [JsonPropertyName("sessionUri")]
+    public string SessionUri { get; set; } = string.Empty;
+}
+
 /// <summary>An optional plugin default from managed settings. Explicit user choices override this default.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class ManagedPluginAssignment
@@ -4888,6 +6573,23 @@ internal sealed class AccountLogoutRequest
     public string? SelectionId { get; set; }
 }
 
+/// <summary>Relay endpoints from the original account owner and its captured credential environment.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class AccountRelayBootstrapConfig
+{
+    /// <summary>Mission Control endpoint, including a configured endpoint override.</summary>
+    [JsonPropertyName("missionControlUrl")]
+    public string MissionControlUrl { get; set; } = string.Empty;
+
+    /// <summary>GitHub host of the active account.</summary>
+    [JsonPropertyName("relayHost")]
+    public string RelayHost { get; set; } = string.Empty;
+
+    /// <summary>Whether an interactive flow can upgrade the active credential.</summary>
+    [JsonPropertyName("tokenUpgradeable")]
+    public bool TokenUpgradeable { get; set; }
+}
+
 /// <summary>The wording the runtime uses for an authentication identity.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed class AccountDescribeAuthInfoResult
@@ -5028,6 +6730,216 @@ internal sealed class AccountGetHostUrlRequest
     [JsonPropertyName("ghHost")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? GhHost { get; set; }
+}
+
+/// <summary>One step in an interactive login flow. The consumer acts on the step and calls advance to proceed. Browser-open is encoded as two distinct steps by design: `open-url` is CONSUMER-driven (the provider surfaces the authorize URL and the consumer opens it — github.com/GHEC web), while `needs-interaction` is PROVIDER-driven (the provider opens the browser or broker UI itself and does not surface a URL — Entra). A device-code flow surfaces its one-time code as `device-code`; the consumer shows the code, may open the verification URI, and calls advance, which resolves once the user has authorized the device.</summary>
+/// <remarks>Polymorphic base type discriminated by <c>kind</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonPolymorphic(
+    TypeDiscriminatorPropertyName = "kind",
+    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
+[JsonDerivedType(typeof(AuthLoginStepOpenUrl), "open-url")]
+[JsonDerivedType(typeof(AuthLoginStepInputRequired), "input-required")]
+[JsonDerivedType(typeof(AuthLoginStepAwaiting), "awaiting")]
+[JsonDerivedType(typeof(AuthLoginStepNeedsInteraction), "needs-interaction")]
+[JsonDerivedType(typeof(AuthLoginStepCompleted), "completed")]
+[JsonDerivedType(typeof(AuthLoginStepError), "error")]
+[JsonDerivedType(typeof(AuthLoginStepDeviceCode), "device-code")]
+public partial class AuthLoginStep
+{
+    /// <summary>The type discriminator.</summary>
+    [JsonPropertyName("kind")]
+    public virtual string Kind { get; set; } = string.Empty;
+}
+
+
+/// <summary>The <c>open-url</c> variant of <see cref="AuthLoginStep"/>.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class AuthLoginStepOpenUrl : AuthLoginStep
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Kind => "open-url";
+
+    /// <summary>Authorize URL the consumer should open in a browser (consumer-driven browser-open).</summary>
+    [JsonPropertyName("url")]
+    public required string Url { get; set; }
+}
+
+/// <summary>The <c>input-required</c> variant of <see cref="AuthLoginStep"/>.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class AuthLoginStepInputRequired : AuthLoginStep
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Kind => "input-required";
+
+    /// <summary>Prompt for the value the provider needs; the consumer supplies it as advance input (e.g. a GitHub Enterprise Cloud host, *.ghe.com).</summary>
+    [JsonPropertyName("prompt")]
+    public required string Prompt { get; set; }
+}
+
+/// <summary>The <c>awaiting</c> variant of <see cref="AuthLoginStep"/>.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class AuthLoginStepAwaiting : AuthLoginStep
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Kind => "awaiting";
+}
+
+/// <summary>The <c>needs-interaction</c> variant of <see cref="AuthLoginStep"/>.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class AuthLoginStepNeedsInteraction : AuthLoginStep
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Kind => "needs-interaction";
+}
+
+/// <summary>A credential-free account choice after sign-in.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class AuthLoginAccount
+{
+    /// <summary>Host coordinate owned by the selected account's provider.</summary>
+    [JsonPropertyName("host")]
+    public string Host { get; set; } = string.Empty;
+
+    /// <summary>Provider kind that owns this account choice.</summary>
+    [JsonPropertyName("kind")]
+    public AccountKind Kind { get; set; }
+
+    /// <summary>Human-readable login for the account choice.</summary>
+    [JsonPropertyName("login")]
+    public string Login { get; set; } = string.Empty;
+
+    /// <summary>Opaque identifier supplied to the next login step to select this account.</summary>
+    [JsonPropertyName("selectionId")]
+    public string SelectionId { get; set; } = string.Empty;
+}
+
+/// <summary>Result of an interactive login flow. Pending consent or account selection is not terminal.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class AuthLoginResultDto
+{
+    /// <summary>Available accounts when sign-in is awaiting account selection, ordered with Microsoft 365 first.</summary>
+    [JsonPropertyName("accounts")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<AuthLoginAccount>? Accounts { get; set; }
+
+    /// <summary>Host that was signed in, when completed.</summary>
+    [Url]
+    [StringSyntax(StringSyntaxAttribute.Uri)]
+    [JsonPropertyName("host")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Host { get; set; }
+
+    /// <summary>Login that was signed in, when completed.</summary>
+    [JsonPropertyName("login")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Login { get; set; }
+
+    /// <summary>Current disposition of the login, including pending user decisions.</summary>
+    [JsonPropertyName("status")]
+    public AuthLoginResultStatus Status { get; set; }
+}
+
+/// <summary>The <c>completed</c> variant of <see cref="AuthLoginStep"/>.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class AuthLoginStepCompleted : AuthLoginStep
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Kind => "completed";
+
+    /// <summary>Login result. When status is needs-plaintext-consent or needs-account-selection, advance with the user's decision to continue.</summary>
+    [JsonPropertyName("result")]
+    public required AuthLoginResultDto Result { get; set; }
+}
+
+/// <summary>The <c>error</c> variant of <see cref="AuthLoginStep"/>.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class AuthLoginStepError : AuthLoginStep
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Kind => "error";
+
+    /// <summary>Human-readable failure message.</summary>
+    [JsonPropertyName("message")]
+    public required string Message { get; set; }
+}
+
+/// <summary>The <c>device-code</c> variant of <see cref="AuthLoginStep"/>.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class AuthLoginStepDeviceCode : AuthLoginStep
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Kind => "device-code";
+
+    /// <summary>Seconds until the one-time code expires, measured from when this step was produced. Consumers can show a countdown or pick their own timeout instead of blocking until the provider rejects the code.</summary>
+    [JsonPropertyName("expiresIn")]
+    public required long ExpiresIn { get; set; }
+
+    /// <summary>Minimum seconds between authorization polls required by the provider. The runtime performs the polling itself for the duration of the single `advance` call, so this is informational (for example to drive a progress indicator); repeating `advance` is rejected as already advancing.</summary>
+    [JsonPropertyName("interval")]
+    public required long Interval { get; set; }
+
+    /// <summary>One-time code the user enters at the verification URI.</summary>
+    [JsonPropertyName("userCode")]
+    public required string UserCode { get; set; }
+
+    /// <summary>Page where the user enters the one-time code (consumer-driven browser-open).</summary>
+    [Url]
+    [StringSyntax(StringSyntaxAttribute.Uri)]
+    [JsonPropertyName("verificationUri")]
+    public required string VerificationUri { get; set; }
+}
+
+/// <summary>A started login flow: its opaque id and first step.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class AuthLoginBegun
+{
+    /// <summary>Opaque flow id used to advance or cancel this login.</summary>
+    [JsonPropertyName("flowId")]
+    public string FlowId { get; set; } = string.Empty;
+
+    /// <summary>The first step of the flow.</summary>
+    [JsonPropertyName("step")]
+    public AuthLoginStep Step { get => field ??= new(); set; }
+}
+
+/// <summary>The GitHub host to authorize through this connection's original account owner.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class AccountDeviceCodeLoginBeginRequest
+{
+    /// <summary>GitHub host for device authorization.</summary>
+    [JsonPropertyName("host")]
+    public string Host { get; set; } = string.Empty;
+}
+
+/// <summary>Advances a device authorization flow. A plaintext decision is accepted only after the runtime requests consent.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class AccountDeviceCodeLoginAdvanceRequest
+{
+    /// <summary>Explicit storage decision after a needs-plaintext-consent result.</summary>
+    [JsonPropertyName("allowPlaintext")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AllowPlaintext { get; set; }
+
+    /// <summary>Identifier returned by deviceCodeLogin.begin.</summary>
+    [JsonPropertyName("flowId")]
+    public string FlowId { get; set; } = string.Empty;
+}
+
+/// <summary>An opaque device authorization identifier owned by this connection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class AccountDeviceCodeLoginRequest
+{
+    /// <summary>Identifier returned by deviceCodeLogin.begin.</summary>
+    [JsonPropertyName("flowId")]
+    public string FlowId { get; set; } = string.Empty;
 }
 
 /// <summary>The shared session-name policy decision.</summary>
@@ -7763,6 +9675,15 @@ public sealed class SessionsListRequest
     public bool? ThrowOnError { get; set; }
 }
 
+/// <summary>Canonical live membership owned by this runtime engine.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionsListActiveResult
+{
+    /// <summary>Native identities of the engine's live sessions, including protocol-created sessions.</summary>
+    [JsonPropertyName("sessionIds")]
+    public IList<string> SessionIds { get => field ??= []; set; }
+}
+
 /// <summary>Persisted local session metadata, including identifiers, timestamps, summary/name, client, context, detached state, and task ID.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class LocalSessionMetadataValue
@@ -8375,11 +10296,16 @@ public sealed class SessionsSaveResult
 
 /// <summary>Session ID whose pending events should be flushed to disk.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class SessionsSaveRequest
+public sealed class SessionsSaveRequest
 {
+    /// <summary>Persist an unnamed session even before its first prompt. Omitted or null defaults to false.</summary>
+    [JsonPropertyName("force")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Force { get; set; }
+
     /// <summary>Session ID whose pending events should be flushed to disk.</summary>
     [JsonPropertyName("sessionId")]
-    public string SessionId { get; set; } = string.Empty;
+    public required string SessionId { get; set; }
 }
 
 /// <summary>Release the in-use lock held by this process for the given session. No-op when this process does not currently hold a lock for the session.</summary>
@@ -8554,16 +10480,26 @@ public sealed class SessionsReloadPluginHooksResult
 
 /// <summary>Active session ID and an optional flag for deferring repo-level hooks until folder trust.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class SessionsReloadPluginHooksRequest
+public sealed class SessionsReloadPluginHooksRequest
 {
     /// <summary>When true, skip repo-level hooks. Use before folder trust is confirmed; loadDeferredRepoHooks loads them post-trust.</summary>
     [JsonPropertyName("deferRepoHooks")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? DeferRepoHooks { get; set; }
 
+    /// <summary>Managed plugin specifications whose hooks must load before queue release.</summary>
+    [JsonPropertyName("requiredManagedPluginSpecs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? RequiredManagedPluginSpecs { get; set; }
+
     /// <summary>Active session ID to reload hooks for.</summary>
     [JsonPropertyName("sessionId")]
-    public string SessionId { get; set; } = string.Empty;
+    public required string SessionId { get; set; }
+
+    /// <summary>Whether hook reload failures must retain the managed-policy queue pause.</summary>
+    [JsonPropertyName("strictManagedPolicy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? StrictManagedPolicy { get; set; }
 }
 
 /// <summary>Queued repo-level startup prompts and the total hook command count after loading.</summary>
@@ -8847,10 +10783,35 @@ public sealed class SessionsStopRemoteControlRequest
     public bool? Force { get; set; }
 }
 
-/// <summary>Params to attach or detach an in-process ExtensionController delegate.</summary>
+/// <summary>Runtime-owned extension discovery and launch controls for a local host.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed class ConfigureSessionExtensionsParams
 {
+    /// <summary>Whether the model receives extension management tools.</summary>
+    [JsonPropertyName("exposeManagementTools")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ExposeManagementTools { get; set; }
+
+    /// <summary>Discovery sources allowed by the host's trust decision.</summary>
+    [JsonPropertyName("includeSources")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? IncludeSources { get; set; }
+
+    /// <summary>Whether discovered extension processes may run.</summary>
+    [JsonPropertyName("launchProcesses")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? LaunchProcesses { get; set; }
+
+    /// <summary>Whether extension management operations are enabled.</summary>
+    [JsonPropertyName("managementToolsEnabled")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ManagementToolsEnabled { get; set; }
+
+    /// <summary>Keep compatible extension processes instead of restarting them.</summary>
+    [JsonPropertyName("retainProcessesIfUnchanged")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RetainProcessesIfUnchanged { get; set; }
+
     /// <summary>Session to attach the extension controller delegate to.</summary>
     [JsonPropertyName("sessionId")]
     public string SessionId { get; set; } = string.Empty;
@@ -14785,7 +16746,7 @@ public sealed class EnvironmentsListResult
 
 /// <summary>Optional discovery filters supported by GitHub Mission Control.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class EnvironmentsListRequest
+public sealed class EnvironmentsListRequest
 {
     /// <summary>Restrict discovery to this compute kind.</summary>
     [JsonPropertyName("kind")]
@@ -14796,6 +16757,15 @@ internal sealed class EnvironmentsListRequest
     [JsonPropertyName("status")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Status { get; set; }
+
+    /// <summary>
+    /// Use the server's configured account instead of the connection's foreground account.
+    /// Omit or set false to retain connection authentication.
+    /// </summary>
+    [JsonInclude]
+    [JsonPropertyName("useConfiguredAccount")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal bool? UseConfiguredAccount { get; set; }
 }
 
 /// <summary>Safe discovery information for the requested environment.</summary>
@@ -14829,665 +16799,6 @@ internal sealed class EnvironmentsDeleteRequest
     /// <summary>User-managed environment to delete. GitHub-managed environments cannot be deleted.</summary>
     [JsonPropertyName("environmentId")]
     public string EnvironmentId { get; set; } = string.Empty;
-}
-
-/// <summary>The existing runtime identity and its resource on the listener.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class HostPublishSessionResult
-{
-    /// <summary>Canonical runtime ID of the published session.</summary>
-    [JsonPropertyName("sessionId")]
-    public string SessionId { get; set; } = string.Empty;
-
-    /// <summary>AHP resource URI for the session on this listener.</summary>
-    [JsonPropertyName("sessionUri")]
-    public string SessionUri { get; set; } = string.Empty;
-}
-
-/// <summary>Publishes a resident session attached to the listener's owning connection.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostPublishSessionRequest
-{
-    /// <summary>Listener UUID returned by host.start.</summary>
-    [JsonPropertyName("hostId")]
-    public string HostId { get; set; } = string.Empty;
-
-    /// <summary>Canonical runtime session ID attached to the listener's owning connection.</summary>
-    [JsonPropertyName("sessionId")]
-    public string SessionId { get; set; } = string.Empty;
-}
-
-/// <summary>Projection of the authoritative runtime credential transaction.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostCredentialLifecycleResult
-{
-    /// <summary>Pinned identity resolved through the original credential owner.</summary>
-    [JsonPropertyName("authInfo")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonElement? AuthInfo { get; set; }
-
-    /// <summary>Whether the runtime transaction bound its registration.</summary>
-    [JsonPropertyName("committed")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? Committed { get; set; }
-
-    /// <summary>Current registration when one exists.</summary>
-    [JsonPropertyName("registrationId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? RegistrationId { get; set; }
-
-    /// <summary>Whether rollback restored the displaced mapping.</summary>
-    [JsonPropertyName("restored")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? Restored { get; set; }
-
-    /// <summary>Whether resume retains the session's existing registration.</summary>
-    [JsonPropertyName("reusingSessionRegistration")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? ReusingSessionRegistration { get; set; }
-
-    /// <summary>Opaque runtime transaction capability.</summary>
-    [JsonPropertyName("transactionId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? TransactionId { get; set; }
-}
-
-/// <summary>Private host protocol for one runtime-owned credential transaction. Only the admitted in-process CLI host can use this protocol.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostCredentialLifecycleRequest
-{
-    /// <summary>Credential lifecycle transition or host-owned credential observation.</summary>
-    [JsonPropertyName("action")]
-    public HostCredentialLifecycleAction Action { get; set; }
-
-    /// <summary>Whether the original connection owns a renewable SDK callback rather than a static token context.</summary>
-    [JsonPropertyName("callback")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? Callback { get; set; }
-
-    /// <summary>Original callback connection. The runtime verifies that it belongs to this host's engine.</summary>
-    [JsonPropertyName("connectionId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public long? ConnectionId { get; set; }
-
-    /// <summary>Registration retained by a resident ambient-auth rollback.</summary>
-    [JsonPropertyName("previousRegistrationId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? PreviousRegistrationId { get; set; }
-
-    /// <summary>Existing credential registration, never a bearer token.</summary>
-    [JsonPropertyName("registrationId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? RegistrationId { get; set; }
-
-    /// <summary>Whether begin resumes an existing session.</summary>
-    [JsonPropertyName("resume")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? Resume { get; set; }
-
-    /// <summary>Session resolved by the original host lifecycle.</summary>
-    [JsonPropertyName("sessionId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? SessionId { get; set; }
-
-    /// <summary>Opaque runtime transaction capability returned by begin.</summary>
-    [JsonPropertyName("transactionId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? TransactionId { get; set; }
-}
-
-/// <summary>Publication withdrawal outcome; local history, worktrees and ongoing work are preserved.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class HostUnpublishSessionResult
-{
-    /// <summary>True when a publication was removed; false when it was already absent.</summary>
-    [JsonPropertyName("unpublished")]
-    public bool Unpublished { get; set; }
-}
-
-/// <summary>Withdraws an application publication without deleting its underlying local session.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostUnpublishSessionRequest
-{
-    /// <summary>Listener UUID returned by host.start; the caller must own the live listener.</summary>
-    [JsonPropertyName("hostId")]
-    public string HostId { get; set; } = string.Empty;
-
-    /// <summary>Canonical session ID in the durable catalog, whether resident or dormant.</summary>
-    [JsonPropertyName("sessionId")]
-    public string SessionId { get; set; } = string.Empty;
-}
-
-/// <summary>Metadata advertised by the AHP host, not a guarantee that history can be resumed.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class HostSessionSummary
-{
-    /// <summary>Optional activity description advertised by the host.</summary>
-    [JsonPropertyName("activity")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Activity { get; set; }
-
-    /// <summary>Session creation time as an ISO 8601 timestamp.</summary>
-    [JsonPropertyName("createdAt")]
-    public string CreatedAt { get; set; } = string.Empty;
-
-    /// <summary>Last modification time as an ISO 8601 timestamp.</summary>
-    [JsonPropertyName("modifiedAt")]
-    public string ModifiedAt { get; set; } = string.Empty;
-
-    /// <summary>Stable AHP resource URI identifying the session on this host.</summary>
-    [JsonPropertyName("resource")]
-    public string Resource { get; set; } = string.Empty;
-
-    /// <summary>Unsigned 32-bit AHP session status bitset (0..=4294967295); unknown bits must be preserved.</summary>
-    [JsonPropertyName("status")]
-    public long Status { get; set; }
-
-    /// <summary>Authoritative title advertised by the host.</summary>
-    [JsonPropertyName("title")]
-    public string Title { get; set; } = string.Empty;
-}
-
-/// <summary>The complete live and dormant advertised catalog, without subscribing to sessions.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class HostListSessionsResult
-{
-    /// <summary>Complete advertised session summaries, in the host's catalog order.</summary>
-    [JsonPropertyName("sessions")]
-    public IList<HostSessionSummary> Sessions { get => field ??= []; set; }
-}
-
-/// <summary>Reads a running host's catalog or the runtime's saved default catalog.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostListSessionsRequest
-{
-    /// <summary>
-    /// Listener UUID returned by host.start; the caller must own it. Omit to read
-    /// the saved default compute-identity catalog without starting a listener.
-    /// </summary>
-    [JsonPropertyName("hostId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? HostId { get; set; }
-}
-
-/// <summary>The resident session the application has materialized on its own connection.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostCreateSessionResult
-{
-    /// <summary>Runtime session UUID materialized on the application's SDK connection.</summary>
-    [JsonPropertyName("sessionId")]
-    public string SessionId { get; set; } = string.Empty;
-}
-
-/// <summary>Trusted admission context, not inference authentication or session configuration.</summary>
-/// <remarks>Polymorphic base type discriminated by <c>mode</c>.</remarks>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-[JsonPolymorphic(
-    TypeDiscriminatorPropertyName = "mode",
-    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
-[JsonDerivedType(typeof(HostSessionAuthenticationGitHub), "github")]
-[JsonDerivedType(typeof(HostSessionAuthenticationCustom), "custom")]
-[JsonDerivedType(typeof(HostSessionAuthenticationNone), "none")]
-public partial class HostSessionAuthentication
-{
-    /// <summary>The type discriminator.</summary>
-    [JsonPropertyName("mode")]
-    public virtual string Mode { get; set; } = string.Empty;
-}
-
-
-/// <summary>A verified GitHub owner.</summary>
-/// <remarks>The <c>github</c> variant of <see cref="HostSessionAuthentication"/>.</remarks>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class HostSessionAuthenticationGitHub : HostSessionAuthentication
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Mode => "github";
-
-    /// <summary>Verified host account identity.</summary>
-    [JsonPropertyName("identity")]
-    public required string Identity { get; set; }
-}
-
-/// <summary>An application-validated owner.</summary>
-/// <remarks>The <c>custom</c> variant of <see cref="HostSessionAuthentication"/>.</remarks>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class HostSessionAuthenticationCustom : HostSessionAuthentication
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Mode => "custom";
-
-    /// <summary>Verified application identity.</summary>
-    [JsonPropertyName("identity")]
-    public required string Identity { get; set; }
-}
-
-/// <summary>Explicitly anonymous admission.</summary>
-/// <remarks>The <c>none</c> variant of <see cref="HostSessionAuthentication"/>.</remarks>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class HostSessionAuthenticationNone : HostSessionAuthentication
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Mode => "none";
-}
-
-/// <summary>One application-owned session handoff, requested by the supervised hosting participant.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostCreateSessionRequest
-{
-    /// <summary>Trusted admission identity supplied by the hosting participant. Required by the runtime before a handoff is admitted.</summary>
-    [JsonPropertyName("authentication")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public HostSessionAuthentication? Authentication { get; set; }
-
-    /// <summary>Host-selected SDK creation or resume settings, without executable callbacks or tools.</summary>
-    [JsonPropertyName("config")]
-    public IDictionary<string, JsonElement> Config { get => field ??= new Dictionary<string, JsonElement>(); set; }
-
-    /// <summary>Unique identity for this participation, independent of the session lifetime.</summary>
-    [JsonPropertyName("handoffId")]
-    public string HandoffId { get; set; } = string.Empty;
-
-    /// <summary>
-    /// For an explicit publication, borrow an existing owning-connection resident
-    /// instead of invoking the resume factory. Cold sessions still use the factory.
-    /// </summary>
-    [JsonPropertyName("preferResident")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? PreferResident { get; set; }
-
-    /// <summary>Resume an app-owned durable session instead of creating a new session.</summary>
-    [JsonPropertyName("resume")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? Resume { get; set; }
-}
-
-/// <summary>Empty acknowledgement for a completed host lifecycle operation.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostReleaseSessionResult
-{
-}
-
-/// <summary>Ends one participation, not the application's session lifetime.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostReleaseSessionRequest
-{
-    /// <summary>Identity of the participation to release without destroying the session.</summary>
-    [JsonPropertyName("handoffId")]
-    public string HandoffId { get; set; } = string.Empty;
-}
-
-/// <summary>Listener readiness, returned only after binding and the supervised participant's SDK handshake.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class HostStartResult
-{
-    /// <summary>GitHub Mission Control environment ID, present when its relay transport is ready.</summary>
-    [JsonPropertyName("environmentId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? EnvironmentId { get; set; }
-
-    /// <summary>Caller-generated listener UUID.</summary>
-    [JsonPropertyName("hostId")]
-    public string HostId { get; set; } = string.Empty;
-
-    /// <summary>Separate host process ID, when provided by a legacy runtime. Absent for in-process listeners.</summary>
-    [JsonPropertyName("pid")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public long? Pid { get; set; }
-
-    /// <summary>Secret connection token, absent when authentication is disabled.</summary>
-    [JsonPropertyName("token")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Token { get; set; }
-
-    /// <summary>Actual bound WebSocket URL, including the allocated port.</summary>
-    [JsonPropertyName("url")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Url { get; set; }
-}
-
-/// <summary>Explicit host-wide session admission policy.</summary>
-/// <remarks>Polymorphic base type discriminated by <c>mode</c>.</remarks>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-[JsonPolymorphic(
-    TypeDiscriminatorPropertyName = "mode",
-    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
-[JsonDerivedType(typeof(HostAuthenticationGitHub), "github")]
-[JsonDerivedType(typeof(HostAuthenticationNone), "none")]
-[JsonDerivedType(typeof(HostAuthenticationCustom), "custom")]
-public partial class HostAuthentication
-{
-    /// <summary>The type discriminator.</summary>
-    [JsonPropertyName("mode")]
-    public virtual string Mode { get; set; } = string.Empty;
-}
-
-
-/// <summary>Admit the authenticated host's GitHub account.</summary>
-/// <remarks>The <c>github</c> variant of <see cref="HostAuthentication"/>.</remarks>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class HostAuthenticationGitHub : HostAuthentication
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Mode => "github";
-}
-
-/// <summary>Explicitly allow anonymous access.</summary>
-/// <remarks>The <c>none</c> variant of <see cref="HostAuthentication"/>.</remarks>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class HostAuthenticationNone : HostAuthentication
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Mode => "none";
-}
-
-/// <summary>Delegate token validation to the owning application.</summary>
-/// <remarks>The <c>custom</c> variant of <see cref="HostAuthentication"/>.</remarks>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class HostAuthenticationCustom : HostAuthentication
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Mode => "custom";
-
-    /// <summary>Stable nonempty owner identity; validated identities must match exactly.</summary>
-    [JsonPropertyName("requireIdentity")]
-    public required string RequireIdentity { get; set; }
-}
-
-/// <summary>GitHub Mission Control registration options. The compute ID is application-owned and stable.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class HostGitHubEnvironmentOptions
-{
-    /// <summary>Stable application installation identity, reused across host restarts.</summary>
-    [JsonPropertyName("computeId")]
-    public string ComputeId { get; set; } = string.Empty;
-
-    /// <summary>Human-readable environment display name.</summary>
-    [JsonPropertyName("name")]
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>Require sealed, connection-bound authentication (default true), independent of listener address. False permits unsealed direct credentials and unbound sealed relay credentials; use only when the caller fully controls and trusts the direct transport. Relay token encryption remains mandatory.</summary>
-    [JsonPropertyName("requireConnectionBinding")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? RequireConnectionBinding { get; set; }
-}
-
-/// <summary>Local WebSocket transport options.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class HostLocalServerOptions
-{
-    /// <summary>Listener hostname. Defaults to 127.0.0.1; explicit non-loopback binds are allowed.</summary>
-    [JsonPropertyName("hostname")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Hostname { get; set; }
-
-    /// <summary>Listener port. Omitted or zero requests an OS-allocated port.</summary>
-    [JsonPropertyName("port")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? Port { get; set; }
-
-    /// <summary>Require token authentication (default true). Cannot be false with a token.</summary>
-    [JsonPropertyName("requireConnectionToken")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? RequireConnectionToken { get; set; }
-
-    /// <summary>Nonempty connection token. Generated randomly when required and omitted.</summary>
-    [JsonPropertyName("token")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Token { get; set; }
-}
-
-/// <summary>Starts a supervised AHP host with at least one explicitly selected transport.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostStartRequest
-{
-    /// <summary>Whether remote clients may create new sessions. Defaults to denied when omitted. Does not restrict owner work, publication, or existing sessions.</summary>
-    [JsonPropertyName("allowCreatingNewSessions")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? AllowCreatingNewSessions { get; set; }
-
-    /// <summary>Explicit admission policy, required by the runtime before hosting. Optional in the wire DTO only to preserve generated client construction.</summary>
-    [JsonPropertyName("authentication")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public HostAuthentication? Authentication { get; set; }
-
-    /// <summary>Stable application identity selecting its durable host catalog. Defaults to the persisted runtime compute GUID; must agree with githubEnvironment.computeId when both are supplied.</summary>
-    [JsonPropertyName("computeId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ComputeId { get; set; }
-
-    /// <summary>Registers a GitHub Mission Control environment and enables its relay transport.</summary>
-    [JsonPropertyName("githubEnvironment")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public HostGitHubEnvironmentOptions? GitHubEnvironment { get; set; }
-
-    /// <summary>Caller-generated UUID identifying this connection-owned listener.</summary>
-    [JsonPropertyName("hostId")]
-    public string HostId { get; set; } = string.Empty;
-
-    /// <summary>Enables a local WebSocket listener.</summary>
-    [JsonPropertyName("localServer")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public HostLocalServerOptions? LocalServer { get; set; }
-
-    /// <summary>Ask the owning application to resume its durable AHP sessions.</summary>
-    [JsonPropertyName("resumeFactory")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? ResumeFactory { get; set; }
-
-    /// <summary>Ask the owning SDK application to materialize AHP sessions.</summary>
-    [JsonPropertyName("sessionFactory")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? SessionFactory { get; set; }
-
-    /// <summary>Absolute directory on the runtime host to serve through AHP. Defaults to the runtime's configured working directory. Does not change process or session working directories.</summary>
-    [JsonPropertyName("workspace")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Workspace { get; set; }
-}
-
-/// <summary>Empty acknowledgement for a completed host lifecycle operation.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class HostDisposeResult
-{
-}
-
-/// <summary>Stops a connection-owned listener and joins its teardown.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostDisposeRequest
-{
-    /// <summary>Listener UUID. Unknown or successfully stopped IDs are harmless.</summary>
-    [JsonPropertyName("hostId")]
-    public string HostId { get; set; } = string.Empty;
-}
-
-/// <summary>Empty acknowledgement for a completed host lifecycle operation.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class HostSetSessionCreationPolicyResult
-{
-}
-
-/// <summary>Changes remote session creation admission without disconnecting clients.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostSetSessionCreationPolicyRequest
-{
-    /// <summary>After acknowledgement, subsequent remote creation admissions use this policy. Already-admitted requests may finish.</summary>
-    [JsonPropertyName("allowCreatingNewSessions")]
-    public bool AllowCreatingNewSessions { get; set; }
-
-    /// <summary>Listener UUID owned by the calling SDK connection.</summary>
-    [JsonPropertyName("hostId")]
-    public string HostId { get; set; } = string.Empty;
-}
-
-/// <summary>Private credentials delivered only to a runtime-owned Mission Control hosting participant.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostGetEnvironmentCredentialsResult
-{
-    /// <summary>GitHub API base URL for the authenticated service.</summary>
-    [JsonPropertyName("githubApiUrl")]
-    public string GitHubApiUrl { get; set; } = string.Empty;
-
-    /// <summary>Hostname of the authenticated GitHub service.</summary>
-    [JsonPropertyName("githubHost")]
-    public string GitHubHost { get; set; } = string.Empty;
-
-    /// <summary>Mission Control API origin for environment registration and management.</summary>
-    [JsonPropertyName("missionControlUrl")]
-    public string MissionControlUrl { get; set; } = string.Empty;
-
-    /// <summary>Current bearer token for the authenticated GitHub identity.</summary>
-    [JsonPropertyName("token")]
-    public string Token { get; set; } = string.Empty;
-}
-
-/// <summary>Normalized local WebSocket listener settings.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class HostLocalServerConfiguration
-{
-    /// <summary>Hostname or IP address to bind.</summary>
-    [JsonPropertyName("hostname")]
-    public string Hostname { get; set; } = string.Empty;
-
-    /// <summary>Port to bind, with zero requesting OS allocation.</summary>
-    [JsonPropertyName("port")]
-    public int Port { get; set; }
-
-    /// <summary>Whether the listener requires token authentication.</summary>
-    [JsonPropertyName("requireConnectionToken")]
-    public bool RequireConnectionToken { get; set; }
-
-    /// <summary>Secret connection token, absent when authentication is disabled.</summary>
-    [JsonPropertyName("token")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Token { get; set; }
-}
-
-/// <summary>Normalized listener settings delivered only to the supervised hosting participant.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostGetConfigurationResult
-{
-    /// <summary>Initial remote creation policy, independent of application session factories. Defaults to denied when omitted.</summary>
-    [JsonPropertyName("allowCreatingNewSessions")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? AllowCreatingNewSessions { get; set; }
-
-    /// <summary>Explicit host-wide admission policy. Always supplied by the runtime after validating host.start.</summary>
-    [JsonPropertyName("authentication")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public HostAuthentication? Authentication { get; set; }
-
-    /// <summary>Requested GitHub Mission Control registration.</summary>
-    [JsonPropertyName("githubEnvironment")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public HostGitHubEnvironmentOptions? GitHubEnvironment { get; set; }
-
-    /// <summary>Normalized local listener settings, absent for relay-only hosts.</summary>
-    [JsonPropertyName("localServer")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public HostLocalServerConfiguration? LocalServer { get; set; }
-
-    /// <summary>Whether app-owned durable sessions are resumed by the owning application.</summary>
-    [JsonPropertyName("resumeFactory")]
-    public bool ResumeFactory { get; set; }
-
-    /// <summary>Whether session materialization is delegated to the owning application.</summary>
-    [JsonPropertyName("sessionFactory")]
-    public bool SessionFactory { get; set; }
-}
-
-/// <summary>Private credentials delivered only to a runtime-owned Mission Control hosting participant.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostGetAuthenticationCredentialsResult
-{
-    /// <summary>GitHub API base URL for the authenticated service.</summary>
-    [JsonPropertyName("githubApiUrl")]
-    public string GitHubApiUrl { get; set; } = string.Empty;
-
-    /// <summary>Hostname of the authenticated GitHub service.</summary>
-    [JsonPropertyName("githubHost")]
-    public string GitHubHost { get; set; } = string.Empty;
-
-    /// <summary>Mission Control API origin for environment registration and management.</summary>
-    [JsonPropertyName("missionControlUrl")]
-    public string MissionControlUrl { get; set; } = string.Empty;
-
-    /// <summary>Current bearer token for the authenticated GitHub identity.</summary>
-    [JsonPropertyName("token")]
-    public string Token { get; set; } = string.Empty;
-}
-
-/// <summary>A validated credential with a required, future RFC3339 expiration.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class HostAuthenticationResult
-{
-    /// <summary>Required future expiration in RFC3339 format.</summary>
-    [JsonPropertyName("expiresAt")]
-    public string ExpiresAt { get; set; } = string.Empty;
-
-    /// <summary>Stable identity, required to match the configured owner exactly.</summary>
-    [JsonPropertyName("identity")]
-    public string Identity { get; set; } = string.Empty;
-}
-
-/// <summary>A decrypted credential presented by a supervised hosting participant.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostAuthenticateRequest
-{
-    /// <summary>Unique validation attempt, scoped to this host.</summary>
-    [JsonPropertyName("requestId")]
-    public string RequestId { get; set; } = string.Empty;
-
-    /// <summary>Decrypted admission token, never an inference credential.</summary>
-    [JsonPropertyName("token")]
-    public string Token { get; set; } = string.Empty;
-}
-
-/// <summary>Empty acknowledgement for a completed host lifecycle operation.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostCancelAuthenticationResult
-{
-}
-
-/// <summary>Cancels a pending validation on the supervised participant's connection.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostCancelAuthenticationRequest
-{
-    /// <summary>Validation attempt to cancel.</summary>
-    [JsonPropertyName("requestId")]
-    public string RequestId { get; set; } = string.Empty;
-}
-
-/// <summary>Empty acknowledgement for a completed host lifecycle operation.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostReadyResult
-{
-}
-
-/// <summary>Readiness reported by the supervised hosting participant on its own SDK connection.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class HostReadyRequest
-{
-    /// <summary>Actual bound WebSocket URL.</summary>
-    [JsonPropertyName("address")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Address { get; set; }
-
-    /// <summary>Registered environment ID, reported only once the relay transport is connected.</summary>
-    [JsonPropertyName("environmentId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? EnvironmentId { get; set; }
-
-    /// <summary>Configured secret token, absent when authentication is disabled.</summary>
-    [JsonPropertyName("token")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Token { get; set; }
 }
 
 /// <summary>One server-discovered hook action from user, repository, plugin, or managed-policy configuration.</summary>
@@ -26192,10 +27503,121 @@ internal sealed class CafeMetricsShutdownRequest
     public bool? FlushOnly { get; set; }
 }
 
+/// <summary>ACP transport configuration for an existing in-process SDK engine.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class AcpServeRequest
+{
+    /// <summary>The host application version.</summary>
+    [JsonPropertyName("agentVersion")]
+    public string AgentVersion { get; set; } = string.Empty;
+
+    /// <summary>The session options resolved by the embedding host.</summary>
+    [JsonPropertyName("bootOptions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? BootOptions { get; set; }
+
+    /// <summary>The TCP interface, or absent for loopback.</summary>
+    [JsonPropertyName("host")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Host { get; set; }
+
+    /// <summary>The authentication command arguments.</summary>
+    [JsonPropertyName("loginArgs")]
+    public IList<string> LoginArgs { get => field ??= []; set; }
+
+    /// <summary>The executable an editor can use to authenticate.</summary>
+    [JsonPropertyName("loginCommand")]
+    public string LoginCommand { get; set; } = string.Empty;
+
+    /// <summary>The TCP port, required unless stdio is selected.</summary>
+    [JsonPropertyName("port")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? Port { get; set; }
+
+    /// <summary>The SDK engine that owns the calling connection.</summary>
+    [JsonPropertyName("serverId")]
+    public long ServerId { get; set; }
+
+    /// <summary>Whether to serve the process's standard input and output.</summary>
+    [JsonPropertyName("stdio")]
+    public bool Stdio { get; set; }
+
+    /// <summary>Whether the SDK client supplies the ACP telemetry callback.</summary>
+    [JsonPropertyName("telemetry")]
+    public bool Telemetry { get; set; }
+
+    /// <summary>An absolute attachment directory, or absent for the platform default.</summary>
+    [JsonPropertyName("tempDir")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TempDir { get; set; }
+}
+
+/// <summary>Configuration after the original engine retains approved account-authenticated servers.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class McpGitHubAuthPrepareResult
+{
+    /// <summary>Remaining ordinary MCP configuration. Approval grants never leave the engine.</summary>
+    [JsonPropertyName("additionalConfigJson")]
+    public string AdditionalConfigJson { get; set; } = string.Empty;
+}
+
+/// <summary>Explicit host approval for account-authenticated MCP endpoints.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class McpGitHubAuthPrepareRequest
+{
+    /// <summary>Additional MCP configuration before approved servers leave ordinary configuration.</summary>
+    [JsonPropertyName("additionalConfigJson")]
+    public string AdditionalConfigJson { get; set; } = string.Empty;
+
+    /// <summary>Explicit server-name and exact-origin approvals from the host command line.</summary>
+    [JsonPropertyName("specifications")]
+    public IList<string> Specifications { get => field ??= []; set; }
+}
+
 /// <summary>Identifies the target session.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed class SessionSuspendRequest
 {
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>One connection-owned view retention for the current session generation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionRetainViewResult
+{
+    /// <summary>Opaque retention token owned by this connection and session generation.</summary>
+    [JsonPropertyName("retentionId")]
+    public long RetentionId { get; set; }
+}
+
+/// <summary>Identifies the target session.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionRetainViewRequest
+{
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>Whether this request released its original view retention.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionReleaseViewResult
+{
+    /// <summary>False for an unknown token, another owner, or a superseded session generation.</summary>
+    [JsonPropertyName("released")]
+    public bool Released { get; set; }
+}
+
+/// <summary>Releases one view retention acquired by this connection for this session generation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionReleaseViewRequest
+{
+    /// <summary>The token returned by session.retainView on the original connection.</summary>
+    [JsonPropertyName("retentionId")]
+    public long RetentionId { get; set; }
+
     /// <summary>Target session identifier.</summary>
     [JsonPropertyName("sessionId")]
     public string SessionId { get; set; } = string.Empty;
@@ -26323,6 +27745,12 @@ internal sealed class SendRequest
     [JsonPropertyName("responseFormat")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ResponseFormat? ResponseFormat { get; set; }
+
+    /// <summary>SDK-owned invocation identifier for an embedder.sendAdmission callback after canonical queue admission. Only the original trusted in-process host may request it. Does not change wait or turn completion semantics.</summary>
+    [JsonInclude]
+    [JsonPropertyName("sendAdmissionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal string? SendAdmissionId { get; set; }
 
     /// <summary>Target session identifier.</summary>
     [JsonPropertyName("sessionId")]
@@ -26669,6 +28097,16 @@ public sealed class Extension
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
+    /// <summary>Runtime-owned process log path, when available.</summary>
+    [JsonPropertyName("logPath")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LogPath { get; set; }
+
+    /// <summary>Absolute executable module path discovered by the runtime.</summary>
+    [JsonPropertyName("modulePath")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModulePath { get; set; }
+
     /// <summary>Extension name (directory name).</summary>
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
@@ -26691,6 +28129,16 @@ public sealed class Extension
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class ExtensionList
 {
+    /// <summary>Whether the runtime installed an extension service, including an empty catalog.</summary>
+    [JsonPropertyName("configured")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Configured { get; set; }
+
+    /// <summary>Whether the latest explicit create or resume choice disabled extensions.</summary>
+    [JsonPropertyName("explicitOptOut")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ExplicitOptOut { get; set; }
+
     /// <summary>Discovered extensions and their current status.</summary>
     [JsonPropertyName("extensions")]
     public IList<Extension> Extensions { get => field ??= []; set; }
@@ -27768,6 +29216,169 @@ internal sealed class SessionPluginsReloadRequestWithSession
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ReloadMcp { get; set; }
 
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>Context used for effective plugin resolution.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIPluginActivationContext
+{
+    /// <summary>Repository root, when present.</summary>
+    [JsonPropertyName("gitRoot")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? GitRoot { get; set; }
+
+    /// <summary>Working directory requested by the caller.</summary>
+    [JsonPropertyName("requestedWorkingDirectory")]
+    public string RequestedWorkingDirectory { get; set; } = string.Empty;
+
+    /// <summary>Working directory used by the resolver.</summary>
+    [JsonPropertyName("resolvedWorkingDirectory")]
+    public string ResolvedWorkingDirectory { get; set; } = string.Empty;
+
+    /// <summary>Settings root used by the resolver.</summary>
+    [JsonPropertyName("settingsRoot")]
+    public string SettingsRoot { get; set; } = string.Empty;
+
+    /// <summary>Whether repository plugin inputs are trusted.</summary>
+    [JsonPropertyName("trusted")]
+    public bool Trusted { get; set; }
+
+    /// <summary>Root covered by workspace trust, when present.</summary>
+    [JsonPropertyName("trustRoot")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TrustRoot { get; set; }
+
+    /// <summary>Runtime source of the trust decision.</summary>
+    [JsonPropertyName("trustSource")]
+    public string TrustSource { get; set; } = string.Empty;
+}
+
+/// <summary>Source and reason for a plugin activation decision.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIPluginActivationDecision
+{
+    /// <summary>Whether the plugin is active.</summary>
+    [JsonPropertyName("active")]
+    public bool Active { get; set; }
+
+    /// <summary>Whether the inventory entry comes from persistent configuration.</summary>
+    [JsonPropertyName("persisted")]
+    public bool Persisted { get; set; }
+
+    /// <summary>Installed plugin descriptor.</summary>
+    [JsonPropertyName("plugin")]
+    public InstalledPlugin Plugin { get => field ??= new(); set; }
+
+    /// <summary>Runtime explanation of the decision.</summary>
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
+
+    /// <summary>Configuration layer that selected the plugin.</summary>
+    [JsonPropertyName("source")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; set; }
+}
+
+/// <summary>A plugin resolution warning ready for display.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIPluginActivationWarning
+{
+    /// <summary>Expected plugin directory, when present.</summary>
+    [JsonPropertyName("expectedDir")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExpectedDir { get; set; }
+
+    /// <summary>Warning classification.</summary>
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Configuration layer.</summary>
+    [JsonPropertyName("layer")]
+    public string Layer { get; set; } = string.Empty;
+
+    /// <summary>Marketplace name.</summary>
+    [JsonPropertyName("marketplace")]
+    public string Marketplace { get; set; } = string.Empty;
+
+    /// <summary>Marketplace directory.</summary>
+    [JsonPropertyName("marketplaceDir")]
+    public string MarketplaceDir { get; set; } = string.Empty;
+
+    /// <summary>Human-readable warning.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Plugin name for a plugin-specific warning.</summary>
+    [JsonPropertyName("plugin")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Plugin { get; set; }
+}
+
+/// <summary>Effective plugin activation resolved by the runtime.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIPluginActivationSnapshot
+{
+    /// <summary>Resolution context.</summary>
+    [JsonPropertyName("context")]
+    public UIPluginActivationContext Context { get => field ??= new(); set; }
+
+    /// <summary>Identity of the resolved activation.</summary>
+    [JsonPropertyName("fingerprint")]
+    public string Fingerprint { get; set; } = string.Empty;
+
+    /// <summary>Activation decisions for every considered plugin.</summary>
+    [JsonPropertyName("inventory")]
+    public IList<UIPluginActivationDecision> Inventory { get => field ??= []; set; }
+
+    /// <summary>Active plugin inventory.</summary>
+    [JsonPropertyName("plugins")]
+    public IList<InstalledPlugin> Plugins { get => field ??= []; set; }
+
+    /// <summary>Repository-owned live plugin directories, when known.</summary>
+    [JsonPropertyName("repositoryLivePluginPaths")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? RepositoryLivePluginPaths { get; set; }
+
+    /// <summary>Classification of a failed resolution, when present.</summary>
+    [JsonPropertyName("resolutionFailure")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResolutionFailure { get; set; }
+
+    /// <summary>Marketplace resolution warnings.</summary>
+    [JsonPropertyName("warnings")]
+    public IList<UIPluginActivationWarning> Warnings { get => field ??= []; set; }
+}
+
+/// <summary>Canonical activation after workspace consent and plugin policy reconciliation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionPluginsResolveActivationResult
+{
+    /// <summary>Current activation, or null before activation resolves.</summary>
+    [JsonPropertyName("snapshot")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UIPluginActivationSnapshot? Snapshot { get; set; }
+
+    /// <summary>Whether the runtime trusts the workspace.</summary>
+    [JsonPropertyName("trusted")]
+    public bool Trusted { get; set; }
+
+    /// <summary>Current working directory of the session.</summary>
+    [JsonPropertyName("workingDirectory")]
+    public string WorkingDirectory { get; set; } = string.Empty;
+
+    /// <summary>Authoritative workspace root, when known.</summary>
+    [JsonPropertyName("workspaceRoot")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WorkspaceRoot { get; set; }
+}
+
+/// <summary>Identifies the target session.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionPluginsResolveActivationRequest
+{
     /// <summary>Target session identifier.</summary>
     [JsonPropertyName("sessionId")]
     public string SessionId { get; set; } = string.Empty;
@@ -28891,6 +30502,35 @@ internal sealed class ModelGetReasoningSummariesRequest
     public bool? SummariesVisible { get; set; }
 }
 
+/// <summary>
+/// Raw CAPI model descriptions for client-side catalog enrichment.
+/// Unlike `models.list` and `session.model.list`, this result does not normalize model fields.
+/// </summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionModelDescribeClientCatalogResult
+{
+    /// <summary>
+    /// Complete model descriptions with their original CAPI field names.
+    /// These include `billing.token_prices`, `capabilities.supports.tool_calls`, and snake_case token limits.
+    /// </summary>
+    [JsonPropertyName("models")]
+    public IList<JsonElement> Models { get => field ??= []; set; }
+}
+
+/// <summary>Options for the client's session-authenticated description catalog.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionModelDescribeClientCatalogRequest
+{
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>Bypass the existing catalog cache. The default is false.</summary>
+    [JsonPropertyName("skipCache")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? SkipCache { get; set; }
+}
+
 /// <summary>Cost-category metadata for a CAPI model.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class SessionModelPriceCategory
@@ -29347,6 +30987,19 @@ internal sealed class McpDisableRequest
     public string SessionId { get; set; } = string.Empty;
 }
 
+/// <summary>An MCP server whose saved disable replaces its session-only override.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class McpReleaseSessionDisableRequest
+{
+    /// <summary>Name of the MCP server whose disable the host saved.</summary>
+    [JsonPropertyName("serverName")]
+    public string ServerName { get; set; } = string.Empty;
+
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
 /// <summary>Identifies the target session.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed class SessionMcpReloadRequest
@@ -29694,6 +31347,25 @@ internal sealed class McpStopServerRequest
     [JsonPropertyName("transport")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public McpServerConfigLocalType? Transport { get; set; }
+}
+
+/// <summary>Acknowledges completion of the scoped plugin MCP server stop.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionMcpStopPluginServersResult
+{
+}
+
+/// <summary>Plugin identity for a scoped MCP server stop.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionMcpStopPluginServersRequest
+{
+    /// <summary>Name of the plugin whose owned MCP servers must stop.</summary>
+    [JsonPropertyName("pluginName")]
+    public string PluginName { get; set; } = string.Empty;
+
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
 }
 
 /// <summary>Registration parameters for an external MCP client.</summary>
@@ -33580,6 +35252,11 @@ public sealed class SessionAuthStatus
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CopilotPlan { get; set; }
 
+    /// <summary>Whether the session can resolve a GitHub token. Returned by session.gitHubAuth.getStatus without exposing the credential.</summary>
+    [JsonPropertyName("hasGitHubToken")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? HasGitHubToken { get; set; }
+
     /// <summary>Authentication host URL.</summary>
     [Url]
     [StringSyntax(StringSyntaxAttribute.Uri)]
@@ -34182,184 +35859,6 @@ internal sealed class AuthLoginListRequest
     /// <summary>Target session identifier.</summary>
     [JsonPropertyName("sessionId")]
     public string SessionId { get; set; } = string.Empty;
-}
-
-/// <summary>One step in an interactive login flow. The consumer acts on the step and calls advance to proceed. Browser-open is encoded as two distinct steps by design: `open-url` is CONSUMER-driven (the provider surfaces the authorize URL and the consumer opens it — github.com/GHEC web), while `needs-interaction` is PROVIDER-driven (the provider opens the browser or broker UI itself and does not surface a URL — Entra). A device-code flow surfaces its one-time code as `device-code`; the consumer shows the code, may open the verification URI, and calls advance, which resolves once the user has authorized the device.</summary>
-/// <remarks>Polymorphic base type discriminated by <c>kind</c>.</remarks>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-[JsonPolymorphic(
-    TypeDiscriminatorPropertyName = "kind",
-    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
-[JsonDerivedType(typeof(AuthLoginStepOpenUrl), "open-url")]
-[JsonDerivedType(typeof(AuthLoginStepInputRequired), "input-required")]
-[JsonDerivedType(typeof(AuthLoginStepAwaiting), "awaiting")]
-[JsonDerivedType(typeof(AuthLoginStepNeedsInteraction), "needs-interaction")]
-[JsonDerivedType(typeof(AuthLoginStepCompleted), "completed")]
-[JsonDerivedType(typeof(AuthLoginStepError), "error")]
-[JsonDerivedType(typeof(AuthLoginStepDeviceCode), "device-code")]
-public partial class AuthLoginStep
-{
-    /// <summary>The type discriminator.</summary>
-    [JsonPropertyName("kind")]
-    public virtual string Kind { get; set; } = string.Empty;
-}
-
-
-/// <summary>The <c>open-url</c> variant of <see cref="AuthLoginStep"/>.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class AuthLoginStepOpenUrl : AuthLoginStep
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Kind => "open-url";
-
-    /// <summary>Authorize URL the consumer should open in a browser (consumer-driven browser-open).</summary>
-    [JsonPropertyName("url")]
-    public required string Url { get; set; }
-}
-
-/// <summary>The <c>input-required</c> variant of <see cref="AuthLoginStep"/>.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class AuthLoginStepInputRequired : AuthLoginStep
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Kind => "input-required";
-
-    /// <summary>Prompt for the value the provider needs; the consumer supplies it as advance input (e.g. a GitHub Enterprise Cloud host, *.ghe.com).</summary>
-    [JsonPropertyName("prompt")]
-    public required string Prompt { get; set; }
-}
-
-/// <summary>The <c>awaiting</c> variant of <see cref="AuthLoginStep"/>.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class AuthLoginStepAwaiting : AuthLoginStep
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Kind => "awaiting";
-}
-
-/// <summary>The <c>needs-interaction</c> variant of <see cref="AuthLoginStep"/>.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class AuthLoginStepNeedsInteraction : AuthLoginStep
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Kind => "needs-interaction";
-}
-
-/// <summary>A credential-free account choice after sign-in.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class AuthLoginAccount
-{
-    /// <summary>Host coordinate owned by the selected account's provider.</summary>
-    [JsonPropertyName("host")]
-    public string Host { get; set; } = string.Empty;
-
-    /// <summary>Provider kind that owns this account choice.</summary>
-    [JsonPropertyName("kind")]
-    public AccountKind Kind { get; set; }
-
-    /// <summary>Human-readable login for the account choice.</summary>
-    [JsonPropertyName("login")]
-    public string Login { get; set; } = string.Empty;
-
-    /// <summary>Opaque identifier supplied to the next login step to select this account.</summary>
-    [JsonPropertyName("selectionId")]
-    public string SelectionId { get; set; } = string.Empty;
-}
-
-/// <summary>Result of an interactive login flow. Pending consent or account selection is not terminal.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class AuthLoginResultDto
-{
-    /// <summary>Available accounts when sign-in is awaiting account selection, ordered with Microsoft 365 first.</summary>
-    [JsonPropertyName("accounts")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public IList<AuthLoginAccount>? Accounts { get; set; }
-
-    /// <summary>Host that was signed in, when completed.</summary>
-    [Url]
-    [StringSyntax(StringSyntaxAttribute.Uri)]
-    [JsonPropertyName("host")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Host { get; set; }
-
-    /// <summary>Login that was signed in, when completed.</summary>
-    [JsonPropertyName("login")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Login { get; set; }
-
-    /// <summary>Current disposition of the login, including pending user decisions.</summary>
-    [JsonPropertyName("status")]
-    public AuthLoginResultStatus Status { get; set; }
-}
-
-/// <summary>The <c>completed</c> variant of <see cref="AuthLoginStep"/>.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class AuthLoginStepCompleted : AuthLoginStep
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Kind => "completed";
-
-    /// <summary>Login result. When status is needs-plaintext-consent or needs-account-selection, advance with the user's decision to continue.</summary>
-    [JsonPropertyName("result")]
-    public required AuthLoginResultDto Result { get; set; }
-}
-
-/// <summary>The <c>error</c> variant of <see cref="AuthLoginStep"/>.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class AuthLoginStepError : AuthLoginStep
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Kind => "error";
-
-    /// <summary>Human-readable failure message.</summary>
-    [JsonPropertyName("message")]
-    public required string Message { get; set; }
-}
-
-/// <summary>The <c>device-code</c> variant of <see cref="AuthLoginStep"/>.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public partial class AuthLoginStepDeviceCode : AuthLoginStep
-{
-    /// <inheritdoc />
-    [JsonIgnore]
-    public override string Kind => "device-code";
-
-    /// <summary>Seconds until the one-time code expires, measured from when this step was produced. Consumers can show a countdown or pick their own timeout instead of blocking until the provider rejects the code.</summary>
-    [JsonPropertyName("expiresIn")]
-    public required long ExpiresIn { get; set; }
-
-    /// <summary>Minimum seconds between authorization polls required by the provider. The runtime performs the polling itself for the duration of the single `advance` call, so this is informational (for example to drive a progress indicator); repeating `advance` is rejected as already advancing.</summary>
-    [JsonPropertyName("interval")]
-    public required long Interval { get; set; }
-
-    /// <summary>One-time code the user enters at the verification URI.</summary>
-    [JsonPropertyName("userCode")]
-    public required string UserCode { get; set; }
-
-    /// <summary>Page where the user enters the one-time code (consumer-driven browser-open).</summary>
-    [Url]
-    [StringSyntax(StringSyntaxAttribute.Uri)]
-    [JsonPropertyName("verificationUri")]
-    public required string VerificationUri { get; set; }
-}
-
-/// <summary>A started login flow: its opaque id and first step.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class AuthLoginBegun
-{
-    /// <summary>Opaque flow id used to advance or cancel this login.</summary>
-    [JsonPropertyName("flowId")]
-    public string FlowId { get; set; } = string.Empty;
-
-    /// <summary>The first step of the flow.</summary>
-    [JsonPropertyName("step")]
-    public AuthLoginStep Step { get => field ??= new(); set; }
 }
 
 /// <summary>Begin an interactive login flow for a provider kind, optionally reusing a cached base identity or explicitly requesting provider account selection.</summary>
@@ -37450,6 +38949,11 @@ public sealed class AutopilotObjectiveState
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CompletionSummary { get; set; }
 
+    /// <summary>UTC timestamp when this objective was created, retained across resumes.</summary>
+    [JsonPropertyName("createdAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedAt { get; set; }
+
     /// <summary>Exact lifetime AI-credit consumption in non-negative integer nano-AIU, encoded as a decimal string.</summary>
     [RegularExpression("^[0-9]+$")]
     [JsonPropertyName("creditCountNanoAiu")]
@@ -37472,6 +38976,11 @@ public sealed class AutopilotObjectiveState
     [JsonPropertyName("pauseReason")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PauseReason { get; set; }
+
+    /// <summary>Number of times this objective resumed, identifying its current credit window.</summary>
+    [JsonPropertyName("resumeCount")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? ResumeCount { get; set; }
 
     /// <summary>Current normalized lifecycle status.</summary>
     [JsonPropertyName("status")]
@@ -40840,6 +42349,48 @@ internal sealed class SessionUpdateOptionsParams
     public string? WorkingDirectory { get; set; }
 }
 
+/// <summary>Queue scheduling work released by a host control update.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionHostUpdateControlsResult
+{
+    /// <summary>Whether the update released queued work for processing.</summary>
+    [JsonPropertyName("scheduleProcessQueue")]
+    public bool ScheduleProcessQueue { get; set; }
+}
+
+/// <summary>Transient controls owned by the original embedding host.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionHostUpdateControlsRequest
+{
+    /// <summary>Whether the original host supplies the plan-approval callback.</summary>
+    [JsonPropertyName("exitPlanModeCallbackEnabled")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ExitPlanModeCallbackEnabled { get; set; }
+
+    /// <summary>Whether managed-policy reconciliation pauses queued prompt processing.</summary>
+    [JsonPropertyName("managedPolicyQueueDrainPaused")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ManagedPolicyQueueDrainPaused { get; set; }
+
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>Whether the original host currently shows this session's shell password prompts.</summary>
+    [JsonPropertyName("shellAuthenticationPromptsShown")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ShellAuthenticationPromptsShown { get; set; }
+}
+
+/// <summary>Identifies the target session.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionHostWatchCloseRequest
+{
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
 /// <summary>Parameters for (re)loading the merged LSP configuration set.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed class LspInitializeRequest
@@ -42053,6 +43604,56 @@ internal sealed class UpdateSubagentSettingsRequest
     public SubagentSettingsConfig? Subagents { get; set; }
 }
 
+/// <summary>Result from the session's cloud memory service, without a local fallback.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class SessionMemoryImportRecordResult
+{
+    /// <summary>Machine-readable result code.</summary>
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>Result description from the service or runtime.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Whether the service stored the memory.</summary>
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+
+    /// <summary>Import outcome, including conflicts and policy refusals.</summary>
+    [JsonPropertyName("status")]
+    public MemoryImportStatus Status { get; set; }
+}
+
+/// <summary>One memory to import through the session's cloud memory service.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionMemoryImportRecordRequest
+{
+    /// <summary>Sources that support the fact.</summary>
+    [JsonPropertyName("citations")]
+    public string Citations { get; set; } = string.Empty;
+
+    /// <summary>Fact to preserve.</summary>
+    [JsonPropertyName("fact")]
+    public string Fact { get; set; } = string.Empty;
+
+    /// <summary>Reason to preserve the fact.</summary>
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
+
+    /// <summary>Memory scope. Repository scope uses the session's resolved repository.</summary>
+    [JsonPropertyName("scope")]
+    public MemoryImportScope Scope { get; set; }
+
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>Short description of the memory's subject.</summary>
+    [JsonPropertyName("subject")]
+    public string Subject { get; set; } = string.Empty;
+}
+
 /// <summary>RPC data type for SessionCommandsList operations.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class SessionCommandsListRequest
@@ -42579,6 +44180,11 @@ public partial class QueuedCommandResult
     [JsonPropertyName("handled")]
     public bool Handled { get; set; }
 
+    /// <summary>Failure reason when the host rejected the command or execution failed. Omit when the host only declines to execute it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
     /// <summary>When true, the runtime will not process subsequent queued commands until a new request comes in.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("stopProcessingQueue")]
@@ -42656,6 +44262,15 @@ internal sealed class SessionTelemetryGetEngagementIdRequest
     public string SessionId { get; set; } = string.Empty;
 }
 
+/// <summary>Identifies the target session.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionTelemetryReloadRequest
+{
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
 /// <summary>Feature override key/value pairs to attach to subsequent telemetry events from this session.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed class TelemetrySetFeatureOverridesRequest
@@ -42664,6 +44279,534 @@ internal sealed class TelemetrySetFeatureOverridesRequest
     [JsonPropertyName("features")]
     public IDictionary<string, string> Features { get => field ??= new Dictionary<string, string>(); set; }
 
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>A form or URL elicitation prompt.</summary>
+/// <remarks>Polymorphic base type discriminated by <c>mode</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonPolymorphic(
+    TypeDiscriminatorPropertyName = "mode",
+    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
+[JsonDerivedType(typeof(UIElicitationPromptForm), "form")]
+[JsonDerivedType(typeof(UIElicitationPromptUrl), "url")]
+public partial class UIElicitationPrompt
+{
+    /// <summary>The type discriminator.</summary>
+    [JsonPropertyName("mode")]
+    public virtual string Mode { get; set; } = string.Empty;
+}
+
+
+/// <summary>Form fields retained in their declared order for an attached view.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIElicitationSnapshotSchema
+{
+    /// <summary>Form field definitions in their declared order.</summary>
+    [JsonPropertyName("properties")]
+    public IDictionary<string, JsonElement> Properties { get => field ??= new Dictionary<string, JsonElement>(); set; }
+
+    /// <summary>Names of required form fields.</summary>
+    [JsonPropertyName("required")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? Required { get; set; }
+
+    /// <summary>Schema type indicator, always object.</summary>
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+}
+
+/// <summary>Metadata controlling an MCP task's lifetime.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class McpTaskMetadata
+{
+    /// <summary>Task time-to-live.</summary>
+    [JsonPropertyName("ttl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? Ttl { get; set; }
+}
+
+/// <summary>An MCP form elicitation prompt with its default mode made explicit.</summary>
+/// <remarks>The <c>form</c> variant of <see cref="UIElicitationPrompt"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class UIElicitationPromptForm : UIElicitationPrompt
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Mode => "form";
+
+    /// <summary>MCP request metadata.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("_meta")]
+    public IDictionary<string, JsonElement>? Meta { get; set; }
+
+    /// <summary>Message that explains the requested information.</summary>
+    [JsonPropertyName("message")]
+    public required string Message { get; set; }
+
+    /// <summary>Schema of the form fields.</summary>
+    [JsonPropertyName("requestedSchema")]
+    public required UIElicitationSnapshotSchema RequestedSchema { get; set; }
+
+    /// <summary>MCP task metadata.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("task")]
+    public McpTaskMetadata? Task { get; set; }
+}
+
+/// <summary>An MCP URL elicitation prompt.</summary>
+/// <remarks>The <c>url</c> variant of <see cref="UIElicitationPrompt"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class UIElicitationPromptUrl : UIElicitationPrompt
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Mode => "url";
+
+    /// <summary>MCP request metadata.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("_meta")]
+    public IDictionary<string, JsonElement>? Meta { get; set; }
+
+    /// <summary>MCP identity of the browser request.</summary>
+    [JsonPropertyName("elicitationId")]
+    public required string ElicitationId { get; set; }
+
+    /// <summary>Message that explains the browser action.</summary>
+    [JsonPropertyName("message")]
+    public required string Message { get; set; }
+
+    /// <summary>MCP task metadata.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("task")]
+    public McpTaskMetadata? Task { get; set; }
+
+    /// <summary>Browser destination supplied by the MCP server.</summary>
+    [JsonPropertyName("url")]
+    public required string Url { get; set; }
+}
+
+/// <summary>An unanswered elicitation request.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIPendingElicitation
+{
+    /// <summary>MCP source of the request, when present.</summary>
+    [JsonPropertyName("elicitationSource")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ElicitationSource { get; set; }
+
+    /// <summary>Runtime-verified display name of the source.</summary>
+    [JsonPropertyName("elicitationSourceDisplayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ElicitationSourceDisplayName { get; set; }
+
+    /// <summary>Original form or URL prompt.</summary>
+    [JsonPropertyName("request")]
+    public UIElicitationPrompt Request { get => field ??= new(); set; }
+
+    /// <summary>Runtime identity accepted by the elicitation response method.</summary>
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = string.Empty;
+}
+
+/// <summary>A plan that awaits approval.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIPlanApprovalPrompt
+{
+    /// <summary>Available actions.</summary>
+    [JsonPropertyName("actions")]
+    public IList<UIExitPlanModeAction> Actions { get => field ??= []; set; }
+
+    /// <summary>Model that authored the plan.</summary>
+    [JsonPropertyName("model")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Model { get; set; }
+
+    /// <summary>Full plan content.</summary>
+    [JsonPropertyName("planContent")]
+    public string PlanContent { get; set; } = string.Empty;
+
+    /// <summary>Action selected by default.</summary>
+    [JsonPropertyName("recommendedAction")]
+    public UIExitPlanModeAction RecommendedAction { get; set; }
+
+    /// <summary>Runtime identity of this request.</summary>
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = string.Empty;
+
+    /// <summary>Plan summary.</summary>
+    [JsonPropertyName("summary")]
+    public string Summary { get; set; } = string.Empty;
+}
+
+/// <summary>An unanswered plan-approval request.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIPendingPlanApproval
+{
+    /// <summary>Original plan and available actions.</summary>
+    [JsonPropertyName("request")]
+    public UIPlanApprovalPrompt Request { get => field ??= new(); set; }
+
+    /// <summary>Runtime identity accepted by the plan-approval response method.</summary>
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = string.Empty;
+}
+
+/// <summary>A question shown to the user.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIUserInputPrompt
+{
+    /// <summary>Whether a custom answer is allowed.</summary>
+    [JsonPropertyName("allowFreeform")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AllowFreeform { get; set; }
+
+    /// <summary>Suggested answers, when present.</summary>
+    [JsonPropertyName("choices")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? Choices { get; set; }
+
+    /// <summary>Question text.</summary>
+    [JsonPropertyName("question")]
+    public string Question { get; set; } = string.Empty;
+
+    /// <summary>Tool call that requested the answer.</summary>
+    [JsonPropertyName("toolCallId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ToolCallId { get; set; }
+}
+
+/// <summary>An unanswered user-input request.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIPendingUserInput
+{
+    /// <summary>Original question and available answers.</summary>
+    [JsonPropertyName("request")]
+    public UIUserInputPrompt Request { get => field ??= new(); set; }
+
+    /// <summary>Runtime identity accepted by the user-input response method.</summary>
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = string.Empty;
+}
+
+/// <summary>Trust inputs retained by the runtime's plugin policy.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIPluginTrustContext
+{
+    /// <summary>Persisted or authoritative trust mode.</summary>
+    [JsonPropertyName("mode")]
+    public string Mode { get; set; } = string.Empty;
+
+    /// <summary>Host that supplied the authoritative decision.</summary>
+    [JsonPropertyName("source")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; set; }
+
+    /// <summary>Authoritative trust decision, when supplied.</summary>
+    [JsonPropertyName("trusted")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Trusted { get; set; }
+}
+
+/// <summary>Runtime-owned plugin discovery and trust policy.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIPluginActivationPolicy
+{
+    /// <summary>Additional caller-supplied ambient plugin inputs.</summary>
+    [JsonPropertyName("ambientPlugins")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<InstalledPlugin>? AmbientPlugins { get; set; }
+
+    /// <summary>Host enablement overrides, when supplied.</summary>
+    [JsonPropertyName("baseEnabledPlugins")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IDictionary<string, bool>? BaseEnabledPlugins { get; set; }
+
+    /// <summary>Session enablement defaults, when supplied.</summary>
+    [JsonPropertyName("defaultEnabledPlugins")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IDictionary<string, bool>? DefaultEnabledPlugins { get; set; }
+
+    /// <summary>Explicit plugin-directory inputs.</summary>
+    [JsonPropertyName("explicitPlugins")]
+    public IList<InstalledPlugin> ExplicitPlugins { get => field ??= []; set; }
+
+    /// <summary>Whether ambient plugin discovery is enabled.</summary>
+    [JsonPropertyName("includeAmbient")]
+    public bool IncludeAmbient { get; set; }
+
+    /// <summary>Trust context used by the policy.</summary>
+    [JsonPropertyName("trust")]
+    public UIPluginTrustContext Trust { get => field ??= new(); set; }
+}
+
+/// <summary>A timestamped service message.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIServiceLogEntry
+{
+    /// <summary>Display message.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Time in milliseconds since the Unix epoch.</summary>
+    [JsonPropertyName("timestamp")]
+    public double Timestamp { get; set; }
+}
+
+/// <summary>Current state of a long-lived service.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIServiceTask
+{
+    /// <summary>Completion time in milliseconds since the Unix epoch.</summary>
+    [JsonPropertyName("completedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? CompletedAt { get; set; }
+
+    /// <summary>Display description.</summary>
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>Failure text, when present.</summary>
+    [JsonPropertyName("error")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Error { get; set; }
+
+    /// <summary>Registry task identity.</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Recent display messages.</summary>
+    [JsonPropertyName("log")]
+    public IList<UIServiceLogEntry> Log { get => field ??= []; set; }
+
+    /// <summary>Current completion percentage.</summary>
+    [JsonPropertyName("percentage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Percentage { get; set; }
+
+    /// <summary>Current initialization phase.</summary>
+    [JsonPropertyName("phase")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Phase { get; set; }
+
+    /// <summary>Whether the service can accept work.</summary>
+    [JsonPropertyName("ready")]
+    public bool Ready { get; set; }
+
+    /// <summary>Identity of the service instance.</summary>
+    [JsonPropertyName("serviceId")]
+    public string ServiceId { get; set; } = string.Empty;
+
+    /// <summary>Service kind, such as LSP.</summary>
+    [JsonPropertyName("serviceKind")]
+    public string ServiceKind { get; set; } = string.Empty;
+
+    /// <summary>Start time in milliseconds since the Unix epoch.</summary>
+    [JsonPropertyName("startedAt")]
+    public double StartedAt { get; set; }
+
+    /// <summary>Current lifecycle status.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>Task kind, always service.</summary>
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+}
+
+/// <summary>Current state of a background sidekick agent.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UIBackgroundAgentTask
+{
+    /// <summary>Start of the current active period in milliseconds since the Unix epoch.</summary>
+    [JsonPropertyName("activeStartedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? ActiveStartedAt { get; set; }
+
+    /// <summary>Accumulated active time in milliseconds.</summary>
+    [JsonPropertyName("activeTimeMs")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? ActiveTimeMs { get; set; }
+
+    /// <summary>Agent type.</summary>
+    [JsonPropertyName("agentType")]
+    public string AgentType { get; set; } = string.Empty;
+
+    /// <summary>Whether the task can move to background execution.</summary>
+    [JsonPropertyName("canPromoteToBackground")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanPromoteToBackground { get; set; }
+
+    /// <summary>Completion time in milliseconds since the Unix epoch.</summary>
+    [JsonPropertyName("completedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? CompletedAt { get; set; }
+
+    /// <summary>Task description.</summary>
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>Friendly display name.</summary>
+    [JsonPropertyName("displayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisplayName { get; set; }
+
+    /// <summary>Failure text, when present.</summary>
+    [JsonPropertyName("error")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Error { get; set; }
+
+    /// <summary>Synchronous or background execution.</summary>
+    [JsonPropertyName("executionMode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExecutionMode { get; set; }
+
+    /// <summary>Registry task identity.</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Idle start time in milliseconds since the Unix epoch.</summary>
+    [JsonPropertyName("idleSince")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? IdleSince { get; set; }
+
+    /// <summary>Most recent agent response.</summary>
+    [JsonPropertyName("latestResponse")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LatestResponse { get; set; }
+
+    /// <summary>Requested model override.</summary>
+    [JsonPropertyName("modelOverride")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModelOverride { get; set; }
+
+    /// <summary>Most recent prompt.</summary>
+    [JsonPropertyName("prompt")]
+    public string Prompt { get; set; } = string.Empty;
+
+    /// <summary>Model selected by the runtime.</summary>
+    [JsonPropertyName("resolvedModel")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResolvedModel { get; set; }
+
+    /// <summary>Completed result, when present.</summary>
+    [JsonPropertyName("result")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Result { get; set; }
+
+    /// <summary>Event source when the task derives from history.</summary>
+    [JsonPropertyName("source")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; set; }
+
+    /// <summary>Start time in milliseconds since the Unix epoch.</summary>
+    [JsonPropertyName("startedAt")]
+    public double StartedAt { get; set; }
+
+    /// <summary>Current lifecycle status.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>Tool call associated with the agent.</summary>
+    [JsonPropertyName("toolCallId")]
+    public string ToolCallId { get; set; } = string.Empty;
+
+    /// <summary>Task kind, always agent.</summary>
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+}
+
+/// <summary>Current transient prompts and native service state for an attached conversation view.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class UISnapshot
+{
+    /// <summary>Whether the main agent turn is active.</summary>
+    [JsonPropertyName("agentTurnActive")]
+    public bool AgentTurnActive { get; set; }
+
+    /// <summary>Whether a turn, queue reservation, resume continuation, or native send is active.</summary>
+    [JsonPropertyName("hasActiveResumeWork")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? HasActiveResumeWork { get; set; }
+
+    /// <summary>Whether the current hook generation has repository hooks left to load.</summary>
+    [JsonPropertyName("hasPendingRepoHooks")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? HasPendingRepoHooks { get; set; }
+
+    /// <summary>Number of services that have not completed initialization.</summary>
+    [JsonPropertyName("initializingServiceCount")]
+    public long InitializingServiceCount { get; set; }
+
+    /// <summary>Whether this session enables experimental CLI behavior.</summary>
+    [JsonPropertyName("isExperimentalMode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsExperimentalMode { get; set; }
+
+    /// <summary>Whether the session's current telemetry pipeline accepts events.</summary>
+    [JsonPropertyName("isSessionTelemetryEnabled")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsSessionTelemetryEnabled { get; set; }
+
+    /// <summary>Unanswered elicitation requests, including their source and runtime request IDs.</summary>
+    [JsonPropertyName("pendingElicitationRequests")]
+    public IList<UIPendingElicitation> PendingElicitationRequests { get => field ??= []; set; }
+
+    /// <summary>Unanswered plan-approval requests, including their runtime request IDs.</summary>
+    [JsonPropertyName("pendingExitPlanModeRequests")]
+    public IList<UIPendingPlanApproval> PendingExitPlanModeRequests { get => field ??= []; set; }
+
+    /// <summary>Unanswered user-input requests, including their runtime request IDs.</summary>
+    [JsonPropertyName("pendingUserInputRequests")]
+    public IList<UIPendingUserInput> PendingUserInputRequests { get => field ??= []; set; }
+
+    /// <summary>Runtime-owned plugin discovery and trust policy, or null when absent.</summary>
+    [JsonPropertyName("pluginActivationPolicy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UIPluginActivationPolicy? PluginActivationPolicy { get; set; }
+
+    /// <summary>Current effective plugin activation, or null before activation resolves.</summary>
+    [JsonPropertyName("pluginActivationSnapshot")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UIPluginActivationSnapshot? PluginActivationSnapshot { get; set; }
+
+    /// <summary>Durable event counts by type for the primary agent, excluding subagent events.</summary>
+    [JsonPropertyName("primaryEventCounts")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IDictionary<string, long>? PrimaryEventCounts { get; set; }
+
+    /// <summary>Whether the session currently processes queued or active messages.</summary>
+    [JsonPropertyName("processing")]
+    public bool Processing { get; set; }
+
+    /// <summary>Long-lived services and their current status, progress, and display logs.</summary>
+    [JsonPropertyName("serviceTasks")]
+    public IList<UIServiceTask> ServiceTasks { get => field ??= []; set; }
+
+    /// <summary>Background agents managed by the session's sidekick registry.</summary>
+    [JsonPropertyName("sidekickBackgroundTasks")]
+    public IList<UIBackgroundAgentTask> SidekickBackgroundTasks { get => field ??= []; set; }
+
+    /// <summary>Startup prompts from the runtime-owned hook configuration.</summary>
+    [JsonPropertyName("startupPrompts")]
+    public IList<string> StartupPrompts { get => field ??= []; set; }
+
+    /// <summary>Whether the session supports interactive MCP Apps.</summary>
+    [JsonPropertyName("supportsMcpApps")]
+    public bool SupportsMcpApps { get; set; }
+
+    /// <summary>Canonical working-directory revision for this live session.</summary>
+    [JsonPropertyName("workingDirectoryRevision")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? WorkingDirectoryRevision { get; set; }
+}
+
+/// <summary>Identifies the target session.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionUiSnapshotRequest
+{
     /// <summary>Target session identifier.</summary>
     [JsonPropertyName("sessionId")]
     public string SessionId { get; set; } = string.Empty;
@@ -42726,16 +44869,6 @@ public sealed class UIElicitationSchema
     /// <summary>Schema type indicator (always 'object').</summary>
     [JsonPropertyName("type")]
     public string Type { get; set; } = string.Empty;
-}
-
-/// <summary>Metadata controlling an MCP task's lifetime.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class McpTaskMetadata
-{
-    /// <summary>Task time-to-live.</summary>
-    [JsonPropertyName("ttl")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public long? Ttl { get; set; }
 }
 
 /// <summary>Prompt message and JSON schema describing the form fields to elicit from the user.</summary>
@@ -44984,6 +47117,11 @@ public sealed class SessionMetadataSnapshot
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public MetadataSnapshotRemoteMetadata? RemoteMetadata { get; set; }
 
+    /// <summary>Opaque ID for the live runtime generation. Attachments to the same generation share this ID. Replacement changes it. Older runtimes can omit it.</summary>
+    [JsonPropertyName("runtimeInstanceId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RuntimeInstanceId { get; set; }
+
     /// <summary>Currently selected model identifier, if any.</summary>
     [JsonPropertyName("selectedModel")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -45926,6 +48064,248 @@ internal sealed class ShellCancelUserRequestedRequest
     /// <summary>Request ID previously passed to executeUserRequested.</summary>
     [JsonPropertyName("requestId")]
     public string RequestId { get; set; } = string.Empty;
+
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>Conversation records that can enter a session without model or tool execution.</summary>
+/// <remarks>Polymorphic base type discriminated by <c>type</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonPolymorphic(
+    TypeDiscriminatorPropertyName = "type",
+    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
+[JsonDerivedType(typeof(HistoryImportConversationEventUserMessage), "user.message")]
+[JsonDerivedType(typeof(HistoryImportConversationEventAssistantMessage), "assistant.message")]
+[JsonDerivedType(typeof(HistoryImportConversationEventToolExecutionStart), "tool.execution_start")]
+[JsonDerivedType(typeof(HistoryImportConversationEventToolExecutionComplete), "tool.execution_complete")]
+public partial class HistoryImportConversationEvent
+{
+    /// <summary>The type discriminator.</summary>
+    [JsonPropertyName("type")]
+    public virtual string Type { get; set; } = string.Empty;
+}
+
+
+/// <summary>An inline attachment from an external conversation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HistoryImportAttachment
+{
+    /// <summary>Base64-encoded attachment bytes.</summary>
+    [JsonPropertyName("data")]
+    public string Data { get; set; } = string.Empty;
+
+    /// <summary>Name shown with the attachment.</summary>
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = string.Empty;
+
+    /// <summary>Original MIME type.</summary>
+    [JsonPropertyName("mimeType")]
+    public string MimeType { get; set; } = string.Empty;
+
+    /// <summary>Attachment format.</summary>
+    [JsonPropertyName("type")]
+    public HistoryImportAttachmentType Type { get; set; }
+}
+
+/// <summary>A user message from an external conversation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HistoryImportUserMessage
+{
+    /// <summary>Inline attachments from the original message.</summary>
+    [JsonPropertyName("attachments")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<HistoryImportAttachment>? Attachments { get; set; }
+
+    /// <summary>Original user message text.</summary>
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = string.Empty;
+}
+
+/// <summary>An imported user message and its attachments.</summary>
+/// <remarks>The <c>user.message</c> variant of <see cref="HistoryImportConversationEvent"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class HistoryImportConversationEventUserMessage : HistoryImportConversationEvent
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "user.message";
+
+    /// <summary>Original conversation record payload.</summary>
+    [JsonPropertyName("data")]
+    public required HistoryImportUserMessage Data { get; set; }
+}
+
+/// <summary>A tool request from an external conversation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HistoryImportToolRequest
+{
+    /// <summary>Original tool arguments.</summary>
+    [JsonPropertyName("arguments")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Arguments { get; set; }
+
+    /// <summary>Original tool name.</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Identifier shared with the invocation and result.</summary>
+    [JsonPropertyName("toolCallId")]
+    public string ToolCallId { get; set; } = string.Empty;
+}
+
+/// <summary>An assistant message from an external conversation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HistoryImportAssistantMessage
+{
+    /// <summary>Original assistant message text.</summary>
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = string.Empty;
+
+    /// <summary>Identifier of this message.</summary>
+    [JsonPropertyName("messageId")]
+    public string MessageId { get; set; } = string.Empty;
+
+    /// <summary>Model that produced the original message.</summary>
+    [JsonPropertyName("model")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Model { get; set; }
+
+    /// <summary>Original tool requests, which the runtime does not execute.</summary>
+    [JsonPropertyName("toolRequests")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<HistoryImportToolRequest>? ToolRequests { get; set; }
+
+    /// <summary>Identifier shared with records from the original turn.</summary>
+    [JsonPropertyName("turnId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TurnId { get; set; }
+}
+
+/// <summary>An imported assistant message and its tool requests.</summary>
+/// <remarks>The <c>assistant.message</c> variant of <see cref="HistoryImportConversationEvent"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class HistoryImportConversationEventAssistantMessage : HistoryImportConversationEvent
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "assistant.message";
+
+    /// <summary>Original conversation record payload.</summary>
+    [JsonPropertyName("data")]
+    public required HistoryImportAssistantMessage Data { get; set; }
+}
+
+/// <summary>A tool invocation from an external conversation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HistoryImportToolInvocation
+{
+    /// <summary>Original tool arguments.</summary>
+    [JsonPropertyName("arguments")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Arguments { get; set; }
+
+    /// <summary>Identifier shared with the tool request and result.</summary>
+    [JsonPropertyName("toolCallId")]
+    public string ToolCallId { get; set; } = string.Empty;
+
+    /// <summary>Original tool name.</summary>
+    [JsonPropertyName("toolName")]
+    public string ToolName { get; set; } = string.Empty;
+
+    /// <summary>Identifier shared with records from the original turn.</summary>
+    [JsonPropertyName("turnId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TurnId { get; set; }
+}
+
+/// <summary>An imported tool invocation, which the runtime does not execute.</summary>
+/// <remarks>The <c>tool.execution_start</c> variant of <see cref="HistoryImportConversationEvent"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class HistoryImportConversationEventToolExecutionStart : HistoryImportConversationEvent
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "tool.execution_start";
+
+    /// <summary>Original conversation record payload.</summary>
+    [JsonPropertyName("data")]
+    public required HistoryImportToolInvocation Data { get; set; }
+}
+
+/// <summary>Failure from an imported tool invocation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HistoryImportToolError
+{
+    /// <summary>Original error code, when present.</summary>
+    [JsonPropertyName("code")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Code { get; set; }
+
+    /// <summary>Original error message, including any associated output.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>Text output from an imported tool invocation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HistoryImportToolOutput
+{
+    /// <summary>Original tool output text.</summary>
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = string.Empty;
+}
+
+/// <summary>An imported tool completion with a text result or an error.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class HistoryImportToolCompletion
+{
+    /// <summary>Original error for a failed invocation.</summary>
+    [JsonPropertyName("error")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HistoryImportToolError? Error { get; set; }
+
+    /// <summary>Original text output for a successful invocation.</summary>
+    [JsonPropertyName("result")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HistoryImportToolOutput? Result { get; set; }
+
+    /// <summary>Whether the original tool invocation succeeded.</summary>
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    /// <summary>Identifier shared with the imported tool invocation.</summary>
+    [JsonPropertyName("toolCallId")]
+    public string ToolCallId { get; set; } = string.Empty;
+
+    /// <summary>Identifier shared with other records from the original turn.</summary>
+    [JsonPropertyName("turnId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TurnId { get; set; }
+}
+
+/// <summary>An imported tool result.</summary>
+/// <remarks>The <c>tool.execution_complete</c> variant of <see cref="HistoryImportConversationEvent"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class HistoryImportConversationEventToolExecutionComplete : HistoryImportConversationEvent
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "tool.execution_complete";
+
+    /// <summary>Original conversation record payload.</summary>
+    [JsonPropertyName("data")]
+    public required HistoryImportToolCompletion Data { get; set; }
+}
+
+/// <summary>Conversation history to append through the session's canonical event writer.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionHistoryImportConversationRequest
+{
+    /// <summary>Conversation records in their original order. The runtime generates event IDs and timestamps.</summary>
+    [JsonPropertyName("events")]
+    public IList<HistoryImportConversationEvent> Events { get => field ??= []; set; }
 
     /// <summary>Target session identifier.</summary>
     [JsonPropertyName("sessionId")]
@@ -47657,6 +50037,207 @@ internal sealed class SessionCafeMetricsAttachRequest
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed class SessionCafeMetricsDetachRequest
 {
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>Result of an original-host IDE operation.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionMcpSourceIdeClientResult
+{
+    /// <summary>Whether this operation changed or addressed the current registration.</summary>
+    [JsonPropertyName("applied")]
+    public bool Applied { get; set; }
+
+    /// <summary>Opaque token returned only after successful registration.</summary>
+    [JsonPropertyName("token")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Token { get; set; }
+}
+
+/// <summary>Original-host operations for a session-owned IDE bridge.</summary>
+/// <remarks>Polymorphic base type discriminated by <c>action</c>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonPolymorphic(
+    TypeDiscriminatorPropertyName = "action",
+    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
+[JsonDerivedType(typeof(McpIdeClientOperationRegister), "register")]
+[JsonDerivedType(typeof(McpIdeClientOperationRefresh), "refresh")]
+[JsonDerivedType(typeof(McpIdeClientOperationRemove), "remove")]
+[JsonDerivedType(typeof(McpIdeClientOperationListChanged), "listChanged")]
+[JsonDerivedType(typeof(McpIdeClientOperationNotification), "notification")]
+[JsonDerivedType(typeof(McpIdeClientOperationProgress), "progress")]
+public partial class McpIdeClientOperation
+{
+    /// <summary>The type discriminator.</summary>
+    [JsonPropertyName("action")]
+    public virtual string Action { get; set; } = string.Empty;
+}
+
+
+/// <summary>Serializable snapshot of a host-owned IDE client.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class McpIdeClientSnapshot
+{
+    /// <summary>Actual backing-server capabilities as JSON.</summary>
+    [JsonPropertyName("capabilitiesJson")]
+    public string CapabilitiesJson { get; set; } = string.Empty;
+
+    /// <summary>Serializable configuration, without live client or transport objects.</summary>
+    [JsonPropertyName("configJson")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConfigJson { get; set; }
+
+    /// <summary>Logical server name.</summary>
+    [JsonPropertyName("serverName")]
+    public string ServerName { get; set; } = string.Empty;
+
+    /// <summary>Backing server version.</summary>
+    [JsonPropertyName("serverVersion")]
+    public string ServerVersion { get; set; } = string.Empty;
+
+    /// <summary>Complete MCP tool descriptors as JSON.</summary>
+    [JsonPropertyName("toolsJson")]
+    public string ToolsJson { get; set; } = string.Empty;
+}
+
+/// <summary>Installs a callback identity before the graph starts the server.</summary>
+/// <remarks>The <c>register</c> variant of <see cref="McpIdeClientOperation"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class McpIdeClientOperationRegister : McpIdeClientOperation
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Action => "register";
+
+    /// <summary>Unique callback identity retained by the original SDK host.</summary>
+    [JsonPropertyName("callbackId")]
+    public required string CallbackId { get; set; }
+
+    /// <summary>The current backing-client snapshot.</summary>
+    [JsonPropertyName("snapshot")]
+    public required McpIdeClientSnapshot Snapshot { get; set; }
+}
+
+/// <summary>Replaces descriptors only while the registration token matches.</summary>
+/// <remarks>The <c>refresh</c> variant of <see cref="McpIdeClientOperation"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class McpIdeClientOperationRefresh : McpIdeClientOperation
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Action => "refresh";
+
+    /// <summary>Unique callback identity of the installed registration.</summary>
+    [JsonPropertyName("callbackId")]
+    public required string CallbackId { get; set; }
+
+    /// <summary>The current backing-client snapshot.</summary>
+    [JsonPropertyName("snapshot")]
+    public required McpIdeClientSnapshot Snapshot { get; set; }
+
+    /// <summary>Opaque graph ownership token.</summary>
+    [JsonPropertyName("token")]
+    public required string Token { get; set; }
+}
+
+/// <summary>Stops the graph before the host drops its callback identity.</summary>
+/// <remarks>The <c>remove</c> variant of <see cref="McpIdeClientOperation"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class McpIdeClientOperationRemove : McpIdeClientOperation
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Action => "remove";
+
+    /// <summary>Logical server name.</summary>
+    [JsonPropertyName("serverName")]
+    public required string ServerName { get; set; }
+
+    /// <summary>Opaque graph ownership token.</summary>
+    [JsonPropertyName("token")]
+    public required string Token { get; set; }
+}
+
+/// <summary>Invalidates the matching registration's resource or prompt projection.</summary>
+/// <remarks>The <c>listChanged</c> variant of <see cref="McpIdeClientOperation"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class McpIdeClientOperationListChanged : McpIdeClientOperation
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Action => "listChanged";
+
+    /// <summary>Resources or prompts.</summary>
+    [JsonPropertyName("kind")]
+    public required string Kind { get; set; }
+
+    /// <summary>Logical server name.</summary>
+    [JsonPropertyName("serverName")]
+    public required string ServerName { get; set; }
+
+    /// <summary>Opaque graph ownership token.</summary>
+    [JsonPropertyName("token")]
+    public required string Token { get; set; }
+}
+
+/// <summary>Routes a backing client's notification under its registration token.</summary>
+/// <remarks>The <c>notification</c> variant of <see cref="McpIdeClientOperation"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class McpIdeClientOperationNotification : McpIdeClientOperation
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Action => "notification";
+
+    /// <summary>Notification method.</summary>
+    [JsonPropertyName("method")]
+    public required string Method { get; set; }
+
+    /// <summary>Notification parameters as JSON.</summary>
+    [JsonPropertyName("paramsJson")]
+    public required string ParamsJson { get; set; }
+
+    /// <summary>Logical server name.</summary>
+    [JsonPropertyName("serverName")]
+    public required string ServerName { get; set; }
+
+    /// <summary>Opaque graph ownership token.</summary>
+    [JsonPropertyName("token")]
+    public required string Token { get; set; }
+}
+
+/// <summary>Sends progress only for this callback identity's active call.</summary>
+/// <remarks>The <c>progress</c> variant of <see cref="McpIdeClientOperation"/>.</remarks>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public partial class McpIdeClientOperationProgress : McpIdeClientOperation
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Action => "progress";
+
+    /// <summary>Callback identity that owns the active call.</summary>
+    [JsonPropertyName("callbackId")]
+    public required string CallbackId { get; set; }
+
+    /// <summary>Complete MCP progress notification as JSON.</summary>
+    [JsonPropertyName("notificationJson")]
+    public required string NotificationJson { get; set; }
+
+    /// <summary>Active tool-call correlation token.</summary>
+    [JsonPropertyName("token")]
+    public required long Token { get; set; }
+}
+
+/// <summary>Original-host request for a session-owned IDE bridge.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class SessionMcpSourceIdeClientRequest
+{
+    /// <summary>The operation to apply to the original host's IDE bridge.</summary>
+    [JsonPropertyName("operation")]
+    public McpIdeClientOperation Operation { get => field ??= new(); set; }
+
     /// <summary>Target session identifier.</summary>
     [JsonPropertyName("sessionId")]
     public string SessionId { get; set; } = string.Empty;
@@ -49874,6 +52455,156 @@ public readonly struct TaskKind : IEquatable<TaskKind>
 }
 
 
+/// <summary>Private transition in an admitted host's credential lifecycle.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct HostCredentialLifecycleAction : IEquatable<HostCredentialLifecycleAction>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="HostCredentialLifecycleAction"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="HostCredentialLifecycleAction"/>.</param>
+    [JsonConstructor]
+    public HostCredentialLifecycleAction(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="HostCredentialLifecycleAction"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Start a credential transaction for session creation or resume.</summary>
+    public static HostCredentialLifecycleAction Begin { get; } = new("begin");
+
+    /// <summary>Bind the transaction's registration to its session.</summary>
+    public static HostCredentialLifecycleAction Bind { get; } = new("bind");
+
+    /// <summary>Adopt the session's current registration.</summary>
+    public static HostCredentialLifecycleAction Adopt { get; } = new("adopt");
+
+    /// <summary>Restore a displaced registration after a failed transaction.</summary>
+    public static HostCredentialLifecycleAction Restore { get; } = new("restore");
+
+    /// <summary>Discard an unaccepted credential transaction.</summary>
+    public static HostCredentialLifecycleAction Discard { get; } = new("discard");
+
+    /// <summary>Accept the transaction and retain its session registration.</summary>
+    public static HostCredentialLifecycleAction Accept { get; } = new("accept");
+
+    /// <summary>Read the transaction's resolved auth information.</summary>
+    public static HostCredentialLifecycleAction Auth { get; } = new("auth");
+
+    /// <summary>Read a session's current credential registration.</summary>
+    public static HostCredentialLifecycleAction Session { get; } = new("session");
+
+    /// <summary>Release a session's credential registration.</summary>
+    public static HostCredentialLifecycleAction Release { get; } = new("release");
+
+    /// <summary>Restore a session's previous credential registration.</summary>
+    public static HostCredentialLifecycleAction RestoreSession { get; } = new("restoreSession");
+
+    /// <summary>Returns a value indicating whether two <see cref="HostCredentialLifecycleAction"/> instances are equivalent.</summary>
+    public static bool operator ==(HostCredentialLifecycleAction left, HostCredentialLifecycleAction right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="HostCredentialLifecycleAction"/> instances are not equivalent.</summary>
+    public static bool operator !=(HostCredentialLifecycleAction left, HostCredentialLifecycleAction right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is HostCredentialLifecycleAction other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(HostCredentialLifecycleAction other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{HostCredentialLifecycleAction}"/> for serializing <see cref="HostCredentialLifecycleAction"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<HostCredentialLifecycleAction>
+    {
+        /// <inheritdoc />
+        public override HostCredentialLifecycleAction Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, HostCredentialLifecycleAction value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(HostCredentialLifecycleAction));
+        }
+    }
+}
+
+
+/// <summary>AHP message queue selection.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct RemoteHostPendingMessageKind : IEquatable<RemoteHostPendingMessageKind>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="RemoteHostPendingMessageKind"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="RemoteHostPendingMessageKind"/>.</param>
+    [JsonConstructor]
+    public RemoteHostPendingMessageKind(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="RemoteHostPendingMessageKind"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Steer the active turn.</summary>
+    public static RemoteHostPendingMessageKind Steering { get; } = new("steering");
+
+    /// <summary>Dispatch after the active turn settles.</summary>
+    public static RemoteHostPendingMessageKind Queued { get; } = new("queued");
+
+    /// <summary>Returns a value indicating whether two <see cref="RemoteHostPendingMessageKind"/> instances are equivalent.</summary>
+    public static bool operator ==(RemoteHostPendingMessageKind left, RemoteHostPendingMessageKind right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="RemoteHostPendingMessageKind"/> instances are not equivalent.</summary>
+    public static bool operator !=(RemoteHostPendingMessageKind left, RemoteHostPendingMessageKind right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is RemoteHostPendingMessageKind other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(RemoteHostPendingMessageKind other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{RemoteHostPendingMessageKind}"/> for serializing <see cref="RemoteHostPendingMessageKind"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<RemoteHostPendingMessageKind>
+    {
+        /// <inheritdoc />
+        public override RemoteHostPendingMessageKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, RemoteHostPendingMessageKind value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(RemoteHostPendingMessageKind));
+        }
+    }
+}
+
+
 /// <summary>A wire feature a caller can require of the catalog surface, negotiated per request. A grant means the runtime understands the feature's contract, not that the deployment has enabled the operation; typed unavailable results report availability separately.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
@@ -51813,6 +54544,147 @@ public readonly struct SkillResourceRemoveKind : IEquatable<SkillResourceRemoveK
         public override void Write(Utf8JsonWriter writer, SkillResourceRemoveKind value, JsonSerializerOptions options)
         {
             GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(SkillResourceRemoveKind));
+        }
+    }
+}
+
+
+/// <summary>The provider kind of a signed-in account.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct AccountKind : IEquatable<AccountKind>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="AccountKind"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="AccountKind"/>.</param>
+    [JsonConstructor]
+    public AccountKind(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="AccountKind"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>An OAuth github.com account.</summary>
+    public static AccountKind GitHub { get; } = new("gitHub");
+
+    /// <summary>A GitHub Enterprise Cloud account on a non-github.com host, e.g. *.ghe.com.</summary>
+    public static AccountKind GitHubEnterpriseCloud { get; } = new("gitHubEnterpriseCloud");
+
+    /// <summary>A GitHub (EMU) account derived from a base Entra identity.</summary>
+    public static AccountKind EntraEmu { get; } = new("entraEmu");
+
+    /// <summary>A base Microsoft Entra identity.</summary>
+    public static AccountKind Entra { get; } = new("entra");
+
+    /// <summary>A selectable Microsoft 365 Copilot inference account, backed by a base Entra identity or an external bearer.</summary>
+    public static AccountKind Microsoft365Copilot { get; } = new("microsoft365Copilot");
+
+    /// <summary>Returns a value indicating whether two <see cref="AccountKind"/> instances are equivalent.</summary>
+    public static bool operator ==(AccountKind left, AccountKind right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="AccountKind"/> instances are not equivalent.</summary>
+    public static bool operator !=(AccountKind left, AccountKind right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is AccountKind other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(AccountKind other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{AccountKind}"/> for serializing <see cref="AccountKind"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<AccountKind>
+    {
+        /// <inheritdoc />
+        public override AccountKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, AccountKind value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(AccountKind));
+        }
+    }
+}
+
+
+/// <summary>Disposition of a login attempt, including pending user decisions.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct AuthLoginResultStatus : IEquatable<AuthLoginResultStatus>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="AuthLoginResultStatus"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="AuthLoginResultStatus"/>.</param>
+    [JsonConstructor]
+    public AuthLoginResultStatus(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="AuthLoginResultStatus"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>The credential was persisted and the selected account is signed in.</summary>
+    public static AuthLoginResultStatus Completed { get; } = new("completed");
+
+    /// <summary>Persistence needs explicit consent to store the token in plaintext.</summary>
+    public static AuthLoginResultStatus NeedsPlaintextConsent { get; } = new("needs-plaintext-consent");
+
+    /// <summary>Credentials are saved; select an account using a returned selectionId as advance input to complete sign-in.</summary>
+    public static AuthLoginResultStatus NeedsAccountSelection { get; } = new("needs-account-selection");
+
+    /// <summary>The user declined plaintext persistence.</summary>
+    public static AuthLoginResultStatus Declined { get; } = new("declined");
+
+    /// <summary>Returns a value indicating whether two <see cref="AuthLoginResultStatus"/> instances are equivalent.</summary>
+    public static bool operator ==(AuthLoginResultStatus left, AuthLoginResultStatus right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="AuthLoginResultStatus"/> instances are not equivalent.</summary>
+    public static bool operator !=(AuthLoginResultStatus left, AuthLoginResultStatus right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is AuthLoginResultStatus other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(AuthLoginResultStatus other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{AuthLoginResultStatus}"/> for serializing <see cref="AuthLoginResultStatus"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<AuthLoginResultStatus>
+    {
+        /// <inheritdoc />
+        public override AuthLoginResultStatus Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, AuthLoginResultStatus value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(AuthLoginResultStatus));
         }
     }
 }
@@ -56756,93 +59628,6 @@ public readonly struct EnvironmentKind : IEquatable<EnvironmentKind>
         public override void Write(Utf8JsonWriter writer, EnvironmentKind value, JsonSerializerOptions options)
         {
             GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(EnvironmentKind));
-        }
-    }
-}
-
-
-/// <summary>Private transition in an admitted host's credential lifecycle.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-[JsonConverter(typeof(Converter))]
-[DebuggerDisplay("{Value,nq}")]
-public readonly struct HostCredentialLifecycleAction : IEquatable<HostCredentialLifecycleAction>
-{
-    private readonly string? _value;
-
-    /// <summary>Initializes a new instance of the <see cref="HostCredentialLifecycleAction"/> struct.</summary>
-    /// <param name="value">The value to associate with this <see cref="HostCredentialLifecycleAction"/>.</param>
-    [JsonConstructor]
-    public HostCredentialLifecycleAction(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        _value = value;
-    }
-
-    /// <summary>Gets the value associated with this <see cref="HostCredentialLifecycleAction"/>.</summary>
-    public string Value => _value ?? string.Empty;
-
-    /// <summary>Start a credential transaction for session creation or resume.</summary>
-    public static HostCredentialLifecycleAction Begin { get; } = new("begin");
-
-    /// <summary>Bind the transaction's registration to its session.</summary>
-    public static HostCredentialLifecycleAction Bind { get; } = new("bind");
-
-    /// <summary>Adopt the session's current registration.</summary>
-    public static HostCredentialLifecycleAction Adopt { get; } = new("adopt");
-
-    /// <summary>Restore a displaced registration after a failed transaction.</summary>
-    public static HostCredentialLifecycleAction Restore { get; } = new("restore");
-
-    /// <summary>Discard an unaccepted credential transaction.</summary>
-    public static HostCredentialLifecycleAction Discard { get; } = new("discard");
-
-    /// <summary>Accept the transaction and retain its session registration.</summary>
-    public static HostCredentialLifecycleAction Accept { get; } = new("accept");
-
-    /// <summary>Read the transaction's resolved auth information.</summary>
-    public static HostCredentialLifecycleAction Auth { get; } = new("auth");
-
-    /// <summary>Read a session's current credential registration.</summary>
-    public static HostCredentialLifecycleAction Session { get; } = new("session");
-
-    /// <summary>Release a session's credential registration.</summary>
-    public static HostCredentialLifecycleAction Release { get; } = new("release");
-
-    /// <summary>Restore a session's previous credential registration.</summary>
-    public static HostCredentialLifecycleAction RestoreSession { get; } = new("restoreSession");
-
-    /// <summary>Returns a value indicating whether two <see cref="HostCredentialLifecycleAction"/> instances are equivalent.</summary>
-    public static bool operator ==(HostCredentialLifecycleAction left, HostCredentialLifecycleAction right) => left.Equals(right);
-
-    /// <summary>Returns a value indicating whether two <see cref="HostCredentialLifecycleAction"/> instances are not equivalent.</summary>
-    public static bool operator !=(HostCredentialLifecycleAction left, HostCredentialLifecycleAction right) => !(left == right);
-
-    /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is HostCredentialLifecycleAction other && Equals(other);
-
-    /// <inheritdoc />
-    public bool Equals(HostCredentialLifecycleAction other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
-
-    /// <inheritdoc />
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
-
-    /// <inheritdoc />
-    public override string ToString() => Value;
-
-    /// <summary>Provides a <see cref="JsonConverter{HostCredentialLifecycleAction}"/> for serializing <see cref="HostCredentialLifecycleAction"/> instances.</summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public sealed class Converter : JsonConverter<HostCredentialLifecycleAction>
-    {
-        /// <inheritdoc />
-        public override HostCredentialLifecycleAction Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
-        }
-
-        /// <inheritdoc />
-        public override void Write(Utf8JsonWriter writer, HostCredentialLifecycleAction value, JsonSerializerOptions options)
-        {
-            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(HostCredentialLifecycleAction));
         }
     }
 }
@@ -65971,78 +68756,6 @@ public readonly struct AccountHealth : IEquatable<AccountHealth>
 }
 
 
-/// <summary>The provider kind of a signed-in account.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-[JsonConverter(typeof(Converter))]
-[DebuggerDisplay("{Value,nq}")]
-public readonly struct AccountKind : IEquatable<AccountKind>
-{
-    private readonly string? _value;
-
-    /// <summary>Initializes a new instance of the <see cref="AccountKind"/> struct.</summary>
-    /// <param name="value">The value to associate with this <see cref="AccountKind"/>.</param>
-    [JsonConstructor]
-    public AccountKind(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        _value = value;
-    }
-
-    /// <summary>Gets the value associated with this <see cref="AccountKind"/>.</summary>
-    public string Value => _value ?? string.Empty;
-
-    /// <summary>An OAuth github.com account.</summary>
-    public static AccountKind GitHub { get; } = new("gitHub");
-
-    /// <summary>A GitHub Enterprise Cloud account on a non-github.com host, e.g. *.ghe.com.</summary>
-    public static AccountKind GitHubEnterpriseCloud { get; } = new("gitHubEnterpriseCloud");
-
-    /// <summary>A GitHub (EMU) account derived from a base Entra identity.</summary>
-    public static AccountKind EntraEmu { get; } = new("entraEmu");
-
-    /// <summary>A base Microsoft Entra identity.</summary>
-    public static AccountKind Entra { get; } = new("entra");
-
-    /// <summary>A selectable Microsoft 365 Copilot inference account, backed by a base Entra identity or an external bearer.</summary>
-    public static AccountKind Microsoft365Copilot { get; } = new("microsoft365Copilot");
-
-    /// <summary>Returns a value indicating whether two <see cref="AccountKind"/> instances are equivalent.</summary>
-    public static bool operator ==(AccountKind left, AccountKind right) => left.Equals(right);
-
-    /// <summary>Returns a value indicating whether two <see cref="AccountKind"/> instances are not equivalent.</summary>
-    public static bool operator !=(AccountKind left, AccountKind right) => !(left == right);
-
-    /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is AccountKind other && Equals(other);
-
-    /// <inheritdoc />
-    public bool Equals(AccountKind other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
-
-    /// <inheritdoc />
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
-
-    /// <inheritdoc />
-    public override string ToString() => Value;
-
-    /// <summary>Provides a <see cref="JsonConverter{AccountKind}"/> for serializing <see cref="AccountKind"/> instances.</summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public sealed class Converter : JsonConverter<AccountKind>
-    {
-        /// <inheritdoc />
-        public override AccountKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
-        }
-
-        /// <inheritdoc />
-        public override void Write(Utf8JsonWriter writer, AccountKind value, JsonSerializerOptions options)
-        {
-            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(AccountKind));
-        }
-    }
-}
-
-
 /// <summary>A provider a consumer may interactively sign in with.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
@@ -66104,75 +68817,6 @@ public readonly struct LoginProviderKind : IEquatable<LoginProviderKind>
         public override void Write(Utf8JsonWriter writer, LoginProviderKind value, JsonSerializerOptions options)
         {
             GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(LoginProviderKind));
-        }
-    }
-}
-
-
-/// <summary>Disposition of a login attempt, including pending user decisions.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-[JsonConverter(typeof(Converter))]
-[DebuggerDisplay("{Value,nq}")]
-public readonly struct AuthLoginResultStatus : IEquatable<AuthLoginResultStatus>
-{
-    private readonly string? _value;
-
-    /// <summary>Initializes a new instance of the <see cref="AuthLoginResultStatus"/> struct.</summary>
-    /// <param name="value">The value to associate with this <see cref="AuthLoginResultStatus"/>.</param>
-    [JsonConstructor]
-    public AuthLoginResultStatus(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        _value = value;
-    }
-
-    /// <summary>Gets the value associated with this <see cref="AuthLoginResultStatus"/>.</summary>
-    public string Value => _value ?? string.Empty;
-
-    /// <summary>The credential was persisted and the selected account is signed in.</summary>
-    public static AuthLoginResultStatus Completed { get; } = new("completed");
-
-    /// <summary>Persistence needs explicit consent to store the token in plaintext.</summary>
-    public static AuthLoginResultStatus NeedsPlaintextConsent { get; } = new("needs-plaintext-consent");
-
-    /// <summary>Credentials are saved; select an account using a returned selectionId as advance input to complete sign-in.</summary>
-    public static AuthLoginResultStatus NeedsAccountSelection { get; } = new("needs-account-selection");
-
-    /// <summary>The user declined plaintext persistence.</summary>
-    public static AuthLoginResultStatus Declined { get; } = new("declined");
-
-    /// <summary>Returns a value indicating whether two <see cref="AuthLoginResultStatus"/> instances are equivalent.</summary>
-    public static bool operator ==(AuthLoginResultStatus left, AuthLoginResultStatus right) => left.Equals(right);
-
-    /// <summary>Returns a value indicating whether two <see cref="AuthLoginResultStatus"/> instances are not equivalent.</summary>
-    public static bool operator !=(AuthLoginResultStatus left, AuthLoginResultStatus right) => !(left == right);
-
-    /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is AuthLoginResultStatus other && Equals(other);
-
-    /// <inheritdoc />
-    public bool Equals(AuthLoginResultStatus other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
-
-    /// <inheritdoc />
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
-
-    /// <inheritdoc />
-    public override string ToString() => Value;
-
-    /// <summary>Provides a <see cref="JsonConverter{AuthLoginResultStatus}"/> for serializing <see cref="AuthLoginResultStatus"/> instances.</summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public sealed class Converter : JsonConverter<AuthLoginResultStatus>
-    {
-        /// <inheritdoc />
-        public override AuthLoginResultStatus Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
-        }
-
-        /// <inheritdoc />
-        public override void Write(Utf8JsonWriter writer, AuthLoginResultStatus value, JsonSerializerOptions options)
-        {
-            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(AuthLoginResultStatus));
         }
     }
 }
@@ -69226,6 +71870,141 @@ public readonly struct SubagentSettingsEntryContextTier : IEquatable<SubagentSet
 }
 
 
+/// <summary>Outcome of an explicit cloud memory import.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct MemoryImportStatus : IEquatable<MemoryImportStatus>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="MemoryImportStatus"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="MemoryImportStatus"/>.</param>
+    [JsonConstructor]
+    public MemoryImportStatus(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="MemoryImportStatus"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>The service stored the memory.</summary>
+    public static MemoryImportStatus Imported { get; } = new("imported");
+
+    /// <summary>The service rejected a conflicting memory.</summary>
+    public static MemoryImportStatus Conflict { get; } = new("conflict");
+
+    /// <summary>Policy or configuration disables memory storage.</summary>
+    public static MemoryImportStatus Disabled { get; } = new("disabled");
+
+    /// <summary>Cloud memory storage is unavailable.</summary>
+    public static MemoryImportStatus Unavailable { get; } = new("unavailable");
+
+    /// <summary>The service could not store the memory.</summary>
+    public static MemoryImportStatus Failed { get; } = new("failed");
+
+    /// <summary>Returns a value indicating whether two <see cref="MemoryImportStatus"/> instances are equivalent.</summary>
+    public static bool operator ==(MemoryImportStatus left, MemoryImportStatus right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="MemoryImportStatus"/> instances are not equivalent.</summary>
+    public static bool operator !=(MemoryImportStatus left, MemoryImportStatus right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is MemoryImportStatus other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(MemoryImportStatus other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{MemoryImportStatus}"/> for serializing <see cref="MemoryImportStatus"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<MemoryImportStatus>
+    {
+        /// <inheritdoc />
+        public override MemoryImportStatus Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, MemoryImportStatus value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(MemoryImportStatus));
+        }
+    }
+}
+
+
+/// <summary>Scope for one user-requested cloud memory import.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct MemoryImportScope : IEquatable<MemoryImportScope>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="MemoryImportScope"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="MemoryImportScope"/>.</param>
+    [JsonConstructor]
+    public MemoryImportScope(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="MemoryImportScope"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Store the memory for the current user.</summary>
+    public static MemoryImportScope User { get; } = new("user");
+
+    /// <summary>Store the memory for the session's resolved repository.</summary>
+    public static MemoryImportScope Repository { get; } = new("repository");
+
+    /// <summary>Returns a value indicating whether two <see cref="MemoryImportScope"/> instances are equivalent.</summary>
+    public static bool operator ==(MemoryImportScope left, MemoryImportScope right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="MemoryImportScope"/> instances are not equivalent.</summary>
+    public static bool operator !=(MemoryImportScope left, MemoryImportScope right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is MemoryImportScope other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(MemoryImportScope other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{MemoryImportScope}"/> for serializing <see cref="MemoryImportScope"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<MemoryImportScope>
+    {
+        /// <inheritdoc />
+        public override MemoryImportScope Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, MemoryImportScope value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(MemoryImportScope));
+        }
+    }
+}
+
+
 /// <summary>A session-scoped sandbox transition applied while handling a slash command.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
@@ -69467,6 +72246,75 @@ public readonly struct QueuedCommandWaitRequirement : IEquatable<QueuedCommandWa
         public override void Write(Utf8JsonWriter writer, QueuedCommandWaitRequirement value, JsonSerializerOptions options)
         {
             GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(QueuedCommandWaitRequirement));
+        }
+    }
+}
+
+
+/// <summary>The action the user selected. Defaults to 'autopilot' when autoApproveEdits is true, otherwise 'interactive'.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct UIExitPlanModeAction : IEquatable<UIExitPlanModeAction>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="UIExitPlanModeAction"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="UIExitPlanModeAction"/>.</param>
+    [JsonConstructor]
+    public UIExitPlanModeAction(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="UIExitPlanModeAction"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Exit plan mode without starting implementation.</summary>
+    public static UIExitPlanModeAction ExitOnly { get; } = new("exit_only");
+
+    /// <summary>Exit plan mode and continue interactively.</summary>
+    public static UIExitPlanModeAction Interactive { get; } = new("interactive");
+
+    /// <summary>Exit plan mode and continue in autopilot mode.</summary>
+    public static UIExitPlanModeAction Autopilot { get; } = new("autopilot");
+
+    /// <summary>Exit plan mode and continue in autopilot mode with parallel subagent execution.</summary>
+    public static UIExitPlanModeAction AutopilotFleet { get; } = new("autopilot_fleet");
+
+    /// <summary>Returns a value indicating whether two <see cref="UIExitPlanModeAction"/> instances are equivalent.</summary>
+    public static bool operator ==(UIExitPlanModeAction left, UIExitPlanModeAction right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="UIExitPlanModeAction"/> instances are not equivalent.</summary>
+    public static bool operator !=(UIExitPlanModeAction left, UIExitPlanModeAction right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is UIExitPlanModeAction other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(UIExitPlanModeAction other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{UIExitPlanModeAction}"/> for serializing <see cref="UIExitPlanModeAction"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<UIExitPlanModeAction>
+    {
+        /// <inheritdoc />
+        public override UIExitPlanModeAction Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, UIExitPlanModeAction value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(UIExitPlanModeAction));
         }
     }
 }
@@ -69728,75 +72576,6 @@ public readonly struct UISessionLimitsExhaustedResponseAction : IEquatable<UISes
         public override void Write(Utf8JsonWriter writer, UISessionLimitsExhaustedResponseAction value, JsonSerializerOptions options)
         {
             GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(UISessionLimitsExhaustedResponseAction));
-        }
-    }
-}
-
-
-/// <summary>The action the user selected. Defaults to 'autopilot' when autoApproveEdits is true, otherwise 'interactive'.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-[JsonConverter(typeof(Converter))]
-[DebuggerDisplay("{Value,nq}")]
-public readonly struct UIExitPlanModeAction : IEquatable<UIExitPlanModeAction>
-{
-    private readonly string? _value;
-
-    /// <summary>Initializes a new instance of the <see cref="UIExitPlanModeAction"/> struct.</summary>
-    /// <param name="value">The value to associate with this <see cref="UIExitPlanModeAction"/>.</param>
-    [JsonConstructor]
-    public UIExitPlanModeAction(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        _value = value;
-    }
-
-    /// <summary>Gets the value associated with this <see cref="UIExitPlanModeAction"/>.</summary>
-    public string Value => _value ?? string.Empty;
-
-    /// <summary>Exit plan mode without starting implementation.</summary>
-    public static UIExitPlanModeAction ExitOnly { get; } = new("exit_only");
-
-    /// <summary>Exit plan mode and continue interactively.</summary>
-    public static UIExitPlanModeAction Interactive { get; } = new("interactive");
-
-    /// <summary>Exit plan mode and continue in autopilot mode.</summary>
-    public static UIExitPlanModeAction Autopilot { get; } = new("autopilot");
-
-    /// <summary>Exit plan mode and continue in autopilot mode with parallel subagent execution.</summary>
-    public static UIExitPlanModeAction AutopilotFleet { get; } = new("autopilot_fleet");
-
-    /// <summary>Returns a value indicating whether two <see cref="UIExitPlanModeAction"/> instances are equivalent.</summary>
-    public static bool operator ==(UIExitPlanModeAction left, UIExitPlanModeAction right) => left.Equals(right);
-
-    /// <summary>Returns a value indicating whether two <see cref="UIExitPlanModeAction"/> instances are not equivalent.</summary>
-    public static bool operator !=(UIExitPlanModeAction left, UIExitPlanModeAction right) => !(left == right);
-
-    /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is UIExitPlanModeAction other && Equals(other);
-
-    /// <inheritdoc />
-    public bool Equals(UIExitPlanModeAction other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
-
-    /// <inheritdoc />
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
-
-    /// <inheritdoc />
-    public override string ToString() => Value;
-
-    /// <summary>Provides a <see cref="JsonConverter{UIExitPlanModeAction}"/> for serializing <see cref="UIExitPlanModeAction"/> instances.</summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public sealed class Converter : JsonConverter<UIExitPlanModeAction>
-    {
-        /// <inheritdoc />
-        public override UIExitPlanModeAction Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
-        }
-
-        /// <inheritdoc />
-        public override void Write(Utf8JsonWriter writer, UIExitPlanModeAction value, JsonSerializerOptions options)
-        {
-            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(UIExitPlanModeAction));
         }
     }
 }
@@ -70508,6 +73287,66 @@ public readonly struct ShellKillSignal : IEquatable<ShellKillSignal>
         public override void Write(Utf8JsonWriter writer, ShellKillSignal value, JsonSerializerOptions options)
         {
             GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(ShellKillSignal));
+        }
+    }
+}
+
+
+/// <summary>The supported imported attachment format.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct HistoryImportAttachmentType : IEquatable<HistoryImportAttachmentType>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="HistoryImportAttachmentType"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="HistoryImportAttachmentType"/>.</param>
+    [JsonConstructor]
+    public HistoryImportAttachmentType(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="HistoryImportAttachmentType"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Gets the <c>blob</c> value.</summary>
+    public static HistoryImportAttachmentType Blob { get; } = new("blob");
+
+    /// <summary>Returns a value indicating whether two <see cref="HistoryImportAttachmentType"/> instances are equivalent.</summary>
+    public static bool operator ==(HistoryImportAttachmentType left, HistoryImportAttachmentType right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="HistoryImportAttachmentType"/> instances are not equivalent.</summary>
+    public static bool operator !=(HistoryImportAttachmentType left, HistoryImportAttachmentType right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is HistoryImportAttachmentType other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(HistoryImportAttachmentType other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{HistoryImportAttachmentType}"/> for serializing <see cref="HistoryImportAttachmentType"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<HistoryImportAttachmentType>
+    {
+        /// <inheritdoc />
+        public override HistoryImportAttachmentType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, HistoryImportAttachmentType value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(HistoryImportAttachmentType));
         }
     }
 }
@@ -72078,6 +74917,18 @@ public sealed class ServerRpc
         await CopilotClient.InvokeRpcAsync(_rpc, "registerExtensionLaunchProvider", [], cancellationToken);
     }
 
+    /// <summary>Host APIs.</summary>
+    public ServerHostApi Host =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
+    /// <summary>RemoteHosts APIs.</summary>
+    public ServerRemoteHostsApi RemoteHosts =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
     /// <summary>Plugins APIs.</summary>
     public ServerPluginsApi Plugins =>
         field ??
@@ -72194,12 +75045,6 @@ public sealed class ServerRpc
 
     /// <summary>Environments APIs.</summary>
     public ServerEnvironmentsApi Environments =>
-        field ??
-        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
-        field;
-
-    /// <summary>Host APIs.</summary>
-    public ServerHostApi Host =>
         field ??
         Interlocked.CompareExchange(ref field, new(_rpc), null) ??
         field;
@@ -72389,6 +75234,409 @@ public sealed class ServerRpc
         field ??
         Interlocked.CompareExchange(ref field, new(_rpc), null) ??
         field;
+
+    /// <summary>Acp APIs.</summary>
+    public ServerAcpApi Acp =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
+    /// <summary>McpSource APIs.</summary>
+    public ServerMcpSourceApi McpSource =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+}
+
+/// <summary>Provides server-scoped Host APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerHostApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerHostApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Reads or atomically creates the stable compute UUID used by hosted environments in the selected canonical settings document. Preserves concurrent edits and refuses malformed files or identities.</summary>
+    /// <param name="configDir">Explicit Copilot configuration directory; omission uses the SDK server's configured home.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Stable compute identity stored atomically in the canonical settings document.</returns>
+    internal async Task<HostGetOrCreateComputeIdResult> GetOrCreateComputeIdAsync(string? configDir = null, CancellationToken cancellationToken = default)
+    {
+        var request = new HostGetOrCreateComputeIdRequest { ConfigDir = configDir };
+        return await CopilotClient.InvokeRpcAsync<HostGetOrCreateComputeIdResult>(_rpc, "host.getOrCreateComputeId", [request], cancellationToken);
+    }
+
+    /// <summary>Publishes an attached resident session for this listener's lifetime without copying it.</summary>
+    /// <param name="hostId">Listener UUID returned by host.start.</param>
+    /// <param name="sessionId">Canonical runtime session ID attached to the listener's owning connection.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The existing runtime identity and its resource on the listener.</returns>
+    public async Task<HostPublishSessionResult> PublishSessionAsync(string hostId, string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+        ArgumentNullException.ThrowIfNull(sessionId);
+
+        var request = new HostPublishSessionRequest { HostId = hostId, SessionId = sessionId };
+        return await CopilotClient.InvokeRpcAsync<HostPublishSessionResult>(_rpc, "host.publishSession", [request], cancellationToken);
+    }
+
+    /// <summary>Runs the admitted CLI host's private credential lifecycle protocol. The runtime retains each transaction and its displaced registration. Callback admission uses the original connection in this same engine. This is host migration plumbing, not a public credential API.</summary>
+    /// <param name="action">Credential lifecycle transition or host-owned credential observation.</param>
+    /// <param name="transactionId">Opaque runtime transaction capability returned by begin.</param>
+    /// <param name="connectionId">Original callback connection. The runtime verifies that it belongs to this host's engine.</param>
+    /// <param name="registrationId">Existing credential registration, never a bearer token.</param>
+    /// <param name="sessionId">Session resolved by the original host lifecycle.</param>
+    /// <param name="previousRegistrationId">Registration retained by a resident ambient-auth rollback.</param>
+    /// <param name="resume">Whether begin resumes an existing session.</param>
+    /// <param name="callback">Whether the original connection owns a renewable SDK callback rather than a static token context.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Projection of the authoritative runtime credential transaction.</returns>
+    internal async Task<HostCredentialLifecycleResult> CredentialsAsync(HostCredentialLifecycleAction action, string? transactionId = null, long? connectionId = null, string? registrationId = null, string? sessionId = null, string? previousRegistrationId = null, bool? resume = null, bool? callback = null, CancellationToken cancellationToken = default)
+    {
+        var request = new HostCredentialLifecycleRequest { Action = action, TransactionId = transactionId, ConnectionId = connectionId, RegistrationId = registrationId, SessionId = sessionId, PreviousRegistrationId = previousRegistrationId, Resume = resume, Callback = callback };
+        return await CopilotClient.InvokeRpcAsync<HostCredentialLifecycleResult>(_rpc, "host.credentials", [request], cancellationToken);
+    }
+
+    /// <summary>Withdraws a live or dormant application publication from an owned live host and revokes AHP attachments without deleting local session history, worktrees, or ongoing work. Returns false when already absent; rejects nonapplication publications.</summary>
+    /// <param name="hostId">Listener UUID returned by host.start; the caller must own the live listener.</param>
+    /// <param name="sessionId">Canonical session ID in the durable catalog, whether resident or dormant.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Publication withdrawal outcome; local history, worktrees and ongoing work are preserved.</returns>
+    public async Task<HostUnpublishSessionResult> UnpublishSessionAsync(string hostId, string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+        ArgumentNullException.ThrowIfNull(sessionId);
+
+        var request = new HostUnpublishSessionRequest { HostId = hostId, SessionId = sessionId };
+        return await CopilotClient.InvokeRpcAsync<HostUnpublishSessionResult>(_rpc, "host.unpublishSession", [request], cancellationToken);
+    }
+
+    /// <summary>Reads the complete advertised live and dormant session catalog of an existing host owned by this connection. Does not start hosting, subscribe to sessions, or guarantee resumability.</summary>
+    /// <param name="hostId">
+    /// Listener UUID returned by host.start; the caller must own it. Omit to read
+    /// the saved default compute-identity catalog without starting a listener.
+    /// </param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The complete live and dormant advertised catalog, without subscribing to sessions.</returns>
+    public async Task<HostListSessionsResult> ListSessionsAsync(string? hostId = null, CancellationToken cancellationToken = default)
+    {
+        var request = new HostListSessionsRequest { HostId = hostId };
+        return await CopilotClient.InvokeRpcAsync<HostListSessionsResult>(_rpc, "host.listSessions", [request], cancellationToken);
+    }
+
+    /// <summary>Requests app-owned materialization over the owning SDK participant.</summary>
+    /// <param name="handoffId">Unique identity for this participation, independent of the session lifetime.</param>
+    /// <param name="config">Host-selected SDK creation or resume settings, without executable callbacks or tools.</param>
+    /// <param name="authentication">Trusted admission identity supplied by the hosting participant. Required by the runtime before a handoff is admitted.</param>
+    /// <param name="resume">Resume an app-owned durable session instead of creating a new session.</param>
+    /// <param name="preferResident">
+    /// For an explicit publication, borrow an existing owning-connection resident
+    /// instead of invoking the resume factory. Cold sessions still use the factory.
+    /// </param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The resident session the application has materialized on its own connection.</returns>
+    internal async Task<HostCreateSessionResult> CreateSessionAsync(string handoffId, IDictionary<string, JsonElement> config, HostSessionAuthentication? authentication = null, bool? resume = null, bool? preferResident = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(handoffId);
+        ArgumentNullException.ThrowIfNull(config);
+
+        var request = new HostCreateSessionRequest { HandoffId = handoffId, Config = config, Authentication = authentication, Resume = resume, PreferResident = preferResident };
+        return await CopilotClient.InvokeRpcAsync<HostCreateSessionResult>(_rpc, "host.createSession", [request], cancellationToken);
+    }
+
+    /// <summary>Releases app ownership retention after AHP detaches.</summary>
+    /// <param name="handoffId">Identity of the participation to release without destroying the session.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Empty acknowledgement for a completed host lifecycle operation.</returns>
+    internal async Task<HostReleaseSessionResult> ReleaseSessionAsync(string handoffId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(handoffId);
+
+        var request = new HostReleaseSessionRequest { HandoffId = handoffId };
+        return await CopilotClient.InvokeRpcAsync<HostReleaseSessionResult>(_rpc, "host.releaseSession", [request], cancellationToken);
+    }
+
+    /// <summary>Starts a connection-owned AHP host with explicit localServer and/or githubEnvironment transports as a supervised SDK participant.</summary>
+    /// <param name="hostId">Caller-generated UUID identifying this connection-owned listener.</param>
+    /// <param name="authentication">Explicit admission policy, required by the runtime before hosting. Optional in the wire DTO only to preserve generated client construction.</param>
+    /// <param name="computeId">Stable application identity selecting its durable host catalog. Defaults to the persisted runtime compute GUID; must agree with githubEnvironment.computeId when both are supplied.</param>
+    /// <param name="workspace">Absolute directory on the runtime host to serve through AHP. Defaults to the runtime's configured working directory. Does not change process or session working directories.</param>
+    /// <param name="localServer">Enables a local WebSocket listener.</param>
+    /// <param name="githubEnvironment">Registers a GitHub Mission Control environment and enables its relay transport.</param>
+    /// <param name="sessionFactory">Ask the owning SDK application to materialize AHP sessions.</param>
+    /// <param name="resumeFactory">Ask the owning application to resume its durable AHP sessions.</param>
+    /// <param name="allowCreatingNewSessions">Whether remote clients may create new sessions. Defaults to denied when omitted. Does not restrict owner work, publication, or existing sessions.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Listener readiness, returned only after binding and the supervised participant's SDK handshake.</returns>
+    public async Task<HostStartResult> StartAsync(string hostId, HostAuthentication? authentication = null, string? computeId = null, string? workspace = null, HostLocalServerOptions? localServer = null, HostGitHubEnvironmentOptions? githubEnvironment = null, bool? sessionFactory = null, bool? resumeFactory = null, bool? allowCreatingNewSessions = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+
+        var request = new HostStartRequest { HostId = hostId, Authentication = authentication, ComputeId = computeId, Workspace = workspace, LocalServer = localServer, GitHubEnvironment = githubEnvironment, SessionFactory = sessionFactory, ResumeFactory = resumeFactory, AllowCreatingNewSessions = allowCreatingNewSessions };
+        return await CopilotClient.InvokeRpcAsync<HostStartResult>(_rpc, "host.start", [request], cancellationToken);
+    }
+
+    /// <summary>Stops a listener owned by this SDK connection and joins its cleanup without deleting sessions.</summary>
+    /// <param name="hostId">Listener UUID. Unknown or successfully stopped IDs are harmless.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Empty acknowledgement for a completed host lifecycle operation.</returns>
+    public async Task<HostDisposeResult> DisposeAsync(string hostId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+
+        var request = new HostDisposeRequest { HostId = hostId };
+        return await CopilotClient.InvokeRpcAsync<HostDisposeResult>(_rpc, "host.dispose", [request], cancellationToken);
+    }
+
+    /// <summary>Changes remote creation admission on a host owned by this SDK connection without disconnecting clients. Acknowledgement means subsequent admissions use the new policy; already-admitted creation may complete.</summary>
+    /// <param name="hostId">Listener UUID owned by the calling SDK connection.</param>
+    /// <param name="allowCreatingNewSessions">After acknowledgement, subsequent remote creation admissions use this policy. Already-admitted requests may finish.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Empty acknowledgement for a completed host lifecycle operation.</returns>
+    public async Task<HostSetSessionCreationPolicyResult> SetSessionCreationPolicyAsync(string hostId, bool allowCreatingNewSessions, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+
+        var request = new HostSetSessionCreationPolicyRequest { HostId = hostId, AllowCreatingNewSessions = allowCreatingNewSessions };
+        return await CopilotClient.InvokeRpcAsync<HostSetSessionCreationPolicyResult>(_rpc, "host.setSessionCreationPolicy", [request], cancellationToken);
+    }
+
+    /// <summary>Resolves current authenticated credentials and remote-control policy only for the runtime-owned Mission Control hosting participant.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Private credentials delivered only to a runtime-owned Mission Control hosting participant.</returns>
+    internal async Task<HostGetEnvironmentCredentialsResult> GetEnvironmentCredentialsAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<HostGetEnvironmentCredentialsResult>(_rpc, "host.getEnvironmentCredentials", [], cancellationToken);
+    }
+
+    /// <summary>Returns listener settings only to the supervised hosting participant over its SDK connection.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Normalized listener settings delivered only to the supervised hosting participant.</returns>
+    internal async Task<HostGetConfigurationResult> GetConfigurationAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<HostGetConfigurationResult>(_rpc, "host.getConfiguration", [], cancellationToken);
+    }
+
+    /// <summary>Resolves the host account credential without applying Mission Control transport policy, only for its supervised GitHub hosting participant.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Private credentials delivered only to a runtime-owned Mission Control hosting participant.</returns>
+    internal async Task<HostGetAuthenticationCredentialsResult> GetAuthenticationCredentialsAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<HostGetAuthenticationCredentialsResult>(_rpc, "host.getAuthenticationCredentials", [], cancellationToken);
+    }
+
+    /// <summary>Validates a decrypted admission credential through the owning application, only for its supervised custom-authentication participant.</summary>
+    /// <param name="requestId">Unique validation attempt, scoped to this host.</param>
+    /// <param name="token">Decrypted admission token, never an inference credential.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Validated admission credential, or null when the application rejects it.</returns>
+    internal async Task<HostAuthenticationResult?> AuthenticateAsync(string requestId, string token, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(requestId);
+        ArgumentNullException.ThrowIfNull(token);
+
+        var request = new HostAuthenticateRequest { RequestId = requestId, Token = token };
+        return await CopilotClient.InvokeRpcAsync<HostAuthenticationResult?>(_rpc, "host.authenticate", [request], cancellationToken);
+    }
+
+    /// <summary>Cancels a supervised participant's pending admission validation.</summary>
+    /// <param name="requestId">Validation attempt to cancel.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Empty acknowledgement for a completed host lifecycle operation.</returns>
+    internal async Task<HostCancelAuthenticationResult> CancelAuthenticationAsync(string requestId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(requestId);
+
+        var request = new HostCancelAuthenticationRequest { RequestId = requestId };
+        return await CopilotClient.InvokeRpcAsync<HostCancelAuthenticationResult>(_rpc, "host.cancelAuthentication", [request], cancellationToken);
+    }
+
+    /// <summary>Reports a supervised hosting participant's bound AHP endpoint after its SDK handshake.</summary>
+    /// <param name="address">Actual bound WebSocket URL.</param>
+    /// <param name="token">Configured secret token, absent when authentication is disabled.</param>
+    /// <param name="environmentId">Registered environment ID, reported only once the relay transport is connected.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Empty acknowledgement for a completed host lifecycle operation.</returns>
+    internal async Task<HostReadyResult> ReadyAsync(string? address = null, string? token = null, string? environmentId = null, CancellationToken cancellationToken = default)
+    {
+        var request = new HostReadyRequest { Address = address, Token = token, EnvironmentId = environmentId };
+        return await CopilotClient.InvokeRpcAsync<HostReadyResult>(_rpc, "host.ready", [request], cancellationToken);
+    }
+}
+
+/// <summary>Provides server-scoped RemoteHosts APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerRemoteHostsApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerRemoteHostsApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Executes a closed native relay operation through an outgoing engine owned by this SDK connection. Does not accept arbitrary JSON-RPC methods or copy canonical session state.</summary>
+    /// <param name="hostId">Owned outgoing connection UUID.</param>
+    /// <param name="command">Native engine command; arbitrary protocol methods are not accepted.</param>
+    /// <param name="sessionUri">AHP session or chat URI; absent only for connection-wide commands.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Result of a closed native relay operation.</returns>
+    internal async Task<RemoteHostsCommandResult> CommandAsync(string hostId, RemoteHostCommand command, string? sessionUri = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+        ArgumentNullException.ThrowIfNull(command);
+
+        var request = new RemoteHostsCommandRequest { HostId = hostId, Command = command, SessionUri = sessionUri };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsCommandResult>(_rpc, "remoteHosts.command", [request], cancellationToken);
+    }
+
+    /// <summary>Allocates an inert outgoing AHP connection owned by this SDK connection. Direct credential sharing requires explicit permission; credentials never cross this interface.</summary>
+    /// <param name="hostId">Application-generated UUID, also usable to dispose a canceled creation.</param>
+    /// <param name="transport">The single endpoint this connection may contact.</param>
+    /// <param name="clientId">Optional stable application client identity for the AHP handshake.</param>
+    /// <param name="diagnosticLogId">Optional file logger owned by this SDK connection, with its filter and flush boundary.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>An allocated, inert outgoing connection.</returns>
+    internal async Task<RemoteHostsCreateResult> CreateAsync(string hostId, RemoteHostTransport transport, string? clientId = null, string? diagnosticLogId = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+        ArgumentNullException.ThrowIfNull(transport);
+
+        var request = new RemoteHostsCreateRequest { HostId = hostId, Transport = transport, ClientId = clientId, DiagnosticLogId = diagnosticLogId };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsCreateResult>(_rpc, "remoteHosts.create", [request], cancellationToken);
+    }
+
+    /// <summary>Connects an owned outgoing AHP engine using its original transport and renewable account credential.</summary>
+    /// <param name="hostId">Outgoing connection UUID returned by create.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>An outgoing connection's canonical engine snapshot.</returns>
+    internal async Task<RemoteHostsConnectResult> ConnectAsync(string hostId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+
+        var request = new RemoteHostsConnectRequest { HostId = hostId };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsConnectResult>(_rpc, "remoteHosts.connect", [request], cancellationToken);
+    }
+
+    /// <summary>Reconnects the same outgoing AHP engine and restores its admitted subscriptions without changing account identity.</summary>
+    /// <param name="hostId">Outgoing connection UUID returned by create.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>An outgoing connection's canonical engine snapshot.</returns>
+    internal async Task<RemoteHostsReconnectResult> ReconnectAsync(string hostId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+
+        var request = new RemoteHostsReconnectRequest { HostId = hostId };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsReconnectResult>(_rpc, "remoteHosts.reconnect", [request], cancellationToken);
+    }
+
+    /// <summary>Reads the existing outgoing engine snapshot without network access.</summary>
+    /// <param name="hostId">Outgoing connection UUID returned by create.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>An outgoing connection's canonical engine snapshot.</returns>
+    internal async Task<RemoteHostsGetStateResult> GetStateAsync(string hostId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+
+        var request = new RemoteHostsGetStateRequest { HostId = hostId };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsGetStateResult>(_rpc, "remoteHosts.getState", [request], cancellationToken);
+    }
+
+    /// <summary>Refreshes the owned remote host's session inventory without attaching to its sessions.</summary>
+    /// <param name="hostId">Outgoing connection UUID returned by create.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>An outgoing connection's canonical engine snapshot.</returns>
+    internal async Task<RemoteHostsListSessionsResult> ListSessionsAsync(string hostId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+
+        var request = new RemoteHostsListSessionsRequest { HostId = hostId };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsListSessionsResult>(_rpc, "remoteHosts.listSessions", [request], cancellationToken);
+    }
+
+    /// <summary>Cancels pending allocation and disposes an outgoing connection. Safe before create completes and after prior disposal.</summary>
+    /// <param name="hostId">Outgoing connection UUID returned by create.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Completion of an outgoing connection operation with no result.</returns>
+    internal async Task<RemoteHostsDisposeResult> DisposeAsync(string hostId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+
+        var request = new RemoteHostsDisposeRequest { HostId = hostId };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsDisposeResult>(_rpc, "remoteHosts.dispose", [request], cancellationToken);
+    }
+
+    /// <summary>Answers advertised and explicitly requested protected resources with this connection's renewable GitHub credential. Reports independent outcomes.</summary>
+    /// <param name="hostId">Owned outgoing connection UUID.</param>
+    /// <param name="extraResources">Additional protected resources to answer alongside advertised requirements.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Independent authentication outcomes; one failure does not hide other outcomes.</returns>
+    internal async Task<RemoteHostsAuthenticateResourcesResult> AuthenticateResourcesAsync(string hostId, IList<string>? extraResources = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+
+        var request = new RemoteHostsAuthenticateResourcesRequest { HostId = hostId, ExtraResources = extraResources };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsAuthenticateResourcesResult>(_rpc, "remoteHosts.authenticateResources", [request], cancellationToken);
+    }
+
+    /// <summary>Creates a remote session, including native project provisioning when requested, and returns the engine's existing post-creation refresh.</summary>
+    /// <param name="hostId">Owned outgoing connection UUID.</param>
+    /// <param name="text">Optional initial prompt, sent exactly once by the owning engine.</param>
+    /// <param name="options">Native AHP session options, including model, provider, directory, and project selection.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The created session and the refresh already performed by its owning engine.</returns>
+    internal async Task<RemoteHostsCreateSessionResult> CreateSessionAsync(string hostId, string? text = null, object? options = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+
+        var request = new RemoteHostsCreateSessionRequest { HostId = hostId, Text = text, Options = CopilotClient.ToJsonElementForWire(options) };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsCreateSessionResult>(_rpc, "remoteHosts.createSession", [request], cancellationToken);
+    }
+
+    /// <summary>Deletes a session through its existing outgoing host engine without creating a local session model.</summary>
+    /// <param name="hostId">Owned outgoing connection UUID.</param>
+    /// <param name="sessionUri">AHP session URI advertised by that connection.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Completion of an outgoing connection operation with no result.</returns>
+    internal async Task<RemoteHostsDeleteSessionResult> DeleteSessionAsync(string hostId, string sessionUri, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+        ArgumentNullException.ThrowIfNull(sessionUri);
+
+        var request = new RemoteHostsDeleteSessionRequest { HostId = hostId, SessionUri = sessionUri };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsDeleteSessionResult>(_rpc, "remoteHosts.deleteSession", [request], cancellationToken);
+    }
+
+    /// <summary>Retains a native refcounted remote session subscription and delivers projected actions to the owning SDK connection.</summary>
+    /// <param name="hostId">Owned outgoing connection UUID.</param>
+    /// <param name="sessionUri">AHP session URI advertised by that connection.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Completion of an outgoing connection operation with no result.</returns>
+    internal async Task<RemoteHostsSubscribeSessionResult> SubscribeSessionAsync(string hostId, string sessionUri, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+        ArgumentNullException.ThrowIfNull(sessionUri);
+
+        var request = new RemoteHostsSubscribeSessionRequest { HostId = hostId, SessionUri = sessionUri };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsSubscribeSessionResult>(_rpc, "remoteHosts.subscribeSession", [request], cancellationToken);
+    }
+
+    /// <summary>Releases one native remote session subscription without deleting or stopping the remote session.</summary>
+    /// <param name="hostId">Owned outgoing connection UUID.</param>
+    /// <param name="sessionUri">AHP session URI advertised by that connection.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Completion of an outgoing connection operation with no result.</returns>
+    internal async Task<RemoteHostsUnsubscribeSessionResult> UnsubscribeSessionAsync(string hostId, string sessionUri, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hostId);
+        ArgumentNullException.ThrowIfNull(sessionUri);
+
+        var request = new RemoteHostsUnsubscribeSessionRequest { HostId = hostId, SessionUri = sessionUri };
+        return await CopilotClient.InvokeRpcAsync<RemoteHostsUnsubscribeSessionResult>(_rpc, "remoteHosts.unsubscribeSession", [request], cancellationToken);
+    }
 }
 
 /// <summary>Provides server-scoped Plugins APIs.</summary>
@@ -72463,7 +75711,7 @@ public sealed class ServerPluginsApi
     /// <param name="request">Optional read-only plugin discovery context. The runtime resolves account, policy, and workspace trust. This query does not change settings.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Plugins installed in user/global state.</returns>
-    public async Task<PluginListResult> ListAsync(PluginsListRequest request, CancellationToken cancellationToken = default)
+    public async Task<PluginListResult> ListWithOptionsAsync(PluginsListRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         return await CopilotClient.InvokeRpcAsync<PluginListResult>(_rpc, "plugins.list", [request], cancellationToken);
@@ -73236,6 +76484,22 @@ public sealed class ServerAccountApi
         return await CopilotClient.InvokeRpcAsync<AccountLogoutResult>(_rpc, "account.logout", [request], cancellationToken);
     }
 
+    /// <summary>Resolves relay endpoints through the original account owner before any session exists. Requires a usable GitHub credential and preserves the owner's captured environment.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Relay endpoints from the original account owner and its captured credential environment.</returns>
+    internal async Task<AccountRelayBootstrapConfig> GetRelayBootstrapConfigAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<AccountRelayBootstrapConfig>(_rpc, "account.getRelayBootstrapConfig", [], cancellationToken);
+    }
+
+    /// <summary>Returns the active account's GitHub API URL when its current credential is usable, or null when no authenticated credential exists. Resolves credentials through the original account owner.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The authenticated account's GitHub API URL, or null when no usable credential exists.</returns>
+    internal async Task<string?> GetGitHubApiUrlIfAuthenticatedAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<string?>(_rpc, "account.getGitHubApiUrlIfAuthenticated", [], cancellationToken);
+    }
+
     /// <summary>Renders the sign-in banner and the one-line account description the runtime uses for an authentication identity. The runtime words these in several places for its own callers, so a host that announces a sign-in or an account switch should render them from here rather than composing its own, which would let the two spellings drift apart.</summary>
     /// <param name="identity">Identity to describe.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
@@ -73303,6 +76567,71 @@ public sealed class ServerAccountApi
     {
         var request = new AccountGetHostUrlRequest { CopilotGhHost = copilotGhHost, GhHost = ghHost };
         return await CopilotClient.InvokeRpcAsync<AccountGetHostUrlResult>(_rpc, "account.getHostUrl", [request], cancellationToken);
+    }
+
+    /// <summary>DeviceCodeLogin APIs.</summary>
+    public ServerAccountDeviceCodeLoginApi DeviceCodeLogin =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+}
+
+/// <summary>Provides server-scoped AccountDeviceCodeLogin APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerAccountDeviceCodeLoginApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerAccountDeviceCodeLoginApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Starts device authorization through the original account owner without creating a session. The calling connection owns the flow; connection teardown cancels polling and pending persistence.</summary>
+    /// <param name="host">GitHub host for device authorization.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>A started login flow: its opaque id and first step.</returns>
+    internal async Task<AuthLoginBegun> BeginAsync(string host, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+
+        var request = new AccountDeviceCodeLoginBeginRequest { Host = host };
+        return await CopilotClient.InvokeRpcAsync<AuthLoginBegun>(_rpc, "account.deviceCodeLogin.begin", [request], cancellationToken);
+    }
+
+    /// <summary>Awaits device authorization or answers a previous plaintext-storage request. Never saves plaintext without a later explicit decision. Rejects another connection's flow and a changed original account owner.</summary>
+    /// <param name="flowId">Identifier returned by deviceCodeLogin.begin.</param>
+    /// <param name="allowPlaintext">Explicit storage decision after a needs-plaintext-consent result.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>One step in an interactive login flow. The consumer acts on the step and calls advance to proceed. Browser-open is encoded as two distinct steps by design: `open-url` is CONSUMER-driven (the provider surfaces the authorize URL and the consumer opens it — github.com/GHEC web), while `needs-interaction` is PROVIDER-driven (the provider opens the browser or broker UI itself and does not surface a URL — Entra). A device-code flow surfaces its one-time code as `device-code`; the consumer shows the code, may open the verification URI, and calls advance, which resolves once the user has authorized the device.</returns>
+    internal async Task<AuthLoginStep> AdvanceAsync(string flowId, bool? allowPlaintext = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(flowId);
+
+        var request = new AccountDeviceCodeLoginAdvanceRequest { FlowId = flowId, AllowPlaintext = allowPlaintext };
+        return await CopilotClient.InvokeRpcAsync<AuthLoginStep>(_rpc, "account.deviceCodeLogin.advance", [request], cancellationToken);
+    }
+
+    /// <summary>Opens the verification URL for a device authorization flow owned by this connection.</summary>
+    /// <param name="flowId">Identifier returned by deviceCodeLogin.begin.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    internal async Task OpenBrowserAsync(string flowId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(flowId);
+
+        var request = new AccountDeviceCodeLoginRequest { FlowId = flowId };
+        await CopilotClient.InvokeRpcAsync(_rpc, "account.deviceCodeLogin.openBrowser", [request], cancellationToken);
+    }
+
+    /// <summary>Cancels this connection's device authorization flow and discards any pending plaintext-storage decision.</summary>
+    /// <param name="flowId">Identifier returned by deviceCodeLogin.begin.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    internal async Task CancelAsync(string flowId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(flowId);
+
+        var request = new AccountDeviceCodeLoginRequest { FlowId = flowId };
+        await CopilotClient.InvokeRpcAsync(_rpc, "account.deviceCodeLogin.cancel", [request], cancellationToken);
     }
 }
 
@@ -73422,6 +76751,14 @@ public sealed class ServerSessionsApi
     {
         ArgumentNullException.ThrowIfNull(request);
         return await CopilotClient.InvokeRpcAsync<SessionList>(_rpc, "sessions.list", [request], cancellationToken);
+    }
+
+    /// <summary>Lists canonical live session identities owned by this engine. Includes SDK and protocol sessions without scanning saved history or consulting terminal views.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Canonical live membership owned by this runtime engine.</returns>
+    internal async Task<SessionsListActiveResult> ListActiveAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<SessionsListActiveResult>(_rpc, "sessions.listActive", [], cancellationToken);
     }
 
     /// <summary>Reads lightweight persisted metadata for one local session without opening it.</summary>
@@ -73641,6 +76978,17 @@ public sealed class ServerSessionsApi
         return await CopilotClient.InvokeRpcAsync<SessionsSaveResult>(_rpc, "sessions.save", [request], cancellationToken);
     }
 
+    /// <summary>Flushes a session's pending events to disk.</summary>
+    /// <param name="request">Session ID whose pending events should be flushed to disk.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Flush a session's pending events to disk. No-op when no writer exists for the session (e.g., already closed).</returns>
+    public async Task<SessionsSaveResult> SaveAsync(SessionsSaveRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.SessionId);
+        return await CopilotClient.InvokeRpcAsync<SessionsSaveResult>(_rpc, "sessions.save", [request], cancellationToken);
+    }
+
     /// <summary>Releases the in-use lock held by this process for a session.</summary>
     /// <param name="sessionId">Session ID whose in-use lock should be released.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
@@ -73723,6 +77071,17 @@ public sealed class ServerSessionsApi
         ArgumentNullException.ThrowIfNull(sessionId);
 
         var request = new SessionsReloadPluginHooksRequest { SessionId = sessionId, DeferRepoHooks = deferRepoHooks };
+        return await CopilotClient.InvokeRpcAsync<SessionsReloadPluginHooksResult>(_rpc, "sessions.reloadPluginHooks", [request], cancellationToken);
+    }
+
+    /// <summary>Reloads user, plugin, and (optionally) repo hooks on the active session.</summary>
+    /// <param name="request">Active session ID and an optional flag for deferring repo-level hooks until folder trust.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Reload all hooks (user, plugin, optionally repo) and apply them to the active session. Call after installing or removing plugins so their hooks take effect immediately. No-op when no active session matches the given sessionId.</returns>
+    public async Task<SessionsReloadPluginHooksResult> ReloadPluginHooksAsync(SessionsReloadPluginHooksRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.SessionId);
         return await CopilotClient.InvokeRpcAsync<SessionsReloadPluginHooksResult>(_rpc, "sessions.reloadPluginHooks", [request], cancellationToken);
     }
 
@@ -73827,12 +77186,17 @@ public sealed class ServerSessionsApi
 
     /// <summary>Attaches (or detaches) an in-process ExtensionController delegate for the given session in a local host adapter. Pass `controller: undefined` to detach. Internal because the controller cannot cross the JSON-RPC boundary; the runtime manages its own session extension service.</summary>
     /// <param name="sessionId">Session to attach the extension controller delegate to.</param>
+    /// <param name="launchProcesses">Whether discovered extension processes may run.</param>
+    /// <param name="retainProcessesIfUnchanged">Keep compatible extension processes instead of restarting them.</param>
+    /// <param name="managementToolsEnabled">Whether extension management operations are enabled.</param>
+    /// <param name="exposeManagementTools">Whether the model receives extension management tools.</param>
+    /// <param name="includeSources">Discovery sources allowed by the host's trust decision.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    internal async Task ConfigureSessionExtensionsAsync(string sessionId, CancellationToken cancellationToken = default)
+    internal async Task ConfigureSessionExtensionsAsync(string sessionId, bool? launchProcesses = null, bool? retainProcessesIfUnchanged = null, bool? managementToolsEnabled = null, bool? exposeManagementTools = null, IList<string>? includeSources = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sessionId);
 
-        var request = new ConfigureSessionExtensionsParams { SessionId = sessionId };
+        var request = new ConfigureSessionExtensionsParams { SessionId = sessionId, LaunchProcesses = launchProcesses, RetainProcessesIfUnchanged = retainProcessesIfUnchanged, ManagementToolsEnabled = managementToolsEnabled, ExposeManagementTools = exposeManagementTools, IncludeSources = includeSources };
         await CopilotClient.InvokeRpcAsync(_rpc, "sessions.configureSessionExtensions", [request], cancellationToken);
     }
 
@@ -76666,6 +80030,16 @@ public sealed class ServerEnvironmentsApi
         return await CopilotClient.InvokeRpcAsync<EnvironmentsListResult>(_rpc, "environments.list", [request], cancellationToken);
     }
 
+    /// <summary>Lists GitHub Mission Control environments visible to the authenticated identity. Does not require a running host and excludes host relay credentials.</summary>
+    /// <param name="request">Optional discovery filters supported by GitHub Mission Control.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Environments visible to the authenticated caller and matching the supplied filters.</returns>
+    public async Task<EnvironmentsListResult> ListWithOptionsAsync(EnvironmentsListRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await CopilotClient.InvokeRpcAsync<EnvironmentsListResult>(_rpc, "environments.list", [request], cancellationToken);
+    }
+
     /// <summary>Gets safe discovery information for a GitHub Mission Control environment without requiring a running host.</summary>
     /// <param name="environmentId">Identifier assigned by Mission Control.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
@@ -76688,215 +80062,6 @@ public sealed class ServerEnvironmentsApi
 
         var request = new EnvironmentsDeleteRequest { EnvironmentId = environmentId };
         return await CopilotClient.InvokeRpcAsync<EnvironmentsDeleteResult>(_rpc, "environments.delete", [request], cancellationToken);
-    }
-}
-
-/// <summary>Provides server-scoped Host APIs.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class ServerHostApi
-{
-    private readonly JsonRpc _rpc;
-
-    internal ServerHostApi(JsonRpc rpc)
-    {
-        _rpc = rpc;
-    }
-
-    /// <summary>Publishes an attached resident session for this listener's lifetime without copying it.</summary>
-    /// <param name="hostId">Listener UUID returned by host.start.</param>
-    /// <param name="sessionId">Canonical runtime session ID attached to the listener's owning connection.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>The existing runtime identity and its resource on the listener.</returns>
-    public async Task<HostPublishSessionResult> PublishSessionAsync(string hostId, string sessionId, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(hostId);
-        ArgumentNullException.ThrowIfNull(sessionId);
-
-        var request = new HostPublishSessionRequest { HostId = hostId, SessionId = sessionId };
-        return await CopilotClient.InvokeRpcAsync<HostPublishSessionResult>(_rpc, "host.publishSession", [request], cancellationToken);
-    }
-
-    /// <summary>Runs the admitted CLI host's private credential lifecycle protocol. The runtime retains each transaction and its displaced registration. Callback admission uses the original connection in this same engine. This is host migration plumbing, not a public credential API.</summary>
-    /// <param name="action">Credential lifecycle transition or host-owned credential observation.</param>
-    /// <param name="transactionId">Opaque runtime transaction capability returned by begin.</param>
-    /// <param name="connectionId">Original callback connection. The runtime verifies that it belongs to this host's engine.</param>
-    /// <param name="registrationId">Existing credential registration, never a bearer token.</param>
-    /// <param name="sessionId">Session resolved by the original host lifecycle.</param>
-    /// <param name="previousRegistrationId">Registration retained by a resident ambient-auth rollback.</param>
-    /// <param name="resume">Whether begin resumes an existing session.</param>
-    /// <param name="callback">Whether the original connection owns a renewable SDK callback rather than a static token context.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Projection of the authoritative runtime credential transaction.</returns>
-    internal async Task<HostCredentialLifecycleResult> CredentialsAsync(HostCredentialLifecycleAction action, string? transactionId = null, long? connectionId = null, string? registrationId = null, string? sessionId = null, string? previousRegistrationId = null, bool? resume = null, bool? callback = null, CancellationToken cancellationToken = default)
-    {
-        var request = new HostCredentialLifecycleRequest { Action = action, TransactionId = transactionId, ConnectionId = connectionId, RegistrationId = registrationId, SessionId = sessionId, PreviousRegistrationId = previousRegistrationId, Resume = resume, Callback = callback };
-        return await CopilotClient.InvokeRpcAsync<HostCredentialLifecycleResult>(_rpc, "host.credentials", [request], cancellationToken);
-    }
-
-    /// <summary>Withdraws a live or dormant application publication from an owned live host and revokes AHP attachments without deleting local session history, worktrees, or ongoing work. Returns false when already absent; rejects nonapplication publications.</summary>
-    /// <param name="hostId">Listener UUID returned by host.start; the caller must own the live listener.</param>
-    /// <param name="sessionId">Canonical session ID in the durable catalog, whether resident or dormant.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Publication withdrawal outcome; local history, worktrees and ongoing work are preserved.</returns>
-    public async Task<HostUnpublishSessionResult> UnpublishSessionAsync(string hostId, string sessionId, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(hostId);
-        ArgumentNullException.ThrowIfNull(sessionId);
-
-        var request = new HostUnpublishSessionRequest { HostId = hostId, SessionId = sessionId };
-        return await CopilotClient.InvokeRpcAsync<HostUnpublishSessionResult>(_rpc, "host.unpublishSession", [request], cancellationToken);
-    }
-
-    /// <summary>Reads the complete advertised live and dormant session catalog of an existing host owned by this connection. Does not start hosting, subscribe to sessions, or guarantee resumability.</summary>
-    /// <param name="hostId">
-    /// Listener UUID returned by host.start; the caller must own it. Omit to read
-    /// the saved default compute-identity catalog without starting a listener.
-    /// </param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>The complete live and dormant advertised catalog, without subscribing to sessions.</returns>
-    public async Task<HostListSessionsResult> ListSessionsAsync(string? hostId = null, CancellationToken cancellationToken = default)
-    {
-        var request = new HostListSessionsRequest { HostId = hostId };
-        return await CopilotClient.InvokeRpcAsync<HostListSessionsResult>(_rpc, "host.listSessions", [request], cancellationToken);
-    }
-
-    /// <summary>Requests app-owned materialization over the owning SDK participant.</summary>
-    /// <param name="handoffId">Unique identity for this participation, independent of the session lifetime.</param>
-    /// <param name="config">Host-selected SDK creation or resume settings, without executable callbacks or tools.</param>
-    /// <param name="authentication">Trusted admission identity supplied by the hosting participant. Required by the runtime before a handoff is admitted.</param>
-    /// <param name="resume">Resume an app-owned durable session instead of creating a new session.</param>
-    /// <param name="preferResident">
-    /// For an explicit publication, borrow an existing owning-connection resident
-    /// instead of invoking the resume factory. Cold sessions still use the factory.
-    /// </param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>The resident session the application has materialized on its own connection.</returns>
-    internal async Task<HostCreateSessionResult> CreateSessionAsync(string handoffId, IDictionary<string, JsonElement> config, HostSessionAuthentication? authentication = null, bool? resume = null, bool? preferResident = null, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(handoffId);
-        ArgumentNullException.ThrowIfNull(config);
-
-        var request = new HostCreateSessionRequest { HandoffId = handoffId, Config = config, Authentication = authentication, Resume = resume, PreferResident = preferResident };
-        return await CopilotClient.InvokeRpcAsync<HostCreateSessionResult>(_rpc, "host.createSession", [request], cancellationToken);
-    }
-
-    /// <summary>Releases app ownership retention after AHP detaches.</summary>
-    /// <param name="handoffId">Identity of the participation to release without destroying the session.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Empty acknowledgement for a completed host lifecycle operation.</returns>
-    internal async Task<HostReleaseSessionResult> ReleaseSessionAsync(string handoffId, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(handoffId);
-
-        var request = new HostReleaseSessionRequest { HandoffId = handoffId };
-        return await CopilotClient.InvokeRpcAsync<HostReleaseSessionResult>(_rpc, "host.releaseSession", [request], cancellationToken);
-    }
-
-    /// <summary>Starts a connection-owned AHP host with explicit localServer and/or githubEnvironment transports as a supervised SDK participant.</summary>
-    /// <param name="hostId">Caller-generated UUID identifying this connection-owned listener.</param>
-    /// <param name="authentication">Explicit admission policy, required by the runtime before hosting. Optional in the wire DTO only to preserve generated client construction.</param>
-    /// <param name="computeId">Stable application identity selecting its durable host catalog. Defaults to the persisted runtime compute GUID; must agree with githubEnvironment.computeId when both are supplied.</param>
-    /// <param name="workspace">Absolute directory on the runtime host to serve through AHP. Defaults to the runtime's configured working directory. Does not change process or session working directories.</param>
-    /// <param name="localServer">Enables a local WebSocket listener.</param>
-    /// <param name="githubEnvironment">Registers a GitHub Mission Control environment and enables its relay transport.</param>
-    /// <param name="sessionFactory">Ask the owning SDK application to materialize AHP sessions.</param>
-    /// <param name="resumeFactory">Ask the owning application to resume its durable AHP sessions.</param>
-    /// <param name="allowCreatingNewSessions">Whether remote clients may create new sessions. Defaults to denied when omitted. Does not restrict owner work, publication, or existing sessions.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Listener readiness, returned only after binding and the supervised participant's SDK handshake.</returns>
-    public async Task<HostStartResult> StartAsync(string hostId, HostAuthentication? authentication = null, string? computeId = null, string? workspace = null, HostLocalServerOptions? localServer = null, HostGitHubEnvironmentOptions? githubEnvironment = null, bool? sessionFactory = null, bool? resumeFactory = null, bool? allowCreatingNewSessions = null, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(hostId);
-
-        var request = new HostStartRequest { HostId = hostId, Authentication = authentication, ComputeId = computeId, Workspace = workspace, LocalServer = localServer, GitHubEnvironment = githubEnvironment, SessionFactory = sessionFactory, ResumeFactory = resumeFactory, AllowCreatingNewSessions = allowCreatingNewSessions };
-        return await CopilotClient.InvokeRpcAsync<HostStartResult>(_rpc, "host.start", [request], cancellationToken);
-    }
-
-    /// <summary>Stops a listener owned by this SDK connection and joins its cleanup without deleting sessions.</summary>
-    /// <param name="hostId">Listener UUID. Unknown or successfully stopped IDs are harmless.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Empty acknowledgement for a completed host lifecycle operation.</returns>
-    public async Task<HostDisposeResult> DisposeAsync(string hostId, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(hostId);
-
-        var request = new HostDisposeRequest { HostId = hostId };
-        return await CopilotClient.InvokeRpcAsync<HostDisposeResult>(_rpc, "host.dispose", [request], cancellationToken);
-    }
-
-    /// <summary>Changes remote creation admission on a host owned by this SDK connection without disconnecting clients. Acknowledgement means subsequent admissions use the new policy; already-admitted creation may complete.</summary>
-    /// <param name="hostId">Listener UUID owned by the calling SDK connection.</param>
-    /// <param name="allowCreatingNewSessions">After acknowledgement, subsequent remote creation admissions use this policy. Already-admitted requests may finish.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Empty acknowledgement for a completed host lifecycle operation.</returns>
-    public async Task<HostSetSessionCreationPolicyResult> SetSessionCreationPolicyAsync(string hostId, bool allowCreatingNewSessions, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(hostId);
-
-        var request = new HostSetSessionCreationPolicyRequest { HostId = hostId, AllowCreatingNewSessions = allowCreatingNewSessions };
-        return await CopilotClient.InvokeRpcAsync<HostSetSessionCreationPolicyResult>(_rpc, "host.setSessionCreationPolicy", [request], cancellationToken);
-    }
-
-    /// <summary>Resolves current authenticated credentials and remote-control policy only for the runtime-owned Mission Control hosting participant.</summary>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Private credentials delivered only to a runtime-owned Mission Control hosting participant.</returns>
-    internal async Task<HostGetEnvironmentCredentialsResult> GetEnvironmentCredentialsAsync(CancellationToken cancellationToken = default)
-    {
-        return await CopilotClient.InvokeRpcAsync<HostGetEnvironmentCredentialsResult>(_rpc, "host.getEnvironmentCredentials", [], cancellationToken);
-    }
-
-    /// <summary>Returns listener settings only to the supervised hosting participant over its SDK connection.</summary>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Normalized listener settings delivered only to the supervised hosting participant.</returns>
-    internal async Task<HostGetConfigurationResult> GetConfigurationAsync(CancellationToken cancellationToken = default)
-    {
-        return await CopilotClient.InvokeRpcAsync<HostGetConfigurationResult>(_rpc, "host.getConfiguration", [], cancellationToken);
-    }
-
-    /// <summary>Resolves the host account credential without applying Mission Control transport policy, only for its supervised GitHub hosting participant.</summary>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Private credentials delivered only to a runtime-owned Mission Control hosting participant.</returns>
-    internal async Task<HostGetAuthenticationCredentialsResult> GetAuthenticationCredentialsAsync(CancellationToken cancellationToken = default)
-    {
-        return await CopilotClient.InvokeRpcAsync<HostGetAuthenticationCredentialsResult>(_rpc, "host.getAuthenticationCredentials", [], cancellationToken);
-    }
-
-    /// <summary>Validates a decrypted admission credential through the owning application, only for its supervised custom-authentication participant.</summary>
-    /// <param name="requestId">Unique validation attempt, scoped to this host.</param>
-    /// <param name="token">Decrypted admission token, never an inference credential.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Validated admission credential, or null when the application rejects it.</returns>
-    internal async Task<HostAuthenticationResult?> AuthenticateAsync(string requestId, string token, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(requestId);
-        ArgumentNullException.ThrowIfNull(token);
-
-        var request = new HostAuthenticateRequest { RequestId = requestId, Token = token };
-        return await CopilotClient.InvokeRpcAsync<HostAuthenticationResult?>(_rpc, "host.authenticate", [request], cancellationToken);
-    }
-
-    /// <summary>Cancels a supervised participant's pending admission validation.</summary>
-    /// <param name="requestId">Validation attempt to cancel.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Empty acknowledgement for a completed host lifecycle operation.</returns>
-    internal async Task<HostCancelAuthenticationResult> CancelAuthenticationAsync(string requestId, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(requestId);
-
-        var request = new HostCancelAuthenticationRequest { RequestId = requestId };
-        return await CopilotClient.InvokeRpcAsync<HostCancelAuthenticationResult>(_rpc, "host.cancelAuthentication", [request], cancellationToken);
-    }
-
-    /// <summary>Reports a supervised hosting participant's bound AHP endpoint after its SDK handshake.</summary>
-    /// <param name="address">Actual bound WebSocket URL.</param>
-    /// <param name="token">Configured secret token, absent when authentication is disabled.</param>
-    /// <param name="environmentId">Registered environment ID, reported only once the relay transport is connected.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Empty acknowledgement for a completed host lifecycle operation.</returns>
-    internal async Task<HostReadyResult> ReadyAsync(string? address = null, string? token = null, string? environmentId = null, CancellationToken cancellationToken = default)
-    {
-        var request = new HostReadyRequest { Address = address, Token = token, EnvironmentId = environmentId };
-        return await CopilotClient.InvokeRpcAsync<HostReadyResult>(_rpc, "host.ready", [request], cancellationToken);
     }
 }
 
@@ -77297,7 +80462,7 @@ public sealed class ServerMcpApi
     /// <param name="request">Optional working directory used as context for MCP server discovery.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>MCP servers discovered from user, workspace, plugin, and built-in sources.</returns>
-    public async Task<McpDiscoverResult> DiscoverAsync(McpDiscoverRequest request, CancellationToken cancellationToken = default)
+    public async Task<McpDiscoverResult> DiscoverWithOptionsAsync(McpDiscoverRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         return await CopilotClient.InvokeRpcAsync<McpDiscoverResult>(_rpc, "mcp.discover", [request], cancellationToken);
@@ -79354,6 +82519,73 @@ public sealed class ServerCafeMetricsApi
     }
 }
 
+/// <summary>Provides server-scoped Acp APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerAcpApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerAcpApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Serves ACP through the original trusted SDK host's engine until its transport ends. Closes ACP sessions before completion. Refuses other peers and unrelated engines.</summary>
+    /// <param name="serverId">The SDK engine that owns the calling connection.</param>
+    /// <param name="stdio">Whether to serve the process's standard input and output.</param>
+    /// <param name="agentVersion">The host application version.</param>
+    /// <param name="loginCommand">The executable an editor can use to authenticate.</param>
+    /// <param name="loginArgs">The authentication command arguments.</param>
+    /// <param name="telemetry">Whether the SDK client supplies the ACP telemetry callback.</param>
+    /// <param name="port">The TCP port, required unless stdio is selected.</param>
+    /// <param name="host">The TCP interface, or absent for loopback.</param>
+    /// <param name="bootOptions">The session options resolved by the embedding host.</param>
+    /// <param name="tempDir">An absolute attachment directory, or absent for the platform default.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    internal async Task ServeAsync(long serverId, bool stdio, string agentVersion, string loginCommand, IList<string> loginArgs, bool telemetry, long? port = null, string? host = null, object? bootOptions = null, string? tempDir = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(agentVersion);
+        ArgumentNullException.ThrowIfNull(loginCommand);
+        ArgumentNullException.ThrowIfNull(loginArgs);
+
+        var request = new AcpServeRequest { ServerId = serverId, Stdio = stdio, AgentVersion = agentVersion, LoginCommand = loginCommand, LoginArgs = loginArgs, Telemetry = telemetry, Port = port, Host = host, BootOptions = CopilotClient.ToJsonElementForWire(bootOptions), TempDir = tempDir };
+        await CopilotClient.InvokeRpcAsync(_rpc, "acp.serve", [request], cancellationToken);
+    }
+
+    /// <summary>Stops the original trusted SDK host's ACP transport and waits for its sessions to close.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    internal async Task ShutdownAsync(CancellationToken cancellationToken = default)
+    {
+        await CopilotClient.InvokeRpcAsync(_rpc, "acp.shutdown", [], cancellationToken);
+    }
+}
+
+/// <summary>Provides server-scoped McpSource APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerMcpSourceApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerMcpSourceApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Validates explicit account-authenticated MCP approvals and retains opaque grants in the original engine before any session opens. Requires the private CLI host capability.</summary>
+    /// <param name="specifications">Explicit server-name and exact-origin approvals from the host command line.</param>
+    /// <param name="additionalConfigJson">Additional MCP configuration before approved servers leave ordinary configuration.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Configuration after the original engine retains approved account-authenticated servers.</returns>
+    internal async Task<McpGitHubAuthPrepareResult> PrepareGitHubAuthAsync(IList<string> specifications, string additionalConfigJson, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(specifications);
+        ArgumentNullException.ThrowIfNull(additionalConfigJson);
+
+        var request = new McpGitHubAuthPrepareRequest { Specifications = specifications, AdditionalConfigJson = additionalConfigJson };
+        return await CopilotClient.InvokeRpcAsync<McpGitHubAuthPrepareResult>(_rpc, "mcpSource.prepareGitHubAuth", [request], cancellationToken);
+    }
+}
+
 /// <summary>Provides typed session-scoped RPC methods.</summary>
 public sealed class SessionRpc
 {
@@ -79588,6 +82820,12 @@ public sealed class SessionRpc
         Interlocked.CompareExchange(ref field, new(_session), null) ??
         field;
 
+    /// <summary>Host APIs.</summary>
+    internal HostApi Host =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_session), null) ??
+        field;
+
     /// <summary>Lsp APIs.</summary>
     public LspApi Lsp =>
         field ??
@@ -79596,6 +82834,12 @@ public sealed class SessionRpc
 
     /// <summary>Tools APIs.</summary>
     public ToolsApi Tools =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_session), null) ??
+        field;
+
+    /// <summary>Memory APIs.</summary>
+    public MemoryApi Memory =>
         field ??
         Interlocked.CompareExchange(ref field, new(_session), null) ??
         field;
@@ -79696,6 +82940,12 @@ public sealed class SessionRpc
         Interlocked.CompareExchange(ref field, new(_session), null) ??
         field;
 
+    /// <summary>McpSource APIs.</summary>
+    internal McpSourceApi McpSource =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_session), null) ??
+        field;
+
     /// <summary>Research APIs.</summary>
     internal ResearchApi Research =>
         field ??
@@ -79719,6 +82969,31 @@ public sealed class SessionRpc
         await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.suspend", [request], cancellationToken);
     }
 
+    /// <summary>Retains the active session for a subscribed view without creating, resuming, or copying it. Editors and other SDK clients use this while a view outlives its original connection owner. The token belongs to this connection and session generation. Connection teardown releases it automatically.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>One connection-owned view retention for the current session generation.</returns>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    internal async Task<SessionRetainViewResult> RetainViewAsync(CancellationToken cancellationToken = default)
+    {
+        _session.ThrowIfDisposed();
+
+        var request = new SessionRetainViewRequest { SessionId = _session.SessionId };
+        return await CopilotClient.InvokeRpcAsync<SessionRetainViewResult>(_session.Rpc, "session.retainView", [request], cancellationToken);
+    }
+
+    /// <summary>Releases one view retention from the original connection and session generation. Unknown tokens, tokens owned by another connection, and tokens from an older generation return released false. Explicit session close and deletion keep their existing behavior.</summary>
+    /// <param name="retentionId">The token returned by session.retainView on the original connection.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Whether this request released its original view retention.</returns>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    internal async Task<SessionReleaseViewResult> ReleaseViewAsync(long retentionId, CancellationToken cancellationToken = default)
+    {
+        _session.ThrowIfDisposed();
+
+        var request = new SessionReleaseViewRequest { SessionId = _session.SessionId, RetentionId = retentionId };
+        return await CopilotClient.InvokeRpcAsync<SessionReleaseViewResult>(_session.Rpc, "session.releaseView", [request], cancellationToken);
+    }
+
     /// <summary>Sends a user message to the session and returns its message ID.</summary>
     /// <param name="prompt">The user message text.</param>
     /// <param name="displayPrompt">If provided, this is shown in the timeline instead of `prompt`.</param>
@@ -79735,16 +83010,17 @@ public sealed class SessionRpc
     /// <param name="traceparent">W3C Trace Context traceparent header for distributed tracing of this agent turn.</param>
     /// <param name="tracestate">W3C Trace Context tracestate header for distributed tracing.</param>
     /// <param name="clientTurnId">Opaque caller-chosen ID for the turn this message starts. The runtime copies it unchanged into `params._meta["com.github.copilot/turnId"]` on every MCP `tools/call` the agent makes while serving that turn, including calls from sub-agents it spawns and from Autopilot continuations of it. Visible user steering (`mode: "immediate"`) that a running turn consumes hands it to a successor turn: the steering's value replaces the running turn's from the next model call onward, and steering without one clears it. System and hidden steering leave it unchanged. A turn started without one, including one the runtime starts itself, carries no turn ID. The `user.message` event for each message the send delivers echoes it as `clientTurnId` when the message is consumed, and is persisted like other events; the value stamped on MCP calls is held in memory only and is not restored on resume.</param>
+    /// <param name="sendAdmissionId">SDK-owned invocation identifier for an embedder.sendAdmission callback after canonical queue admission. Only the original trusted in-process host may request it. Does not change wait or turn completion semantics.</param>
     /// <param name="wait">If true, await completion of the agentic loop for this message before returning. Defaults to false (fire-and-forget). When true, the result still contains the same `messageId`; the caller can rely on the agent having processed the message before the call resolves. Transport-dependent tail semantics: on a LOCAL (in-process) session the wait additionally blocks until the completed turn's event tail has been dispatched to this session's in-process subscribers, so a subsequent read of subscriber state already reflects the turn; on a REMOTE session the wait resolves once the loop completes and mirrored delivery follows over the wire. Callers that need the stronger local guarantee on remote sessions should await the event stream explicitly.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Result of sending a user message.</returns>
     [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-    public async Task<SendResult> SendAsync(string prompt, string? displayPrompt = null, IList<Attachment>? attachments = null, SendMode? mode = null, bool? prepend = null, bool? billable = null, string? requiredTool = null, string? source = null, bool? agentAuthored = null, SendAgentMode? agentMode = null, IDictionary<string, string>? requestHeaders = null, ResponseFormat? responseFormat = null, string? traceparent = null, string? tracestate = null, string? clientTurnId = null, bool? wait = null, CancellationToken cancellationToken = default)
+    public async Task<SendResult> SendAsync(string prompt, string? displayPrompt = null, IList<Attachment>? attachments = null, SendMode? mode = null, bool? prepend = null, bool? billable = null, string? requiredTool = null, string? source = null, bool? agentAuthored = null, SendAgentMode? agentMode = null, IDictionary<string, string>? requestHeaders = null, ResponseFormat? responseFormat = null, string? traceparent = null, string? tracestate = null, string? clientTurnId = null, string? sendAdmissionId = null, bool? wait = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(prompt);
         _session.ThrowIfDisposed();
 
-        var request = new SendRequest { SessionId = _session.SessionId, Prompt = prompt, DisplayPrompt = displayPrompt, Attachments = attachments, Mode = mode, Prepend = prepend, Billable = billable, RequiredTool = requiredTool, Source = source, AgentAuthored = agentAuthored, AgentMode = agentMode, RequestHeaders = requestHeaders, ResponseFormat = responseFormat, Traceparent = traceparent, Tracestate = tracestate, ClientTurnId = clientTurnId, Wait = wait };
+        var request = new SendRequest { SessionId = _session.SessionId, Prompt = prompt, DisplayPrompt = displayPrompt, Attachments = attachments, Mode = mode, Prepend = prepend, Billable = billable, RequiredTool = requiredTool, Source = source, AgentAuthored = agentAuthored, AgentMode = agentMode, RequestHeaders = requestHeaders, ResponseFormat = responseFormat, Traceparent = traceparent, Tracestate = tracestate, ClientTurnId = clientTurnId, SendAdmissionId = sendAdmissionId, Wait = wait };
         return await CopilotClient.InvokeRpcAsync<SendResult>(_session.Rpc, "session.send", [request], cancellationToken);
     }
 
@@ -79764,16 +83040,17 @@ public sealed class SessionRpc
     /// <param name="traceparent">W3C Trace Context traceparent header for distributed tracing of this agent turn.</param>
     /// <param name="tracestate">W3C Trace Context tracestate header for distributed tracing.</param>
     /// <param name="clientTurnId">Opaque caller-chosen ID for the turn this message starts. The runtime copies it unchanged into `params._meta["com.github.copilot/turnId"]` on every MCP `tools/call` the agent makes while serving that turn, including calls from sub-agents it spawns and from Autopilot continuations of it. Visible user steering (`mode: "immediate"`) that a running turn consumes hands it to a successor turn: the steering's value replaces the running turn's from the next model call onward, and steering without one clears it. System and hidden steering leave it unchanged. A turn started without one, including one the runtime starts itself, carries no turn ID. The `user.message` event for each message the send delivers echoes it as `clientTurnId` when the message is consumed, and is persisted like other events; the value stamped on MCP calls is held in memory only and is not restored on resume.</param>
+    /// <param name="sendAdmissionId">SDK-owned invocation identifier for an embedder.sendAdmission callback after canonical queue admission. Only the original trusted in-process host may request it. Does not change wait or turn completion semantics.</param>
     /// <param name="wait">If true, await completion of the agentic loop for this message before returning. Defaults to false (fire-and-forget). When true, the result still contains the same `messageId`; the caller can rely on the agent having processed the message before the call resolves. Transport-dependent tail semantics: on a LOCAL (in-process) session the wait additionally blocks until the completed turn's event tail has been dispatched to this session's in-process subscribers, so a subsequent read of subscriber state already reflects the turn; on a REMOTE session the wait resolves once the loop completes and mirrored delivery follows over the wire. Callers that need the stronger local guarantee on remote sessions should await the event stream explicitly.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Internal request-correlated completion of one submitted message.</returns>
     [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-    internal async Task<SendAndWaitResult> SendAndWaitAsync(string prompt, string? displayPrompt = null, IList<Attachment>? attachments = null, SendMode? mode = null, bool? prepend = null, bool? billable = null, string? requiredTool = null, string? source = null, bool? agentAuthored = null, SendAgentMode? agentMode = null, IDictionary<string, string>? requestHeaders = null, ResponseFormat? responseFormat = null, string? traceparent = null, string? tracestate = null, string? clientTurnId = null, bool? wait = null, CancellationToken cancellationToken = default)
+    internal async Task<SendAndWaitResult> SendAndWaitAsync(string prompt, string? displayPrompt = null, IList<Attachment>? attachments = null, SendMode? mode = null, bool? prepend = null, bool? billable = null, string? requiredTool = null, string? source = null, bool? agentAuthored = null, SendAgentMode? agentMode = null, IDictionary<string, string>? requestHeaders = null, ResponseFormat? responseFormat = null, string? traceparent = null, string? tracestate = null, string? clientTurnId = null, string? sendAdmissionId = null, bool? wait = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(prompt);
         _session.ThrowIfDisposed();
 
-        var request = new SendRequest { SessionId = _session.SessionId, Prompt = prompt, DisplayPrompt = displayPrompt, Attachments = attachments, Mode = mode, Prepend = prepend, Billable = billable, RequiredTool = requiredTool, Source = source, AgentAuthored = agentAuthored, AgentMode = agentMode, RequestHeaders = requestHeaders, ResponseFormat = responseFormat, Traceparent = traceparent, Tracestate = tracestate, ClientTurnId = clientTurnId, Wait = wait };
+        var request = new SendRequest { SessionId = _session.SessionId, Prompt = prompt, DisplayPrompt = displayPrompt, Attachments = attachments, Mode = mode, Prepend = prepend, Billable = billable, RequiredTool = requiredTool, Source = source, AgentAuthored = agentAuthored, AgentMode = agentMode, RequestHeaders = requestHeaders, ResponseFormat = responseFormat, Traceparent = traceparent, Tracestate = tracestate, ClientTurnId = clientTurnId, SendAdmissionId = sendAdmissionId, Wait = wait };
         return await CopilotClient.InvokeRpcAsync<SendAndWaitResult>(_session.Rpc, "session.sendAndWait", [request], cancellationToken);
     }
 
@@ -80187,6 +83464,17 @@ public sealed class PluginsApi
         await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.plugins.reload", [rpcRequest], cancellationToken);
     }
 
+    /// <summary>Reconciles canonical workspace consent and plugin policy for the original embedding host, then returns effective activation.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Canonical activation after workspace consent and plugin policy reconciliation.</returns>
+    internal async Task<SessionPluginsResolveActivationResult> ResolveActivationAsync(CancellationToken cancellationToken = default)
+    {
+        _session.ThrowIfDisposed();
+
+        var request = new SessionPluginsResolveActivationRequest { SessionId = _session.SessionId };
+        return await CopilotClient.InvokeRpcAsync<SessionPluginsResolveActivationResult>(_session.Rpc, "session.plugins.resolveActivation", [request], cancellationToken);
+    }
+
     /// <summary>Installs or updates the plugins the session's managed settings require now, without waiting for the next automatic attempt after a failure, then reloads plugins. Reports progress and failures with the same `session.info` and `session.warning` events as automatic preparation. Fails when the runtime does not prepare managed plugins for the session.</summary>
     /// <param name="request">Plugins required by the session's managed settings to install or update again.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
@@ -80576,6 +83864,21 @@ public sealed class ModelApi
         return await CopilotClient.InvokeRpcAsync<ModelGetReasoningSummariesResult>(_session.Rpc, "session.model.getReasoningSummaries", [request], cancellationToken);
     }
 
+    /// <summary>Describes this client's Copilot model catalog using the session's original authentication and integration. Remote clients can enrich host models without forwarding this request to that host or changing its advertised membership. The result preserves raw CAPI descriptions, including billing.token_prices, capability flags, and snake_case limits. Unlike models.list and session.model.list, it does not normalize model fields. Sessions without Copilot authentication or with a custom provider return an empty list. Omitted skipCache preserves existing cache behavior.</summary>
+    /// <param name="skipCache">Bypass the existing catalog cache. The default is false.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>
+    /// Raw CAPI model descriptions for client-side catalog enrichment.
+    /// Unlike `models.list` and `session.model.list`, this result does not normalize model fields.
+    /// </returns>
+    internal async Task<SessionModelDescribeClientCatalogResult> DescribeClientCatalogAsync(bool? skipCache = null, CancellationToken cancellationToken = default)
+    {
+        _session.ThrowIfDisposed();
+
+        var request = new SessionModelDescribeClientCatalogRequest { SessionId = _session.SessionId, SkipCache = skipCache };
+        return await CopilotClient.InvokeRpcAsync<SessionModelDescribeClientCatalogResult>(_session.Rpc, "session.model.describeClientCatalog", [request], cancellationToken);
+    }
+
     /// <summary>Lists models available to this session using its own auth and integration context. Connected hosts (CLI TUI, GitHub App) should call this through the session client so remote sessions return the remote CLI's available models rather than the caller's.</summary>
     /// <param name="request">Optional listing options.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
@@ -80686,6 +83989,18 @@ public sealed class McpApi
 
         var request = new McpDisableRequest { SessionId = _session.SessionId, ServerName = serverName, ExpectedInstallationId = expectedInstallationId };
         await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.mcp.disable", [request], cancellationToken);
+    }
+
+    /// <summary>Releases a session-only MCP disable after the host saves that choice in its settings. The live server stays disabled. Later reloads use the saved settings instead of the released override.</summary>
+    /// <param name="serverName">Name of the MCP server whose disable the host saved.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    internal async Task ReleaseSessionDisableAsync(string serverName, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(serverName);
+        _session.ThrowIfDisposed();
+
+        var request = new McpReleaseSessionDisableRequest { SessionId = _session.SessionId, ServerName = serverName };
+        await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.mcp.releaseSessionDisable", [request], cancellationToken);
     }
 
     /// <summary>Reloads MCP server connections for the session.</summary>
@@ -80824,6 +84139,19 @@ public sealed class McpApi
 
         var request = new McpStopServerRequest { SessionId = _session.SessionId, ServerName = serverName, ExpectedInstallationId = expectedInstallationId, Transport = transport };
         await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.mcp.stopServer", [request], cancellationToken);
+    }
+
+    /// <summary>Stops the session's MCP servers owned by one plugin. Only the original embedding host may perform this control.</summary>
+    /// <param name="pluginName">Name of the plugin whose owned MCP servers must stop.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Acknowledges completion of the scoped plugin MCP server stop.</returns>
+    internal async Task<SessionMcpStopPluginServersResult> StopPluginServersAsync(string pluginName, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pluginName);
+        _session.ThrowIfDisposed();
+
+        var request = new SessionMcpStopPluginServersRequest { SessionId = _session.SessionId, PluginName = pluginName };
+        return await CopilotClient.InvokeRpcAsync<SessionMcpStopPluginServersResult>(_session.Rpc, "session.mcp.stopPluginServers", [request], cancellationToken);
     }
 
     /// <summary>Registers a pre-connected external MCP client (e.g. IDE) on the session's host. The caller retains lifecycle ownership of the client and transport. Marked internal because the `client` and `transport` arguments are in-process MCP SDK instances that cannot be serialized across the JSON-RPC boundary; once the CLI moves on top of the SDK, external clients will be expressed as transport configs the runtime can construct itself.</summary>
@@ -84366,6 +87694,42 @@ public sealed class OptionsApi
     }
 }
 
+/// <summary>Provides session-scoped Host APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class HostApi
+{
+    private readonly CopilotSession _session;
+
+    internal HostApi(CopilotSession session)
+    {
+        _session = session;
+    }
+
+    /// <summary>Updates transient callback and queue controls owned by the original private embedding host. Foreign and extension connections cannot update these controls.</summary>
+    /// <param name="shellAuthenticationPromptsShown">Whether the original host currently shows this session's shell password prompts.</param>
+    /// <param name="exitPlanModeCallbackEnabled">Whether the original host supplies the plan-approval callback.</param>
+    /// <param name="managedPolicyQueueDrainPaused">Whether managed-policy reconciliation pauses queued prompt processing.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Queue scheduling work released by a host control update.</returns>
+    internal async Task<SessionHostUpdateControlsResult> UpdateControlsAsync(bool? shellAuthenticationPromptsShown = null, bool? exitPlanModeCallbackEnabled = null, bool? managedPolicyQueueDrainPaused = null, CancellationToken cancellationToken = default)
+    {
+        _session.ThrowIfDisposed();
+
+        var request = new SessionHostUpdateControlsRequest { SessionId = _session.SessionId, ShellAuthenticationPromptsShown = shellAuthenticationPromptsShown, ExitPlanModeCallbackEnabled = exitPlanModeCallbackEnabled, ManagedPolicyQueueDrainPaused = managedPolicyQueueDrainPaused };
+        return await CopilotClient.InvokeRpcAsync<SessionHostUpdateControlsResult>(_session.Rpc, "session.host.updateControls", [request], cancellationToken);
+    }
+
+    /// <summary>Waits until this canonical session generation starts disposal or this original host attachment closes. The original host uses this subscription to release its SDK handles and callback channels.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    internal async Task WatchCloseAsync(CancellationToken cancellationToken = default)
+    {
+        _session.ThrowIfDisposed();
+
+        var request = new SessionHostWatchCloseRequest { SessionId = _session.SessionId };
+        await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.host.watchClose", [request], cancellationToken);
+    }
+}
+
 /// <summary>Provides session-scoped Lsp APIs.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class LspApi
@@ -84609,6 +87973,38 @@ public sealed class ToolsApi
     }
 }
 
+/// <summary>Provides session-scoped Memory APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class MemoryApi
+{
+    private readonly CopilotSession _session;
+
+    internal MemoryApi(CopilotSession session)
+    {
+        _session = session;
+    }
+
+    /// <summary>Imports one user-requested memory through the session's cloud memory service. Uses the session's credentials, repository, memory policy, permission checks, secret filtering, and telemetry. Returns conflicts and service failures without a local or host-store fallback.</summary>
+    /// <param name="scope">Memory scope. Repository scope uses the session's resolved repository.</param>
+    /// <param name="subject">Short description of the memory's subject.</param>
+    /// <param name="fact">Fact to preserve.</param>
+    /// <param name="reason">Reason to preserve the fact.</param>
+    /// <param name="citations">Sources that support the fact.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Result from the session's cloud memory service, without a local fallback.</returns>
+    public async Task<SessionMemoryImportRecordResult> ImportRecordAsync(MemoryImportScope scope, string subject, string fact, string reason, string citations, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(fact);
+        ArgumentNullException.ThrowIfNull(reason);
+        ArgumentNullException.ThrowIfNull(citations);
+        _session.ThrowIfDisposed();
+
+        var request = new SessionMemoryImportRecordRequest { SessionId = _session.SessionId, Scope = scope, Subject = subject, Fact = fact, Reason = reason, Citations = citations };
+        return await CopilotClient.InvokeRpcAsync<SessionMemoryImportRecordResult>(_session.Rpc, "session.memory.importRecord", [request], cancellationToken);
+    }
+}
+
 /// <summary>Provides session-scoped Commands APIs.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class CommandsApi
@@ -84758,6 +88154,16 @@ public sealed class TelemetryApi
         return await CopilotClient.InvokeRpcAsync<SessionTelemetryEngagement>(_session.Rpc, "session.telemetry.getEngagementId", [request], cancellationToken);
     }
 
+    /// <summary>Reloads local OpenTelemetry settings from this session's configuration directory. Retains runtime overrides, managed policy precedence, and the session's credential identity. Returns after the exporter update completes, or retains an outstanding managed-policy fence until its owner settles it.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    public async Task ReloadAsync(CancellationToken cancellationToken = default)
+    {
+        _session.ThrowIfDisposed();
+
+        var request = new SessionTelemetryReloadRequest { SessionId = _session.SessionId };
+        await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.telemetry.reload", [request], cancellationToken);
+    }
+
     /// <summary>Sets feature override key/value pairs to attach to subsequent telemetry events for the session.</summary>
     /// <param name="features">Override key/value pairs to attach to subsequent telemetry events from this session. Replaces any previously-set overrides.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
@@ -84780,6 +88186,17 @@ public sealed class UiApi
     internal UiApi(CopilotSession session)
     {
         _session = session;
+    }
+
+    /// <summary>Reads transient prompts and native service state for an attached conversation view.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Current transient prompts and native service state for an attached conversation view.</returns>
+    public async Task<UISnapshot> SnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        _session.ThrowIfDisposed();
+
+        var request = new SessionUiSnapshotRequest { SessionId = _session.SessionId };
+        return await CopilotClient.InvokeRpcAsync<UISnapshot>(_session.Rpc, "session.ui.snapshot", [request], cancellationToken);
     }
 
     /// <summary>Runs a transient no-tools model query against the current conversation context.</summary>
@@ -85758,6 +89175,18 @@ public sealed class HistoryApi
         _session = session;
     }
 
+    /// <summary>Appends imported user messages, assistant messages, tool invocations, and tool results without running a model or executing tools. Validates the batch before appending, generates native event IDs and timestamps, and flushes the configured event writer before returning. Call before sending new prompts.</summary>
+    /// <param name="events">Conversation records in their original order. The runtime generates event IDs and timestamps.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    public async Task ImportConversationAsync(IList<HistoryImportConversationEvent> events, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(events);
+        _session.ThrowIfDisposed();
+
+        var request = new SessionHistoryImportConversationRequest { SessionId = _session.SessionId, Events = events };
+        await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.history.importConversation", [request], cancellationToken);
+    }
+
     /// <summary>Compacts the session history to reduce context usage.</summary>
     /// <param name="request">Optional compaction parameters.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
@@ -86472,6 +89901,31 @@ internal sealed class CafeMetricsApi
 
         var request = new SessionCafeMetricsDetachRequest { SessionId = _session.SessionId };
         await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.cafeMetrics.detach", [request], cancellationToken);
+    }
+}
+
+/// <summary>Provides session-scoped McpSource APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class McpSourceApi
+{
+    private readonly CopilotSession _session;
+
+    internal McpSourceApi(CopilotSession session)
+    {
+        _session = session;
+    }
+
+    /// <summary>Manages the original trusted CLI host's live IDE client on the canonical session graph. Requires the private host capability and original session ownership; remote peers cannot confer first-party trust.</summary>
+    /// <param name="operation">The operation to apply to the original host's IDE bridge.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Result of an original-host IDE operation.</returns>
+    internal async Task<SessionMcpSourceIdeClientResult> IdeClientAsync(McpIdeClientOperation operation, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        _session.ThrowIfDisposed();
+
+        var request = new SessionMcpSourceIdeClientRequest { SessionId = _session.SessionId, Operation = operation };
+        return await CopilotClient.InvokeRpcAsync<SessionMcpSourceIdeClientResult>(_session.Rpc, "session.mcpSource.ideClient", [request], cancellationToken);
     }
 }
 
@@ -87629,6 +91083,9 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(AccountAllUsers))]
 [JsonSerializable(typeof(AccountDescribeAuthInfoRequest))]
 [JsonSerializable(typeof(AccountDescribeAuthInfoResult))]
+[JsonSerializable(typeof(AccountDeviceCodeLoginAdvanceRequest))]
+[JsonSerializable(typeof(AccountDeviceCodeLoginBeginRequest))]
+[JsonSerializable(typeof(AccountDeviceCodeLoginRequest))]
 [JsonSerializable(typeof(AccountGetCurrentAuthResult))]
 [JsonSerializable(typeof(AccountGetGistSupportRequest))]
 [JsonSerializable(typeof(AccountGetGistSupportResult))]
@@ -87646,6 +91103,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(AccountLogoutRequest))]
 [JsonSerializable(typeof(AccountLogoutResult))]
 [JsonSerializable(typeof(AccountQuotaSnapshot))]
+[JsonSerializable(typeof(AccountRelayBootstrapConfig))]
 [JsonSerializable(typeof(AccountSubscribeCopilotFreeRequest))]
 [JsonSerializable(typeof(AccountSubscribeCopilotFreeResult))]
 [JsonSerializable(typeof(AccountsGetActiveResult))]
@@ -87654,6 +91112,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(AccountsLogoutRequest))]
 [JsonSerializable(typeof(AccountsSetCredentialsRequest))]
 [JsonSerializable(typeof(AccountsSwitchActiveRequest))]
+[JsonSerializable(typeof(AcpServeRequest))]
 [JsonSerializable(typeof(AgentDiscoveryPath))]
 [JsonSerializable(typeof(AgentDiscoveryPathList))]
 [JsonSerializable(typeof(AgentGetCurrentResult))]
@@ -88131,6 +91590,15 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(HistoryClearContextResult))]
 [JsonSerializable(typeof(HistoryCompactContextWindow))]
 [JsonSerializable(typeof(HistoryCompactResult))]
+[JsonSerializable(typeof(HistoryImportAssistantMessage))]
+[JsonSerializable(typeof(HistoryImportAttachment))]
+[JsonSerializable(typeof(HistoryImportConversationEvent))]
+[JsonSerializable(typeof(HistoryImportToolCompletion))]
+[JsonSerializable(typeof(HistoryImportToolError))]
+[JsonSerializable(typeof(HistoryImportToolInvocation))]
+[JsonSerializable(typeof(HistoryImportToolOutput))]
+[JsonSerializable(typeof(HistoryImportToolRequest))]
+[JsonSerializable(typeof(HistoryImportUserMessage))]
 [JsonSerializable(typeof(HistoryListRewindPointsResult))]
 [JsonSerializable(typeof(HistoryPreviewRewindRequest))]
 [JsonSerializable(typeof(HistoryPreviewRewindResult))]
@@ -88161,6 +91629,8 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(HostGetAuthenticationCredentialsResult))]
 [JsonSerializable(typeof(HostGetConfigurationResult))]
 [JsonSerializable(typeof(HostGetEnvironmentCredentialsResult))]
+[JsonSerializable(typeof(HostGetOrCreateComputeIdRequest))]
+[JsonSerializable(typeof(HostGetOrCreateComputeIdResult))]
 [JsonSerializable(typeof(HostGitHubEnvironmentOptions))]
 [JsonSerializable(typeof(HostListSessionsRequest))]
 [JsonSerializable(typeof(HostListSessionsResult))]
@@ -88375,6 +91845,8 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(McpExternalClientSnapshot))]
 [JsonSerializable(typeof(McpFailedServer))]
 [JsonSerializable(typeof(McpFilteredServer))]
+[JsonSerializable(typeof(McpGitHubAuthPrepareRequest))]
+[JsonSerializable(typeof(McpGitHubAuthPrepareResult))]
 [JsonSerializable(typeof(McpGitHubInvocationToolOptions))]
 [JsonSerializable(typeof(McpGitHubResolveForInvocationRequest))]
 [JsonSerializable(typeof(McpGitHubResolveForInvocationResult))]
@@ -88383,6 +91855,8 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(McpHeadersHandlePendingHeadersRefreshRequestRequest))]
 [JsonSerializable(typeof(McpHeadersHandlePendingHeadersRefreshRequestResult))]
 [JsonSerializable(typeof(McpHostState))]
+[JsonSerializable(typeof(McpIdeClientOperation))]
+[JsonSerializable(typeof(McpIdeClientSnapshot))]
 [JsonSerializable(typeof(McpIdeConfig))]
 [JsonSerializable(typeof(McpInstallPlan))]
 [JsonSerializable(typeof(McpInstallationInput))]
@@ -88453,6 +91927,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(McpRegistryRequestIdResult))]
 [JsonSerializable(typeof(McpRegistrySearchRequest))]
 [JsonSerializable(typeof(McpRegistrySearchResult))]
+[JsonSerializable(typeof(McpReleaseSessionDisableRequest))]
 [JsonSerializable(typeof(McpReloadWithConfigRequest))]
 [JsonSerializable(typeof(McpRemoveGitHubResult))]
 [JsonSerializable(typeof(McpResolveGitHubConfigRequest))]
@@ -88826,6 +92301,33 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(RemoteControlTransferResult))]
 [JsonSerializable(typeof(RemoteEnableRequest))]
 [JsonSerializable(typeof(RemoteEnableResult))]
+[JsonSerializable(typeof(RemoteHostCommand))]
+[JsonSerializable(typeof(RemoteHostResourceAuthentication))]
+[JsonSerializable(typeof(RemoteHostTransport))]
+[JsonSerializable(typeof(RemoteHostsAuthenticateResourcesRequest))]
+[JsonSerializable(typeof(RemoteHostsAuthenticateResourcesResult))]
+[JsonSerializable(typeof(RemoteHostsCommandRequest))]
+[JsonSerializable(typeof(RemoteHostsCommandResult))]
+[JsonSerializable(typeof(RemoteHostsConnectRequest))]
+[JsonSerializable(typeof(RemoteHostsConnectResult))]
+[JsonSerializable(typeof(RemoteHostsCreateRequest))]
+[JsonSerializable(typeof(RemoteHostsCreateResult))]
+[JsonSerializable(typeof(RemoteHostsCreateSessionRequest))]
+[JsonSerializable(typeof(RemoteHostsCreateSessionResult))]
+[JsonSerializable(typeof(RemoteHostsDeleteSessionRequest))]
+[JsonSerializable(typeof(RemoteHostsDeleteSessionResult))]
+[JsonSerializable(typeof(RemoteHostsDisposeRequest))]
+[JsonSerializable(typeof(RemoteHostsDisposeResult))]
+[JsonSerializable(typeof(RemoteHostsGetStateRequest))]
+[JsonSerializable(typeof(RemoteHostsGetStateResult))]
+[JsonSerializable(typeof(RemoteHostsListSessionsRequest))]
+[JsonSerializable(typeof(RemoteHostsListSessionsResult))]
+[JsonSerializable(typeof(RemoteHostsReconnectRequest))]
+[JsonSerializable(typeof(RemoteHostsReconnectResult))]
+[JsonSerializable(typeof(RemoteHostsSubscribeSessionRequest))]
+[JsonSerializable(typeof(RemoteHostsSubscribeSessionResult))]
+[JsonSerializable(typeof(RemoteHostsUnsubscribeSessionRequest))]
+[JsonSerializable(typeof(RemoteHostsUnsubscribeSessionResult))]
 [JsonSerializable(typeof(RemoteNotifySteerableChangedRequest))]
 [JsonSerializable(typeof(RemoteNotifySteerableChangedResult))]
 [JsonSerializable(typeof(RemoteSessionConnectionResult))]
@@ -89039,8 +92541,12 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(SessionHistoryCancelBackgroundCompactionRequest))]
 [JsonSerializable(typeof(SessionHistoryCompactRequest))]
 [JsonSerializable(typeof(SessionHistoryCompactRequestWithSession))]
+[JsonSerializable(typeof(SessionHistoryImportConversationRequest))]
 [JsonSerializable(typeof(SessionHistoryListRewindPointsRequest))]
 [JsonSerializable(typeof(SessionHistorySummarizeForHandoffRequest))]
+[JsonSerializable(typeof(SessionHostUpdateControlsRequest))]
+[JsonSerializable(typeof(SessionHostUpdateControlsResult))]
+[JsonSerializable(typeof(SessionHostWatchCloseRequest))]
 [JsonSerializable(typeof(SessionImportCounts))]
 [JsonSerializable(typeof(SessionInstalledPlugin))]
 [JsonSerializable(typeof(SessionInstructionsGetSourcesRequest))]
@@ -89107,6 +92613,12 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(SessionMcpReloadRequest))]
 [JsonSerializable(typeof(SessionMcpRemoveGitHubRequest))]
 [JsonSerializable(typeof(SessionMcpSetConnectedIdeInfoParams))]
+[JsonSerializable(typeof(SessionMcpSourceIdeClientRequest))]
+[JsonSerializable(typeof(SessionMcpSourceIdeClientResult))]
+[JsonSerializable(typeof(SessionMcpStopPluginServersRequest))]
+[JsonSerializable(typeof(SessionMcpStopPluginServersResult))]
+[JsonSerializable(typeof(SessionMemoryImportRecordRequest))]
+[JsonSerializable(typeof(SessionMemoryImportRecordResult))]
 [JsonSerializable(typeof(SessionMetadataActivityRequest))]
 [JsonSerializable(typeof(SessionMetadataGetClientMetadataRequest))]
 [JsonSerializable(typeof(SessionMetadataGetContextAttributionRequest))]
@@ -89119,6 +92631,8 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(SessionModeGetRequest))]
 [JsonSerializable(typeof(SessionModelClearStartupSeedRequest))]
 [JsonSerializable(typeof(SessionModelClearStartupSeedResult))]
+[JsonSerializable(typeof(SessionModelDescribeClientCatalogRequest))]
+[JsonSerializable(typeof(SessionModelDescribeClientCatalogResult))]
 [JsonSerializable(typeof(SessionModelDescribeLoadErrorRequest))]
 [JsonSerializable(typeof(SessionModelDescribeLoadErrorResult))]
 [JsonSerializable(typeof(SessionModelGenerateBranchSlugRequest))]
@@ -89182,6 +92696,8 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(SessionPluginsMarketplacesRefreshRequestWithSession))]
 [JsonSerializable(typeof(SessionPluginsReloadRequest))]
 [JsonSerializable(typeof(SessionPluginsReloadRequestWithSession))]
+[JsonSerializable(typeof(SessionPluginsResolveActivationRequest))]
+[JsonSerializable(typeof(SessionPluginsResolveActivationResult))]
 [JsonSerializable(typeof(SessionPluginsRetryManagedRequest))]
 [JsonSerializable(typeof(SessionPluginsRetryManagedRequestWithSession))]
 [JsonSerializable(typeof(SessionPluginsRetryManagedResult))]
@@ -89208,6 +92724,8 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(SessionQuotaRefreshResult))]
 [JsonSerializable(typeof(SessionQuotaSnapshot))]
 [JsonSerializable(typeof(SessionQuotaTakeWarningsRequest))]
+[JsonSerializable(typeof(SessionReleaseViewRequest))]
+[JsonSerializable(typeof(SessionReleaseViewResult))]
 [JsonSerializable(typeof(SessionRemoteDisableRequest))]
 [JsonSerializable(typeof(SessionRemotePublishStateRequest))]
 [JsonSerializable(typeof(SessionRemoteReadProjectionRequest))]
@@ -89217,6 +92735,8 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(SessionRemoteSendWithAdmissionRequest))]
 [JsonSerializable(typeof(SessionRepositoryDisabledNamesRequest))]
 [JsonSerializable(typeof(SessionResearchListReportsRequest))]
+[JsonSerializable(typeof(SessionRetainViewRequest))]
+[JsonSerializable(typeof(SessionRetainViewResult))]
 [JsonSerializable(typeof(SessionSandboxEnsureEnforcementAvailableRequest))]
 [JsonSerializable(typeof(SessionSandboxGetCachedEnforcementStatusRequest))]
 [JsonSerializable(typeof(SessionSandboxGetCredentialSuggestionsRequest))]
@@ -89264,12 +92784,14 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(SessionTasksWaitForPendingRequest))]
 [JsonSerializable(typeof(SessionTelemetryEngagement))]
 [JsonSerializable(typeof(SessionTelemetryGetEngagementIdRequest))]
+[JsonSerializable(typeof(SessionTelemetryReloadRequest))]
 [JsonSerializable(typeof(SessionToolsGetBuiltinAgentFlagOverridesRequest))]
 [JsonSerializable(typeof(SessionToolsGetCurrentMetadataRequest))]
 [JsonSerializable(typeof(SessionToolsGetSubagentSettingsRequest))]
 [JsonSerializable(typeof(SessionToolsInitializeAndValidateRequest))]
 [JsonSerializable(typeof(SessionUiRegisterDirectAutoModeSwitchHandlerRequest))]
 [JsonSerializable(typeof(SessionUiRegisterDirectAutoModeSwitchHandlerRequestWithSession))]
+[JsonSerializable(typeof(SessionUiSnapshotRequest))]
 [JsonSerializable(typeof(SessionUpdateAgentOptions))]
 [JsonSerializable(typeof(SessionUpdateEventOptions))]
 [JsonSerializable(typeof(SessionUpdateExecutionOptions))]
@@ -89340,6 +92862,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(SessionsImportResult))]
 [JsonSerializable(typeof(SessionsImportSemanticRequest))]
 [JsonSerializable(typeof(SessionsImportSemanticResult))]
+[JsonSerializable(typeof(SessionsListActiveResult))]
 [JsonSerializable(typeof(SessionsListNonEmptySessionIdsRequest))]
 [JsonSerializable(typeof(SessionsListNonEmptySessionIdsResult))]
 [JsonSerializable(typeof(SessionsListRemotePageRequest))]
@@ -89500,10 +93023,13 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(ToolsShellDescriptorConfig))]
 [JsonSerializable(typeof(ToolsTaskCompleteEventDataRequest))]
 [JsonSerializable(typeof(ToolsUpdateSubagentSettingsResult))]
+[JsonSerializable(typeof(UIBackgroundAgentTask))]
+[JsonSerializable(typeof(UIElicitationPrompt))]
 [JsonSerializable(typeof(UIElicitationRequest))]
 [JsonSerializable(typeof(UIElicitationResponse))]
 [JsonSerializable(typeof(UIElicitationResult))]
 [JsonSerializable(typeof(UIElicitationSchema))]
+[JsonSerializable(typeof(UIElicitationSnapshotSchema))]
 [JsonSerializable(typeof(UIEphemeralQueryRequest))]
 [JsonSerializable(typeof(UIEphemeralQueryResult))]
 [JsonSerializable(typeof(UIExitPlanModeResponse))]
@@ -89514,10 +93040,24 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(UIHandlePendingSamplingRequest))]
 [JsonSerializable(typeof(UIHandlePendingSessionLimitsExhaustedRequest))]
 [JsonSerializable(typeof(UIHandlePendingUserInputRequest))]
+[JsonSerializable(typeof(UIPendingElicitation))]
+[JsonSerializable(typeof(UIPendingPlanApproval))]
+[JsonSerializable(typeof(UIPendingUserInput))]
+[JsonSerializable(typeof(UIPlanApprovalPrompt))]
+[JsonSerializable(typeof(UIPluginActivationContext))]
+[JsonSerializable(typeof(UIPluginActivationDecision))]
+[JsonSerializable(typeof(UIPluginActivationPolicy))]
+[JsonSerializable(typeof(UIPluginActivationSnapshot))]
+[JsonSerializable(typeof(UIPluginActivationWarning))]
+[JsonSerializable(typeof(UIPluginTrustContext))]
 [JsonSerializable(typeof(UIRegisterDirectAutoModeSwitchHandlerResult))]
+[JsonSerializable(typeof(UIServiceLogEntry))]
+[JsonSerializable(typeof(UIServiceTask))]
 [JsonSerializable(typeof(UISessionLimitsExhaustedResponse))]
+[JsonSerializable(typeof(UISnapshot))]
 [JsonSerializable(typeof(UIUnregisterDirectAutoModeSwitchHandlerRequest))]
 [JsonSerializable(typeof(UIUnregisterDirectAutoModeSwitchHandlerResult))]
+[JsonSerializable(typeof(UIUserInputPrompt))]
 [JsonSerializable(typeof(UIUserInputResponse))]
 [JsonSerializable(typeof(UiThreadRunRequest))]
 [JsonSerializable(typeof(UpdateSubagentSettingsRequest))]

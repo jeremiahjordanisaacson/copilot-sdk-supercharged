@@ -4740,6 +4740,121 @@ func (r *DiscoveredMCPServer) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func unmarshalEmbedderAgentRegistrySpawnResult(data []byte) (EmbedderAgentRegistrySpawnResult, error) {
+	if string(data) == "null" {
+		return nil, nil
+	}
+	type rawUnion struct {
+		Kind EmbedderAgentRegistrySpawnResultKind `json:"kind"`
+	}
+	var raw rawUnion
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	switch raw.Kind {
+	case EmbedderAgentRegistrySpawnResultKindMessage:
+		var d EmbedderAgentRegistrySpawnResultMessage
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case EmbedderAgentRegistrySpawnResultKindResponse:
+		var d EmbedderAgentRegistrySpawnResultResponse
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case EmbedderAgentRegistrySpawnResultKindResult:
+		var d EmbedderAgentRegistrySpawnResultResult
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case EmbedderAgentRegistrySpawnResultKindUnexpected:
+		var d EmbedderAgentRegistrySpawnResultUnexpected
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	default:
+		return &RawEmbedderAgentRegistrySpawnResultData{Discriminator: raw.Kind, Raw: data}, nil
+	}
+}
+
+func (r RawEmbedderAgentRegistrySpawnResultData) MarshalJSON() ([]byte, error) {
+	if r.Raw != nil {
+		return r.Raw, nil
+	}
+	return json.Marshal(struct {
+		Kind EmbedderAgentRegistrySpawnResultKind `json:"kind"`
+	}{
+		Kind: r.Discriminator,
+	})
+}
+
+func (r EmbedderAgentRegistrySpawnResultMessage) MarshalJSON() ([]byte, error) {
+	type alias EmbedderAgentRegistrySpawnResultMessage
+	return json.Marshal(struct {
+		Kind EmbedderAgentRegistrySpawnResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r EmbedderAgentRegistrySpawnResultResponse) MarshalJSON() ([]byte, error) {
+	type alias EmbedderAgentRegistrySpawnResultResponse
+	return json.Marshal(struct {
+		Kind EmbedderAgentRegistrySpawnResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r *EmbedderAgentRegistrySpawnResultResult) UnmarshalJSON(data []byte) error {
+	type rawEmbedderAgentRegistrySpawnResultResult struct {
+		Result json.RawMessage `json:"result"`
+	}
+	var raw rawEmbedderAgentRegistrySpawnResultResult
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Result != nil {
+		value, err := unmarshalAgentRegistrySpawnResult(raw.Result)
+		if err != nil {
+			return err
+		}
+		r.Result = value
+	}
+	return nil
+}
+
+func (r EmbedderAgentRegistrySpawnResultResult) MarshalJSON() ([]byte, error) {
+	type alias EmbedderAgentRegistrySpawnResultResult
+	return json.Marshal(struct {
+		Kind EmbedderAgentRegistrySpawnResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r EmbedderAgentRegistrySpawnResultUnexpected) MarshalJSON() ([]byte, error) {
+	type alias EmbedderAgentRegistrySpawnResultUnexpected
+	return json.Marshal(struct {
+		Kind EmbedderAgentRegistrySpawnResultKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
 func unmarshalEnqueueCommandResult(data []byte) (EnqueueCommandResult, error) {
 	if string(data) == "null" {
 		return nil, nil
@@ -5812,6 +5927,124 @@ func (r *HandlePendingToolCallRequest) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		r.Result = value
+	}
+	return nil
+}
+
+func unmarshalHistoryImportConversationEvent(data []byte) (HistoryImportConversationEvent, error) {
+	if string(data) == "null" {
+		return nil, nil
+	}
+	type rawUnion struct {
+		Type HistoryImportConversationEventType `json:"type"`
+	}
+	var raw rawUnion
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	switch raw.Type {
+	case HistoryImportConversationEventTypeAssistantMessage:
+		var d HistoryImportConversationEventAssistantMessage
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case HistoryImportConversationEventTypeToolExecutionComplete:
+		var d HistoryImportConversationEventToolExecutionComplete
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case HistoryImportConversationEventTypeToolExecutionStart:
+		var d HistoryImportConversationEventToolExecutionStart
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case HistoryImportConversationEventTypeUserMessage:
+		var d HistoryImportConversationEventUserMessage
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	default:
+		return &RawHistoryImportConversationEventData{Discriminator: raw.Type, Raw: data}, nil
+	}
+}
+
+func (r RawHistoryImportConversationEventData) MarshalJSON() ([]byte, error) {
+	if r.Raw != nil {
+		return r.Raw, nil
+	}
+	return json.Marshal(struct {
+		Type HistoryImportConversationEventType `json:"type"`
+	}{
+		Type: r.Discriminator,
+	})
+}
+
+func (r HistoryImportConversationEventAssistantMessage) MarshalJSON() ([]byte, error) {
+	type alias HistoryImportConversationEventAssistantMessage
+	return json.Marshal(struct {
+		Type HistoryImportConversationEventType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r HistoryImportConversationEventToolExecutionComplete) MarshalJSON() ([]byte, error) {
+	type alias HistoryImportConversationEventToolExecutionComplete
+	return json.Marshal(struct {
+		Type HistoryImportConversationEventType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r HistoryImportConversationEventToolExecutionStart) MarshalJSON() ([]byte, error) {
+	type alias HistoryImportConversationEventToolExecutionStart
+	return json.Marshal(struct {
+		Type HistoryImportConversationEventType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r HistoryImportConversationEventUserMessage) MarshalJSON() ([]byte, error) {
+	type alias HistoryImportConversationEventUserMessage
+	return json.Marshal(struct {
+		Type HistoryImportConversationEventType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r *HistoryImportConversationRequest) UnmarshalJSON(data []byte) error {
+	type rawHistoryImportConversationRequest struct {
+		Events []json.RawMessage `json:"events"`
+	}
+	var raw rawHistoryImportConversationRequest
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Events != nil {
+		r.Events = make([]HistoryImportConversationEvent, 0, len(raw.Events))
+		for _, rawItem := range raw.Events {
+			value, err := unmarshalHistoryImportConversationEvent(rawItem)
+			if err != nil {
+				return err
+			}
+			r.Events = append(r.Events, value)
+		}
 	}
 	return nil
 }
@@ -7487,6 +7720,155 @@ func (r *MCPHeadersHandlePendingHeadersRefreshRequestRequest) UnmarshalJSON(data
 			return err
 		}
 		r.Result = value
+	}
+	return nil
+}
+
+func unmarshalMCPIdeClientOperation(data []byte) (MCPIdeClientOperation, error) {
+	if string(data) == "null" {
+		return nil, nil
+	}
+	type rawUnion struct {
+		Action MCPIdeClientOperationAction `json:"action"`
+	}
+	var raw rawUnion
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	switch raw.Action {
+	case MCPIdeClientOperationActionListChanged:
+		var d MCPIdeClientOperationListChanged
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case MCPIdeClientOperationActionNotification:
+		var d MCPIdeClientOperationNotification
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case MCPIdeClientOperationActionProgress:
+		var d MCPIdeClientOperationProgress
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case MCPIdeClientOperationActionRefresh:
+		var d MCPIdeClientOperationRefresh
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case MCPIdeClientOperationActionRegister:
+		var d MCPIdeClientOperationRegister
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case MCPIdeClientOperationActionRemove:
+		var d MCPIdeClientOperationRemove
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	default:
+		return &RawMCPIdeClientOperationData{Discriminator: raw.Action, Raw: data}, nil
+	}
+}
+
+func (r RawMCPIdeClientOperationData) MarshalJSON() ([]byte, error) {
+	if r.Raw != nil {
+		return r.Raw, nil
+	}
+	return json.Marshal(struct {
+		Action MCPIdeClientOperationAction `json:"action"`
+	}{
+		Action: r.Discriminator,
+	})
+}
+
+func (r MCPIdeClientOperationListChanged) MarshalJSON() ([]byte, error) {
+	type alias MCPIdeClientOperationListChanged
+	return json.Marshal(struct {
+		Action MCPIdeClientOperationAction `json:"action"`
+		alias
+	}{
+		Action: r.Action(),
+		alias:  alias(r),
+	})
+}
+
+func (r MCPIdeClientOperationNotification) MarshalJSON() ([]byte, error) {
+	type alias MCPIdeClientOperationNotification
+	return json.Marshal(struct {
+		Action MCPIdeClientOperationAction `json:"action"`
+		alias
+	}{
+		Action: r.Action(),
+		alias:  alias(r),
+	})
+}
+
+func (r MCPIdeClientOperationProgress) MarshalJSON() ([]byte, error) {
+	type alias MCPIdeClientOperationProgress
+	return json.Marshal(struct {
+		Action MCPIdeClientOperationAction `json:"action"`
+		alias
+	}{
+		Action: r.Action(),
+		alias:  alias(r),
+	})
+}
+
+func (r MCPIdeClientOperationRefresh) MarshalJSON() ([]byte, error) {
+	type alias MCPIdeClientOperationRefresh
+	return json.Marshal(struct {
+		Action MCPIdeClientOperationAction `json:"action"`
+		alias
+	}{
+		Action: r.Action(),
+		alias:  alias(r),
+	})
+}
+
+func (r MCPIdeClientOperationRegister) MarshalJSON() ([]byte, error) {
+	type alias MCPIdeClientOperationRegister
+	return json.Marshal(struct {
+		Action MCPIdeClientOperationAction `json:"action"`
+		alias
+	}{
+		Action: r.Action(),
+		alias:  alias(r),
+	})
+}
+
+func (r MCPIdeClientOperationRemove) MarshalJSON() ([]byte, error) {
+	type alias MCPIdeClientOperationRemove
+	return json.Marshal(struct {
+		Action MCPIdeClientOperationAction `json:"action"`
+		alias
+	}{
+		Action: r.Action(),
+		alias:  alias(r),
+	})
+}
+
+func (r *MCPIdeClientRequest) UnmarshalJSON(data []byte) error {
+	type rawMCPIdeClientRequest struct {
+		Operation json.RawMessage `json:"operation"`
+	}
+	var raw rawMCPIdeClientRequest
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Operation != nil {
+		value, err := unmarshalMCPIdeClientOperation(raw.Operation)
+		if err != nil {
+			return err
+		}
+		r.Operation = value
 	}
 	return nil
 }
@@ -9254,6 +9636,7 @@ func (r *MCPReloadConfig) UnmarshalJSON(data []byte) error {
 		IncludeWorkspaceSources   *bool                      `json:"includeWorkspaceSources,omitempty"`
 		Mcp3pEnabled              *bool                      `json:"mcp3pEnabled,omitempty"`
 		MCPServers                map[string]json.RawMessage `json:"mcpServers"`
+		PolicyCheckTrigger        *string                    `json:"policyCheckTrigger,omitempty"`
 		SecretStore               any                        `json:"secretStore,omitempty"`
 		UseCachedToolSnapshots    *bool                      `json:"useCachedToolSnapshots,omitempty"`
 	}
@@ -9282,6 +9665,7 @@ func (r *MCPReloadConfig) UnmarshalJSON(data []byte) error {
 			r.MCPServers[key] = value
 		}
 	}
+	r.PolicyCheckTrigger = raw.PolicyCheckTrigger
 	r.SecretStore = raw.SecretStore
 	r.UseCachedToolSnapshots = raw.UseCachedToolSnapshots
 	return nil
@@ -11774,6 +12158,722 @@ func (r *RemoteControlTransferResult) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func unmarshalRemoteHostCommand(data []byte) (RemoteHostCommand, error) {
+	if string(data) == "null" {
+		return nil, nil
+	}
+	type rawUnion struct {
+		Type RemoteHostCommandType `json:"type"`
+	}
+	var raw rawUnion
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	switch raw.Type {
+	case RemoteHostCommandTypeAnnounceActiveClient:
+		var d RemoteHostCommandAnnounceActiveClient
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeAuthorizeMCPResource:
+		var d RemoteHostCommandAuthorizeMCPResource
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeBindUserRequestedShell:
+		var d RemoteHostCommandBindUserRequestedShell
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeCancelTurn:
+		var d RemoteHostCommandCancelTurn
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeClientID:
+		var d RemoteHostCommandClientID
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeCompleteExitPlanInput:
+		var d RemoteHostCommandCompleteExitPlanInput
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeCompleteToolCall:
+		var d RemoteHostCommandCompleteToolCall
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeCompleteUserInput:
+		var d RemoteHostCommandCompleteUserInput
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeCompletions:
+		var d RemoteHostCommandCompletions
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeConfirmToolCall:
+		var d RemoteHostCommandConfirmToolCall
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeConfirmToolResult:
+		var d RemoteHostCommandConfirmToolResult
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeDisableSandboxForSession:
+		var d RemoteHostCommandDisableSandboxForSession
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeGetAutopilotObjectiveState:
+		var d RemoteHostCommandGetAutopilotObjectiveState
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeGetPlan:
+		var d RemoteHostCommandGetPlan
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeGetSessionModels:
+		var d RemoteHostCommandGetSessionModels
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeListCheckpoints:
+		var d RemoteHostCommandListCheckpoints
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeListWorkspaceFiles:
+		var d RemoteHostCommandListWorkspaceFiles
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypePrepareAttachments:
+		var d RemoteHostCommandPrepareAttachments
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypePublishViewState:
+		var d RemoteHostCommandPublishViewState
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeReadCheckpoint:
+		var d RemoteHostCommandReadCheckpoint
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeRemoveActiveClient:
+		var d RemoteHostCommandRemoveActiveClient
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeRemovePendingMessage:
+		var d RemoteHostCommandRemovePendingMessage
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeSelectAgent:
+		var d RemoteHostCommandSelectAgent
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeSelectSession:
+		var d RemoteHostCommandSelectSession
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeSessionDiff:
+		var d RemoteHostCommandSessionDiff
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeSetAllowedModels:
+		var d RemoteHostCommandSetAllowedModels
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeSetApprovalMode:
+		var d RemoteHostCommandSetApprovalMode
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeSetDraftText:
+		var d RemoteHostCommandSetDraftText
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeSetMode:
+		var d RemoteHostCommandSetMode
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeSetModel:
+		var d RemoteHostCommandSetModel
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeSetPendingMessage:
+		var d RemoteHostCommandSetPendingMessage
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeSetSessionApproveAll:
+		var d RemoteHostCommandSetSessionApproveAll
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeSetTitle:
+		var d RemoteHostCommandSetTitle
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostCommandTypeStartTurn:
+		var d RemoteHostCommandStartTurn
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	default:
+		return &RawRemoteHostCommandData{Discriminator: raw.Type, Raw: data}, nil
+	}
+}
+
+func (r RawRemoteHostCommandData) MarshalJSON() ([]byte, error) {
+	if r.Raw != nil {
+		return r.Raw, nil
+	}
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+	}{
+		Type: r.Discriminator,
+	})
+}
+
+func (r RemoteHostCommandAnnounceActiveClient) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandAnnounceActiveClient
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandAuthorizeMCPResource) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandAuthorizeMCPResource
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandBindUserRequestedShell) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandBindUserRequestedShell
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandCancelTurn) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandCancelTurn
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandClientID) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandClientID
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandCompleteExitPlanInput) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandCompleteExitPlanInput
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandCompleteToolCall) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandCompleteToolCall
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandCompleteUserInput) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandCompleteUserInput
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandCompletions) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandCompletions
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandConfirmToolCall) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandConfirmToolCall
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandConfirmToolResult) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandConfirmToolResult
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandDisableSandboxForSession) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandDisableSandboxForSession
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandGetAutopilotObjectiveState) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandGetAutopilotObjectiveState
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandGetPlan) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandGetPlan
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandGetSessionModels) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandGetSessionModels
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandListCheckpoints) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandListCheckpoints
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandListWorkspaceFiles) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandListWorkspaceFiles
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandPrepareAttachments) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandPrepareAttachments
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandPublishViewState) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandPublishViewState
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandReadCheckpoint) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandReadCheckpoint
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandRemoveActiveClient) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandRemoveActiveClient
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandRemovePendingMessage) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandRemovePendingMessage
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandSelectAgent) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandSelectAgent
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandSelectSession) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandSelectSession
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandSessionDiff) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandSessionDiff
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandSetAllowedModels) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandSetAllowedModels
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandSetApprovalMode) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandSetApprovalMode
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandSetDraftText) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandSetDraftText
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandSetMode) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandSetMode
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandSetModel) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandSetModel
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandSetPendingMessage) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandSetPendingMessage
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandSetSessionApproveAll) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandSetSessionApproveAll
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandSetTitle) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandSetTitle
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostCommandStartTurn) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostCommandStartTurn
+	return json.Marshal(struct {
+		Type RemoteHostCommandType `json:"type"`
+		alias
+	}{
+		Type:  r.Type(),
+		alias: alias(r),
+	})
+}
+
+func (r *RemoteHostCommandRequest) UnmarshalJSON(data []byte) error {
+	type rawRemoteHostCommandRequest struct {
+		Command    json.RawMessage `json:"command"`
+		HostID     string          `json:"hostId"`
+		SessionURI *string         `json:"sessionUri,omitempty"`
+	}
+	var raw rawRemoteHostCommandRequest
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Command != nil {
+		value, err := unmarshalRemoteHostCommand(raw.Command)
+		if err != nil {
+			return err
+		}
+		r.Command = value
+	}
+	r.HostID = raw.HostID
+	r.SessionURI = raw.SessionURI
+	return nil
+}
+
+func unmarshalRemoteHostTransport(data []byte) (RemoteHostTransport, error) {
+	if string(data) == "null" {
+		return nil, nil
+	}
+	type rawUnion struct {
+		Kind RemoteHostTransportKind `json:"kind"`
+	}
+	var raw rawUnion
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	switch raw.Kind {
+	case RemoteHostTransportKindDirect:
+		var d RemoteHostTransportDirect
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case RemoteHostTransportKindMissionControl:
+		var d RemoteHostTransportMissionControl
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	default:
+		return &RawRemoteHostTransportData{Discriminator: raw.Kind, Raw: data}, nil
+	}
+}
+
+func (r RawRemoteHostTransportData) MarshalJSON() ([]byte, error) {
+	if r.Raw != nil {
+		return r.Raw, nil
+	}
+	return json.Marshal(struct {
+		Kind RemoteHostTransportKind `json:"kind"`
+	}{
+		Kind: r.Discriminator,
+	})
+}
+
+func (r RemoteHostTransportDirect) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostTransportDirect
+	return json.Marshal(struct {
+		Kind RemoteHostTransportKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r RemoteHostTransportMissionControl) MarshalJSON() ([]byte, error) {
+	type alias RemoteHostTransportMissionControl
+	return json.Marshal(struct {
+		Kind RemoteHostTransportKind `json:"kind"`
+		alias
+	}{
+		Kind:  r.Kind(),
+		alias: alias(r),
+	})
+}
+
+func (r *RemoteHostCreateRequest) UnmarshalJSON(data []byte) error {
+	type rawRemoteHostCreateRequest struct {
+		ClientID        *string         `json:"clientId,omitempty"`
+		DiagnosticLogID *string         `json:"diagnosticLogId,omitempty"`
+		HostID          string          `json:"hostId"`
+		Transport       json.RawMessage `json:"transport"`
+	}
+	var raw rawRemoteHostCreateRequest
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.ClientID = raw.ClientID
+	r.DiagnosticLogID = raw.DiagnosticLogID
+	r.HostID = raw.HostID
+	if raw.Transport != nil {
+		value, err := unmarshalRemoteHostTransport(raw.Transport)
+		if err != nil {
+			return err
+		}
+		r.Transport = value
+	}
+	return nil
+}
+
 func unmarshalSandboxOwnedOperation(data []byte) (SandboxOwnedOperation, error) {
 	if string(data) == "null" {
 		return nil, nil
@@ -12041,22 +13141,23 @@ func (r *SendMessageItem) UnmarshalJSON(data []byte) error {
 
 func (r *SendRequest) UnmarshalJSON(data []byte) error {
 	type rawSendRequest struct {
-		AgentAuthored  *bool             `json:"agentAuthored,omitempty"`
-		AgentMode      *SendAgentMode    `json:"agentMode,omitempty"`
-		Attachments    []json.RawMessage `json:"attachments,omitzero"`
-		Billable       *bool             `json:"billable,omitempty"`
-		ClientTurnID   *string           `json:"clientTurnId,omitempty"`
-		DisplayPrompt  *string           `json:"displayPrompt,omitempty"`
-		Mode           *SendMode         `json:"mode,omitempty"`
-		Prepend        *bool             `json:"prepend,omitempty"`
-		Prompt         string            `json:"prompt"`
-		RequestHeaders map[string]string `json:"requestHeaders,omitzero"`
-		RequiredTool   *string           `json:"requiredTool,omitempty"`
-		ResponseFormat *ResponseFormat   `json:"responseFormat,omitempty"`
-		Source         *string           `json:"source,omitempty"`
-		Traceparent    *string           `json:"traceparent,omitempty"`
-		Tracestate     *string           `json:"tracestate,omitempty"`
-		Wait           *bool             `json:"wait,omitempty"`
+		AgentAuthored   *bool             `json:"agentAuthored,omitempty"`
+		AgentMode       *SendAgentMode    `json:"agentMode,omitempty"`
+		Attachments     []json.RawMessage `json:"attachments,omitzero"`
+		Billable        *bool             `json:"billable,omitempty"`
+		ClientTurnID    *string           `json:"clientTurnId,omitempty"`
+		DisplayPrompt   *string           `json:"displayPrompt,omitempty"`
+		Mode            *SendMode         `json:"mode,omitempty"`
+		Prepend         *bool             `json:"prepend,omitempty"`
+		Prompt          string            `json:"prompt"`
+		RequestHeaders  map[string]string `json:"requestHeaders,omitzero"`
+		RequiredTool    *string           `json:"requiredTool,omitempty"`
+		ResponseFormat  *ResponseFormat   `json:"responseFormat,omitempty"`
+		SendAdmissionID *string           `json:"sendAdmissionId,omitempty"`
+		Source          *string           `json:"source,omitempty"`
+		Traceparent     *string           `json:"traceparent,omitempty"`
+		Tracestate      *string           `json:"tracestate,omitempty"`
+		Wait            *bool             `json:"wait,omitempty"`
 	}
 	var raw rawSendRequest
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -12083,6 +13184,7 @@ func (r *SendRequest) UnmarshalJSON(data []byte) error {
 	r.RequestHeaders = raw.RequestHeaders
 	r.RequiredTool = raw.RequiredTool
 	r.ResponseFormat = raw.ResponseFormat
+	r.SendAdmissionID = raw.SendAdmissionID
 	r.Source = raw.Source
 	r.Traceparent = raw.Traceparent
 	r.Tracestate = raw.Tracestate
@@ -12283,6 +13385,27 @@ func (r SessionFSReaddirWithTypesResult) MarshalJSON() ([]byte, error) {
 		r.Entries = []SessionFSReaddirWithTypesEntry{}
 	}
 	return json.Marshal(wire(r))
+}
+
+func (r *SessionHistoryImportConversationRequest) UnmarshalJSON(data []byte) error {
+	type rawSessionHistoryImportConversationRequest struct {
+		Events []json.RawMessage `json:"events"`
+	}
+	var raw rawSessionHistoryImportConversationRequest
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Events != nil {
+		r.Events = make([]HistoryImportConversationEvent, 0, len(raw.Events))
+		for _, rawItem := range raw.Events {
+			value, err := unmarshalHistoryImportConversationEvent(rawItem)
+			if err != nil {
+				return err
+			}
+			r.Events = append(r.Events, value)
+		}
+	}
+	return nil
 }
 
 func (r SessionInstalledPluginSource) MarshalJSON() ([]byte, error) {
@@ -12728,6 +13851,24 @@ func (r *SessionMCPOauthTryRefreshTokensRequest) UnmarshalJSON(data []byte) erro
 		r.Store = value
 	}
 	r.StoreKey = raw.StoreKey
+	return nil
+}
+
+func (r *SessionMCPSourceIdeClientRequest) UnmarshalJSON(data []byte) error {
+	type rawSessionMCPSourceIdeClientRequest struct {
+		Operation json.RawMessage `json:"operation"`
+	}
+	var raw rawSessionMCPSourceIdeClientRequest
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Operation != nil {
+		value, err := unmarshalMCPIdeClientOperation(raw.Operation)
+		if err != nil {
+			return err
+		}
+		r.Operation = value
+	}
 	return nil
 }
 
@@ -14880,6 +16021,47 @@ func unmarshalUIElicitationFieldValue(data []byte) (UIElicitationFieldValue, err
 	return nil, errors.New("data did not match any union variant for UIElicitationFieldValue")
 }
 
+func unmarshalUIElicitationPrompt(data []byte) (UIElicitationPrompt, error) {
+	if string(data) == "null" {
+		return nil, nil
+	}
+	type rawUnion struct {
+		Mode UIElicitationPromptMode `json:"mode"`
+	}
+	var raw rawUnion
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	switch raw.Mode {
+	case UIElicitationPromptModeForm:
+		var d UIFormElicitationPrompt
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	case UIElicitationPromptModeURL:
+		var d UIURLElicitationPrompt
+		if err := json.Unmarshal(data, &d); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	default:
+		return &RawUIElicitationPromptData{Discriminator: raw.Mode, Raw: data}, nil
+	}
+}
+
+func (r RawUIElicitationPromptData) MarshalJSON() ([]byte, error) {
+	if r.Raw != nil {
+		return r.Raw, nil
+	}
+	return json.Marshal(struct {
+		Mode UIElicitationPromptMode `json:"mode"`
+	}{
+		Mode: r.Discriminator,
+	})
+}
+
 func matchesUIElicitationSchemaPropertyUIElicitationArrayAnyOfField(data []byte) bool {
 	var rawGroup0 struct {
 		Items json.RawMessage `json:"items"`
@@ -15148,6 +16330,53 @@ func (r UIElicitationStringOneOfField) MarshalJSON() ([]byte, error) {
 	})
 }
 
+func (r *UIElicitationSnapshotSchema) UnmarshalJSON(data []byte) error {
+	type rawUIElicitationSnapshotSchema struct {
+		Properties map[string]json.RawMessage      `json:"properties"`
+		Required   []string                        `json:"required,omitzero"`
+		Type       UIElicitationSnapshotSchemaType `json:"type"`
+	}
+	var raw rawUIElicitationSnapshotSchema
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Properties != nil {
+		r.Properties = make(map[string]UIElicitationSchemaProperty, len(raw.Properties))
+		for key, rawValue := range raw.Properties {
+			value, err := unmarshalUIElicitationSchemaProperty(rawValue)
+			if err != nil {
+				return err
+			}
+			r.Properties[key] = value
+		}
+	}
+	r.Required = raw.Required
+	r.Type = raw.Type
+	return nil
+}
+
+func (r UIFormElicitationPrompt) MarshalJSON() ([]byte, error) {
+	type alias UIFormElicitationPrompt
+	return json.Marshal(struct {
+		Mode UIElicitationPromptMode `json:"mode"`
+		alias
+	}{
+		Mode:  r.Mode(),
+		alias: alias(r),
+	})
+}
+
+func (r UIURLElicitationPrompt) MarshalJSON() ([]byte, error) {
+	type alias UIURLElicitationPrompt
+	return json.Marshal(struct {
+		Mode UIElicitationPromptMode `json:"mode"`
+		alias
+	}{
+		Mode:  r.Mode(),
+		alias: alias(r),
+	})
+}
+
 func (r *UIElicitationSchema) UnmarshalJSON(data []byte) error {
 	type rawUIElicitationSchema struct {
 		Properties map[string]json.RawMessage `json:"properties"`
@@ -15195,6 +16424,30 @@ func (r *UIElicitationResponse) UnmarshalJSON(data []byte) error {
 		}
 	}
 	r.Meta = raw.Meta
+	return nil
+}
+
+func (r *UIPendingElicitation) UnmarshalJSON(data []byte) error {
+	type rawUIPendingElicitation struct {
+		ElicitationSource            *string         `json:"elicitationSource,omitempty"`
+		ElicitationSourceDisplayName *string         `json:"elicitationSourceDisplayName,omitempty"`
+		Request                      json.RawMessage `json:"request"`
+		RequestID                    string          `json:"requestId"`
+	}
+	var raw rawUIPendingElicitation
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.ElicitationSource = raw.ElicitationSource
+	r.ElicitationSourceDisplayName = raw.ElicitationSourceDisplayName
+	if raw.Request != nil {
+		value, err := unmarshalUIElicitationPrompt(raw.Request)
+		if err != nil {
+			return err
+		}
+		r.Request = value
+	}
+	r.RequestID = raw.RequestID
 	return nil
 }
 

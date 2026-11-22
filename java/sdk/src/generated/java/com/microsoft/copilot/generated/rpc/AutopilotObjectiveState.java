@@ -33,6 +33,10 @@ public record AutopilotObjectiveState(
     @JsonProperty("status") AutopilotObjectiveStatus status,
     /** Number of objective turns started. */
     @JsonProperty("turnCount") Long turnCount,
+    /** UTC timestamp when this objective was created, retained across resumes. */
+    @JsonProperty("createdAt") String createdAt,
+    /** Number of times this objective resumed, identifying its current credit window. */
+    @JsonProperty("resumeCount") Long resumeCount,
     /** Optional reason the objective is paused. */
     @JsonProperty("pauseReason") String pauseReason,
     /** Optional summary recorded when the objective completed. */
@@ -48,6 +52,21 @@ public record AutopilotObjectiveState(
      * Use {@link #builder()} for named construction.
      */
     public AutopilotObjectiveState {}
+
+    /**
+     * Creates a record without optional runtime metadata.
+     * @param id the {@code id} property
+     * @param objective the {@code objective} property
+     * @param status the {@code status} property
+     * @param turnCount the {@code turnCount} property
+     * @param pauseReason the {@code pauseReason} property
+     * @param completionSummary the {@code completionSummary} property
+     * @param creditCountNanoAiu the {@code creditCountNanoAiu} property
+     * @param creditLimit the {@code creditLimit} property
+     */
+    public AutopilotObjectiveState(Long id, String objective, AutopilotObjectiveStatus status, Long turnCount, String pauseReason, String completionSummary, String creditCountNanoAiu, AutopilotObjectiveCreditLimit creditLimit) {
+        this(id, objective, status, turnCount, null, null, pauseReason, completionSummary, creditCountNanoAiu, creditLimit);
+    }
 
     /**
      * Returns a named builder.
@@ -68,6 +87,8 @@ public record AutopilotObjectiveState(
         private String objective;
         private AutopilotObjectiveStatus status;
         private Long turnCount;
+        private String createdAt;
+        private Long resumeCount;
         private String pauseReason;
         private String completionSummary;
         private String creditCountNanoAiu;
@@ -118,6 +139,30 @@ public record AutopilotObjectiveState(
         @com.microsoft.copilot.CopilotExperimental
         public Builder turnCount(Long value) {
             this.turnCount = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code createdAt} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder createdAt(String value) {
+            this.createdAt = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code resumeCount} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder resumeCount(Long value) {
+            this.resumeCount = value;
             return this;
         }
 
@@ -181,7 +226,7 @@ public record AutopilotObjectiveState(
             if (status == null) throw new IllegalStateException("Missing required property: status");
             if (turnCount == null) throw new IllegalStateException("Missing required property: turnCount");
             if (creditCountNanoAiu == null) throw new IllegalStateException("Missing required property: creditCountNanoAiu");
-            return new AutopilotObjectiveState(id, objective, status, turnCount, pauseReason, completionSummary, creditCountNanoAiu, creditLimit);
+            return new AutopilotObjectiveState(id, objective, status, turnCount, createdAt, resumeCount, pauseReason, completionSummary, creditCountNanoAiu, creditLimit);
         }
     }
 }

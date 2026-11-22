@@ -75,6 +75,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -98,13 +99,17 @@ public class CopilotClientTest {
         cliPath = TestUtil.findCliPath();
     }
 
-    @Test
-    void testStopDoesNotThrowWhenRuntimeShutdownFails() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testStopPropagatesRuntimeShutdownFailureAfterCleanup(boolean timeout) throws Exception {
         var client = new CopilotClient(
                 new CopilotClientOptions().setMode(CopilotClientMode.CODING_AGENT).setAutoStart(false));
         var rpc = mock(JsonRpcClient.class);
+        Exception failure = timeout
+                ? new TimeoutException("shutdown timed out")
+                : new RuntimeException("shutdown failed");
         when(rpc.invoke(eq("runtime.shutdown"), any(), eq(Void.class)))
-                .thenReturn(CompletableFuture.failedFuture(new RuntimeException("shutdown failed")));
+                .thenReturn(CompletableFuture.failedFuture(failure));
         var process = mock(Process.class);
         when(process.isAlive()).thenReturn(true);
         when(process.getOutputStream()).thenReturn(OutputStream.nullOutputStream());
@@ -113,7 +118,8 @@ public class CopilotClientTest {
 
         setConnectionFuture(client, rpc, process);
 
-        assertDoesNotThrow(() -> client.stop().get());
+        var error = assertThrows(ExecutionException.class, () -> client.stop().get());
+        assertSame(failure, error.getCause());
 
         verify(rpc).invoke(eq("runtime.shutdown"), eq(Map.of()), eq(Void.class));
         verify(rpc).close();

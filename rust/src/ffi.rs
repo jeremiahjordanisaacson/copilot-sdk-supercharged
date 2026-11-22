@@ -13,8 +13,8 @@ use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
-use std::sync::{Arc, OnceLock};
-use std::task::{Context, Poll};
+use std::sync::{Arc, OnceLock, Weak};
+use std::task::{Context, Poll, Waker};
 
 use libloading::Library;
 use tokio::io::{AsyncRead, ReadBuf};
@@ -29,6 +29,24 @@ type AuthOwnerCallback = unsafe extern "C" fn(*mut c_void, u32, u32) -> bool;
 type HostStartWithAuthOwnerFn =
     unsafe extern "C" fn(*const u8, usize, *const u8, usize, AuthOwnerCallback, *mut c_void) -> u32;
 type HostShutdownFn = unsafe extern "C" fn(u32) -> bool;
+type ServerSessionControlFn = unsafe extern "C" fn(u32, *const u8, usize) -> i32;
+type ServerHasSessionConnectionFn =
+    unsafe extern "C" fn(u32, *const u8, usize, *const u8, usize) -> i32;
+type ServerSetConnectionDefaultSessionFn = unsafe extern "C" fn(u32, u32, *const u8, usize) -> i32;
+pub(crate) type DiscoveryPublisherCreateFn = unsafe extern "C" fn(u32, *const u8, usize) -> u32;
+pub(crate) type DiscoveryPublisherRequestFn =
+    unsafe extern "C" fn(u32, u32, *const u8, usize, OutboundCallback, *mut c_void) -> bool;
+type ServerSetSdkSessionConfigFn = unsafe extern "C" fn(
+    u32,
+    *const u8,
+    usize,
+    bool,
+    bool,
+    *const u8,
+    usize,
+    *const u8,
+    usize,
+) -> bool;
 #[allow(clippy::type_complexity)]
 type ConnectionOpenFn = unsafe extern "C" fn(
     u32,
@@ -42,7 +60,27 @@ type ConnectionOpenFn = unsafe extern "C" fn(
     usize,
 ) -> u32;
 type ConnectionWriteFn = unsafe extern "C" fn(u32, *const u8, usize) -> bool;
+type FileLoggingConnectionAdmitFn = unsafe extern "C" fn(u32, *const u8, usize) -> bool;
 type ConnectionCloseFn = unsafe extern "C" fn(u32) -> bool;
+type ConnectionCloseAndWaitFn = unsafe extern "C" fn(u32, u32) -> bool;
+type ProtocolConnectionOpenFn =
+    unsafe extern "C" fn(u32, OutboundCallback, *mut c_void, *const u8, usize) -> u32;
+#[cfg(copilot_cli_host)]
+type OriginalStdioOpenFn = unsafe extern "C" fn(u32, u32, OutboundCallback, *mut c_void) -> u32;
+type ConnectionNotifyFn = unsafe extern "C" fn(u32, *const u8, usize, *const u8, usize) -> bool;
+type ConnectionNotifyAfterResponseFn =
+    unsafe extern "C" fn(u32, u32, *const u8, usize, *const u8, usize) -> bool;
+type ConnectionRequestFn = unsafe extern "C" fn(
+    u32,
+    *const u8,
+    usize,
+    *const u8,
+    usize,
+    OutboundCallback,
+    *mut c_void,
+) -> bool;
+type PluginHostRequestFn =
+    unsafe extern "C" fn(u32, u32, u32, *const u8, usize, OutboundCallback, *mut c_void) -> bool;
 type SessionConnectionOpenFn = unsafe extern "C" fn(
     u32,
     *const u8,
@@ -58,20 +96,29 @@ type ConnectionRunUiActionFn = unsafe extern "C" fn(u32, u32) -> bool;
 /// State handed to the native side as `user_data` so the outbound callback can
 /// route inbound frames back to the reader.
 struct CallbackState {
-    tx: mpsc::UnboundedSender<Vec<u8>>,
+    tx: parking_lot::Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>>,
     closing: AtomicBool,
 }
 
 extern "C" fn on_outbound(user_data: *mut c_void, bytes: *const u8, len: usize) {
-    if user_data.is_null() || bytes.is_null() || len == 0 {
+    if user_data.is_null() {
         return;
     }
     let state = unsafe { &*(user_data as *const CallbackState) };
     if state.closing.load(Ordering::SeqCst) {
         return;
     }
+    if bytes.is_null() && len == 0 {
+        state.tx.lock().take();
+        return;
+    }
+    if bytes.is_null() || len == 0 {
+        return;
+    }
     let slice = unsafe { std::slice::from_raw_parts(bytes, len) };
-    let _ = state.tx.send(slice.to_vec());
+    if let Some(tx) = state.tx.lock().as_ref() {
+        let _ = tx.send(slice.to_vec());
+    }
 }
 
 /// Bound exports and connection lifecycle state, shared between the
@@ -86,6 +133,7 @@ pub(crate) struct FfiShared {
     owns_host: bool,
     connection_write: ConnectionWriteFn,
     connection_close: ConnectionCloseFn,
+    connection_close_and_wait: Option<ConnectionCloseAndWaitFn>,
     connection_set_ui_thread_handler: ConnectionSetUiThreadHandlerFn,
     connection_run_ui_action: ConnectionRunUiActionFn,
     server_id: AtomicU32,
@@ -93,6 +141,9 @@ pub(crate) struct FfiShared {
     callback_state: AtomicPtr<CallbackState>,
     closed: AtomicBool,
     operation_lock: parking_lot::Mutex<()>,
+    foreground_order: Arc<tokio::sync::Mutex<()>>,
+    protocol_peers: parking_lot::Mutex<Option<Vec<Weak<FfiShared>>>>,
+    cleanup_done: tokio::sync::watch::Sender<bool>,
     library_path: PathBuf,
 }
 
@@ -155,6 +206,324 @@ impl FfiShared {
         }
     }
 
+    pub(crate) async fn call_plugin_host(
+        &self,
+        operation: crate::InProcessPluginHostOperation,
+        params: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, Error> {
+        unsafe extern "C" fn complete(data: *mut c_void, bytes: *const u8, len: usize) {
+            let sender =
+                unsafe { Box::from_raw(data.cast::<tokio::sync::oneshot::Sender<Vec<u8>>>()) };
+            let payload = unsafe { std::slice::from_raw_parts(bytes, len) }.to_vec();
+            let _ = sender.send(payload);
+        }
+        let params = params.map(|value| serde_json::to_vec(&value)).transpose()?;
+        let receiver = self.with_server(|server_id, library| {
+            let request = unsafe {
+                library.get::<PluginHostRequestFn>(b"copilot_runtime_plugin_host_request\0")
+            }
+            .map_err(|error| {
+                Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    format!("the runtime does not support bounded plugin host calls: {error}"),
+                )
+            })?;
+            let connection_id = self.connection_id().ok_or_else(|| {
+                Error::with_message(ErrorKind::InvalidConfig, "in-process connection is closed")
+            })?;
+            let (sender, receiver) = tokio::sync::oneshot::channel::<Vec<u8>>();
+            let sender = Box::into_raw(Box::new(sender));
+            let (ptr, len) = params
+                .as_ref()
+                .map_or((std::ptr::null(), 0), |value| (value.as_ptr(), value.len()));
+            let accepted = unsafe {
+                request(
+                    server_id,
+                    connection_id,
+                    operation as u32,
+                    ptr,
+                    len,
+                    complete,
+                    sender.cast(),
+                )
+            };
+            if !accepted {
+                drop(unsafe { Box::from_raw(sender) });
+                return Err(Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "the local plugin host request was refused",
+                ));
+            }
+            Ok(receiver)
+        })?;
+        let bytes = receiver
+            .await
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    pub(crate) fn discovery_publisher_exports(
+        &self,
+    ) -> Result<(u32, DiscoveryPublisherCreateFn, DiscoveryPublisherRequestFn), Error> {
+        self.with_server(|server_id, library| {
+            let create = unsafe {
+                library.get::<DiscoveryPublisherCreateFn>(
+                    b"copilot_runtime_discovery_publisher_create\0",
+                )
+            }
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+            let request = unsafe {
+                library.get::<DiscoveryPublisherRequestFn>(
+                    b"copilot_runtime_discovery_publisher_request\0",
+                )
+            }
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+            Ok((server_id, *create, *request))
+        })
+    }
+
+    pub(crate) fn configure_process_telemetry_host(&self) -> Result<(), Error> {
+        if !self.owns_host {
+            return Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "process telemetry requires the original owned SDK engine",
+            ));
+        }
+        self.with_server(|server_id, library| {
+            let configure = unsafe {
+                library.get::<unsafe extern "C" fn(u32, u32) -> bool>(
+                    b"copilot_runtime_server_configure_process_telemetry_host\0",
+                )
+            }
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+            if unsafe {
+                configure(
+                    server_id,
+                    self.connection_id().ok_or_else(|| {
+                        Error::with_message(
+                            ErrorKind::InvalidConfig,
+                            "in-process connection is closed",
+                        )
+                    })?,
+                )
+            } {
+                Ok(())
+            } else {
+                Err(Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "the original engine refused process telemetry callbacks",
+                ))
+            }
+        })
+    }
+
+    pub(crate) fn register_embedder_observer(&self) -> Result<(), Error> {
+        if !self.owns_host {
+            return Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "embedding callbacks require the original owned SDK engine",
+            ));
+        }
+        self.with_server(|_server_id, library| {
+            let admit = unsafe {
+                library.get::<unsafe extern "C" fn(u32) -> bool>(
+                    b"copilot_runtime_embedder_observer_admit\0",
+                )
+            }
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+            let connection_id = self.connection_id().ok_or_else(|| {
+                Error::with_message(ErrorKind::InvalidConfig, "in-process connection is closed")
+            })?;
+            if unsafe { admit(connection_id) } {
+                Ok(())
+            } else {
+                Err(Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "the original SDK connection cannot register embedding callbacks",
+                ))
+            }
+        })
+    }
+
+    fn with_server<T>(
+        &self,
+        operation: impl FnOnce(u32, &Library) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let _operation = self.operation_lock.lock();
+        let server_id = self.server_id().ok_or_else(|| {
+            Error::with_message(ErrorKind::InvalidConfig, "in-process server is closed")
+        })?;
+        let library = load_library(self.library_path())?;
+        operation(server_id, library)
+    }
+
+    pub(crate) fn publish_foreground_session(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<bool, Error> {
+        self.with_server(|server_id, library| {
+            let publish = unsafe {
+                library.get::<ServerSessionControlFn>(
+                    b"copilot_runtime_server_set_foreground_session\0",
+                )
+            }
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+            let (pointer, length) = session_id
+                .map(|id| (id.as_ptr(), id.len()))
+                .unwrap_or((std::ptr::null(), 0));
+            Self::server_boolean_result(unsafe { publish(server_id, pointer, length) })
+        })
+    }
+
+    pub(crate) fn reserve_foreground_publication(
+        &self,
+    ) -> impl std::future::Future<Output = tokio::sync::OwnedMutexGuard<()>> + Send + 'static + use<>
+    {
+        let mut reservation = Box::pin(Arc::clone(&self.foreground_order).lock_owned());
+        // Register FIFO admission now, before independent executor tasks can reorder calls.
+        let admitted = reservation
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()));
+        async move {
+            match admitted {
+                Poll::Ready(guard) => guard,
+                Poll::Pending => reservation.await,
+            }
+        }
+    }
+
+    pub(crate) fn is_session_retained(&self, session_id: &str) -> Result<bool, Error> {
+        self.with_server(|server_id, library| {
+            let inspect = unsafe {
+                library
+                    .get::<ServerSessionControlFn>(b"copilot_runtime_server_is_session_retained\0")
+            }
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+            Self::server_boolean_result(unsafe {
+                inspect(server_id, session_id.as_ptr(), session_id.len())
+            })
+        })
+    }
+
+    pub(crate) fn has_session_connection(
+        &self,
+        session_id: &str,
+        ignored: &[u32],
+    ) -> Result<bool, Error> {
+        let ignored = serde_json::to_vec(ignored)?;
+        self.with_server(|server_id, library| {
+            let inspect = unsafe {
+                library.get::<ServerHasSessionConnectionFn>(
+                    b"copilot_runtime_server_has_session_connection\0",
+                )
+            }
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+            Self::server_boolean_result(unsafe {
+                inspect(
+                    server_id,
+                    session_id.as_ptr(),
+                    session_id.len(),
+                    ignored.as_ptr(),
+                    ignored.len(),
+                )
+            })
+        })
+    }
+
+    pub(crate) fn set_connection_default_session(
+        &self,
+        connection_id: u32,
+        session_id: &str,
+    ) -> Result<bool, Error> {
+        self.with_server(|server_id, library| {
+            let set = unsafe {
+                library.get::<ServerSetConnectionDefaultSessionFn>(
+                    b"copilot_runtime_server_set_connection_default_session_id\0",
+                )
+            }
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+            Self::server_boolean_result(unsafe {
+                set(
+                    server_id,
+                    connection_id,
+                    session_id.as_ptr(),
+                    session_id.len(),
+                )
+            })
+        })
+    }
+
+    pub(crate) fn configure_server_defaults(&self, overrides: &[u8]) -> Result<(), Error> {
+        self.with_server(|server_id, library| {
+            // The object form extends the existing ABI without changing its signature.
+            let configure = unsafe {
+                library
+                    .get::<ServerSetSdkSessionConfigFn>(
+                        b"copilot_runtime_server_set_sdk_session_config\0",
+                    )
+                    .map_err(|error| {
+                        Error::with_message(ErrorKind::InvalidConfig, error.to_string())
+                    })?
+            };
+            if unsafe {
+                configure(
+                    server_id,
+                    overrides.as_ptr(),
+                    overrides.len(),
+                    false,
+                    false,
+                    std::ptr::null(),
+                    0,
+                    std::ptr::null(),
+                    0,
+                )
+            } {
+                Ok(())
+            } else {
+                Err(Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "runtime rejected the in-process server configuration",
+                ))
+            }
+        })
+    }
+
+    fn server_boolean_result(result: i32) -> Result<bool, Error> {
+        match result {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "in-process server control rejected the engine or arguments",
+            )),
+        }
+    }
+
+    pub(crate) async fn close_protocol_peers(&self) -> Result<(), Error> {
+        let peers: Vec<_> = {
+            let _operation = self.operation_lock.lock();
+            self.protocol_peers
+                .lock()
+                .take()
+                .into_iter()
+                .flatten()
+                .filter_map(|peer| peer.upgrade())
+                .collect()
+        };
+        for peer in &peers {
+            peer.close();
+        }
+        for peer in peers {
+            let mut done = peer.cleanup_done.subscribe();
+            while !*done.borrow_and_update() {
+                done.changed().await.map_err(|error| {
+                    Error::with_message(ErrorKind::InvalidConfig, error.to_string())
+                })?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn server_id(&self) -> Option<u32> {
         let server_id = self.server_id.load(Ordering::SeqCst);
         (!self.closed.load(Ordering::SeqCst) && server_id != 0).then_some(server_id)
@@ -214,7 +583,7 @@ impl FfiShared {
             let state = self
                 .callback_state
                 .swap(std::ptr::null_mut(), Ordering::SeqCst);
-            if !state.is_null() {
+            if !state.is_null() && self.connection_close_and_wait.is_none() {
                 unsafe { &*state }.closing.store(true, Ordering::SeqCst);
             }
             (
@@ -223,23 +592,47 @@ impl FfiShared {
                 state as usize,
             )
         };
+        for peer in self
+            .protocol_peers
+            .lock()
+            .take()
+            .into_iter()
+            .flatten()
+            .filter_map(|peer| peer.upgrade())
+        {
+            peer.close();
+        }
         // New sends now fail without waiting for native close or host shutdown.
         // The callback state remains alive until native callbacks are quiescent.
         if conn != 0 {
-            let quiesced = unsafe { (self.connection_close)(conn) };
+            let quiesced = match self.connection_close_and_wait {
+                Some(close) => unsafe { close(conn, 0) },
+                None => unsafe { (self.connection_close)(conn) },
+            };
             if !quiesced {
                 let connection_close = self.connection_close;
+                let connection_close_and_wait = self.connection_close_and_wait;
                 let host_shutdown = self.host_shutdown;
                 let owns_host = self.owns_host;
                 let auth_owner = Arc::new(self.auth_owner.lock().take());
                 let cleanup_auth_owner = Arc::clone(&auth_owner);
                 let library_path = self.library_path.clone();
+                let cleanup_done = self.cleanup_done.clone();
                 if let Err(error) = std::thread::Builder::new()
                     .name("copilot-ffi-cleanup".to_owned())
                     .spawn(move || {
                         let _auth_owner = cleanup_auth_owner;
-                        while !unsafe { connection_close(conn) } {
-                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        loop {
+                            let quiesced = match connection_close_and_wait {
+                                Some(close) => unsafe { close(conn, 100) },
+                                None => unsafe { connection_close(conn) },
+                            };
+                            if quiesced {
+                                break;
+                            }
+                            if connection_close_and_wait.is_none() {
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
                         }
                         release_callback_state(state);
                         if owns_host && server != 0 && !unsafe { host_shutdown(server) } {
@@ -249,6 +642,7 @@ impl FfiShared {
                                 "FFI runtime host shutdown did not recognize server"
                             );
                         }
+                        cleanup_done.send_replace(true);
                         debug!(library = %library_path.display(), "FFI runtime connection closed");
                     })
                 {
@@ -272,9 +666,325 @@ impl FfiShared {
             );
         }
         self.auth_owner.lock().take();
+        self.cleanup_done.send_replace(true);
         debug!(library = %self.library_path.display(), "FFI runtime connection closed");
     }
+}
 
+/// Identity and admission for an independent inbound protocol peer.
+///
+/// The peer supplies complete protocol bytes, including any headers. The runtime
+/// retains responsibility for authentication, negotiation, routing, and sessions.
+#[derive(Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct InProcessProtocolConnectionOptions {
+    /// Extension source, paired with `extension_name` to identify an extension.
+    pub extension_source: Option<String>,
+    /// Extension name, paired with `extension_source` to identify an extension.
+    pub extension_name: Option<String>,
+    /// Stable extension identifier, when the host has one.
+    pub extension_id: Option<String>,
+    /// Original extension module path, without canonicalization.
+    pub extension_module_path: Option<String>,
+    /// Session that owns an extension subprocess.
+    pub owning_session_id: Option<String>,
+    /// Mark an extension peer even when no extension identity is available.
+    pub is_extension: bool,
+    /// Expected connection token for a peer that requires token authentication.
+    pub connection_token: Option<String>,
+}
+
+/// An independent raw protocol peer on an SDK client's in-process server.
+///
+/// Unlike another [`crate::Client`], this handle has no JSON-RPC reader or
+/// callback dispatcher. The embedding host forwards bytes in both directions.
+/// Closing or dropping it closes only this peer. Stopping its parent client
+/// closes the peer, even when that client borrows its server.
+pub struct InProcessProtocolConnection {
+    reader: tokio::sync::Mutex<FfiReader>,
+    shared: Arc<FfiShared>,
+    connection_id: u32,
+    notify: ConnectionNotifyFn,
+    notify_after_response: ConnectionNotifyAfterResponseFn,
+    request: ConnectionRequestFn,
+}
+
+impl InProcessProtocolConnection {
+    /// Bind catalogue policy to a session in this peer's original engine.
+    ///
+    /// The public identity never exposes or transfers the native session owner.
+    pub fn borrow_catalogue_session(&self, session_id: &str) -> Result<(), Error> {
+        self.shared.with_server(|server_id, library| {
+            let borrow = unsafe {
+                library.get::<unsafe extern "C" fn(u32, u32, *const u8, usize) -> i32>(
+                    b"copilot_runtime_server_borrow_catalogue_session\0",
+                )
+            }
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+            if unsafe {
+                borrow(
+                    server_id,
+                    self.connection_id,
+                    session_id.as_ptr(),
+                    session_id.len(),
+                )
+            } == 1
+            {
+                Ok(())
+            } else {
+                Err(Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "the original engine refused the catalogue session borrow",
+                ))
+            }
+        })
+    }
+
+    /// The runtime-assigned connection ID, retained after close for attribution.
+    pub fn connection_id(&self) -> u32 {
+        self.connection_id
+    }
+
+    /// Whether this handle still accepts inbound bytes and outbound calls.
+    pub fn is_active(&self) -> bool {
+        self.shared.connection_id().is_some() && {
+            // The operation lock prevents close from freeing callback state.
+            let _operation = self.shared.operation_lock.lock();
+            let state = self.shared.callback_state.load(Ordering::SeqCst);
+            !state.is_null() && unsafe { &*state }.tx.lock().is_some()
+        }
+    }
+
+    /// Send a server-initiated notification through the runtime's auth gate.
+    pub fn notify(&self, method: &str, params_json: Option<&str>) -> bool {
+        let (params, len) =
+            params_json.map_or((std::ptr::null(), 0), |value| (value.as_ptr(), value.len()));
+        unsafe {
+            (self.notify)(
+                self.connection_id,
+                method.as_ptr(),
+                method.len(),
+                params,
+                len,
+            )
+        }
+    }
+
+    /// Queue a notification after the response identified by `dispatch_token`.
+    pub fn notify_after_response(
+        &self,
+        dispatch_token: u32,
+        method: &str,
+        params_json: Option<&str>,
+    ) -> bool {
+        let (params, len) =
+            params_json.map_or((std::ptr::null(), 0), |value| (value.as_ptr(), value.len()));
+        unsafe {
+            (self.notify_after_response)(
+                self.connection_id,
+                dispatch_token,
+                method.as_ptr(),
+                method.len(),
+                params,
+                len,
+            )
+        }
+    }
+
+    /// Issue a server-to-client request and return its exact native JSON envelope.
+    pub async fn request(&self, method: &str, params_json: Option<&str>) -> Result<String, Error> {
+        unsafe extern "C" fn complete(data: *mut c_void, bytes: *const u8, len: usize) {
+            let sender =
+                unsafe { Box::from_raw(data.cast::<tokio::sync::oneshot::Sender<Vec<u8>>>()) };
+            let payload = unsafe { std::slice::from_raw_parts(bytes, len) }.to_vec();
+            let _ = sender.send(payload);
+        }
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let sender = Box::into_raw(Box::new(sender));
+        let (params, len) =
+            params_json.map_or((std::ptr::null(), 0), |value| (value.as_ptr(), value.len()));
+        let accepted = unsafe {
+            (self.request)(
+                self.connection_id,
+                method.as_ptr(),
+                method.len(),
+                params,
+                len,
+                complete,
+                sender.cast(),
+            )
+        };
+        if !accepted {
+            drop(unsafe { Box::from_raw(sender) });
+            return Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "protocol request was refused",
+            ));
+        }
+        let bytes = receiver
+            .await
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?;
+        String::from_utf8(bytes)
+            .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))
+    }
+
+    /// Accept inbound protocol bytes without changing their framing or headers.
+    ///
+    /// This operation copies the bytes before it returns.
+    pub fn write(&self, bytes: &[u8]) -> Result<(), Error> {
+        self.shared.write_frame(bytes).map_err(Error::from)
+    }
+
+    /// Receive the next outbound byte run, or `None` after the peer drains.
+    ///
+    /// Cancellation is safe: a canceled receive does not consume any bytes.
+    /// Only one receive runs at a time; close does not acquire the reader lock.
+    /// Native EOF preserves queued frames, then resolves the next receive to `None`.
+    pub async fn next_outbound(&self) -> Option<Vec<u8>> {
+        self.reader.lock().await.rx.recv().await
+    }
+
+    /// Begin peer closure without waiting for native callbacks to finish.
+    ///
+    /// Returns whether this call initiated closure. Buffered outbound frames
+    /// remain readable. Use [`Self::close`] when the native join must finish.
+    pub fn begin_close(&self) -> bool {
+        let open = self.shared.connection_id().is_some();
+        self.shared.close();
+        open
+    }
+
+    /// Close this peer and join its native driver and outbound callbacks.
+    ///
+    /// Queued responses remain available through [`Self::next_outbound`] after
+    /// this returns. This operation never shuts down the borrowed server.
+    /// Cancellation does not interrupt native cleanup; a later close can join it.
+    pub async fn close(&self) -> Result<(), Error> {
+        let mut done = self.shared.cleanup_done.subscribe();
+        self.shared.close();
+        while !*done.borrow_and_update() {
+            done.changed().await.map_err(|error| {
+                Error::with_message(ErrorKind::InvalidConfig, error.to_string())
+            })?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for InProcessProtocolConnection {
+    fn drop(&mut self) {
+        self.shared.close();
+    }
+}
+
+enum ProtocolAdmission {
+    External(InProcessProtocolConnectionOptions),
+    #[cfg(copilot_cli_host)]
+    OriginalStdio(u32),
+}
+
+enum ProtocolOpen {
+    External(ProtocolConnectionOpenFn, Vec<u8>),
+    #[cfg(copilot_cli_host)]
+    OriginalStdio(OriginalStdioOpenFn, u32),
+}
+
+pub(crate) async fn open_protocol_connection(
+    parent: Arc<FfiShared>,
+    options: InProcessProtocolConnectionOptions,
+) -> Result<InProcessProtocolConnection, Error> {
+    open_protocol_peer(parent, ProtocolAdmission::External(options)).await
+}
+
+#[cfg(copilot_cli_host)]
+pub(crate) async fn open_original_stdio_connection(
+    parent: Arc<FfiShared>,
+) -> Result<InProcessProtocolConnection, Error> {
+    let connection_id = parent.connection_id().ok_or_else(|| {
+        Error::with_message(ErrorKind::InvalidConfig, "in-process client is closed")
+    })?;
+    open_protocol_peer(parent, ProtocolAdmission::OriginalStdio(connection_id)).await
+}
+
+async fn open_protocol_peer(
+    parent: Arc<FfiShared>,
+    admission: ProtocolAdmission,
+) -> Result<InProcessProtocolConnection, Error> {
+    // Admission and registration share the parent's close lock. A peer can
+    // never escape a concurrent parent shutdown.
+    tokio::task::spawn_blocking(move || {
+        let _operation = parent.operation_lock.lock();
+        let server_id = parent.server_id().ok_or_else(|| {
+            Error::with_message(ErrorKind::InvalidConfig, "in-process client is closed")
+        })?;
+        #[cfg(copilot_cli_host)]
+        if matches!(admission, ProtocolAdmission::OriginalStdio(_)) && !parent.owns_host {
+            return Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "original stdio requires the owning CLI client",
+            ));
+        }
+        if parent.protocol_peers.lock().is_none() {
+            return Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "in-process client is closing",
+            ));
+        }
+        let host = FfiHost::create(
+            None,
+            None,
+            None,
+            Vec::new(),
+            Vec::new(),
+            FfiHostTarget {
+                auth_owner: None,
+                server_id: Some(server_id),
+                library_path: Some(parent.library_path()),
+                session_binding: None,
+                file_logging_path: None,
+            },
+        )?;
+        let library = load_library(parent.library_path())?;
+        let notify = *bind::<ConnectionNotifyFn>(
+            library,
+            b"copilot_runtime_connection_notify\0",
+            parent.library_path(),
+        )?;
+        let notify_after_response = *bind::<ConnectionNotifyAfterResponseFn>(
+            library,
+            b"copilot_runtime_connection_notify_after_response\0",
+            parent.library_path(),
+        )?;
+        let request = *bind::<ConnectionRequestFn>(
+            library,
+            b"copilot_runtime_connection_request\0",
+            parent.library_path(),
+        )?;
+        let (reader, shared) = host.start_with_protocol_options(Some(admission))?;
+        let connection_id = shared.connection_id().ok_or_else(|| {
+            Error::with_message(ErrorKind::InvalidConfig, "in-process peer is closed")
+        })?;
+        let mut peers = parent.protocol_peers.lock();
+        let peers = peers.as_mut().ok_or_else(|| {
+            Error::with_message(ErrorKind::InvalidConfig, "in-process client is closing")
+        })?;
+        peers.retain(|peer| peer.strong_count() != 0);
+        peers.push(Arc::downgrade(&shared));
+        Ok(InProcessProtocolConnection {
+            reader: tokio::sync::Mutex::new(reader),
+            shared,
+            connection_id,
+            notify,
+            notify_after_response,
+            request,
+        })
+    })
+    .await
+    .map_err(|error| Error::with_message(ErrorKind::InvalidConfig, error.to_string()))?
+}
+
+impl FfiShared {
     pub(crate) fn write_frame(&self, frame: &[u8]) -> std::io::Result<()> {
         let _operation = self.operation_lock.lock();
         let conn = self.connection_id.load(Ordering::SeqCst);
@@ -607,6 +1317,8 @@ pub(crate) struct FfiHost {
     host_start_with_auth_owner: Option<HostStartWithAuthOwnerFn>,
     session_binding: Option<crate::InProcessSessionBinding>,
     session_connection_open: Option<SessionConnectionOpenFn>,
+    file_logging_path: Option<PathBuf>,
+    file_logging_connection_admit: Option<FileLoggingConnectionAdmitFn>,
     library_path: PathBuf,
     cli_entrypoint: Option<PathBuf>,
     integration_id: Option<String>,
@@ -627,6 +1339,7 @@ pub(crate) struct FfiHostTarget<'a> {
     pub server_id: Option<u32>,
     pub library_path: Option<&'a Path>,
     pub session_binding: Option<crate::InProcessSessionBinding>,
+    pub file_logging_path: Option<&'a Path>,
 }
 
 // SAFETY: as for `FfiShared` — the bound exports are plain fn pointers, safe to
@@ -648,6 +1361,7 @@ impl FfiHost {
             server_id: attached_server_id,
             library_path: runtime_library_path,
             session_binding,
+            file_logging_path,
         } = target;
         if session_binding.is_some() && attached_server_id.is_none() {
             return Err(Error::with_message(
@@ -712,6 +1426,12 @@ impl FfiHost {
             &library_path,
             session_binding.is_some(),
         )?;
+        let file_logging_connection_admit = bind_optional::<FileLoggingConnectionAdmitFn>(
+            lib,
+            b"copilot_runtime_file_logging_connection_admit\0",
+            &library_path,
+            file_logging_path.is_some(),
+        )?;
 
         let host_start = *bind::<HostStartFn>(lib, b"copilot_runtime_host_start\0", &library_path)?;
         let host_shutdown =
@@ -740,6 +1460,8 @@ impl FfiHost {
             host_start_with_auth_owner,
             session_binding,
             session_connection_open,
+            file_logging_path: file_logging_path.map(Path::to_path_buf),
+            file_logging_connection_admit,
             library_path,
             cli_entrypoint,
             integration_id: integration_id.map(str::to_owned),
@@ -772,6 +1494,53 @@ impl FfiHost {
     }
 
     fn start_blocking(self) -> Result<(FfiReader, Arc<FfiShared>), Error> {
+        self.start_with_protocol_options(None)
+    }
+
+    fn start_with_protocol_options(
+        self,
+        protocol: Option<ProtocolAdmission>,
+    ) -> Result<(FfiReader, Arc<FfiShared>), Error> {
+        let (protocol_open, connection_close_and_wait) = if protocol.is_some() {
+            let library = load_library(&self.library_path)?;
+            let open = match protocol {
+                Some(ProtocolAdmission::External(options)) => {
+                    let admission = serde_json::to_vec(&options).map_err(|error| {
+                        Error::with_message(ErrorKind::InvalidConfig, error.to_string())
+                    })?;
+                    Some(ProtocolOpen::External(
+                        *bind::<ProtocolConnectionOpenFn>(
+                            library,
+                            b"copilot_runtime_protocol_connection_open\0",
+                            &self.library_path,
+                        )?,
+                        admission,
+                    ))
+                }
+                #[cfg(copilot_cli_host)]
+                Some(ProtocolAdmission::OriginalStdio(parent)) => {
+                    Some(ProtocolOpen::OriginalStdio(
+                        *bind::<OriginalStdioOpenFn>(
+                            library,
+                            b"copilot_runtime_cli_stdio_connection_open\0",
+                            &self.library_path,
+                        )?,
+                        parent,
+                    ))
+                }
+                None => None,
+            };
+            (
+                open,
+                Some(*bind::<ConnectionCloseAndWaitFn>(
+                    library,
+                    b"copilot_runtime_connection_close_and_wait\0",
+                    &self.library_path,
+                )?),
+            )
+        } else {
+            (None, None)
+        };
         let argv = build_argv_json(
             self.cli_entrypoint.as_deref(),
             self.integration_id.as_deref(),
@@ -857,7 +1626,7 @@ impl FfiHost {
 
         let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let state_ptr = Box::into_raw(Box::new(CallbackState {
-            tx,
+            tx: parking_lot::Mutex::new(Some(tx)),
             closing: AtomicBool::new(false),
         }));
         let connection_id = if let Some(binding) = self.session_binding.as_ref() {
@@ -877,6 +1646,22 @@ impl FfiHost {
                     on_outbound,
                     state_ptr as *mut c_void,
                 )
+            }
+        } else if let Some(open) = protocol_open {
+            match open {
+                ProtocolOpen::External(open, admission) => unsafe {
+                    open(
+                        server_id,
+                        on_outbound,
+                        state_ptr.cast(),
+                        admission.as_ptr(),
+                        admission.len(),
+                    )
+                },
+                #[cfg(copilot_cli_host)]
+                ProtocolOpen::OriginalStdio(open, parent) => unsafe {
+                    open(server_id, parent, on_outbound, state_ptr.cast())
+                },
             }
         } else {
             unsafe {
@@ -912,6 +1697,7 @@ impl FfiHost {
             owns_host,
             connection_write: self.connection_write,
             connection_close: self.connection_close,
+            connection_close_and_wait,
             connection_set_ui_thread_handler: self.connection_set_ui_thread_handler,
             connection_run_ui_action: self.connection_run_ui_action,
             server_id: AtomicU32::new(server_id),
@@ -919,8 +1705,32 @@ impl FfiHost {
             callback_state: AtomicPtr::new(state_ptr),
             closed: AtomicBool::new(false),
             operation_lock: parking_lot::Mutex::new(()),
+            foreground_order: Arc::new(tokio::sync::Mutex::new(())),
+            protocol_peers: parking_lot::Mutex::new(Some(Vec::new())),
+            cleanup_done: tokio::sync::watch::channel(false).0,
             library_path: self.library_path.clone(),
         });
+        if let Some(path) = self.file_logging_path.as_deref() {
+            let path = path.to_str().ok_or_else(|| {
+                Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "in_process_file_logging_path must contain valid UTF-8",
+                )
+            })?;
+            let admit = self.file_logging_connection_admit.ok_or_else(|| {
+                Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "file logging admission export is missing",
+                )
+            })?;
+            // SAFETY: the live connection belongs to this image, and the path bytes remain borrowed.
+            if !unsafe { admit(connection_id, path.as_ptr(), path.len()) } {
+                return Err(Error::with_message(
+                    ErrorKind::InvalidConfig,
+                    "the runtime rejected the explicit file logging grant",
+                ));
+            }
+        }
 
         debug!(
             library = %self.library_path.display(),

@@ -18,19 +18,40 @@ import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.microsoft.copilot.generated.rpc.CatalogClientContract;
+import com.microsoft.copilot.generated.rpc.AuthLoginStepAwaiting;
+import com.microsoft.copilot.generated.rpc.AutopilotObjectiveState;
+import com.microsoft.copilot.generated.rpc.AutopilotObjectiveStatus;
+import com.microsoft.copilot.generated.rpc.AutopilotObjectiveCreditLimit;
 import com.microsoft.copilot.generated.rpc.CatalogSearchParams;
 import com.microsoft.copilot.generated.rpc.McpPlanInstallParams;
 import com.microsoft.copilot.generated.rpc.McpPlanScope;
 import com.microsoft.copilot.generated.rpc.RpcCaller;
 import com.microsoft.copilot.generated.rpc.ServerRpc;
 import com.microsoft.copilot.generated.rpc.FeatureFlagServiceSnapshot;
+import com.microsoft.copilot.generated.rpc.Extension;
+import com.microsoft.copilot.generated.rpc.ExtensionSource;
+import com.microsoft.copilot.generated.rpc.ExtensionStatus;
+import com.microsoft.copilot.generated.rpc.SessionExtensionsListResult;
+import com.microsoft.copilot.generated.rpc.SessionExtensionsReconcileResult;
 import com.microsoft.copilot.generated.rpc.SessionFeatureFlagsReadParams;
 import com.microsoft.copilot.generated.rpc.SessionFeatureFlagsReadResult;
 import com.microsoft.copilot.generated.rpc.SessionOpenOptions;
 import com.microsoft.copilot.generated.rpc.SessionUpdateAgentOptions;
+import com.microsoft.copilot.generated.rpc.SessionAccountsLogoutParams;
+import com.microsoft.copilot.generated.rpc.SessionAccountsLoginBeginResult;
+import com.microsoft.copilot.generated.rpc.SessionOptionsUpdateParams;
+import com.microsoft.copilot.generated.rpc.SessionSettingsPatch;
 import com.microsoft.copilot.generated.rpc.SessionPermissionsSetRequiredParams;
 import com.microsoft.copilot.generated.rpc.SessionRpc;
+import com.microsoft.copilot.generated.rpc.SessionMetadataSnapshotResult;
+import com.microsoft.copilot.generated.rpc.MetadataSnapshotRemoteMetadata;
+import com.microsoft.copilot.generated.rpc.MetadataSnapshotCurrentMode;
+import com.microsoft.copilot.generated.rpc.SessionLimitsConfig;
+import com.microsoft.copilot.generated.rpc.IndexedSearchState;
 
 /**
  * Generated request builders preserve the protocol's wire methods.
@@ -38,6 +59,97 @@ import com.microsoft.copilot.generated.rpc.SessionRpc;
 class LegacyRequestCompatibilityTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    @Test
+    void objectiveConstructorPreservesPublishedDescriptorAndCreditArguments() throws Exception {
+        var constructor = AutopilotObjectiveState.class.getConstructor(Long.class, String.class,
+                AutopilotObjectiveStatus.class, Long.class, String.class, String.class, String.class,
+                AutopilotObjectiveCreditLimit.class);
+        var limit = AutopilotObjectiveCreditLimit.builder().credits(5.0).creditsUsed(0.125)
+                .creditsUsedNanoAiu("125000000").build();
+        var objective = constructor.newInstance(7L, "Ship the change", AutopilotObjectiveStatus.PAUSED, 3L, "user",
+                "Work saved", "123456789", limit);
+        assertEquals(MAPPER.readTree("""
+                {"id":7,"objective":"Ship the change","status":"paused","turnCount":3,
+                 "pauseReason":"user","completionSummary":"Work saved","creditCountNanoAiu":"123456789",
+                 "creditLimit":{"credits":5.0,"creditsUsed":0.125,"creditsUsedNanoAiu":"125000000"}}
+                """), MAPPER.readTree(MAPPER.writeValueAsBytes(objective)));
+
+        var current = AutopilotObjectiveState.builder().id(7L).objective("Ship the change")
+                .status(AutopilotObjectiveStatus.PAUSED).turnCount(3L).pauseReason("user")
+                .completionSummary("Work saved").creditCountNanoAiu("123456789").creditLimit(limit)
+                .createdAt("2026-01-02T03:04:05Z").resumeCount(2L).build();
+        ObjectNode currentWire = MAPPER.valueToTree(objective);
+        currentWire.put("createdAt", "2026-01-02T03:04:05Z").put("resumeCount", 2L);
+        assertEquals(currentWire, MAPPER.valueToTree(current));
+    }
+
+    @Test
+    void metadataConstructorPreservesPublishedDescriptorAndArgumentPositions() throws Exception {
+        var constructor = SessionMetadataSnapshotResult.class.getConstructor(String.class,
+                java.time.OffsetDateTime.class, java.time.OffsetDateTime.class, Boolean.class, Boolean.class,
+                String.class, String.class, String.class, MetadataSnapshotRemoteMetadata.class, String.class,
+                String.class, MetadataSnapshotCurrentMode.class, String.class, SessionLimitsConfig.class,
+                IndexedSearchState.class, SessionMetadataSnapshotResult.SessionMetadataSnapshotResultWorkspace.class);
+        var start = java.time.OffsetDateTime.parse("2026-01-02T03:04:05Z");
+        var modified = java.time.OffsetDateTime.parse("2026-01-02T04:05:06Z");
+        var snapshot = constructor.newInstance("snapshot-session", start, modified, false, true, "/workspace",
+                "snapshot-name", "snapshot-client", null, "snapshot-summary", "/work", MetadataSnapshotCurrentMode.PLAN,
+                "snapshot-model", null, null, null);
+        var mapper = MAPPER.copy().registerModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        assertEquals(mapper.readTree("""
+                {"sessionId":"snapshot-session","startTime":"2026-01-02T03:04:05Z",
+                 "modifiedTime":"2026-01-02T04:05:06Z","isRemote":false,"alreadyInUse":true,
+                 "workspacePath":"/workspace","initialName":"snapshot-name","clientName":"snapshot-client",
+                 "summary":"snapshot-summary","workingDirectory":"/work","currentMode":"plan",
+                 "selectedModel":"snapshot-model","sessionLimits":null,"workspace":null}
+                """), mapper.valueToTree(snapshot));
+    }
+
+    @Test
+    void extensionConstructorsPreservePublishedDescriptorsAndWireValues() throws Exception {
+        var constructor = Extension.class.getConstructor(String.class, String.class, ExtensionSource.class,
+                ExtensionStatus.class, Long.class);
+        var extension = constructor.newInstance("user:probe", "probe", ExtensionSource.USER, ExtensionStatus.RUNNING,
+                42L);
+        var expected = MAPPER.createObjectNode().put("id", "user:probe").put("name", "probe").put("source", "user")
+                .put("status", "running").put("pid", 42L);
+        assertEquals(expected, MAPPER.valueToTree(extension));
+        var expectedList = MAPPER.valueToTree(Map.of("extensions", List.of(extension)));
+        for (var type : List.of(SessionExtensionsListResult.class, SessionExtensionsReconcileResult.class)) {
+            var result = type.getConstructor(List.class).newInstance(List.of(extension));
+            assertEquals(expectedList, MAPPER.valueToTree(result));
+        }
+
+        var current = Extension.class.getConstructor(String.class, String.class, ExtensionSource.class,
+                ExtensionStatus.class, Long.class, String.class, String.class).newInstance("user:probe", "probe",
+                        ExtensionSource.USER, ExtensionStatus.RUNNING, 42L, "/extensions/probe.mjs", "/logs/probe.log");
+        var currentWire = expected.deepCopy();
+        currentWire.put("modulePath", "/extensions/probe.mjs");
+        currentWire.put("logPath", "/logs/probe.log");
+        assertEquals(currentWire, MAPPER.valueToTree(current));
+        var currentList = MAPPER
+                .valueToTree(Map.of("extensions", List.of(current), "configured", true, "explicitOptOut", false));
+        for (var type : List.of(SessionExtensionsListResult.class, SessionExtensionsReconcileResult.class)) {
+            var result = type.getConstructor(List.class, Boolean.class, Boolean.class).newInstance(List.of(current),
+                    true, false);
+            assertEquals(currentList, MAPPER.valueToTree(result));
+        }
+    }
+
+    @Test
+    void loginBeginAcceptsThePublishedObjectConstructorAndKeepsTypedSteps() throws Exception {
+        var wireStep = Map.of("kind", "awaiting");
+        var constructor = SessionAccountsLoginBeginResult.class.getConstructor(String.class, Object.class);
+        var result = constructor.newInstance("flow", wireStep);
+        assertInstanceOf(AuthLoginStepAwaiting.class, result.step());
+        assertEquals(MAPPER.valueToTree(Map.of("flowId", "flow", "step", wireStep)), MAPPER.valueToTree(result));
+
+        var typed = AuthLoginStepAwaiting.builder().build();
+        assertSame(typed, constructor.newInstance("flow", typed).step());
+        assertNull(constructor.newInstance("flow", null).step());
+    }
 
     @Test
     void featureFlagReadBuildersPreserveDefaultWireMode() throws Exception {
@@ -128,6 +240,27 @@ class LegacyRequestCompatibilityTest {
         assertCanonicalPresence(SessionUpdateAgentOptions.class, "includedBuiltinAgents", "directories");
     }
 
+    @Test
+    void sessionUpdatesChangeSettingsWithoutChangingDiscovery() {
+        for (boolean explicitNull : new boolean[]{true, false}) {
+            var agents = SessionUpdateAgentOptions.builder();
+            if (explicitNull) {
+                agents.includedBuiltinAgents(null);
+            }
+            var group = agents.build();
+            var value = SessionOptionsUpdateParams.builder().sessionId("session")
+                    .settings(SessionSettingsPatch.builder().memory(false).build()).agents(group).build();
+            var expected = MAPPER.createObjectNode().put("sessionId", "session");
+            expected.set("settings", MAPPER.valueToTree(Map.of("memory", false)));
+            var expectedAgents = expected.putObject("agents");
+            if (explicitNull) {
+                expectedAgents.putNull("includedBuiltinAgents");
+            }
+            assertEquals(expected, MAPPER.valueToTree(value));
+            assertEquals(explicitNull ? Set.of("includedBuiltinAgents") : Set.of(), group.$explicitNulls());
+        }
+    }
+
     private static void assertCanonicalPresence(Class<?> type, String nullableField, String addedField)
             throws ReflectiveOperationException {
         var components = type.getRecordComponents();
@@ -158,6 +291,24 @@ class LegacyRequestCompatibilityTest {
                 assertTrue(wire.get(nullableField).isNull());
             }
         }
+    }
+
+    @Test
+    void accountLogoutRequestsPreserveConcreteWireValues() throws Exception {
+        var constructor = SessionAccountsLogoutParams.class.getConstructor(String.class, String.class, String.class);
+        var wire = Map.of("sessionId", "session", "accountId", "account");
+        for (Object value : List.<Object>of(wire, MAPPER.valueToTree(wire))) {
+            var params = MAPPER.convertValue(value, SessionAccountsLogoutParams.class);
+            assertEquals("account", params.accountId());
+            assertEquals(MAPPER.valueToTree(wire), MAPPER.valueToTree(params));
+            assertEquals(MAPPER.valueToTree(params),
+                    MAPPER.valueToTree(constructor.newInstance("session", "account", null)));
+        }
+        var selected = SessionAccountsLogoutParams.builder().sessionId("session").selectionId("selected").build();
+        assertEquals(MAPPER.valueToTree(Map.of("sessionId", "session", "selectionId", "selected")),
+                MAPPER.valueToTree(selected));
+        assertNull(MAPPER.readValue("{\"sessionId\":\"session\",\"accountId\":null}", SessionAccountsLogoutParams.class)
+                .accountId());
     }
 
     @Test

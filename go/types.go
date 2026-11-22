@@ -249,6 +249,7 @@ type clientOptions struct {
 	// opened by this client. When non-nil, every session created or resumed by
 	// this client opts into telemetry forwarding (enableGitHubTelemetryForwarding).
 	OnGitHubTelemetry func(notification *rpc.GitHubTelemetryNotification)
+
 	// Telemetry configures OpenTelemetry integration for the runtime.
 	// When non-nil, COPILOT_OTEL_ENABLED=true is set and any populated
 	// fields are mapped to the corresponding environment variables.

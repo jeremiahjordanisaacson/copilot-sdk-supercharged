@@ -42,6 +42,17 @@ public final class SessionTelemetryApi {
     }
 
     /**
+     * Reloads local OpenTelemetry settings from this session's configuration directory. Retains runtime overrides, managed policy precedence, and the session's credential identity. Returns after the exporter update completes, or retains an outstanding managed-policy fence until its owner settles it.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<Void> reload() {
+        return caller.invoke("session.telemetry.reload", java.util.Map.of("sessionId", this.sessionId), Void.class);
+    }
+
+    /**
      * Sets feature override key/value pairs to attach to subsequent telemetry events for the session.
      * <p>
      * Note: the {@code sessionId} field in the params record is overridden

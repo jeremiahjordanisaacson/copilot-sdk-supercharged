@@ -925,15 +925,19 @@ func (c *Client) Stop() error {
 	if (c.process != nil || c.ffiHost != nil) && !c.isExternalServer && c.RPC != nil {
 		rpcClient := c.RPC
 		runtimeShutdownStart := time.Now()
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), runtimeShutdownTimeout)
 		shutdownDone := make(chan error, 1)
 		go func() {
-			_, err := rpcClient.Runtime.Shutdown(context.Background())
+			_, err := rpcClient.Runtime.Shutdown(shutdownCtx)
 			shutdownDone <- err
 		}()
 
 		select {
 		case err := <-shutdownDone:
-			if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && shutdownCtx.Err() != nil {
+				c.logDebugTiming(runtimeShutdownStart, "CopilotClient.Stop runtime shutdown timed out")
+				errs = append(errs, fmt.Errorf("timed out gracefully shutting down runtime after %s", runtimeShutdownTimeout))
+			} else if err != nil {
 				c.logDebugTiming(runtimeShutdownStart, "CopilotClient.Stop runtime shutdown failed")
 				errs = append(errs, fmt.Errorf("failed to gracefully shut down runtime: %w", err))
 			} else {
@@ -944,6 +948,7 @@ func (c *Client) Stop() error {
 			c.logDebugTiming(runtimeShutdownStart, "CopilotClient.Stop runtime shutdown timed out")
 			errs = append(errs, fmt.Errorf("timed out gracefully shutting down runtime after %s", runtimeShutdownTimeout))
 		}
+		cancelShutdown()
 	}
 
 	// The stdio host finalizes telemetry after EOF, not after runtime.shutdown.

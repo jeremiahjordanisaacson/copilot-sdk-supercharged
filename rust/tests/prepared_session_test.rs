@@ -78,6 +78,35 @@ struct FakeServer {
 }
 
 impl FakeServer {
+    #[cfg(feature = "local-runtime")]
+    async fn send_admission_callback(&mut self, id: u64, send: &Value, session_id: &str) -> Value {
+        write_framed(
+            &mut self.write,
+            &serde_json::to_vec(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "embedder.sendAdmission",
+                "params": {
+                    "sessionId": session_id,
+                    "admissionId": send["params"]["sendAdmissionId"],
+                },
+            }))
+            .unwrap(),
+        )
+        .await;
+        timeout(TIMEOUT, async {
+            loop {
+                let reply = read_framed(&mut self.read).await;
+                if reply["id"] == id {
+                    return reply;
+                }
+                assert_eq!(reply["method"], "$/cancelRequest", "{reply}");
+            }
+        })
+        .await
+        .unwrap()
+    }
+
     async fn read_request(&mut self) -> Value {
         timeout(TIMEOUT, async {
             loop {
@@ -242,6 +271,166 @@ fn make_client() -> (Client, FakeServer) {
             write: server_write,
         },
     )
+}
+
+#[cfg(feature = "local-runtime")]
+#[tokio::test]
+async fn cli_send_admission_is_invocation_session_and_owner_bound_before_completion() {
+    let (client, mut server) = make_client();
+    let (first_admitted, mut first_receipt) = tokio::sync::oneshot::channel();
+    let first = tokio::spawn({
+        let client = client.clone();
+        async move {
+            copilot_sdk::cli_host::send_with_admission(
+                &client,
+                &SessionId::new("admission-session"),
+                json!({"prompt": "first", "wait": true}),
+                move || async move {
+                    first_admitted.send(()).unwrap();
+                    Ok(())
+                },
+            )
+            .await
+        }
+    });
+    let first_request = server.read_request().await;
+    let (second_admitted, second_receipt) = tokio::sync::oneshot::channel();
+    let second = tokio::spawn({
+        let client = client.clone();
+        async move {
+            copilot_sdk::cli_host::send_with_admission(
+                &client,
+                &SessionId::new("admission-session"),
+                json!({"prompt": "second", "wait": true}),
+                move || async move {
+                    second_admitted.send(()).unwrap();
+                    Ok(())
+                },
+            )
+            .await
+        }
+    });
+    let second_request = server.read_request().await;
+    assert_eq!(first_request["params"]["wait"], true);
+    assert_ne!(
+        first_request["params"]["sendAdmissionId"],
+        second_request["params"]["sendAdmissionId"]
+    );
+    let wrong_session = server
+        .send_admission_callback(9000, &first_request, "other-session")
+        .await;
+    assert_eq!(wrong_session["error"]["code"], -32603);
+    assert_eq!(
+        wrong_session["error"]["message"],
+        "RPC error -32602: Unknown or mismatched send admission callback"
+    );
+    let (_other_client, mut other_server) = make_client();
+    let wrong_owner = other_server
+        .send_admission_callback(9001, &first_request, "admission-session")
+        .await;
+    assert_eq!(wrong_owner["error"]["code"], -32603);
+    assert_eq!(
+        wrong_owner["error"]["message"],
+        wrong_session["error"]["message"]
+    );
+    let accepted = server
+        .send_admission_callback(9002, &second_request, "admission-session")
+        .await;
+    assert_eq!(accepted["result"], Value::Null);
+    assert!(accepted.get("error").is_none(), "{accepted}");
+    timeout(TIMEOUT, second_receipt).await.unwrap().unwrap();
+    assert!(matches!(
+        first_receipt.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(!first.is_finished());
+    assert!(
+        !second.is_finished(),
+        "admission cannot complete a wait:true send"
+    );
+    server
+        .respond(&second_request, json!({"messageId": "second-message"}))
+        .await;
+    assert_eq!(
+        timeout(TIMEOUT, second).await.unwrap().unwrap().unwrap(),
+        json!({"messageId": "second-message"})
+    );
+    let duplicate = server
+        .send_admission_callback(9003, &second_request, "admission-session")
+        .await;
+    assert_eq!(duplicate["error"]["code"], -32603);
+    assert_eq!(
+        duplicate["error"]["message"],
+        wrong_session["error"]["message"]
+    );
+    let accepted = server
+        .send_admission_callback(9004, &first_request, "admission-session")
+        .await;
+    assert_eq!(accepted["result"], Value::Null);
+    assert!(accepted.get("error").is_none(), "{accepted}");
+    timeout(TIMEOUT, first_receipt).await.unwrap().unwrap();
+    server
+        .respond(&first_request, json!({"messageId": "first-message"}))
+        .await;
+    assert_eq!(
+        timeout(TIMEOUT, first).await.unwrap().unwrap().unwrap(),
+        json!({"messageId": "first-message"})
+    );
+}
+
+#[cfg(feature = "local-runtime")]
+#[tokio::test]
+async fn cli_send_admission_releases_callbacks_on_cancel_failure_and_owner_stop() {
+    for outcome in ["cancel", "failure", "owner_stop"] {
+        let (client, mut server) = make_client();
+        let (admitted, receipt) = tokio::sync::oneshot::channel();
+        let sending = tokio::spawn({
+            let client = client.clone();
+            async move {
+                copilot_sdk::cli_host::send_with_admission(
+                    &client,
+                    &SessionId::new("cancelled-admission"),
+                    json!({"prompt": "cancel this send", "wait": true}),
+                    move || async move {
+                        admitted.send(()).unwrap();
+                        Ok(())
+                    },
+                )
+                .await
+            }
+        });
+        let request = server.read_request().await;
+        if outcome == "cancel" {
+            sending.abort();
+            assert!(
+                timeout(TIMEOUT, sending)
+                    .await
+                    .unwrap()
+                    .unwrap_err()
+                    .is_cancelled()
+            );
+        } else {
+            if outcome == "failure" {
+                server
+                    .respond_error(&request, -32602, "Rejected before admission")
+                    .await;
+            } else {
+                client.force_stop();
+            }
+            assert!(timeout(TIMEOUT, sending).await.unwrap().unwrap().is_err());
+        }
+        assert!(timeout(TIMEOUT, receipt).await.unwrap().is_err());
+        if outcome != "owner_stop" {
+            let stale = server
+                .send_admission_callback(9100, &request, "cancelled-admission")
+                .await;
+            assert_eq!(stale["error"]["code"], -32603, "{outcome}: {stale}");
+            assert_eq!(
+                stale["error"]["message"],
+                "RPC error -32602: Unknown or mismatched send admission callback"
+            );
+        }
+    }
 }
 
 fn cloud_options() -> CloudSessionOptions {
@@ -500,6 +689,116 @@ async fn prepared_create_retains_burst_for_deferred_consumer() {
 
     let session = timeout(TIMEOUT, start).await.unwrap().unwrap().unwrap();
     // Only now does the consumer start reading.
+    expect_startup_burst(&mut events).await;
+    drop(session);
+}
+
+#[cfg(feature = "local-runtime")]
+#[tokio::test]
+async fn cli_prepared_create_preserves_cli_policy_and_sdk_callback_delivery() {
+    let (client, mut server) = make_client();
+    let session_id = SessionId::new("prepared-cli-create");
+    let published = Arc::new(tokio::sync::Notify::new());
+    let options = serde_json::from_value(json!({
+        "sessionId": session_id,
+        "clientKind": "cli",
+        "workingDirectory": "/workspace/cli-create",
+        "remoteSteerable": true,
+        "interaction": {"runningInInteractiveMode": true},
+        "git": {"coauthorEnabled": false},
+        "state": {"trajectoryFile": "/workspace/cli-create/trajectory.json"},
+    }))
+    .unwrap();
+    let prepared = copilot_sdk::cli_host::prepare_session(
+        &client,
+        options,
+        CreateSessionOptions::default()
+            .with_git(|group| group.with_coauthor_enabled(true))
+            .with_events(|group| group.with_buffer_capacity(2048))
+            .with_permissions(|group| {
+                group.with_on_request(Arc::new(PublicationFence(published.clone())))
+            }),
+    )
+    .unwrap();
+    let mut events = prepared.subscribe();
+    let start = tokio::spawn(prepared.start());
+
+    let request = server.read_request().await;
+    assert_eq!(request["method"], "session.create");
+    assert_eq!(request["params"]["sessionId"], session_id.as_str());
+    assert_eq!(request["params"]["clientKind"], "cli");
+    assert_eq!(
+        request["params"]["workingDirectory"],
+        "/workspace/cli-create"
+    );
+    assert_eq!(request["params"]["remoteSteerable"], true);
+    assert_eq!(
+        request["params"]["interaction"]["runningInInteractiveMode"],
+        true
+    );
+    assert_eq!(request["params"]["git"]["coauthorEnabled"], false);
+    assert_eq!(
+        request["params"]["state"]["trajectoryFile"],
+        "/workspace/cli-create/trajectory.json"
+    );
+    assert_eq!(request["params"]["permissions"]["request"], true);
+    server.send_startup_burst(session_id.as_str()).await;
+    server
+        .await_publication(session_id.as_str(), &published)
+        .await;
+    server
+        .respond(&request, create_result(session_id.as_str()))
+        .await;
+    let update = server.read_request().await;
+    assert_eq!(update["method"], "session.options.update");
+    assert_eq!(update["params"]["git"]["coauthorEnabled"], false);
+    server.respond(&update, json!({"success": true})).await;
+
+    let session = timeout(TIMEOUT, start).await.unwrap().unwrap().unwrap();
+    expect_startup_burst(&mut events).await;
+    drop(session);
+}
+
+#[cfg(feature = "local-runtime")]
+#[tokio::test]
+async fn cli_prepared_resume_preserves_cli_policy_and_early_events() {
+    let (client, mut server) = make_client();
+    let session_id = SessionId::new("prepared-cli-resume");
+    let prepared = copilot_sdk::cli_host::prepare_resume_session(
+        &client,
+        serde_json::from_value(json!({
+            "sessionId": session_id,
+            "remoteSteerable": false,
+            "workingDirectory": "/workspace/cli-resume",
+            "git": {"coauthorEnabled": true},
+        }))
+        .unwrap(),
+        ResumeSessionOptions::new(session_id.clone())
+            .with_git(|group| group.with_coauthor_enabled(false))
+            .with_events(|group| group.with_buffer_capacity(2048)),
+    )
+    .unwrap();
+    let mut events = prepared.subscribe();
+    let start = tokio::spawn(prepared.start());
+    let request = server.read_request().await;
+    assert_eq!(request["method"], "session.resume");
+    assert_eq!(request["params"]["remoteSteerable"], false);
+    assert_eq!(
+        request["params"]["workingDirectory"],
+        "/workspace/cli-resume"
+    );
+    assert_eq!(request["params"]["git"]["coauthorEnabled"], true);
+    server.send_startup_burst(session_id.as_str()).await;
+    server
+        .respond(&request, json!({ "sessionId": session_id.as_str() }))
+        .await;
+    server.answer_skills_reload().await;
+    let update = server.read_request().await;
+    assert_eq!(update["method"], "session.options.update");
+    assert_eq!(update["params"]["git"]["coauthorEnabled"], true);
+    server.respond(&update, json!({"success": true})).await;
+
+    let session = timeout(TIMEOUT, start).await.unwrap().unwrap().unwrap();
     expect_startup_burst(&mut events).await;
     drop(session);
 }

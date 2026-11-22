@@ -26,7 +26,7 @@ use super::sdk_api_shared::*;
 use crate::generated::{lifecycle_diagnostics, session_events};
 use crate::types::{RequestId, SessionEvent, SessionId};
 
-/// Params to attach or detach an in-process ExtensionController delegate.
+/// Runtime-owned extension discovery and launch controls for a local host.
 ///
 /// <div class="warning">
 ///
@@ -39,10 +39,20 @@ pub(crate) struct ConfigureSessionExtensionsParams {
     /// In-process ExtensionController delegate (CLI-only optimization). Marked internal: this field is excluded from the public SDK surface. The post-SDK extension surface exposes list/enable/disable/reload via dedicated RPCs served by the runtime.
     #[doc(hidden)]
     pub(crate) controller: Option<serde_json::Value>,
+    /// Whether the model receives extension management tools.
+    pub expose_management_tools: Option<bool>,
+    /// Discovery sources allowed by the host's trust decision.
+    pub include_sources: Option<Vec<String>>,
+    /// Whether discovered extension processes may run.
+    pub launch_processes: Option<bool>,
+    /// Whether extension management operations are enabled.
+    pub management_tools_enabled: Option<bool>,
+    /// Keep compatible extension processes instead of restarting them.
+    pub retain_processes_if_unchanged: Option<bool>,
     /// Session to attach the extension controller delegate to.
     pub session_id: SessionId,
 }
-crate::record_serde::wire_record!(ConfigureSessionExtensionsParams { controller: "controller" if is_none, session_id: "sessionId" });
+crate::record_serde::wire_record!(ConfigureSessionExtensionsParams { controller: "controller" if is_none, expose_management_tools: "exposeManagementTools" if is_none, include_sources: "includeSources" if is_none, launch_processes: "launchProcesses" if is_none, management_tools_enabled: "managementToolsEnabled" if is_none, retain_processes_if_unchanged: "retainProcessesIfUnchanged" if is_none, session_id: "sessionId" });
 
 /// The declared shape of one feature flag, independent of any caller population.
 ///
@@ -1338,6 +1348,21 @@ pub(crate) struct UserSettingsBuildRuntimeRequest {
     pub working_directory: String,
 }
 crate::record_serde::wire_record!(UserSettingsBuildRuntimeRequest { environment: "environment", overrides: "overrides" if is_none, platform: "platform", working_directory: "workingDirectory" });
+
+/// Select the canonical settings document without normalizing its contents.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UserSettingsDocumentRequest {
+    /// Explicit Copilot configuration directory; omission uses the SDK server's configured home.
+    pub config_dir: Option<String>,
+}
+crate::record_serde::wire_record!(UserSettingsDocumentRequest { config_dir: "configDir" if is_none });
 
 /// One atomic edit of a canonical setting in settings.json.
 ///

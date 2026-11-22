@@ -103,10 +103,14 @@ public final class SessionRpc {
     public final SessionProviderApi provider;
     /** API methods for the {@code options} namespace. */
     public final SessionOptionsApi options;
+    /** API methods for the {@code host} namespace. */
+    final SessionHostApi host;
     /** API methods for the {@code lsp} namespace. */
     public final SessionLspApi lsp;
     /** API methods for the {@code tools} namespace. */
     public final SessionToolsApi tools;
+    /** API methods for the {@code memory} namespace. */
+    public final SessionMemoryApi memory;
     /** API methods for the {@code commands} namespace. */
     public final SessionCommandsApi commands;
     /** API methods for the {@code telemetry} namespace. */
@@ -139,6 +143,8 @@ public final class SessionRpc {
     public final SessionScheduleApi schedule;
     /** API methods for the {@code cafeMetrics} namespace. */
     final SessionCafeMetricsApi cafeMetrics;
+    /** API methods for the {@code mcpSource} namespace. */
+    final SessionMcpSourceApi mcpSource;
     /** API methods for the {@code research} namespace. */
     final SessionResearchApi research;
     /** API methods for the {@code github} namespace. */
@@ -190,8 +196,10 @@ public final class SessionRpc {
         this.managedSettings = new SessionManagedSettingsApi(caller, sessionId);
         this.provider = new SessionProviderApi(caller, sessionId);
         this.options = new SessionOptionsApi(caller, sessionId);
+        this.host = new SessionHostApi(caller, sessionId);
         this.lsp = new SessionLspApi(caller, sessionId);
         this.tools = new SessionToolsApi(caller, sessionId);
+        this.memory = new SessionMemoryApi(caller, sessionId);
         this.commands = new SessionCommandsApi(caller, sessionId);
         this.telemetry = new SessionTelemetryApi(caller, sessionId);
         this.ui = new SessionUiApi(caller, sessionId);
@@ -208,6 +216,7 @@ public final class SessionRpc {
         this.visibility = new SessionVisibilityApi(caller, sessionId);
         this.schedule = new SessionScheduleApi(caller, sessionId);
         this.cafeMetrics = new SessionCafeMetricsApi(caller, sessionId);
+        this.mcpSource = new SessionMcpSourceApi(caller, sessionId);
         this.research = new SessionResearchApi(caller, sessionId);
         this.github = new SessionGithubApi(caller, sessionId);
     }
@@ -221,6 +230,33 @@ public final class SessionRpc {
     @CopilotExperimental
     public CompletableFuture<Void> suspend() {
         return caller.invoke("session.suspend", java.util.Map.of("sessionId", this.sessionId), Void.class);
+    }
+
+    /**
+     * Retains the active session for a subscribed view without creating, resuming, or copying it. Editors and other SDK clients use this while a view outlives its original connection owner. The token belongs to this connection and session generation. Connection teardown releases it automatically.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SessionViewRetainResult> retainView() {
+        return caller.invoke("session.retainView", java.util.Map.of("sessionId", this.sessionId), SessionViewRetainResult.class);
+    }
+
+    /**
+     * Releases one view retention from the original connection and session generation. Unknown tokens, tokens owned by another connection, and tokens from an older generation return released false. Explicit session close and deletion keep their existing behavior.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<SessionViewReleaseResult> releaseView(SessionReleaseViewParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.releaseView", _p, SessionViewReleaseResult.class);
     }
 
     /**

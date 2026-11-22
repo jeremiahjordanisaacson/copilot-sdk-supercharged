@@ -145,6 +145,67 @@ pub struct AbortResult {
 }
 crate::record_serde::wire_record!(AbortResult { error: "error" if is_none, success: "success" });
 
+/// ACP transport configuration for an existing in-process SDK engine.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct AcpServeRequest {
+    /// The host application version.
+    pub agent_version: String,
+    /// The session options resolved by the embedding host.
+    pub boot_options: Option<serde_json::Value>,
+    /// The TCP interface, or absent for loopback.
+    pub host: Option<String>,
+    /// The authentication command arguments.
+    pub login_args: Vec<String>,
+    /// The executable an editor can use to authenticate.
+    pub login_command: String,
+    /// The TCP port, required unless stdio is selected.
+    pub port: Option<i64>,
+    /// The SDK engine that owns the calling connection.
+    pub server_id: i64,
+    /// Whether to serve the process's standard input and output.
+    pub stdio: bool,
+    /// Whether the SDK client supplies the ACP telemetry callback.
+    pub telemetry: bool,
+    /// An absolute attachment directory, or absent for the platform default.
+    pub temp_dir: Option<String>,
+}
+crate::record_serde::wire_record!(AcpServeRequest { agent_version: "agentVersion", boot_options: "bootOptions" if is_none, host: "host" if is_none, login_args: "loginArgs", login_command: "loginCommand", port: "port" if is_none, server_id: "serverId", stdio: "stdio", telemetry: "telemetry", temp_dir: "tempDir" if is_none });
+
+/// The result of one host-owned ACP telemetry step.
+#[derive(Debug, Clone, Default)]
+pub struct AcpTelemetryReply {
+    /// Whether apply bound the captured credentials.
+    pub applied: Option<bool>,
+    /// The reservation produced by prepare.
+    pub preparation_id: Option<String>,
+    /// The captured managed sandbox policy.
+    pub sandbox_floor: Option<serde_json::Value>,
+    /// Whether the host cannot use its saved sandbox setting.
+    pub sandbox_host_unsupported: Option<bool>,
+    /// The captured account selection.
+    pub selection_id: Option<String>,
+}
+crate::record_serde::wire_record!(AcpTelemetryReply { applied: "applied" if is_none, preparation_id: "preparationId" if is_none, sandbox_floor: "sandboxFloor" if is_none, sandbox_host_unsupported: "sandboxHostUnsupported" if is_none, selection_id: "selectionId" if is_none });
+
+/// One host-owned step in the ACP telemetry transaction.
+#[derive(Debug, Clone, Default)]
+pub struct AcpTelemetryRequest {
+    /// The transaction step.
+    pub action: AcpTelemetryAction,
+    /// The reservation produced by the prepare step.
+    pub preparation_id: Option<String>,
+    /// The session admitted by this transaction.
+    pub session_id: Option<SessionId>,
+}
+crate::record_serde::wire_record!(AcpTelemetryRequest { action: "action", preparation_id: "preparationId" if is_none, session_id: "sessionId" if is_none });
+
 /// Canonical directory where custom agents can be discovered or created, with scope, preference, and optional project path.
 ///
 /// <div class="warning">
@@ -2194,6 +2255,42 @@ pub struct AutopilotEvaluateIdleContinuationResult {
     pub outcome: AutopilotEvaluateIdleContinuationOutcome,
 }
 crate::record_serde::wire_record!(AutopilotEvaluateIdleContinuationResult { outcome: "outcome" });
+
+/// Public, persistence-independent projection of an autopilot objective.
+///
+/// Expanded projection for the existing `Client::call` API. It includes fields added after `AutopilotObjectiveState` was published.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct AutopilotObjectiveStateDetails {
+    /// Optional summary recorded when the objective completed.
+    pub completion_summary: Option<String>,
+    /// UTC timestamp when this objective was created, retained across resumes.
+    pub created_at: Option<String>,
+    /// Exact lifetime AI-credit consumption in non-negative integer nano-AIU, encoded as a decimal string.
+    pub credit_count_nano_aiu: String,
+    /// Current per-window consumption and optional cap, when a credit-tracking window is present.
+    pub credit_limit: Option<AutopilotObjectiveCreditLimit>,
+    /// Session-local objective identifier.
+    pub id: i64,
+    /// User-provided objective text.
+    pub objective: String,
+    /// Optional reason the objective is paused.
+    pub pause_reason: Option<String>,
+    /// Number of times this objective resumed, identifying its current credit window.
+    pub resume_count: Option<i64>,
+    /// Current normalized lifecycle status.
+    pub status: AutopilotObjectiveStatus,
+    /// Number of objective turns started.
+    pub turn_count: i64,
+}
+crate::record_serde::wire_record!(AutopilotObjectiveStateDetails { completion_summary: "completionSummary" if is_none, created_at: "createdAt" if is_none, credit_count_nano_aiu: "creditCountNanoAiu", credit_limit: "creditLimit" if is_none, id: "id", objective: "objective", pause_reason: "pauseReason" if is_none, resume_count: "resumeCount" if is_none, status: "status", turn_count: "turnCount" });
 
 /// Canonical runtime state for the session's current autopilot objective.
 ///
@@ -6231,6 +6328,103 @@ crate::record_serde::wire_record!(DiscoveredModelList {
     outcome: "outcome"
 });
 
+/// The delegate completed the spawn request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedderAgentRegistrySpawnResultResult {
+    /// Controller delegate result or error classification.
+    pub kind: EmbedderAgentRegistrySpawnResultResultKind,
+    /// Canonical process-launch result.
+    pub result: AgentRegistrySpawnResult,
+}
+
+/// The delegate rejected the request with a structured protocol error.
+#[derive(Debug, Clone, Default)]
+pub struct EmbedderAgentRegistrySpawnResultResponse {
+    /// Original JSON-RPC error code.
+    pub code: i64,
+    /// Original structured error data.
+    pub data: Option<serde_json::Value>,
+    /// Controller delegate result or error classification.
+    pub kind: EmbedderAgentRegistrySpawnResultResponseKind,
+    /// Original error message.
+    pub message: String,
+}
+crate::record_serde::wire_record!(EmbedderAgentRegistrySpawnResultResponse { code: "code", data: "data" if is_none, kind: "kind", message: "message" });
+
+/// The delegate threw an error with a message.
+#[derive(Debug, Clone, Default)]
+pub struct EmbedderAgentRegistrySpawnResultMessage {
+    /// Controller delegate result or error classification.
+    pub kind: EmbedderAgentRegistrySpawnResultMessageKind,
+    /// Original error message.
+    pub message: String,
+}
+crate::record_serde::wire_record!(EmbedderAgentRegistrySpawnResultMessage {
+    kind: "kind",
+    message: "message"
+});
+
+/// The delegate threw a value without an error message.
+#[derive(Debug, Clone, Default)]
+pub struct EmbedderAgentRegistrySpawnResultUnexpected {
+    /// Controller delegate result or error classification.
+    pub kind: EmbedderAgentRegistrySpawnResultUnexpectedKind,
+}
+crate::record_serde::wire_record!(EmbedderAgentRegistrySpawnResultUnexpected { kind: "kind" });
+
+/// Terminal foreground change that the runtime already admits.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct EmbedderForegroundRequest {
+    /// Original connection that requests the UI change.
+    pub connection_id: i64,
+    /// Whether the runtime already owns the active session.
+    pub native_session_active: bool,
+    /// Canonical public session ID to display.
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(EmbedderForegroundRequest {
+    connection_id: "connectionId",
+    native_session_active: "nativeSessionActive",
+    session_id: "sessionId"
+});
+
+/// Result of a terminal foreground change.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct EmbedderForegroundResult {
+    /// User-facing refusal when the UI cannot display the session.
+    pub error: Option<String>,
+    /// Whether the UI displays the requested session.
+    pub success: bool,
+}
+crate::record_serde::wire_record!(EmbedderForegroundResult { error: "error" if is_none, success: "success" });
+
+/// Process-resource callback from an owned in-process runtime.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedderLifecycleRequest {}
+
 /// Slash-prefixed command string to enqueue for FIFO processing.
 ///
 /// <div class="warning">
@@ -6512,6 +6706,64 @@ pub struct EnvironmentsListRequest {
     pub status: Option<String>,
 }
 crate::record_serde::wire_record!(EnvironmentsListRequest { kind: "kind" if is_none, status: "status" if is_none });
+
+/// Extensible [`EnvironmentsListRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`EnvironmentsListOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentsListOptions {
+    #[serde(flatten)]
+    legacy: EnvironmentsListRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    use_configured_account: Option<bool>,
+}
+
+impl EnvironmentsListOptions {
+    /// Creates options with the required inputs.
+    pub fn new() -> Self {
+        Self {
+            legacy: EnvironmentsListRequest {
+                kind: None,
+                status: None,
+            },
+            use_configured_account: None,
+        }
+    }
+
+    /// Restrict discovery to this compute kind.
+    pub fn kind(mut self, value: EnvironmentKind) -> Self {
+        self.legacy.kind = Some(value);
+        self
+    }
+
+    /// Operational status, such as online, offline, degraded, waking, or draining.
+    pub fn status(mut self, value: impl Into<String>) -> Self {
+        self.legacy.status = Some(value.into());
+        self
+    }
+
+    /// Use the server's configured account instead of the connection's foreground account.
+    /// Omit or set false to retain connection authentication.
+    pub(crate) fn use_configured_account(mut self, value: bool) -> Self {
+        self.use_configured_account = Some(value);
+        self
+    }
+}
+
+impl Default for EnvironmentsListOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Environments visible to the authenticated caller and matching the supplied filters.
 ///
@@ -7900,6 +8152,21 @@ pub struct HistoryCompactResult {
 }
 crate::record_serde::wire_record!(HistoryCompactResult { context_window: "contextWindow" if is_none, messages_removed: "messagesRemoved", success: "success", summary_content: "summaryContent" if is_none, tokens_removed: "tokensRemoved" });
 
+/// Conversation history to append through the session's canonical event writer.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HistoryImportConversationRequest {
+    /// Conversation records in their original order. The runtime generates event IDs and timestamps.
+    pub events: Vec<HistoryImportConversationEvent>,
+}
+crate::record_serde::wire_record!(HistoryImportConversationRequest { events: "events" });
+
 /// Rewind points and file-change-tracking availability for the session.
 ///
 /// <div class="warning">
@@ -8223,6 +8490,23 @@ pub struct HostCancelAuthenticationRequest {
 }
 crate::record_serde::wire_record!(HostCancelAuthenticationRequest {
     request_id: "requestId"
+});
+
+/// Stable compute identity stored atomically in the canonical settings document.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HostComputeIdentityResult {
+    /// Existing or newly allocated UUID; malformed existing identities are never replaced.
+    pub compute_id: String,
+}
+crate::record_serde::wire_record!(HostComputeIdentityResult {
+    compute_id: "computeId"
 });
 
 /// GitHub Mission Control registration options. The compute ID is application-owned and stable.
@@ -8825,6 +9109,42 @@ pub struct HostUnregisterSessionRequest {
 }
 crate::record_serde::wire_record!(HostUnregisterSessionRequest {
     session_id: "sessionId"
+});
+
+/// Transient controls owned by the original embedding host.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HostUpdateControlsRequest {
+    /// Whether the original host supplies the plan-approval callback.
+    pub exit_plan_mode_callback_enabled: Option<bool>,
+    /// Whether managed-policy reconciliation pauses queued prompt processing.
+    pub managed_policy_queue_drain_paused: Option<bool>,
+    /// Whether the original host currently shows this session's shell password prompts.
+    pub shell_authentication_prompts_shown: Option<bool>,
+}
+crate::record_serde::wire_record!(HostUpdateControlsRequest { exit_plan_mode_callback_enabled: "exitPlanModeCallbackEnabled" if is_none, managed_policy_queue_drain_paused: "managedPolicyQueueDrainPaused" if is_none, shell_authentication_prompts_shown: "shellAuthenticationPromptsShown" if is_none });
+
+/// Queue scheduling work released by a host control update.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HostUpdateControlsResult {
+    /// Whether the update released queued work for processing.
+    pub schedule_process_queue: bool,
+}
+crate::record_serde::wire_record!(HostUpdateControlsResult {
+    schedule_process_queue: "scheduleProcessQueue"
 });
 
 /// Application-owned token validation callback.
@@ -10212,21 +10532,6 @@ pub struct MarketplaceRemoveResult {
 }
 crate::record_serde::wire_record!(MarketplaceRemoveResult { dependent_plugins: "dependentPlugins" if is_none, removed: "removed" });
 
-/// Metadata controlling an MCP task's lifetime.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct McpTaskMetadata {
-    /// Task time-to-live.
-    pub ttl: Option<i64>,
-}
-crate::record_serde::wire_record!(McpTaskMetadata { ttl: "ttl" if is_none });
-
 /// Memory import input. Authentication remains bound to the calling runtime owner.
 ///
 /// <div class="warning">
@@ -10382,6 +10687,61 @@ pub struct MemoryImportItemResult {
     pub status: String,
 }
 crate::record_serde::wire_record!(MemoryImportItemResult { code: "code", external_id: "externalId" if is_none, line: "line", message: "message", status: "status" });
+
+/// One memory to import through the session's cloud memory service.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct MemoryImportRecordRequest {
+    /// Sources that support the fact.
+    pub citations: String,
+    /// Fact to preserve.
+    pub fact: String,
+    /// Reason to preserve the fact.
+    pub reason: String,
+    /// Memory scope. Repository scope uses the session's resolved repository.
+    pub scope: MemoryImportScope,
+    /// Short description of the memory's subject.
+    pub subject: String,
+}
+crate::record_serde::wire_record!(MemoryImportRecordRequest {
+    citations: "citations",
+    fact: "fact",
+    reason: "reason",
+    scope: "scope",
+    subject: "subject"
+});
+
+/// Result from the session's cloud memory service, without a local fallback.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct MemoryImportRecordResult {
+    /// Machine-readable result code.
+    pub code: String,
+    /// Result description from the service or runtime.
+    pub message: String,
+    /// Whether the service stored the memory.
+    pub ok: bool,
+    /// Import outcome, including conflicts and policy refusals.
+    pub status: MemoryImportStatus,
+}
+crate::record_serde::wire_record!(MemoryImportRecordResult {
+    code: "code",
+    message: "message",
+    ok: "ok",
+    status: "status"
+});
 
 /// Input for a semantic memory import.
 ///
@@ -12076,10 +12436,12 @@ crate::record_serde::wire_record!(QueuedCommandHandled { handled: "handled", sto
 /// </div>
 #[derive(Debug, Clone, Default)]
 pub struct QueuedCommandNotHandled {
+    /// Failure reason when the host rejected the command or execution failed. Omit when the host only declines to execute it.
+    pub error: Option<String>,
     /// The host did not execute the queued command. Unblocks the queue without claiming the command was processed (e.g. when the handler threw before completing).
     pub handled: bool,
 }
-crate::record_serde::wire_record!(QueuedCommandNotHandled { handled: "handled" });
+crate::record_serde::wire_record!(QueuedCommandNotHandled { error: "error" if is_none, handled: "handled" });
 
 /// Inputs for marking session.idle deferred in native state.
 ///
@@ -13352,6 +13714,9 @@ pub struct SendRequest {
     pub required_tool: Option<String>,
     /// Provider-native output format for this turn, including all tool-call iterations. Not inherited by later turns or subagents. Ordinary steering inherits the active format; specifying responseFormat with mode: immediate is an error, even while idle. Returned assistant content remains text; the runtime does not parse or validate it. Unsupported models or schemas produce provider errors.
     pub response_format: Option<SendRequestResponseFormat>,
+    /// SDK-owned invocation identifier for an embedder.sendAdmission callback after canonical queue admission. Only the original trusted in-process host may request it. Does not change wait or turn completion semantics.
+    #[doc(hidden)]
+    pub(crate) send_admission_id: Option<String>,
     /// Optional provenance tag copied to the resulting user.message event. Must be `user`, `system`, `command-<command-id>` for command-originated messages, `schedule-<numeric-id>` for scheduled prompts, `agent-<agent-id>` for prompts sent by another agent, or `automation-<automation-id>` for turns a host sends on behalf of an automation the user configured. An automation turn defines the session's task like a user message but carries no human authority.
     #[doc(hidden)]
     pub(crate) source: Option<String>,
@@ -13362,7 +13727,7 @@ pub struct SendRequest {
     /// If true, await completion of the agentic loop for this message before returning. Defaults to false (fire-and-forget). When true, the result still contains the same `messageId`; the caller can rely on the agent having processed the message before the call resolves. Transport-dependent tail semantics: on a LOCAL (in-process) session the wait additionally blocks until the completed turn's event tail has been dispatched to this session's in-process subscribers, so a subsequent read of subscriber state already reflects the turn; on a REMOTE session the wait resolves once the loop completes and mirrored delivery follows over the wire. Callers that need the stronger local guarantee on remote sessions should await the event stream explicitly.
     pub wait: Option<bool>,
 }
-crate::record_serde::wire_record!(SendRequest { agent_authored: "agentAuthored" if is_none, agent_mode: "agentMode" if is_none, attachments: "attachments" if is_none, billable: "billable" if is_none, client_turn_id: "clientTurnId" if is_none, display_prompt: "displayPrompt" if is_none, mode: "mode" if is_none, prepend: "prepend" if is_none, prompt: "prompt", request_headers: "requestHeaders" if is_none, required_tool: "requiredTool" if is_none, response_format: "responseFormat" if is_none, source: "source" if is_none, traceparent: "traceparent" if is_none, tracestate: "tracestate" if is_none, wait: "wait" if is_none });
+crate::record_serde::wire_record!(SendRequest { agent_authored: "agentAuthored" if is_none, agent_mode: "agentMode" if is_none, attachments: "attachments" if is_none, billable: "billable" if is_none, client_turn_id: "clientTurnId" if is_none, display_prompt: "displayPrompt" if is_none, mode: "mode" if is_none, prepend: "prepend" if is_none, prompt: "prompt", request_headers: "requestHeaders" if is_none, required_tool: "requiredTool" if is_none, response_format: "responseFormat" if is_none, send_admission_id: "sendAdmissionId" if is_none, source: "source" if is_none, traceparent: "traceparent" if is_none, tracestate: "tracestate" if is_none, wait: "wait" if is_none });
 
 /// Result of sending a user message
 ///
@@ -14520,6 +14885,55 @@ pub struct UIRegisterDirectAutoModeSwitchHandlerResult {
 }
 crate::record_serde::wire_record!(UIRegisterDirectAutoModeSwitchHandlerResult { auto_mode_recovery: "autoModeRecovery" if is_none, handle: "handle" });
 
+/// Current transient prompts and native service state for an attached conversation view.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UISnapshot {
+    /// Whether the main agent turn is active.
+    pub agent_turn_active: bool,
+    /// Whether a turn, queue reservation, resume continuation, or native send is active.
+    pub has_active_resume_work: Option<bool>,
+    /// Whether the current hook generation has repository hooks left to load.
+    pub has_pending_repo_hooks: Option<bool>,
+    /// Number of services that have not completed initialization.
+    pub initializing_service_count: i64,
+    /// Whether this session enables experimental CLI behavior.
+    pub is_experimental_mode: Option<bool>,
+    /// Whether the session's current telemetry pipeline accepts events.
+    pub is_session_telemetry_enabled: Option<bool>,
+    /// Unanswered elicitation requests, including their source and runtime request IDs.
+    pub pending_elicitation_requests: Vec<UIPendingElicitation>,
+    /// Unanswered plan-approval requests, including their runtime request IDs.
+    pub pending_exit_plan_mode_requests: Vec<UIPendingPlanApproval>,
+    /// Unanswered user-input requests, including their runtime request IDs.
+    pub pending_user_input_requests: Vec<UIPendingUserInput>,
+    /// Runtime-owned plugin discovery and trust policy, or null when absent.
+    pub plugin_activation_policy: Option<UIPluginActivationPolicy>,
+    /// Current effective plugin activation, or null before activation resolves.
+    pub plugin_activation_snapshot: Option<UIPluginActivationSnapshot>,
+    /// Durable event counts by type for the primary agent, excluding subagent events.
+    pub primary_event_counts: Option<HashMap<String, i64>>,
+    /// Whether the session currently processes queued or active messages.
+    pub processing: bool,
+    /// Long-lived services and their current status, progress, and display logs.
+    pub service_tasks: Vec<UIServiceTask>,
+    /// Background agents managed by the session's sidekick registry.
+    pub sidekick_background_tasks: Vec<UIBackgroundAgentTask>,
+    /// Startup prompts from the runtime-owned hook configuration.
+    pub startup_prompts: Vec<String>,
+    /// Whether the session supports interactive MCP Apps.
+    pub supports_mcp_apps: bool,
+    /// Canonical working-directory revision for this live session.
+    pub working_directory_revision: Option<i64>,
+}
+crate::record_serde::wire_record!(UISnapshot { agent_turn_active: "agentTurnActive", has_active_resume_work: "hasActiveResumeWork" if is_none, has_pending_repo_hooks: "hasPendingRepoHooks" if is_none, initializing_service_count: "initializingServiceCount", is_experimental_mode: "isExperimentalMode" if is_none, is_session_telemetry_enabled: "isSessionTelemetryEnabled" if is_none, pending_elicitation_requests: "pendingElicitationRequests", pending_exit_plan_mode_requests: "pendingExitPlanModeRequests", pending_user_input_requests: "pendingUserInputRequests", plugin_activation_policy: "pluginActivationPolicy" if is_none, plugin_activation_snapshot: "pluginActivationSnapshot" if is_none, primary_event_counts: "primaryEventCounts" if is_none, processing: "processing", service_tasks: "serviceTasks", sidekick_background_tasks: "sidekickBackgroundTasks", startup_prompts: "startupPrompts", supports_mcp_apps: "supportsMcpApps", working_directory_revision: "workingDirectoryRevision" if is_none });
+
 /// Identifies one runtime-owned native action for an in-process SDK UI dispatcher.
 ///
 /// <div class="warning">
@@ -14679,6 +15093,202 @@ pub struct VisibilitySetResult {
     pub synced: bool,
 }
 crate::record_serde::wire_record!(VisibilitySetResult { share_url: "shareUrl" if is_none, status: "status" if is_none, synced: "synced" });
+
+/// Stable compute identity stored atomically in the canonical settings document.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HostGetOrCreateComputeIdResult {
+    /// Existing or newly allocated UUID; malformed existing identities are never replaced.
+    pub compute_id: String,
+}
+crate::record_serde::wire_record!(HostGetOrCreateComputeIdResult {
+    compute_id: "computeId"
+});
+
+/// Projection of the authoritative runtime credential transaction.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HostCredentialsResult {
+    /// Pinned identity resolved through the original credential owner.
+    pub auth_info: Option<serde_json::Value>,
+    /// Whether the runtime transaction bound its registration.
+    pub committed: Option<bool>,
+    /// Current registration when one exists.
+    pub registration_id: Option<String>,
+    /// Whether rollback restored the displaced mapping.
+    pub restored: Option<bool>,
+    /// Whether resume retains the session's existing registration.
+    pub reusing_session_registration: Option<bool>,
+    /// Opaque runtime transaction capability.
+    pub transaction_id: Option<String>,
+}
+crate::record_serde::wire_record!(HostCredentialsResult { auth_info: "authInfo" if is_none, committed: "committed" if is_none, registration_id: "registrationId" if is_none, restored: "restored" if is_none, reusing_session_registration: "reusingSessionRegistration" if is_none, transaction_id: "transactionId" if is_none });
+
+/// The resident session the application has materialized on its own connection.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HostCreateSessionResult {
+    /// Runtime session UUID materialized on the application's SDK connection.
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(HostCreateSessionResult {
+    session_id: "sessionId"
+});
+
+/// Empty acknowledgement for a completed host lifecycle operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostReleaseSessionResult {}
+
+/// Empty acknowledgement for a completed host lifecycle operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostDisposeResult {}
+
+/// Empty acknowledgement for a completed host lifecycle operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostSetSessionCreationPolicyResult {}
+
+/// Private credentials delivered only to a runtime-owned Mission Control hosting participant.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HostGetEnvironmentCredentialsResult {
+    /// GitHub API base URL for the authenticated service.
+    pub github_api_url: String,
+    /// Hostname of the authenticated GitHub service.
+    pub github_host: String,
+    /// Mission Control API origin for environment registration and management.
+    pub mission_control_url: String,
+    /// Current bearer token for the authenticated GitHub identity.
+    pub token: String,
+}
+crate::record_serde::wire_record!(HostGetEnvironmentCredentialsResult {
+    github_api_url: "githubApiUrl",
+    github_host: "githubHost",
+    mission_control_url: "missionControlUrl",
+    token: "token"
+});
+
+/// Normalized listener settings delivered only to the supervised hosting participant.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HostGetConfigurationResult {
+    /// Initial remote creation policy, independent of application session factories. Defaults to denied when omitted.
+    pub allow_creating_new_sessions: Option<bool>,
+    /// Explicit host-wide admission policy. Always supplied by the runtime after validating host.start.
+    pub authentication: Option<serde_json::Value>,
+    /// Requested GitHub Mission Control registration.
+    pub github_environment: Option<HostGitHubEnvironmentOptions>,
+    /// Normalized local listener settings, absent for relay-only hosts.
+    pub local_server: Option<HostLocalServerConfiguration>,
+    /// Whether app-owned durable sessions are resumed by the owning application.
+    pub resume_factory: bool,
+    /// Whether session materialization is delegated to the owning application.
+    pub session_factory: bool,
+}
+crate::record_serde::wire_record!(HostGetConfigurationResult { allow_creating_new_sessions: "allowCreatingNewSessions" if is_none, authentication: "authentication" if is_none, github_environment: "githubEnvironment" if is_none, local_server: "localServer" if is_none, resume_factory: "resumeFactory", session_factory: "sessionFactory" });
+
+/// Private credentials delivered only to a runtime-owned Mission Control hosting participant.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HostGetAuthenticationCredentialsResult {
+    /// GitHub API base URL for the authenticated service.
+    pub github_api_url: String,
+    /// Hostname of the authenticated GitHub service.
+    pub github_host: String,
+    /// Mission Control API origin for environment registration and management.
+    pub mission_control_url: String,
+    /// Current bearer token for the authenticated GitHub identity.
+    pub token: String,
+}
+crate::record_serde::wire_record!(HostGetAuthenticationCredentialsResult {
+    github_api_url: "githubApiUrl",
+    github_host: "githubHost",
+    mission_control_url: "missionControlUrl",
+    token: "token"
+});
+
+/// Empty acknowledgement for a completed host lifecycle operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostCancelAuthenticationResult {}
+
+/// Empty acknowledgement for a completed host lifecycle operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostReadyResult {}
 
 /// Result of a semantic memory import.
 ///
@@ -15120,185 +15730,6 @@ pub(crate) struct RepoSettingsEditResult {
     pub(crate) status: SettingsEditStatus,
 }
 crate::record_serde::wire_record!(RepoSettingsEditResult { status: "status" });
-
-/// Projection of the authoritative runtime credential transaction.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct HostCredentialsResult {
-    /// Pinned identity resolved through the original credential owner.
-    pub auth_info: Option<serde_json::Value>,
-    /// Whether the runtime transaction bound its registration.
-    pub committed: Option<bool>,
-    /// Current registration when one exists.
-    pub registration_id: Option<String>,
-    /// Whether rollback restored the displaced mapping.
-    pub restored: Option<bool>,
-    /// Whether resume retains the session's existing registration.
-    pub reusing_session_registration: Option<bool>,
-    /// Opaque runtime transaction capability.
-    pub transaction_id: Option<String>,
-}
-crate::record_serde::wire_record!(HostCredentialsResult { auth_info: "authInfo" if is_none, committed: "committed" if is_none, registration_id: "registrationId" if is_none, restored: "restored" if is_none, reusing_session_registration: "reusingSessionRegistration" if is_none, transaction_id: "transactionId" if is_none });
-
-/// The resident session the application has materialized on its own connection.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct HostCreateSessionResult {
-    /// Runtime session UUID materialized on the application's SDK connection.
-    pub session_id: SessionId,
-}
-crate::record_serde::wire_record!(HostCreateSessionResult {
-    session_id: "sessionId"
-});
-
-/// Empty acknowledgement for a completed host lifecycle operation.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HostReleaseSessionResult {}
-
-/// Empty acknowledgement for a completed host lifecycle operation.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HostDisposeResult {}
-
-/// Empty acknowledgement for a completed host lifecycle operation.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HostSetSessionCreationPolicyResult {}
-
-/// Private credentials delivered only to a runtime-owned Mission Control hosting participant.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct HostGetEnvironmentCredentialsResult {
-    /// GitHub API base URL for the authenticated service.
-    pub github_api_url: String,
-    /// Hostname of the authenticated GitHub service.
-    pub github_host: String,
-    /// Mission Control API origin for environment registration and management.
-    pub mission_control_url: String,
-    /// Current bearer token for the authenticated GitHub identity.
-    pub token: String,
-}
-crate::record_serde::wire_record!(HostGetEnvironmentCredentialsResult {
-    github_api_url: "githubApiUrl",
-    github_host: "githubHost",
-    mission_control_url: "missionControlUrl",
-    token: "token"
-});
-
-/// Normalized listener settings delivered only to the supervised hosting participant.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct HostGetConfigurationResult {
-    /// Initial remote creation policy, independent of application session factories. Defaults to denied when omitted.
-    pub allow_creating_new_sessions: Option<bool>,
-    /// Explicit host-wide admission policy. Always supplied by the runtime after validating host.start.
-    pub authentication: Option<serde_json::Value>,
-    /// Requested GitHub Mission Control registration.
-    pub github_environment: Option<HostGitHubEnvironmentOptions>,
-    /// Normalized local listener settings, absent for relay-only hosts.
-    pub local_server: Option<HostLocalServerConfiguration>,
-    /// Whether app-owned durable sessions are resumed by the owning application.
-    pub resume_factory: bool,
-    /// Whether session materialization is delegated to the owning application.
-    pub session_factory: bool,
-}
-crate::record_serde::wire_record!(HostGetConfigurationResult { allow_creating_new_sessions: "allowCreatingNewSessions" if is_none, authentication: "authentication" if is_none, github_environment: "githubEnvironment" if is_none, local_server: "localServer" if is_none, resume_factory: "resumeFactory", session_factory: "sessionFactory" });
-
-/// Private credentials delivered only to a runtime-owned Mission Control hosting participant.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default)]
-pub struct HostGetAuthenticationCredentialsResult {
-    /// GitHub API base URL for the authenticated service.
-    pub github_api_url: String,
-    /// Hostname of the authenticated GitHub service.
-    pub github_host: String,
-    /// Mission Control API origin for environment registration and management.
-    pub mission_control_url: String,
-    /// Current bearer token for the authenticated GitHub identity.
-    pub token: String,
-}
-crate::record_serde::wire_record!(HostGetAuthenticationCredentialsResult {
-    github_api_url: "githubApiUrl",
-    github_host: "githubHost",
-    mission_control_url: "missionControlUrl",
-    token: "token"
-});
-
-/// Empty acknowledgement for a completed host lifecycle operation.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HostCancelAuthenticationResult {}
-
-/// Empty acknowledgement for a completed host lifecycle operation.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HostReadyResult {}
 
 /// Eligible Azure ML model version and its provider metadata.
 ///
@@ -15906,6 +16337,44 @@ pub type AhpConnectionsAuthenticateResult = Vec<AhpConnectionResourceAuthResult>
 pub enum EnqueueCommandResult {
     AcceptedEnqueueCommandResult(AcceptedEnqueueCommandResult),
     UnsupportedEnqueueCommandResult(UnsupportedEnqueueCommandResult),
+}
+
+/// The transaction step requested from the embedding host.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum AcpTelemetryAction {
+    /// Reserves the managed telemetry policy and captures the account before session admission.
+    #[serde(rename = "prepare")]
+    Prepare,
+    /// Binds the captured account credentials to the admitted session.
+    #[serde(rename = "apply")]
+    Apply,
+    /// Commits the telemetry reservation after successful session admission.
+    #[serde(rename = "commit")]
+    Commit,
+    /// Releases the telemetry reservation after failed or canceled session admission.
+    #[serde(rename = "rollback")]
+    Rollback,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for AcpTelemetryAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "AcpTelemetryAction",
+            &["prepare", "apply", "commit", "rollback", "Unknown"],
+            Some(4),
+        )?;
+        Ok(match index {
+            0 => Self::Prepare,
+            1 => Self::Apply,
+            2 => Self::Commit,
+            3 => Self::Rollback,
+            _ => Self::Unknown,
+        })
+    }
 }
 
 /// Which tier this directory belongs to
@@ -20487,6 +20956,92 @@ impl<'de> Deserialize<'de> for HookOrigin {
     }
 }
 
+/// Controller delegate result or error classification.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum EmbedderAgentRegistrySpawnResultResultKind {
+    #[serde(rename = "result")]
+    #[default]
+    Result,
+}
+impl<'de> Deserialize<'de> for EmbedderAgentRegistrySpawnResultResultKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "EmbedderAgentRegistrySpawnResultResultKind",
+            &["result"],
+            None,
+        )?;
+        Ok(Self::Result)
+    }
+}
+
+/// Controller delegate result or error classification.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum EmbedderAgentRegistrySpawnResultResponseKind {
+    #[serde(rename = "response")]
+    #[default]
+    Response,
+}
+impl<'de> Deserialize<'de> for EmbedderAgentRegistrySpawnResultResponseKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "EmbedderAgentRegistrySpawnResultResponseKind",
+            &["response"],
+            None,
+        )?;
+        Ok(Self::Response)
+    }
+}
+
+/// Controller delegate result or error classification.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum EmbedderAgentRegistrySpawnResultMessageKind {
+    #[serde(rename = "message")]
+    #[default]
+    Message,
+}
+impl<'de> Deserialize<'de> for EmbedderAgentRegistrySpawnResultMessageKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "EmbedderAgentRegistrySpawnResultMessageKind",
+            &["message"],
+            None,
+        )?;
+        Ok(Self::Message)
+    }
+}
+
+/// Controller delegate result or error classification.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum EmbedderAgentRegistrySpawnResultUnexpectedKind {
+    #[serde(rename = "unexpected")]
+    #[default]
+    Unexpected,
+}
+impl<'de> Deserialize<'de> for EmbedderAgentRegistrySpawnResultUnexpectedKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "EmbedderAgentRegistrySpawnResultUnexpectedKind",
+            &["unexpected"],
+            None,
+        )?;
+        Ok(Self::Unexpected)
+    }
+}
+
+/// Reply from the original controller's process-launch delegate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum EmbedderAgentRegistrySpawnResult {
+    Result(EmbedderAgentRegistrySpawnResultResult),
+    Response(EmbedderAgentRegistrySpawnResultResponse),
+    Message(EmbedderAgentRegistrySpawnResultMessage),
+    Unexpected(EmbedderAgentRegistrySpawnResultUnexpected),
+}
+
 /// Interaction policy for host-owned Microsoft Entra acquisition.
 ///
 /// <div class="warning">
@@ -23477,57 +24032,6 @@ impl<'de> Deserialize<'de> for UIElicitationStringOneOfFieldType {
             None,
         )?;
         Ok(Self::String)
-    }
-}
-
-/// The action the user selected. Defaults to 'autopilot' when autoApproveEdits is true, otherwise 'interactive'.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub enum UIExitPlanModeAction {
-    /// Exit plan mode without starting implementation.
-    #[serde(rename = "exit_only")]
-    ExitOnly,
-    /// Exit plan mode and continue interactively.
-    #[serde(rename = "interactive")]
-    Interactive,
-    /// Exit plan mode and continue in autopilot mode.
-    #[serde(rename = "autopilot")]
-    Autopilot,
-    /// Exit plan mode and continue in autopilot mode with parallel subagent execution.
-    #[serde(rename = "autopilot_fleet")]
-    AutopilotFleet,
-    /// Unknown variant for forward compatibility.
-    #[default]
-    #[serde(other)]
-    Unknown,
-}
-impl<'de> Deserialize<'de> for UIExitPlanModeAction {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let index = crate::enum_serde::deserialize_variant(
-            deserializer,
-            "UIExitPlanModeAction",
-            &[
-                "exit_only",
-                "interactive",
-                "autopilot",
-                "autopilot_fleet",
-                "Unknown",
-            ],
-            Some(4),
-        )?;
-        Ok(match index {
-            0 => Self::ExitOnly,
-            1 => Self::Interactive,
-            2 => Self::Autopilot,
-            3 => Self::AutopilotFleet,
-            _ => Self::Unknown,
-        })
     }
 }
 

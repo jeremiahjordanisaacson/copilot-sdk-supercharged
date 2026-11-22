@@ -1,9 +1,69 @@
 #![cfg(test)]
 
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::process::Stdio;
 use std::time::Duration;
 
 use super::*;
+
+#[tokio::test]
+async fn stopped_and_resumed_child_is_not_exited() {
+    let mut command = Command::new("/bin/cat");
+    command.stdin(Stdio::piped()).kill_on_drop(true);
+    let (child, tree) = spawn(&mut command).unwrap();
+    let mut process = OwnedProcess::new(child, tree);
+    let pid = process.child.id().unwrap();
+    let signal_pid = i32::try_from(pid).unwrap();
+
+    assert!(!process.has_exited().unwrap(), "running child");
+    assert_eq!(unsafe { libc::kill(signal_pid, libc::SIGSTOP) }, 0);
+    let exited_after_stop_signal = process.has_exited().unwrap();
+    wait_for_child_event(pid, libc::WSTOPPED, libc::CLD_STOPPED).await;
+    assert!(!process.has_exited().unwrap(), "stopped child");
+    assert!(!exited_after_stop_signal, "immediately after SIGSTOP");
+
+    assert_eq!(unsafe { libc::kill(signal_pid, libc::SIGCONT) }, 0);
+    wait_for_child_event(pid, libc::WCONTINUED, libc::CLD_CONTINUED).await;
+    assert!(!process.has_exited().unwrap(), "resumed child");
+
+    assert_eq!(unsafe { libc::kill(signal_pid, libc::SIGKILL) }, 0);
+    wait_for_child_event(pid, libc::WEXITED, libc::CLD_KILLED).await;
+    assert!(process.has_exited().unwrap(), "killed child");
+    assert!(process.has_exited().unwrap(), "child must remain waitable");
+    process.terminate_tree().unwrap();
+    assert_eq!(
+        process.child.wait().await.unwrap().signal(),
+        Some(libc::SIGKILL)
+    );
+}
+
+async fn wait_for_child_event(pid: u32, event: i32, code: i32) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            // Peek so observing the stop here does not hide it from has_exited.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let result = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    pid,
+                    &mut info,
+                    event | libc::WNOHANG | libc::WNOWAIT,
+                )
+            };
+            if result == 0 {
+                if info.si_code == code {
+                    return;
+                }
+            } else {
+                let error = io::Error::last_os_error();
+                assert_eq!(error.kind(), io::ErrorKind::Interrupted, "{error}");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("child {pid} did not report waitid code {code}"));
+}
 
 #[tokio::test]
 async fn graceful_exit_observation_keeps_the_leader_unreaped() {

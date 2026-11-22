@@ -404,11 +404,14 @@ public sealed class SetToolsTests
     {
         var logger = new SetToolsResponseLogger();
         var exception = includeException ? new IOException("Tool replacement failed.") : null;
-        logger.Log(LogLevel.Warning, default, new KeyValuePair<string, object?>[]
+        if (logger.IsEnabled(LogLevel.Warning))
         {
-            new("Method", "session.tools.set"),
-            new("Status", status),
-        }, exception, static (_, _) => string.Empty);
+            logger.Log(LogLevel.Warning, default, new KeyValuePair<string, object?>[]
+            {
+                new("Method", "session.tools.set"),
+                new("Status", status),
+            }, exception, static (_, _) => string.Empty);
+        }
 
         Assert.True(logger.ResponseReceived.Task.IsFaulted);
         if (exception is not null)

@@ -37,6 +37,7 @@ import com.microsoft.copilot.generated.rpc.AuthIdentityMetadata;
 import com.microsoft.copilot.generated.rpc.AuthInfoType;
 import com.microsoft.copilot.generated.rpc.ConnectorAvailability;
 import com.microsoft.copilot.generated.rpc.ConnectorSessionAccount;
+import com.microsoft.copilot.generated.rpc.EnvironmentsListRequest;
 import com.microsoft.copilot.generated.rpc.McpConfigAddParams;
 import com.microsoft.copilot.generated.rpc.McpDiscoverParams;
 import com.microsoft.copilot.generated.rpc.RpcCaller;
@@ -86,6 +87,22 @@ import com.microsoft.copilot.rpc.PermissionRequestResult;
  * </ul>
  */
 class RpcWrappersTest {
+
+    @Test
+    void internalEnvironmentSelectorKeepsWireSerializationWithoutPublicAccessors() throws Exception {
+        var mapper = JsonRpcClient.getObjectMapper();
+        var expected = mapper.readTree("""
+                {"status":"online","useConfiguredAccount":true}
+                """);
+        var request = mapper.treeToValue(expected, EnvironmentsListRequest.class);
+
+        assertEquals("online", request.getStatus());
+        assertEquals(expected, mapper.valueToTree(request));
+        assertThrows(NoSuchMethodException.class,
+                () -> EnvironmentsListRequest.class.getMethod("getUseConfiguredAccount"));
+        assertThrows(NoSuchMethodException.class,
+                () -> EnvironmentsListRequest.class.getMethod("setUseConfiguredAccount", Boolean.class));
+    }
 
     /**
      * A simple stub {@link RpcCaller} that records every call made to it and

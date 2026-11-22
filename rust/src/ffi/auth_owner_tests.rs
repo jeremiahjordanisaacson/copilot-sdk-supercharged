@@ -13,6 +13,7 @@ use super::*;
 #[derive(Debug, PartialEq)]
 enum Event {
     Admission,
+    FileLoggingGrant { connection: u32, path: String },
     Shutdown,
     OwnerDropped,
 }
@@ -24,6 +25,8 @@ struct State {
     allow_close: AtomicBool,
     allow_open: AtomicBool,
     allow_start: AtomicBool,
+    allow_file_logging: AtomicBool,
+    close_calls: AtomicUsize,
     default_starts: AtomicUsize,
     owner_starts: AtomicUsize,
     shutdown_complete: AtomicBool,
@@ -56,6 +59,8 @@ impl Fixture {
             allow_close: AtomicBool::new(true),
             allow_open: AtomicBool::new(true),
             allow_start: AtomicBool::new(true),
+            allow_file_logging: AtomicBool::new(true),
+            close_calls: AtomicUsize::new(0),
             default_starts: AtomicUsize::new(0),
             owner_starts: AtomicUsize::new(0),
             shutdown_complete: AtomicBool::new(false),
@@ -83,6 +88,8 @@ impl Fixture {
                 .map(|_| start_with_owner as HostStartWithAuthOwnerFn),
             session_binding: None,
             session_connection_open: None,
+            file_logging_path: None,
+            file_logging_connection_admit: None,
             library_path: PathBuf::from("controlled-runtime"),
             cli_entrypoint: None,
             integration_id: None,
@@ -214,7 +221,22 @@ unsafe extern "C" fn open(
 }
 
 unsafe extern "C" fn close(id: u32) -> bool {
-    state(id).allow_close.load(Ordering::SeqCst)
+    let state = state(id);
+    state.close_calls.fetch_add(1, Ordering::SeqCst);
+    state.allow_close.load(Ordering::SeqCst)
+}
+
+unsafe extern "C" fn admit_file_logging(id: u32, path: *const u8, len: usize) -> bool {
+    let state = state(id);
+    let bytes = unsafe { std::slice::from_raw_parts(path, len) };
+    state
+        .events
+        .send(Event::FileLoggingGrant {
+            connection: id,
+            path: String::from_utf8_lossy(bytes).into_owned(),
+        })
+        .unwrap();
+    state.allow_file_logging.load(Ordering::SeqCst)
 }
 
 unsafe extern "C" fn write(_id: u32, _bytes: *const u8, _len: usize) -> bool {
@@ -371,6 +393,111 @@ async fn default_start_does_not_need_auth_owner_export() {
     assert_eq!(fixture.state.owner_starts.load(Ordering::SeqCst), 0);
     drop(transport);
     fixture.expect(Event::Shutdown).await;
+    assert!(fixture.events.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn file_logging_grant_uses_exact_path_on_attached_connection() {
+    let mut fixture = Fixture::new();
+    let mut host = fixture.host(None);
+    host.attached_server_id = Some(fixture.id);
+    host.file_logging_path = Some(PathBuf::from("relay/../connection.log"));
+    host.file_logging_connection_admit = Some(admit_file_logging);
+    let transport = host.start().await.unwrap();
+    fixture
+        .expect(Event::FileLoggingGrant {
+            connection: fixture.id,
+            path: "relay/../connection.log".to_owned(),
+        })
+        .await;
+    assert_eq!(fixture.state.default_starts.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.state.owner_starts.load(Ordering::SeqCst), 0);
+    drop(transport);
+    assert_eq!(fixture.state.close_calls.load(Ordering::SeqCst), 1);
+    assert!(!fixture.state.shutdown_complete.load(Ordering::SeqCst));
+    assert!(fixture.events.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn file_logging_grant_requires_an_explicit_path() {
+    let mut fixture = Fixture::new();
+    let mut host = fixture.host(None);
+    host.file_logging_connection_admit = Some(admit_file_logging);
+    let transport = host.start().await.unwrap();
+    assert!(fixture.events.try_recv().is_err());
+    drop(transport);
+    fixture.expect(Event::Shutdown).await;
+    assert!(fixture.events.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn file_logging_grant_rejection_preserves_connection_and_owner_cleanup() {
+    for attached in [false, true] {
+        let mut fixture = Fixture::new();
+        fixture
+            .state
+            .allow_file_logging
+            .store(false, Ordering::SeqCst);
+        let mut host = fixture.host((!attached).then_some(Behavior::Accept));
+        host.attached_server_id = attached.then_some(fixture.id);
+        host.file_logging_path = Some(PathBuf::from("connection.log"));
+        host.file_logging_connection_admit = Some(admit_file_logging);
+        let error = host.start().await.err().unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("the runtime rejected the explicit file logging grant"),
+            "{error}"
+        );
+        if !attached {
+            fixture.expect(Event::Admission).await;
+        }
+        fixture
+            .expect(Event::FileLoggingGrant {
+                connection: fixture.id,
+                path: "connection.log".to_owned(),
+            })
+            .await;
+        assert_eq!(fixture.state.close_calls.load(Ordering::SeqCst), 1);
+        if attached {
+            assert!(!fixture.state.shutdown_complete.load(Ordering::SeqCst));
+        } else {
+            fixture.expect(Event::Shutdown).await;
+            fixture.expect(Event::OwnerDropped).await;
+            assert!(fixture.state.shutdown_complete.load(Ordering::SeqCst));
+        }
+        assert!(fixture.events.try_recv().is_err());
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[tokio::test]
+async fn file_logging_grant_rejects_non_utf8_path_and_cleans_up() {
+    #[cfg(unix)]
+    let path = {
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(vec![0xff])
+    };
+    #[cfg(windows)]
+    let path = {
+        use std::os::windows::ffi::OsStringExt;
+        std::ffi::OsString::from_wide(&[0xd800])
+    };
+    let mut fixture = Fixture::new();
+    let mut host = fixture.host(Some(Behavior::Accept));
+    host.file_logging_path = Some(PathBuf::from(path));
+    host.file_logging_connection_admit = Some(admit_file_logging);
+    let error = host.start().await.err().unwrap();
+    assert!(
+        error
+            .to_string()
+            .contains("in_process_file_logging_path must contain valid UTF-8"),
+        "{error}"
+    );
+    fixture.expect(Event::Admission).await;
+    fixture.expect(Event::Shutdown).await;
+    fixture.expect(Event::OwnerDropped).await;
+    assert_eq!(fixture.state.close_calls.load(Ordering::SeqCst), 1);
     assert!(fixture.events.try_recv().is_err());
 }
 

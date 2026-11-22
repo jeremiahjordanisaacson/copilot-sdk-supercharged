@@ -14,6 +14,34 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::canvas::{CanvasDeclaration, CanvasHandler};
+
+/// Autopilot objective result with its creation time and resume count.
+///
+/// **Experimental.** May change or be removed in future releases.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct AutopilotObjectiveGetStateDetails {
+    /// Current objective state, or `None` when the session has no objective.
+    pub state: Option<crate::rpc::AutopilotObjectiveStateDetails>,
+}
+
+/// Session extension inventory with executable module paths and process log paths.
+///
+/// **Experimental.** May change or be removed in future releases.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionListDetails {
+    /// Whether the runtime installed an extension service, including an empty catalog.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub configured: Option<bool>,
+    /// Whether the latest explicit create or resume choice disabled extensions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explicit_opt_out: Option<bool>,
+    /// Discovered extensions with their current status and available paths.
+    pub extensions: Vec<crate::rpc::ExtensionDetails>,
+}
+
 /// Host's Entra registration and optional connection-owned acquisition.
 ///
 /// **Experimental.** May change or be removed in future releases.

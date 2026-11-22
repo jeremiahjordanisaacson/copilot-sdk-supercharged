@@ -195,12 +195,14 @@ crate::record_serde::wire_record!(CurrentToolMetadata { defer_loading: "deferLoa
 /// </div>
 #[derive(Debug, Clone, Default)]
 pub struct ExtensionList {
+    /// Whether the runtime installed an extension service, including an empty catalog.
+    pub configured: Option<bool>,
+    /// Whether the latest explicit create or resume choice disabled extensions.
+    pub explicit_opt_out: Option<bool>,
     /// Discovered extensions and their current status
     pub extensions: Vec<Extension>,
 }
-crate::record_serde::wire_record!(ExtensionList {
-    extensions: "extensions"
-});
+crate::record_serde::wire_record!(ExtensionList { configured: "configured" if is_none, explicit_opt_out: "explicitOptOut" if is_none, extensions: "extensions" });
 
 /// Parameters for starting fleet orchestration: an optional user prompt combined with the fleet instructions, plus the send options forwarded to the resulting turn.
 ///
@@ -2765,6 +2767,8 @@ pub struct SessionAuthStatus {
     pub auth_type: Option<AuthInfoType>,
     /// Copilot plan tier (e.g., individual_pro, business)
     pub copilot_plan: Option<String>,
+    /// Whether the session can resolve a GitHub token. Returned by session.gitHubAuth.getStatus without exposing the credential.
+    pub has_git_hub_token: Option<bool>,
     /// Authentication host URL
     pub host: Option<String>,
     /// Whether the session has resolved authentication
@@ -2774,7 +2778,7 @@ pub struct SessionAuthStatus {
     /// Human-readable authentication status description
     pub status_message: Option<String>,
 }
-crate::record_serde::wire_record!(SessionAuthStatus { auth_type: "authType" if is_none, copilot_plan: "copilotPlan" if is_none, host: "host" if is_none, is_authenticated: "isAuthenticated", login: "login" if is_none, status_message: "statusMessage" if is_none });
+crate::record_serde::wire_record!(SessionAuthStatus { auth_type: "authType" if is_none, copilot_plan: "copilotPlan" if is_none, has_git_hub_token: "hasGitHubToken" if is_none, host: "host" if is_none, is_authenticated: "isAuthenticated", login: "login" if is_none, status_message: "statusMessage" if is_none });
 
 /// Parameters for switching the session's active authentication.
 ///
@@ -4561,6 +4565,75 @@ pub struct SessionMetadataSnapshot {
 }
 crate::record_serde::wire_record!(SessionMetadataSnapshot { already_in_use: "alreadyInUse", client_name: "clientName" if is_none, current_mode: "currentMode", indexed_search: "indexedSearch" if is_none, initial_name: "initialName" if is_none, is_remote: "isRemote", modified_time: "modifiedTime", remote_metadata: "remoteMetadata" if is_none, selected_model: "selectedModel" if is_none, session_id: "sessionId", session_limits: "sessionLimits", start_time: "startTime", summary: "summary" if is_none, working_directory: "workingDirectory", workspace: "workspace", workspace_path: "workspacePath" });
 
+/// Public-facing projection of workspace metadata for SDK / TUI consumers
+#[derive(Debug, Clone, Default)]
+pub struct SessionMetadataSnapshotDetailsWorkspace {
+    /// Branch checked out at session start, if any
+    pub branch: Option<String>,
+    /// ISO 8601 timestamp when the workspace was created
+    pub created_at: Option<String>,
+    /// Current working directory at session start
+    pub cwd: Option<String>,
+    /// Resolved git root for cwd, if any
+    pub git_root: Option<String>,
+    /// Repository host type, if known
+    pub host_type: Option<WorkspaceSummaryHostType>,
+    /// Workspace identifier (1:1 with sessionId)
+    pub id: String,
+    /// Display name for the session, if set
+    pub name: Option<String>,
+    /// Repository identifier in 'owner/repo' or 'org/project/repo' format, if any
+    pub repository: Option<String>,
+    /// ISO 8601 timestamp when the workspace was last updated
+    pub updated_at: Option<String>,
+    /// Whether the display name was explicitly set by the user
+    pub user_named: Option<bool>,
+}
+crate::record_serde::wire_record!(SessionMetadataSnapshotDetailsWorkspace { branch: "branch" if is_none, created_at: "created_at" if is_none, cwd: "cwd" if is_none, git_root: "git_root" if is_none, host_type: "host_type" if is_none, id: "id", name: "name" if is_none, repository: "repository" if is_none, updated_at: "updated_at" if is_none, user_named: "user_named" if is_none });
+
+/// Point-in-time snapshot of slow-changing session identifier and state fields
+///
+/// Expanded projection for the existing `Client::call` API. It includes fields added after `SessionMetadataSnapshot` was published.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct SessionMetadataSnapshotDetails {
+    /// True when the session was detected to be in use by another process at construction time. Local consumers may surface a confirmation prompt before fully attaching. Always false for new sessions.
+    pub already_in_use: bool,
+    /// Runtime client name associated with the session (telemetry identifier).
+    pub client_name: Option<String>,
+    /// The current agent mode for this session (e.g., 'interactive', 'plan', 'autopilot')
+    pub current_mode: MetadataSnapshotCurrentMode,
+    /// Live indexed-search state for this session activation. Omitted by runtimes that do not expose indexed-search status; absence does not indicate enablement.
+    pub indexed_search: Option<IndexedSearchState>,
+    /// User-provided name supplied at session construction (via `--name`), if any. Immutable after construction.
+    pub initial_name: Option<String>,
+    /// Whether this is a remote session (i.e., one whose runtime executes elsewhere and is steered through this process)
+    pub is_remote: bool,
+    /// ISO 8601 timestamp of when the session's persisted state was last modified on disk. For new sessions, equals startTime. For resumed sessions, reflects the previous modification time at construction.
+    pub modified_time: String,
+    /// Remote-session-specific metadata. Populated only when `isRemote` is true. Fields are immutable for the lifetime of the session.
+    pub remote_metadata: Option<MetadataSnapshotRemoteMetadata>,
+    /// Opaque ID for the live runtime generation. Attachments to the same generation share this ID. Replacement changes it. Older runtimes can omit it.
+    pub runtime_instance_id: Option<String>,
+    /// Currently selected model identifier, if any
+    pub selected_model: Option<String>,
+    /// The unique identifier of the session
+    pub session_id: SessionId,
+    /// Current session limits, or null when no limits are active
+    pub session_limits: Option<SessionLimitsConfig>,
+    /// ISO 8601 timestamp of when the session started
+    pub start_time: String,
+    /// Short human-readable summary of the session, if known. Omitted when no summary has been generated.
+    pub summary: Option<String>,
+    /// Absolute path to the session's current working directory
+    pub working_directory: String,
+    /// Public-facing workspace metadata for this session, or null if the session has no associated workspace. Excludes runtime-internal fields (GitHub IDs, summary count, internal flags).
+    pub workspace: Option<SessionMetadataSnapshotDetailsWorkspace>,
+    /// Absolute path to the session's workspace directory on disk, or null if the session has no associated workspace
+    pub workspace_path: Option<String>,
+}
+crate::record_serde::wire_record!(SessionMetadataSnapshotDetails { already_in_use: "alreadyInUse", client_name: "clientName" if is_none, current_mode: "currentMode", indexed_search: "indexedSearch" if is_none, initial_name: "initialName" if is_none, is_remote: "isRemote", modified_time: "modifiedTime", remote_metadata: "remoteMetadata" if is_none, runtime_instance_id: "runtimeInstanceId" if is_none, selected_model: "selectedModel" if is_none, session_id: "sessionId", session_limits: "sessionLimits", start_time: "startTime", summary: "summary" if is_none, working_directory: "workingDirectory", workspace: "workspace", workspace_path: "workspacePath" });
+
 /// Cost-category metadata for a CAPI model.
 ///
 /// <div class="warning">
@@ -6040,6 +6113,26 @@ pub struct SessionsDeleteRequest {
 }
 crate::record_serde::wire_record!(SessionsDeleteRequest { session_id: "sessionId", session_path: "sessionPath" if is_none });
 
+/// Acknowledges one admitted send to its original in-process SDK owner without completing the turn.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionSendAdmissionRequest {
+    /// Opaque invocation identifier registered by the original SDK owner.
+    pub admission_id: String,
+    /// Canonical session that admitted the send.
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionSendAdmissionRequest {
+    admission_id: "admissionId",
+    session_id: "sessionId"
+});
+
 /// Session metadata records to enrich with summary and context information.
 ///
 /// <div class="warning">
@@ -6838,6 +6931,23 @@ crate::record_serde::wire_record!(SessionSkillsInspectInventoryResult {
     warnings: "warnings"
 });
 
+/// Canonical live membership owned by this runtime engine.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionsListActiveResult {
+    /// Native identities of the engine's live sessions, including protocol-created sessions.
+    pub session_ids: Vec<String>,
+}
+crate::record_serde::wire_record!(SessionsListActiveResult {
+    session_ids: "sessionIds"
+});
+
 /// Limit for non-empty local session IDs.
 ///
 /// <div class="warning">
@@ -7079,6 +7189,60 @@ pub struct SessionsReloadPluginHooksRequest {
 }
 crate::record_serde::wire_record!(SessionsReloadPluginHooksRequest { defer_repo_hooks: "deferRepoHooks" if is_none, session_id: "sessionId" });
 
+/// Extensible [`SessionsReloadPluginHooksRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`SessionsReloadPluginHooksOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionsReloadPluginHooksOptions {
+    #[serde(flatten)]
+    legacy: SessionsReloadPluginHooksRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required_managed_plugin_specs: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    strict_managed_policy: Option<bool>,
+}
+
+impl SessionsReloadPluginHooksOptions {
+    /// Creates options with the required inputs.
+    pub fn new(session_id: SessionId) -> Self {
+        Self {
+            legacy: SessionsReloadPluginHooksRequest {
+                session_id,
+                defer_repo_hooks: None,
+            },
+            required_managed_plugin_specs: None,
+            strict_managed_policy: None,
+        }
+    }
+
+    /// When true, skip repo-level hooks. Use before folder trust is confirmed; loadDeferredRepoHooks loads them post-trust.
+    pub fn defer_repo_hooks(mut self, value: bool) -> Self {
+        self.legacy.defer_repo_hooks = Some(value);
+        self
+    }
+
+    /// Managed plugin specifications whose hooks must load before queue release.
+    pub fn required_managed_plugin_specs(mut self, value: Vec<String>) -> Self {
+        self.required_managed_plugin_specs = Some(value);
+        self
+    }
+
+    /// Whether hook reload failures must retain the managed-policy queue pause.
+    pub fn strict_managed_policy(mut self, value: bool) -> Self {
+        self.strict_managed_policy = Some(value);
+        self
+    }
+}
+
 /// Reload all hooks (user, plugin, optionally repo) and apply them to the active session. Call after installing or removing plugins so their hooks take effect immediately. No-op when no active session matches the given sessionId.
 ///
 /// <div class="warning">
@@ -7107,6 +7271,42 @@ pub struct SessionsSaveRequest {
 crate::record_serde::wire_record!(SessionsSaveRequest {
     session_id: "sessionId"
 });
+
+/// Extensible [`SessionsSaveRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`SessionsSaveOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionsSaveOptions {
+    #[serde(flatten)]
+    legacy: SessionsSaveRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    force: Option<bool>,
+}
+
+impl SessionsSaveOptions {
+    /// Creates options with the required inputs.
+    pub fn new(session_id: SessionId) -> Self {
+        Self {
+            legacy: SessionsSaveRequest { session_id },
+            force: None,
+        }
+    }
+
+    /// Persist an unnamed session even before its first prompt. Omitted or null defaults to false.
+    pub fn force(mut self, value: bool) -> Self {
+        self.force = Some(value);
+        self
+    }
+}
 
 /// Flush a session's pending events to disk. No-op when no writer exists for the session (e.g., already closed).
 ///
@@ -7751,6 +7951,57 @@ pub struct SessionUpdateOptionsResult {
     pub success: bool,
 }
 crate::record_serde::wire_record!(SessionUpdateOptionsResult { plugin_hook_count: "pluginHookCount" if is_none, success: "success" });
+
+/// Releases one view retention acquired by this connection for this session generation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionViewReleaseRequest {
+    /// The token returned by session.retainView on the original connection.
+    pub retention_id: i64,
+}
+crate::record_serde::wire_record!(SessionViewReleaseRequest {
+    retention_id: "retentionId"
+});
+
+/// Whether this request released its original view retention.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionViewReleaseResult {
+    /// False for an unknown token, another owner, or a superseded session generation.
+    pub released: bool,
+}
+crate::record_serde::wire_record!(SessionViewReleaseResult {
+    released: "released"
+});
+
+/// One connection-owned view retention for the current session generation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionViewRetainResult {
+    /// Opaque retention token owned by this connection and session generation.
+    pub retention_id: i64,
+}
+crate::record_serde::wire_record!(SessionViewRetainResult {
+    retention_id: "retentionId"
+});
 
 /// Tracked background agent task metadata, including IDs, status, timing, agent type, prompt, model, result, and latest response.
 ///
@@ -9651,12 +9902,14 @@ crate::record_serde::wire_record!(SessionExtensionsListParams {
 /// </div>
 #[derive(Debug, Clone, Default)]
 pub struct SessionExtensionsListResult {
+    /// Whether the runtime installed an extension service, including an empty catalog.
+    pub configured: Option<bool>,
+    /// Whether the latest explicit create or resume choice disabled extensions.
+    pub explicit_opt_out: Option<bool>,
     /// Discovered extensions and their current status
     pub extensions: Vec<Extension>,
 }
-crate::record_serde::wire_record!(SessionExtensionsListResult {
-    extensions: "extensions"
-});
+crate::record_serde::wire_record!(SessionExtensionsListResult { configured: "configured" if is_none, explicit_opt_out: "explicitOptOut" if is_none, extensions: "extensions" });
 
 /// Identifies the target session.
 ///
@@ -9702,12 +9955,14 @@ crate::record_serde::wire_record!(SessionExtensionsReconcileParams {
 /// </div>
 #[derive(Debug, Clone, Default)]
 pub struct SessionExtensionsReconcileResult {
+    /// Whether the runtime installed an extension service, including an empty catalog.
+    pub configured: Option<bool>,
+    /// Whether the latest explicit create or resume choice disabled extensions.
+    pub explicit_opt_out: Option<bool>,
     /// Discovered extensions and their current status
     pub extensions: Vec<Extension>,
 }
-crate::record_serde::wire_record!(SessionExtensionsReconcileResult {
-    extensions: "extensions"
-});
+crate::record_serde::wire_record!(SessionExtensionsReconcileResult { configured: "configured" if is_none, explicit_opt_out: "explicitOptOut" if is_none, extensions: "extensions" });
 
 /// Whether a changed active plugin contributes extension directories, including empty directories.
 ///
@@ -10012,6 +10267,44 @@ pub struct SessionPluginsCheckUpdateResult {
     pub update_available: bool,
 }
 crate::record_serde::wire_record!(SessionPluginsCheckUpdateResult { error: "error" if is_none, installed_version: "installedVersion" if is_none, latest_version: "latestVersion" if is_none, not_fetched: "notFetched" if is_none, update_available: "updateAvailable" });
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsResolveActivationParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionPluginsResolveActivationParams {
+    session_id: "sessionId"
+});
+
+/// Canonical activation after workspace consent and plugin policy reconciliation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionPluginsResolveActivationResult {
+    /// Current activation, or null before activation resolves.
+    pub snapshot: Option<UIPluginActivationSnapshot>,
+    /// Whether the runtime trusts the workspace.
+    pub trusted: bool,
+    /// Current working directory of the session.
+    pub working_directory: String,
+    /// Authoritative workspace root, when known.
+    pub workspace_root: Option<String>,
+}
+crate::record_serde::wire_record!(SessionPluginsResolveActivationResult { snapshot: "snapshot" if is_none, trusted: "trusted", working_directory: "workingDirectory", workspace_root: "workspaceRoot" if is_none });
 
 /// Identifies the target session.
 ///
@@ -10496,6 +10789,38 @@ pub struct SessionModelGetReasoningSummariesResult {
 }
 crate::record_serde::wire_record!(SessionModelGetReasoningSummariesResult { clear_redundant_setting: "clearRedundantSetting", experiment_settled: "experimentSettled", model_default_shows_summaries: "modelDefaultShowsSummaries", ready: "ready", session_shows_summaries: "sessionShowsSummaries", show_hidden_hint: "showHiddenHint", show_reasoning_headers: "showReasoningHeaders", visibility: "visibility" if is_none });
 
+/// Options for the client's session-authenticated description catalog.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelDescribeClientCatalogParams {
+    /// Bypass the existing catalog cache. The default is false.
+    pub skip_cache: Option<bool>,
+}
+crate::record_serde::wire_record!(SessionModelDescribeClientCatalogParams { skip_cache: "skipCache" if is_none });
+
+/// Raw CAPI model descriptions for client-side catalog enrichment.
+/// Unlike `models.list` and `session.model.list`, this result does not normalize model fields.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionModelDescribeClientCatalogResult {
+    /// Complete model descriptions with their original CAPI field names.
+    /// These include `billing.token_prices`, `capabilities.supports.tool_calls`, and snake_case token limits.
+    pub models: Vec<serde_json::Value>,
+}
+crate::record_serde::wire_record!(SessionModelDescribeClientCatalogResult { models: "models" });
+
 /// The list of models available to this session.
 ///
 /// <div class="warning">
@@ -10858,6 +11183,35 @@ pub struct SessionMcpConfigureGitHubResult {
     pub changed: bool,
 }
 crate::record_serde::wire_record!(SessionMcpConfigureGitHubResult { changed: "changed" });
+
+/// Plugin identity for a scoped MCP server stop.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionMcpStopPluginServersParams {
+    /// Name of the plugin whose owned MCP servers must stop.
+    pub plugin_name: String,
+}
+crate::record_serde::wire_record!(SessionMcpStopPluginServersParams {
+    plugin_name: "pluginName"
+});
+
+/// Acknowledges completion of the scoped plugin MCP server stop.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionMcpStopPluginServersResult {}
 
 /// Whether the named MCP server is running.
 ///
@@ -12038,6 +12392,74 @@ crate::record_serde::wire_record!(SessionSuspendParams {
     session_id: "sessionId"
 });
 
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionRetainViewParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionRetainViewParams {
+    session_id: "sessionId"
+});
+
+/// One connection-owned view retention for the current session generation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionRetainViewResult {
+    /// Opaque retention token owned by this connection and session generation.
+    pub retention_id: i64,
+}
+crate::record_serde::wire_record!(SessionRetainViewResult {
+    retention_id: "retentionId"
+});
+
+/// Releases one view retention acquired by this connection for this session generation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionReleaseViewParams {
+    /// The token returned by session.retainView on the original connection.
+    pub retention_id: i64,
+}
+crate::record_serde::wire_record!(SessionReleaseViewParams {
+    retention_id: "retentionId"
+});
+
+/// Whether this request released its original view retention.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionReleaseViewResult {
+    /// False for an unknown token, another owner, or a superseded session generation.
+    pub released: bool,
+}
+crate::record_serde::wire_record!(SessionReleaseViewResult {
+    released: "released"
+});
+
 /// Result of sending a user message
 ///
 /// <div class="warning">
@@ -12523,6 +12945,8 @@ pub struct SessionGitHubAuthGetStatusResult {
     pub auth_type: Option<AuthInfoType>,
     /// Copilot plan tier (e.g., individual_pro, business)
     pub copilot_plan: Option<String>,
+    /// Whether the session can resolve a GitHub token. Returned by session.gitHubAuth.getStatus without exposing the credential.
+    pub has_git_hub_token: Option<bool>,
     /// Authentication host URL
     pub host: Option<String>,
     /// Whether the session has resolved authentication
@@ -12532,7 +12956,7 @@ pub struct SessionGitHubAuthGetStatusResult {
     /// Human-readable authentication status description
     pub status_message: Option<String>,
 }
-crate::record_serde::wire_record!(SessionGitHubAuthGetStatusResult { auth_type: "authType" if is_none, copilot_plan: "copilotPlan" if is_none, host: "host" if is_none, is_authenticated: "isAuthenticated", login: "login" if is_none, status_message: "statusMessage" if is_none });
+crate::record_serde::wire_record!(SessionGitHubAuthGetStatusResult { auth_type: "authType" if is_none, copilot_plan: "copilotPlan" if is_none, has_git_hub_token: "hasGitHubToken" if is_none, host: "host" if is_none, is_authenticated: "isAuthenticated", login: "login" if is_none, status_message: "statusMessage" if is_none });
 
 /// Indicates whether the credential update succeeded.
 ///
@@ -15739,6 +16163,59 @@ pub struct SessionOptionsUpdateResult {
 }
 crate::record_serde::wire_record!(SessionOptionsUpdateResult { plugin_hook_count: "pluginHookCount" if is_none, success: "success" });
 
+/// Transient controls owned by the original embedding host.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionHostUpdateControlsParams {
+    /// Whether the original host currently shows this session's shell password prompts.
+    pub shell_authentication_prompts_shown: Option<bool>,
+    /// Whether the original host supplies the plan-approval callback.
+    pub exit_plan_mode_callback_enabled: Option<bool>,
+    /// Whether managed-policy reconciliation pauses queued prompt processing.
+    pub managed_policy_queue_drain_paused: Option<bool>,
+}
+crate::record_serde::wire_record!(SessionHostUpdateControlsParams { shell_authentication_prompts_shown: "shellAuthenticationPromptsShown" if is_none, exit_plan_mode_callback_enabled: "exitPlanModeCallbackEnabled" if is_none, managed_policy_queue_drain_paused: "managedPolicyQueueDrainPaused" if is_none });
+
+/// Queue scheduling work released by a host control update.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionHostUpdateControlsResult {
+    /// Whether the update released queued work for processing.
+    pub schedule_process_queue: bool,
+}
+crate::record_serde::wire_record!(SessionHostUpdateControlsResult {
+    schedule_process_queue: "scheduleProcessQueue"
+});
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionHostWatchCloseParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionHostWatchCloseParams {
+    session_id: "sessionId"
+});
+
 /// Runtime-owned configuration inventory and configuration diagnostics.
 ///
 /// <div class="warning">
@@ -16100,6 +16577,61 @@ crate::record_serde::wire_record!(SessionToolsGetSubagentSettingsResult {
 #[serde(rename_all = "camelCase")]
 pub struct SessionToolsUpdateSubagentSettingsResult {}
 
+/// One memory to import through the session's cloud memory service.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionMemoryImportRecordParams {
+    /// Memory scope. Repository scope uses the session's resolved repository.
+    pub scope: MemoryImportScope,
+    /// Short description of the memory's subject.
+    pub subject: String,
+    /// Fact to preserve.
+    pub fact: String,
+    /// Reason to preserve the fact.
+    pub reason: String,
+    /// Sources that support the fact.
+    pub citations: String,
+}
+crate::record_serde::wire_record!(SessionMemoryImportRecordParams {
+    scope: "scope",
+    subject: "subject",
+    fact: "fact",
+    reason: "reason",
+    citations: "citations"
+});
+
+/// Result from the session's cloud memory service, without a local fallback.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionMemoryImportRecordResult {
+    /// Machine-readable result code.
+    pub code: String,
+    /// Result description from the service or runtime.
+    pub message: String,
+    /// Whether the service stored the memory.
+    pub ok: bool,
+    /// Import outcome, including conflicts and policy refusals.
+    pub status: MemoryImportStatus,
+}
+crate::record_serde::wire_record!(SessionMemoryImportRecordResult {
+    code: "code",
+    message: "message",
+    ok: "ok",
+    status: "status"
+});
+
 /// Slash commands available in the session, after applying any include/exclude filters.
 ///
 /// <div class="warning">
@@ -16229,6 +16761,89 @@ pub struct SessionTelemetryGetEngagementIdResult {
     pub engagement_id: Option<String>,
 }
 crate::record_serde::wire_record!(SessionTelemetryGetEngagementIdResult { engagement_id: "engagementId" if is_none });
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionTelemetryReloadParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionTelemetryReloadParams {
+    session_id: "sessionId"
+});
+
+/// Identifies the target session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionUiSnapshotParams {
+    /// Target session identifier
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(SessionUiSnapshotParams {
+    session_id: "sessionId"
+});
+
+/// Current transient prompts and native service state for an attached conversation view.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionUiSnapshotResult {
+    /// Whether the main agent turn is active.
+    pub agent_turn_active: bool,
+    /// Whether a turn, queue reservation, resume continuation, or native send is active.
+    pub has_active_resume_work: Option<bool>,
+    /// Whether the current hook generation has repository hooks left to load.
+    pub has_pending_repo_hooks: Option<bool>,
+    /// Number of services that have not completed initialization.
+    pub initializing_service_count: i64,
+    /// Whether this session enables experimental CLI behavior.
+    pub is_experimental_mode: Option<bool>,
+    /// Whether the session's current telemetry pipeline accepts events.
+    pub is_session_telemetry_enabled: Option<bool>,
+    /// Unanswered elicitation requests, including their source and runtime request IDs.
+    pub pending_elicitation_requests: Vec<UIPendingElicitation>,
+    /// Unanswered plan-approval requests, including their runtime request IDs.
+    pub pending_exit_plan_mode_requests: Vec<UIPendingPlanApproval>,
+    /// Unanswered user-input requests, including their runtime request IDs.
+    pub pending_user_input_requests: Vec<UIPendingUserInput>,
+    /// Runtime-owned plugin discovery and trust policy, or null when absent.
+    pub plugin_activation_policy: Option<UIPluginActivationPolicy>,
+    /// Current effective plugin activation, or null before activation resolves.
+    pub plugin_activation_snapshot: Option<UIPluginActivationSnapshot>,
+    /// Durable event counts by type for the primary agent, excluding subagent events.
+    pub primary_event_counts: Option<HashMap<String, i64>>,
+    /// Whether the session currently processes queued or active messages.
+    pub processing: bool,
+    /// Long-lived services and their current status, progress, and display logs.
+    pub service_tasks: Vec<UIServiceTask>,
+    /// Background agents managed by the session's sidekick registry.
+    pub sidekick_background_tasks: Vec<UIBackgroundAgentTask>,
+    /// Startup prompts from the runtime-owned hook configuration.
+    pub startup_prompts: Vec<String>,
+    /// Whether the session supports interactive MCP Apps.
+    pub supports_mcp_apps: bool,
+    /// Canonical working-directory revision for this live session.
+    pub working_directory_revision: Option<i64>,
+}
+crate::record_serde::wire_record!(SessionUiSnapshotResult { agent_turn_active: "agentTurnActive", has_active_resume_work: "hasActiveResumeWork" if is_none, has_pending_repo_hooks: "hasPendingRepoHooks" if is_none, initializing_service_count: "initializingServiceCount", is_experimental_mode: "isExperimentalMode" if is_none, is_session_telemetry_enabled: "isSessionTelemetryEnabled" if is_none, pending_elicitation_requests: "pendingElicitationRequests", pending_exit_plan_mode_requests: "pendingExitPlanModeRequests", pending_user_input_requests: "pendingUserInputRequests", plugin_activation_policy: "pluginActivationPolicy" if is_none, plugin_activation_snapshot: "pluginActivationSnapshot" if is_none, primary_event_counts: "primaryEventCounts" if is_none, processing: "processing", service_tasks: "serviceTasks", sidekick_background_tasks: "sidekickBackgroundTasks", startup_prompts: "startupPrompts", supports_mcp_apps: "supportsMcpApps", working_directory_revision: "workingDirectoryRevision" if is_none });
 
 /// Completed transient query. Ordered chunks and the terminal outcome are also delivered through `ui.ephemeral_query` session events while it runs.
 ///
@@ -17139,6 +17754,75 @@ pub struct SessionMetadataSnapshotResult {
 }
 crate::record_serde::wire_record!(SessionMetadataSnapshotResult { already_in_use: "alreadyInUse", client_name: "clientName" if is_none, current_mode: "currentMode", indexed_search: "indexedSearch" if is_none, initial_name: "initialName" if is_none, is_remote: "isRemote", modified_time: "modifiedTime", remote_metadata: "remoteMetadata" if is_none, selected_model: "selectedModel" if is_none, session_id: "sessionId", session_limits: "sessionLimits", start_time: "startTime", summary: "summary" if is_none, working_directory: "workingDirectory", workspace: "workspace", workspace_path: "workspacePath" });
 
+/// Public-facing projection of workspace metadata for SDK / TUI consumers
+#[derive(Debug, Clone, Default)]
+pub struct SessionMetadataSnapshotResultDetailsWorkspace {
+    /// Branch checked out at session start, if any
+    pub branch: Option<String>,
+    /// ISO 8601 timestamp when the workspace was created
+    pub created_at: Option<String>,
+    /// Current working directory at session start
+    pub cwd: Option<String>,
+    /// Resolved git root for cwd, if any
+    pub git_root: Option<String>,
+    /// Repository host type, if known
+    pub host_type: Option<WorkspaceSummaryHostType>,
+    /// Workspace identifier (1:1 with sessionId)
+    pub id: String,
+    /// Display name for the session, if set
+    pub name: Option<String>,
+    /// Repository identifier in 'owner/repo' or 'org/project/repo' format, if any
+    pub repository: Option<String>,
+    /// ISO 8601 timestamp when the workspace was last updated
+    pub updated_at: Option<String>,
+    /// Whether the display name was explicitly set by the user
+    pub user_named: Option<bool>,
+}
+crate::record_serde::wire_record!(SessionMetadataSnapshotResultDetailsWorkspace { branch: "branch" if is_none, created_at: "created_at" if is_none, cwd: "cwd" if is_none, git_root: "git_root" if is_none, host_type: "host_type" if is_none, id: "id", name: "name" if is_none, repository: "repository" if is_none, updated_at: "updated_at" if is_none, user_named: "user_named" if is_none });
+
+/// Point-in-time snapshot of slow-changing session identifier and state fields
+///
+/// Expanded projection for the existing `Client::call` API. It includes fields added after `SessionMetadataSnapshotResult` was published.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct SessionMetadataSnapshotResultDetails {
+    /// True when the session was detected to be in use by another process at construction time. Local consumers may surface a confirmation prompt before fully attaching. Always false for new sessions.
+    pub already_in_use: bool,
+    /// Runtime client name associated with the session (telemetry identifier).
+    pub client_name: Option<String>,
+    /// The current agent mode for this session (e.g., 'interactive', 'plan', 'autopilot')
+    pub current_mode: MetadataSnapshotCurrentMode,
+    /// Live indexed-search state for this session activation. Omitted by runtimes that do not expose indexed-search status; absence does not indicate enablement.
+    pub indexed_search: Option<IndexedSearchState>,
+    /// User-provided name supplied at session construction (via `--name`), if any. Immutable after construction.
+    pub initial_name: Option<String>,
+    /// Whether this is a remote session (i.e., one whose runtime executes elsewhere and is steered through this process)
+    pub is_remote: bool,
+    /// ISO 8601 timestamp of when the session's persisted state was last modified on disk. For new sessions, equals startTime. For resumed sessions, reflects the previous modification time at construction.
+    pub modified_time: String,
+    /// Remote-session-specific metadata. Populated only when `isRemote` is true. Fields are immutable for the lifetime of the session.
+    pub remote_metadata: Option<MetadataSnapshotRemoteMetadata>,
+    /// Opaque ID for the live runtime generation. Attachments to the same generation share this ID. Replacement changes it. Older runtimes can omit it.
+    pub runtime_instance_id: Option<String>,
+    /// Currently selected model identifier, if any
+    pub selected_model: Option<String>,
+    /// The unique identifier of the session
+    pub session_id: SessionId,
+    /// Current session limits, or null when no limits are active
+    pub session_limits: Option<SessionLimitsConfig>,
+    /// ISO 8601 timestamp of when the session started
+    pub start_time: String,
+    /// Short human-readable summary of the session, if known. Omitted when no summary has been generated.
+    pub summary: Option<String>,
+    /// Absolute path to the session's current working directory
+    pub working_directory: String,
+    /// Public-facing workspace metadata for this session, or null if the session has no associated workspace. Excludes runtime-internal fields (GitHub IDs, summary count, internal flags).
+    pub workspace: Option<SessionMetadataSnapshotResultDetailsWorkspace>,
+    /// Absolute path to the session's workspace directory on disk, or null if the session has no associated workspace
+    pub workspace_path: Option<String>,
+}
+crate::record_serde::wire_record!(SessionMetadataSnapshotResultDetails { already_in_use: "alreadyInUse", client_name: "clientName" if is_none, current_mode: "currentMode", indexed_search: "indexedSearch" if is_none, initial_name: "initialName" if is_none, is_remote: "isRemote", modified_time: "modifiedTime", remote_metadata: "remoteMetadata" if is_none, runtime_instance_id: "runtimeInstanceId" if is_none, selected_model: "selectedModel" if is_none, session_id: "sessionId", session_limits: "sessionLimits", start_time: "startTime", summary: "summary" if is_none, working_directory: "workingDirectory", workspace: "workspace", workspace_path: "workspacePath" });
+
 /// Identifies the target session.
 ///
 /// <div class="warning">
@@ -17619,6 +18303,21 @@ pub struct SessionShellCancelUserRequestedResult {
 crate::record_serde::wire_record!(SessionShellCancelUserRequestedResult {
     cancelled: "cancelled"
 });
+
+/// Conversation history to append through the session's canonical event writer.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionHistoryImportConversationParams {
+    /// Conversation records in their original order. The runtime generates event IDs and timestamps.
+    pub events: Vec<HistoryImportConversationEvent>,
+}
+crate::record_serde::wire_record!(SessionHistoryImportConversationParams { events: "events" });
 
 /// Compaction outcome with the number of tokens and messages removed, summary text, and the resulting context window breakdown.
 ///
@@ -18682,6 +19381,38 @@ pub struct SessionCafeMetricsDetachParams {
 crate::record_serde::wire_record!(SessionCafeMetricsDetachParams {
     session_id: "sessionId"
 });
+
+/// Original-host request for a session-owned IDE bridge.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionMcpSourceIdeClientParams {
+    /// The operation to apply to the original host's IDE bridge.
+    pub operation: McpIdeClientOperation,
+}
+
+/// Result of an original-host IDE operation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SessionMcpSourceIdeClientResult {
+    /// Whether this operation changed or addressed the current registration.
+    pub applied: bool,
+    /// Opaque token returned only after successful registration.
+    pub token: Option<String>,
+}
+crate::record_serde::wire_record!(SessionMcpSourceIdeClientResult { applied: "applied", token: "token" if is_none });
 
 /// Identifies the target session.
 ///

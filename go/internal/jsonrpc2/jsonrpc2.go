@@ -21,8 +21,8 @@ import (
 
 const version = "2.0"
 
-// processExitGracePeriod bounds how long a request whose connection has closed
-// waits for the watched CLI process to report its exit.
+// processExitGracePeriod bounds the gap between process exit and transport
+// closure when one arrives before the other.
 const processExitGracePeriod = time.Second
 
 // Standard JSON-RPC 2.0 error codes.
@@ -409,6 +409,11 @@ func (c *Client) RequestWithInlineResponse(ctx context.Context, method string, p
 
 	// Wait for response, also checking for process exit
 	if c.processDone != nil {
+		processDone := c.processDone
+		if _, hasDeadline := ctx.Deadline(); method == "runtime.shutdown" && hasDeadline {
+			// Keep the caller's shutdown budget for the final reply.
+			processDone = nil
+		}
 		select {
 		case <-ctx.Done():
 			return responseAfterShutdown(responseChan, ctx.Err())
@@ -417,7 +422,24 @@ func (c *Client) RequestWithInlineResponse(ctx context.Context, method string, p
 				return nil, response.Error
 			}
 			return response.Result, nil
-		case <-c.processDone:
+		case <-processDone:
+			if method == "runtime.shutdown" {
+				timer := time.NewTimer(processExitGracePeriod)
+				defer timer.Stop()
+				select {
+				case response := <-responseChan:
+					if response.Error != nil {
+						return nil, response.Error
+					}
+					return response.Result, nil
+				case <-ctx.Done():
+					return responseAfterShutdown(responseChan, ctx.Err())
+				case <-c.connectionClosed:
+				case <-c.stopChan:
+					return responseAfterShutdown(responseChan, fmt.Errorf("client stopped"))
+				case <-timer.C:
+				}
+			}
 			if err := c.getProcessError(); err != nil {
 				return responseAfterShutdown(responseChan, err)
 			}

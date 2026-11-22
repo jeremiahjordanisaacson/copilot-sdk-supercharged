@@ -18,6 +18,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Threading.Channels;
 
 namespace Microsoft.Copilot;
 
@@ -86,6 +87,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     private readonly string[] _builtinPluginDirectories;
     private readonly Func<CancellationToken, Task<IList<Model>>>? _onListModels;
     private readonly List<LifecycleSubscription> _lifecycleHandlers = [];
+    private Task _lifecycleDispatchCompletion = Task.CompletedTask;
 
     private Task<Connection>? _connectionTask;
     private CancellationTokenSource? _startupCancellation;
@@ -114,6 +116,37 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     private ClientGlobalApiHandlers? _clientGlobalApis;
 
     private sealed record LifecycleSubscription(Type EventType, Action<SessionLifecycleEvent> Handler);
+
+    private sealed class LifecycleEventDispatcher
+    {
+        private readonly CopilotClient _client;
+        private readonly Channel<SessionLifecycleEvent> _events = Channel.CreateUnbounded<SessionLifecycleEvent>();
+
+        public LifecycleEventDispatcher(CopilotClient client)
+        {
+            _client = client;
+            using var flow = ExecutionContextHelpers.SuppressFlow();
+            lock (client._lifecycleHandlers)
+            {
+                var previous = client._lifecycleDispatchCompletion;
+                // Replacement deliveries follow the retired connection without blocking transport cleanup.
+                client._lifecycleDispatchCompletion = Task.Run(() => ProcessAsync(previous));
+            }
+        }
+
+        public void Enqueue(SessionLifecycleEvent evt) => _events.Writer.TryWrite(evt);
+
+        public void Complete() => _events.Writer.TryComplete();
+
+        private async Task ProcessAsync(Task previous)
+        {
+            await previous.ConfigureAwait(false);
+            await foreach (var evt in _events.Reader.ReadAllAsync())
+            {
+                _client.DispatchLifecycleEvent(evt);
+            }
+        }
+    }
 
     private sealed class SessionOperation(CopilotClient client, string sessionId, JsonRpc rpc, bool recoveryInitialization) : IDisposable
     {
@@ -722,6 +755,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
 
         try { ctx.Rpc.Dispose(); }
         catch (Exception ex) { AddCleanupError(errors, ex, _logger); }
+        ctx.LifecycleEvents?.Complete();
 
         // Clear RPC
         _serverRpc = null;
@@ -3225,6 +3259,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         var setupTimestamp = Stopwatch.GetTimestamp();
         NetworkStream? networkStream = null;
         JsonRpc? rpc = null;
+        LifecycleEventDispatcher? lifecycleEvents = null;
 
         try
         {
@@ -3280,11 +3315,12 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 _logger);
 
             var connection = new Connection(rpc, cliProcess, networkStream, stderrPump, ffiHost);
+            connection.LifecycleEvents = lifecycleEvents = new LifecycleEventDispatcher(this);
             if (_options.Models.RequestHandler is { } requestHandler)
             {
                 connection.LlmInference = new LlmInferenceAdapter(requestHandler, () => connection.Server);
             }
-            var handler = new RpcHandler(this);
+            var handler = new RpcHandler(this, lifecycleEvents);
             rpc.SetLocalRpcNotification<string, SessionEvent?>("session.event", handler.OnSessionEvent);
             rpc.SetLocalRpcMethod("session.lifecycle", handler.OnSessionLifecycle);
             rpc.SetLocalRpcMethod("userInput.request", handler.OnUserInputRequest);
@@ -3353,6 +3389,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         }
         catch
         {
+            lifecycleEvents?.Complete();
             try { rpc?.Dispose(); }
             catch (Exception ex) when (IsRecoverableConnectionCleanupFailure(ex))
             {
@@ -3378,16 +3415,43 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         try
         {
             cliProcess.EnableRaisingEvents = true;
-            cliProcess.Exited += (_, _) => DisposeRpcAfterProcessExit(rpc);
+            cliProcess.Exited += (_, _) => OnProcessExit();
             if (cliProcess.HasExited)
             {
-                DisposeRpcAfterProcessExit(rpc);
+                OnProcessExit();
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
         {
             _logger.LogDebug(ex, "Unable to monitor the Copilot CLI process for transport closure");
         }
+
+        void OnProcessExit()
+        {
+            if (_connection is SpawnedStdioRuntimeConnection)
+            {
+                _ = DrainRpcAfterProcessExitAsync(rpc);
+            }
+            else
+            {
+                DisposeRpcAfterProcessExit(rpc);
+            }
+        }
+    }
+
+    private async Task DrainRpcAfterProcessExitAsync(JsonRpc rpc)
+    {
+        // Final stdout bytes can arrive after process exit. A descendant can retain
+        // stdout, so drain within the existing shutdown budget.
+        try
+        {
+            await rpc.Completion.WaitAsync(s_runtimeShutdownTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogDebug(ex, "Copilot CLI stdout remained open after the shutdown timeout");
+        }
+        DisposeRpcAfterProcessExit(rpc);
     }
 
     private void DisposeRpcAfterProcessExit(JsonRpc rpc)
@@ -3412,6 +3476,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     {
         var rpc = connection.Rpc;
         await Task.WhenAny(rpc.Completion).ConfigureAwait(false);
+        connection.LifecycleEvents?.Complete();
         if (rpc.Completion.Exception is { } exception)
         {
             _logger.LogDebug(exception, "JSON-RPC connection completed with an error");
@@ -3826,7 +3891,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         await StopAsync();
     }
 
-    private class RpcHandler(CopilotClient client)
+    private class RpcHandler(CopilotClient client, LifecycleEventDispatcher lifecycleEvents)
     {
         public void OnSessionEvent(string sessionId, SessionEvent? @event)
         {
@@ -3856,7 +3921,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 evt.Metadata = metadata.Value.Deserialize(TypesJsonContext.Default.SessionLifecycleEventMetadata);
             }
 
-            client.DispatchLifecycleEvent(evt);
+            lifecycleEvents.Enqueue(evt);
         }
 
         public async ValueTask<UserInputRequestResponse> OnUserInputRequest(string sessionId, string question, IList<string>? choices = null, bool? allowFreeform = null, string? requestId = null)
@@ -3982,6 +4047,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         public RuntimePortRegistration? OwnedRuntimePort { get; set; } // Set if we created the child process and it listens on TCP
         public JsonRpc Rpc => rpc;
         public LlmInferenceAdapter? LlmInference { get; set; }
+        public LifecycleEventDispatcher? LifecycleEvents { get; set; }
         public Task CloseCleanup { get; set; } = Task.CompletedTask;
         public ServerRpc Server => field ?? Interlocked.CompareExchange(ref field, new(rpc), null) ?? field;
         public NetworkStream? NetworkStream => networkStream;

@@ -193,6 +193,8 @@ def _sdk_profile(profile, features):
             continue
         if test == "network_test" and "runtime" not in features:
             continue
+        if test == "protocol_connection_test" and "local-runtime" not in features:
+            continue
         tests.append((test, source))
     if profile != "external-test":
         tests.append(("lib", "src/lib.rs"))

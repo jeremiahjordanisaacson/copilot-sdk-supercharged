@@ -5043,6 +5043,7 @@ export class CopilotClient {
         if (!this.connection) {
             return;
         }
+        const connection = this.connection;
 
         const eventConnection = this.connection;
         this.heldSessionEventsConnection = eventConnection;
@@ -5115,7 +5116,7 @@ export class CopilotClient {
         // Register client *global* API handlers (e.g. LLM inference) on the
         // same connection. These methods carry no implicit sessionId dispatch
         // — the runtime calls into a single handler for the whole connection.
-        registerClientGlobalApiHandlers(this.connection, this.clientGlobalHandlers);
+        registerClientGlobalApiHandlers(connection, this.clientGlobalHandlers);
         if (this.options.entra?.tokenProvider) {
             registerEntraTokenProvider(this.connection, this.options.entra.tokenProvider);
         }
@@ -5278,7 +5279,6 @@ export class CopilotClient {
             }
         );
 
-        const connection = this.connection;
         const messageWriter = this.messageWriter;
         const cliProcess = this.isExternalServer ? null : this.cliProcess;
         const connectionEpoch = this.connectionEpoch;
@@ -5341,12 +5341,13 @@ export class CopilotClient {
                     return;
                 }
                 if (disconnected) return;
-                if (this.socket) {
+                if (this.socket && !this.stopPromise) {
                     disconnectAfterDrain();
                     return;
                 }
                 this.connectionClosed = true;
                 if (messageWriter) messageWriter.suppressWriteErrors = true;
+                // During graceful TCP shutdown, process exit can precede the final response.
                 // Reader EOF is authoritative for messages still buffered after process exit.
                 // A descendant can keep stdout open, so bound the fallback.
                 exitFallback = setTimeout(disconnectAfterDrain, RUNTIME_SHUTDOWN_TIMEOUT_MS);

@@ -41,7 +41,7 @@ class GeneratedBuilderEvolutionTest {
 
     @Test
     @Tag("java-compatibility")
-    void builderEnabledRecordsExposeExactlyTheirNondeprecatedCanonicalConstructor() throws Exception {
+    void builderEnabledRecordsExposeOnlyCanonicalAndPublishedCompatibilityConstructors() throws Exception {
         Path classes = Path.of(com.microsoft.copilot.generated.rpc.TaskBlocker.class.getProtectionDomain()
                 .getCodeSource().getLocation().toURI());
         List<Path> files;
@@ -61,17 +61,56 @@ class GeneratedBuilderEvolutionTest {
             records++;
             if (!java.lang.reflect.Modifier.isPublic(type.getModifiers()))
                 internalRecords++;
-            var constructors = type.getDeclaredConstructors();
-            assertEquals(1, constructors.length, name + " must expose only its canonical constructor");
-            var components = Arrays.stream(type.getRecordComponents()).map(component -> component.getType())
-                    .toArray(Class<?>[]::new);
-            assertArrayEquals(components, constructors[0].getParameterTypes(), name);
-            assertFalse(constructors[0].isAnnotationPresent(Deprecated.class), name);
+            assertCanonicalAndPublishedConstructors(type);
             assertSame(type,
                     type.getDeclaredMethod("builder").getReturnType().getDeclaredMethod("build").getReturnType(), name);
         }
         assertTrue(records > 0, "No builder-enabled records inspected");
         assertTrue(internalRecords > 0, "Package-private builder-enabled records must also be inspected");
+    }
+
+    static void assertCanonicalAndPublishedConstructors(Class<?> type) throws NoSuchMethodException {
+        String name = type.getName();
+        var components = Arrays.stream(type.getRecordComponents()).map(component -> component.getType())
+                .toArray(Class<?>[]::new);
+        var canonical = type.getDeclaredConstructor(components);
+        assertFalse(canonical.isAnnotationPresent(Deprecated.class), name);
+        if (java.lang.reflect.Modifier.isPublic(type.getModifiers())) {
+            assertTrue(java.lang.reflect.Modifier.isPublic(canonical.getModifiers()), name);
+        }
+        Class<?>[] compatibilityParameters = switch (name) {
+            case "com.microsoft.copilot.generated.rpc.Extension" ->
+                new Class<?>[]{String.class, String.class, com.microsoft.copilot.generated.rpc.ExtensionSource.class,
+                        com.microsoft.copilot.generated.rpc.ExtensionStatus.class, Long.class};
+            case "com.microsoft.copilot.generated.rpc.SessionExtensionsListResult",
+                    "com.microsoft.copilot.generated.rpc.SessionExtensionsReconcileResult" ->
+                new Class<?>[]{List.class};
+            case "com.microsoft.copilot.generated.rpc.AutopilotObjectiveState" -> new Class<?>[]{Long.class,
+                    String.class, com.microsoft.copilot.generated.rpc.AutopilotObjectiveStatus.class, Long.class,
+                    String.class, String.class, String.class,
+                    com.microsoft.copilot.generated.rpc.AutopilotObjectiveCreditLimit.class};
+            case "com.microsoft.copilot.generated.rpc.SessionMetadataSnapshotResult" -> new Class<?>[]{String.class,
+                    java.time.OffsetDateTime.class, java.time.OffsetDateTime.class, Boolean.class, Boolean.class,
+                    String.class, String.class, String.class,
+                    com.microsoft.copilot.generated.rpc.MetadataSnapshotRemoteMetadata.class, String.class,
+                    String.class, com.microsoft.copilot.generated.rpc.MetadataSnapshotCurrentMode.class, String.class,
+                    com.microsoft.copilot.generated.rpc.SessionLimitsConfig.class,
+                    com.microsoft.copilot.generated.rpc.IndexedSearchState.class,
+                    com.microsoft.copilot.generated.rpc.SessionMetadataSnapshotResult.SessionMetadataSnapshotResultWorkspace.class};
+            case "com.microsoft.copilot.generated.rpc.SessionAuthStatus",
+                    "com.microsoft.copilot.generated.rpc.SessionGitHubAuthGetStatusResult" ->
+                new Class<?>[]{Boolean.class, com.microsoft.copilot.generated.rpc.AuthInfoType.class, String.class,
+                        String.class, String.class, String.class};
+            default -> null;
+        };
+        Set<java.lang.reflect.Constructor<?>> expected = Set.of(canonical);
+        if (compatibilityParameters != null) {
+            var compatibility = type.getDeclaredConstructor(compatibilityParameters);
+            assertTrue(java.lang.reflect.Modifier.isPublic(compatibility.getModifiers()), name);
+            expected = Set.of(canonical, compatibility);
+        }
+        assertEquals(expected, Set.of(type.getDeclaredConstructors()),
+                name + " must expose exactly its canonical and published compatibility constructors");
     }
 
     @Test
@@ -103,7 +142,7 @@ class GeneratedBuilderEvolutionTest {
                 Path.of(com.microsoft.copilot.generated.rpc.TaskBlocker.class.getProtectionDomain().getCodeSource()
                         .getLocation().toURI()))
                 .strip().split("\\R");
-        assertEquals(6, output.length);
+        assertEquals(8, output.length);
         JsonNode skill = JSON.readTree(output[0]);
         assertEquals("example", skill.path("name").asText());
         assertEquals("content", skill.path("content").asText());
@@ -139,6 +178,27 @@ class GeneratedBuilderEvolutionTest {
         assertTrue(marketplace.path("managed").asBoolean());
         assertEquals(JSON.readTree("false"), marketplace.get("available"));
         assertFalse(marketplace.has("team"));
+        JsonNode login = JSON.readTree(output[6]);
+        assertEquals("legacy-flow", login.path("flowId").asText());
+        assertEquals("awaiting", login.path("step").path("kind").asText());
+        assertEquals(JSON.readTree("""
+                {
+                  "sessionId": "snapshot-session",
+                  "startTime": "2026-01-02T03:04:05Z",
+                  "modifiedTime": "2026-01-02T04:05:06Z",
+                  "isRemote": false,
+                  "alreadyInUse": true,
+                  "workspacePath": "/workspace",
+                  "initialName": "snapshot-name",
+                  "clientName": "snapshot-client",
+                  "summary": "snapshot-summary",
+                  "workingDirectory": "/work",
+                  "currentMode": "plan",
+                  "selectedModel": "snapshot-model",
+                  "sessionLimits": null,
+                  "workspace": null
+                }
+                """), JSON.readTree(output[7]));
         assertEquals(before, sha256(bytecode));
     }
 

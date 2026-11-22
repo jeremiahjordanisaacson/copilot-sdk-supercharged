@@ -39,7 +39,7 @@ fn main() {
                 }],
                 "requestPermission": false,
                 "enableConfigDiscovery": false,
-                "disableResume": true,
+                "suppressResumeEvent": true,
                 "streaming": true
             }
         }),

@@ -18,6 +18,7 @@ export async function formatModelTokenPrices(
         if (!model.billing?.tokenPrices || !unit) {
             return [];
         }
+
         return [{ modelId: model.id, unit, prices: model.billing.tokenPrices }];
     });
     return JSON.stringify(prices, null, 2);

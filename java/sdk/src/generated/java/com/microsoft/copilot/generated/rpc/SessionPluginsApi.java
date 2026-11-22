@@ -198,6 +198,17 @@ public final class SessionPluginsApi {
     }
 
     /**
+     * Reconciles canonical workspace consent and plugin policy for the original embedding host, then returns effective activation.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    CompletableFuture<PluginsResolveActivationResult> resolveActivation() {
+        return caller.invoke("session.plugins.resolveActivation", java.util.Map.of("sessionId", this.sessionId), PluginsResolveActivationResult.class);
+    }
+
+    /**
      * Installs or updates the plugins the session's managed settings require now, without waiting for the next automatic attempt after a failure, then reloads plugins. Reports progress and failures with the same `session.info` and `session.warning` events as automatic preparation. Fails when the runtime does not prepare managed plugins for the session.
      * <p>
      * Invokes the method with no params, applying the runtime defaults.
