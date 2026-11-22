@@ -23,12 +23,15 @@ runs:
     - name: Set CLI path
       id: cli-path
       run: |
-        # As of CLI 1.0.64-1 the @github/copilot package is a thin loader; the
-        # runnable index.js ships in the installed platform package
-        # (e.g. @github/copilot-linux-x64). Exactly one is installed.
-        cli_path=$(ls "$(pwd)"/nodejs/node_modules/@github/copilot-*/index.js 2>/dev/null | head -n1)
+        # CLI >= 1.0.10x ships a native binary in the platform package plus
+        # @github/copilot/npm-loader.js, which launches it. Older CLIs (1.0.64-1
+        # onward) shipped a runnable index.js in the platform package instead.
+        cli_path="$(pwd)/nodejs/node_modules/@github/copilot/npm-loader.js"
+        if [ ! -f "$cli_path" ]; then
+          cli_path=$(ls "$(pwd)"/nodejs/node_modules/@github/copilot-*/index.js 2>/dev/null | head -n1)
+        fi
         if [ -z "$cli_path" ]; then
-          echo "Could not find @github/copilot platform package (index.js) under nodejs/node_modules" >&2
+          echo "Could not find the Copilot CLI (npm-loader.js or platform index.js) under nodejs/node_modules" >&2
           exit 1
         fi
         echo "path=$cli_path" >> $GITHUB_OUTPUT

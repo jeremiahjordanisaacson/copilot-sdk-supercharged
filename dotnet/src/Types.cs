@@ -4875,6 +4875,7 @@ public sealed class MessageOptions
     /// Prefer the session-level image generation option.
     /// </summary>
     public ImageOptions? ImageOptions { get; set; }
+    /// <summary>
     /// Opaque caller-chosen ID for the turn this message starts. The runtime copies it unchanged into
     /// <c>_meta["com.github.copilot/turnId"]</c> on every MCP <c>tools/call</c> made while serving that turn,
     /// including calls from sub-agents and Autopilot continuations. When a running turn consumes the message

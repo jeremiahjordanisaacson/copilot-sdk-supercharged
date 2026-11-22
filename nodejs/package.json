@@ -68,6 +68,7 @@
         "@microsoft/copilot-sdk-win32-x64": "2.0.0"
     },
     "devDependencies": {
+        "@github/copilot": "1.0.113",
         "@types/node": "^25.6.0",
         "esbuild": "^0.28.1",
         "tsx": "^4.20.6",

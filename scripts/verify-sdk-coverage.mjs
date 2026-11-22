@@ -113,7 +113,25 @@ const REQUIRED_FEATURES = [
   ['Autopilot options',             ['maxContinues', 'max_continues', 'MaxContinues']],
   ['Subagent lifecycle hooks',      ['subagentStart', 'subagent_start', 'SubagentStart']],
   ['BYOK API key command',          ['apiKeyCommand', 'api_key_command', 'ApiKeyCommand']],
+  // --- SDK protocol 4 / upstream SDK 2.0 parity (Microsoft Copilot SDK, 2026-11 / v3.0.0) ---
+  ['Grouped v4 session payload',    ['hasHandlers']],
+  ['Resume event suppression',      ['suppressResumeEvent']],
+  ['Named BYOK providers',          ['defaultProvider', 'default_provider', 'DefaultProvider']],
+  ['Idempotent tools',              ['idempotent', 'Idempotent']],
+  ['Client turn ID',                ['clientTurnId', 'client_turn_id', 'ClientTurnId']],
+  ['Client mode',                   ['coding-agent']],
+  ['Shell output events',           ['tool.shell_output']],
+  ['Shell authentication',          ['shellAuthentication.request']],
+  ['Memory store',                  ['memoryStore.store']],
+  ['Network callbacks',             ['network.setProvider']],
+  ['Policy helper failure',         ['policyHelperFailure', 'policy_helper_failure', 'PolicyHelperFailure']],
+  ['Permission mode refusal reason', ['managed_policy']],
 ];
+
+// Every SDK must speak this SDK protocol version (canonical source: sdk-protocol-version.json).
+const REQUIRED_PROTOCOL_VERSION = JSON.parse(
+  readFileSync(join(ROOT, 'sdk-protocol-version.json'), 'utf-8'),
+).version;
 
 // SDK directories and their client file glob patterns
 const SDK_CLIENT_FILES = {
@@ -189,14 +207,13 @@ function checkSdk(sdk) {
   return { sdk, missing, found };
 }
 
-function checkSdkFeatures(sdk) {
+function readSdkSources(sdk) {
   const content = readClientFiles(sdk);
-  if (!content.trim()) {
-    return { sdk, missing: REQUIRED_FEATURES.map(f => f[0]), found: [] };
-  }
+  if (!content.trim()) return { content, allContent: '', files: [] };
 
   // Also read config/types/session files if they exist
   let allContent = content;
+  const files = [];
   const sdkDir = sdk === 'dlang' ? 'dlang' : sdk;
   try {
     const dir = join(ROOT, sdkDir);
@@ -211,8 +228,10 @@ function checkSdkFeatures(sdk) {
           try {
             if (statSync(full).isDirectory()) {
               scanDir(full, depth + 1);
-            } else if (/\.(ts|js|py|go|rs|rb|php|swift|kt|java|cpp|hpp|hh|cc|cxx|h|c|dart|scala|ex|hs|fs|lua|sh|clj|vb|pas|f90|m|mm|adb|ads|groovy|jl|cob|ml|zig|nim|d|erl|cr|tcl|sol|v|R|pm|pl)$/.test(entry)) {
-              allContent += readFileSync(full, 'utf-8') + '\n';
+            } else if (/\.(ts|js|py|go|rs|rb|php|swift|kt|java|cpp|hpp|hh|cc|cxx|h|c|dart|scala|ex|hs|fs|lua|sh|clj|vb|pas|f90|m|mm|adb|ads|groovy|jl|cob|cpy|ml|zig|nim|d|erl|hrl|cr|tcl|sol|v|R|pm|pl)$/.test(entry)) {
+              const text = readFileSync(full, 'utf-8');
+              allContent += text + '\n';
+              files.push({ path: full, text });
             }
           } catch {}
         }
@@ -220,6 +239,14 @@ function checkSdkFeatures(sdk) {
     }
     scanDir(dir);
   } catch {}
+  return { content, allContent, files };
+}
+
+function checkSdkFeatures(sdk) {
+  const { content, allContent } = readSdkSources(sdk);
+  if (!content.trim()) {
+    return { sdk, missing: REQUIRED_FEATURES.map(f => f[0]), found: [] };
+  }
 
   const missing = [];
   const found = [];
@@ -233,6 +260,43 @@ function checkSdkFeatures(sdk) {
   return { sdk, missing, found };
 }
 
+// Finds SDK protocol version constants across languages, for example
+// `SDK_PROTOCOL_VERSION = 4`, `#define COPILOT_SDK_PROTOCOL_VERSION 4`,
+// `-define(SDK_PROTOCOL_VERSION, 4).`, `WS-PROTO-MAJOR PIC 9(2) VALUE 4.`,
+// `Public Const Version As String = "4"` inside SdkProtocolVersion.vb, and
+// MATLAB-style `function v = sdkProtocolVersion()` followed by `v = 4;`.
+const PROTOCOL_NAME = /protocol[\s_-]*version|proto[\s_-]*major/i;
+const PROTOCOL_FILE = /protocol[_-]?version/i;
+const TEST_FILE = /(^|[\\/])(spec|specs)[\\/]|(_test|_spec|Tests?|Spec)\.[A-Za-z]+$/;
+const COMMENT_LINE = /^\s*(\/\/|\/\*|\*|--|%|;|!|'|\(\*|\{-|rem\b|#(?!\s*define\b))/i;
+const TRAILING_INT = /(?:=|:=|=>|<-|::|,|\bvalue\b|\s)\s*["']?(\d+)["']?L?\s*[;.)\]]*\s*(?:(?:#|\/\/|--|%|!|').*)?$/i;
+
+function checkProtocolVersion(sdk) {
+  const { files } = readSdkSources(sdk);
+  const values = [];
+  for (const { path, text } of files) {
+    if (TEST_FILE.test(path)) continue;
+    const protocolFile = PROTOCOL_FILE.test(path.split(/[\\/]/).pop());
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (COMMENT_LINE.test(line) || (!protocolFile && !PROTOCOL_NAME.test(line))) continue;
+      if (/strict_types|copyright|license|@since|@version/i.test(line)) continue;
+      let match = line.match(TRAILING_INT);
+      if (!match && /\bfunction\b/i.test(line)) {
+        const next = lines.slice(i + 1).find((l) => l.trim() && !COMMENT_LINE.test(l));
+        match = next?.match(/=\s*(\d+)\s*;?\s*$/);
+      }
+      // Zero is a field default (e.g. `int protocol_version = 0`), never a protocol constant.
+      if (match && Number(match[1]) !== 0) {
+        values.push({ value: Number(match[1]), where: `${path.slice(ROOT.length + 1)}:${i + 1}` });
+      }
+    }
+  }
+  const wrong = values.filter((v) => v.value !== REQUIRED_PROTOCOL_VERSION);
+  return { sdk, ok: values.length > 0 && wrong.length === 0, values, wrong };
+}
+
 // Run the check
 console.log('🔍 SDK API Coverage Check\n');
 
@@ -244,8 +308,10 @@ console.log('');
 
 let rpcFailures = 0;
 let featureFailures = 0;
+let protocolFailures = 0;
 const rpcResults = [];
 const featureResults = [];
+const protocolResults = [];
 
 for (const sdk of Object.keys(SDK_CLIENT_FILES)) {
   const rpc = checkSdk(sdk);
@@ -255,6 +321,10 @@ for (const sdk of Object.keys(SDK_CLIENT_FILES)) {
   const feat = checkSdkFeatures(sdk);
   featureResults.push(feat);
   if (feat.missing.length > 0) featureFailures++;
+
+  const proto = checkProtocolVersion(sdk);
+  protocolResults.push(proto);
+  if (!proto.ok) protocolFailures++;
 }
 
 // Print RPC results
@@ -285,16 +355,32 @@ for (const r of featureResults) {
   console.log(`${status} ${r.sdk.padEnd(13)} ${coverage.padEnd(10)} ${missingStr}`);
 }
 
+// Print protocol results
+console.log('\n' + '━'.repeat(70));
+console.log(`SDK PROTOCOL VERSION (required: ${REQUIRED_PROTOCOL_VERSION})`);
+console.log('━'.repeat(70));
+for (const r of protocolResults) {
+  const status = r.ok ? '✅' : '❌';
+  const detail = r.values.length === 0
+    ? 'no protocol version constant found'
+    : r.ok
+      ? `${r.values.length} constant(s) = ${REQUIRED_PROTOCOL_VERSION}`
+      : r.wrong.map((w) => `${w.value} @ ${w.where}`).join(', ');
+  console.log(`${status} ${r.sdk.padEnd(13)} ${detail}`);
+}
+
 // Summary
 const totalSdks = Object.keys(SDK_CLIENT_FILES).length;
 const totalFailures = new Set([
   ...rpcResults.filter(r => r.missing.length > 0).map(r => r.sdk),
   ...featureResults.filter(r => r.missing.length > 0).map(r => r.sdk),
+  ...protocolResults.filter(r => !r.ok).map(r => r.sdk),
 ]).size;
 
 console.log('\n' + '━'.repeat(70));
 console.log(`RPC:      ${totalSdks - rpcFailures}/${totalSdks} SDKs fully covered`);
 console.log(`Features: ${totalSdks - featureFailures}/${totalSdks} SDKs fully covered`);
+console.log(`Protocol: ${totalSdks - protocolFailures}/${totalSdks} SDKs on protocol ${REQUIRED_PROTOCOL_VERSION}`);
 console.log(`Overall:  ${totalSdks - totalFailures}/${totalSdks} SDKs pass all checks`);
 console.log('━'.repeat(70));
 

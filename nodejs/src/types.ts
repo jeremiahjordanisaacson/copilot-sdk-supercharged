@@ -3420,6 +3420,8 @@ export interface MessageOptions {
      * @deprecated Prefer the session-level `imageGeneration` option.
      */
     imageOptions?: ImageOptions;
+
+    /**
      * Opaque caller-chosen ID for the turn this message starts. The runtime copies it unchanged
      * into `_meta["com.github.copilot/turnId"]` on every MCP `tools/call` made while serving that
      * turn, including calls from sub-agents and Autopilot continuations. When a running turn

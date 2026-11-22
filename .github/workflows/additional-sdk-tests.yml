@@ -91,6 +91,10 @@ permissions:
 env:
   GH_TOKEN: "fake-token-for-e2e-tests"
   GITHUB_TOKEN: "fake-token-for-e2e-tests"
+  # Copilot CLI >= 1.0.10x ships a native binary plus npm-loader.js (no index.js).
+  # The npm bin shim runs the loader on Linux and macOS, so every SDK's E2E
+  # harness can spawn it directly.
+  COPILOT_CLI_PATH: ${{ github.workspace }}/nodejs/node_modules/.bin/copilot
 
 concurrency:
   group: additional-sdk-${{ github.workflow }}-${{ github.ref }}
