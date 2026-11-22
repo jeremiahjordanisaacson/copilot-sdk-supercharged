@@ -50,7 +50,7 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 | **Erlang** | [`erlang/`](./erlang/README.md) | [Cookbook](./erlang/cookbook/README.md) | Rebar3 |
 | **F#** | [`fsharp/`](./fsharp/README.md) | [Cookbook](./fsharp/cookbook/README.md) | `dotnet add package CopilotSDK.Supercharged.FSharp` |
 | **Fortran** | [`fortran/`](./fortran/README.md) | [Cookbook](./fortran/cookbook/README.md) | `fpm` |
-| **Go** | [`go/`](./go/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/go/README.md) | `go get github.com/github/copilot-sdk/go` |
+| **Go** | [`go/`](./go/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/go/README.md) | `go get github.com/microsoft/copilot-sdk/go/v2` |
 | **Groovy** | [`groovy/`](./groovy/README.md) | [Cookbook](./groovy/cookbook/README.md) | Gradle |
 | **Haskell** | [`haskell/`](./haskell/README.md) | [Cookbook](./haskell/cookbook/README.md) | Cabal |
 | **Java** | [`java/`](./java/README.md) | [Cookbook](./java/cookbook/README.md) | `io.github.jeremiahjordanisaacson:copilot-sdk-supercharged` |

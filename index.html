@@ -956,10 +956,12 @@
             </div>
 
             <div class="code-panel active" data-tab="nodejs">
-<pre><span class="token-kw">import</span> { <span class="token-type">CopilotClient</span> } <span class="token-kw">from</span> <span class="token-str">"copilot-sdk-supercharged"</span>;
+<pre><span class="token-kw">import</span> { <span class="token-type">CopilotClient</span>, approveAll } <span class="token-kw">from</span> <span class="token-str">"copilot-sdk-supercharged"</span>;
 
-<span class="token-kw">const</span> client = <span class="token-kw">new</span> <span class="token-type">CopilotClient</span>();
-<span class="token-kw">const</span> session = <span class="token-kw">await</span> client.<span class="token-fn">createSession</span>();
+<span class="token-kw">const</span> client = <span class="token-kw">new</span> <span class="token-type">CopilotClient</span>({ mode: <span class="token-str">"coding-agent"</span> });
+<span class="token-kw">const</span> session = <span class="token-kw">await</span> client.<span class="token-fn">createSession</span>({
+    permissions: { onRequest: approveAll },
+});
 
 <span class="token-kw">const</span> response = <span class="token-kw">await</span> session.<span class="token-fn">sendAndWait</span>({
     <span class="token-str">prompt</span>: <span class="token-str">"What is 2 + 2?"</span>
@@ -971,40 +973,44 @@ console.<span class="token-fn">log</span>(response?.data.content);
 
             <div class="code-panel" data-tab="python">
 <pre><span class="token-kw">from</span> copilot <span class="token-kw">import</span> <span class="token-type">CopilotClient</span>
+<span class="token-kw">from</span> copilot.session <span class="token-kw">import</span> <span class="token-type">PermissionHandler</span>
 
 <span class="token-kw">async def</span> <span class="token-fn">main</span>():
-    client = <span class="token-type">CopilotClient</span>()
-    <span class="token-kw">await</span> client.<span class="token-fn">start</span>()
-
-    session = <span class="token-kw">await</span> client.<span class="token-fn">create_session</span>()
-    response = <span class="token-kw">await</span> session.<span class="token-fn">send_and_wait</span>({
-        <span class="token-str">"prompt"</span>: <span class="token-str">"What is 2 + 2?"</span>
-    })
-
-    <span class="token-fn">print</span>(response.data.content)
-    <span class="token-kw">await</span> client.<span class="token-fn">stop</span>()</pre>
+    <span class="token-kw">async with</span> <span class="token-type">CopilotClient</span>(mode=<span class="token-str">"coding-agent"</span>) <span class="token-kw">as</span> client:
+        session = <span class="token-kw">await</span> client.<span class="token-fn">create_session</span>(
+            permissions={<span class="token-str">"on_request"</span>: <span class="token-type">PermissionHandler</span>.approve_all}
+        )
+        response = <span class="token-kw">await</span> session.<span class="token-fn">send_and_wait</span>(<span class="token-str">"What is 2 + 2?"</span>)
+        <span class="token-fn">print</span>(response.data.content)</pre>
             </div>
 
             <div class="code-panel" data-tab="go">
-<pre>client := copilot.<span class="token-fn">NewClient</span>(<span class="token-kw">nil</span>)
+<pre>client := copilot.<span class="token-fn">NewClient</span>(&amp;copilot.<span class="token-type">ClientOptions</span>{Mode: copilot.ModeCodingAgent})
 client.<span class="token-fn">Start</span>(ctx)
 
-session, _ := client.<span class="token-fn">CreateSession</span>(ctx, <span class="token-kw">nil</span>)
+session, _ := client.<span class="token-fn">CreateSession</span>(ctx, &amp;copilot.<span class="token-type">CreateSessionOptions</span>{
+    Permissions: copilot.<span class="token-type">SessionPermissionOptions</span>{OnRequest: copilot.PermissionHandler.ApproveAll},
+})
 response, _ := session.<span class="token-fn">SendAndWait</span>(ctx,
     copilot.<span class="token-type">MessageOptions</span>{
         Prompt: <span class="token-str">"What is 2 + 2?"</span>,
     },
 )
 
-fmt.<span class="token-fn">Println</span>(*response.Data.Content)
+<span class="token-kw">if</span> d, ok := response.Data.(*copilot.<span class="token-type">AssistantMessageData</span>); ok {
+    fmt.<span class="token-fn">Println</span>(d.Content)
+}
 client.<span class="token-fn">Stop</span>()</pre>
             </div>
 
             <div class="code-panel" data-tab="dotnet">
-<pre><span class="token-kw">using</span> <span class="token-type">GitHub.Copilot.SDK</span>;
+<pre><span class="token-kw">using</span> <span class="token-type">Microsoft.Copilot</span>;
 
-<span class="token-kw">await using var</span> client = <span class="token-kw">new</span> <span class="token-type">CopilotClient</span>();
-<span class="token-kw">await using var</span> session = <span class="token-kw">await</span> client.<span class="token-fn">CreateSessionAsync</span>();
+<span class="token-kw">await using var</span> client = <span class="token-kw">new</span> <span class="token-type">CopilotClient</span>(<span class="token-kw">new</span> <span class="token-type">CopilotClientOptions</span> { Mode = <span class="token-type">CopilotClientMode</span>.CodingAgent });
+<span class="token-kw">await using var</span> session = <span class="token-kw">await</span> client.<span class="token-fn">CreateSessionAsync</span>(<span class="token-kw">new</span> <span class="token-type">CreateSessionOptions</span>
+{
+    Permissions = <span class="token-kw">new</span> <span class="token-type">SessionPermissionOptions</span> { OnRequest = <span class="token-type">PermissionHandler</span>.ApproveAll }
+});
 
 <span class="token-kw">var</span> response = <span class="token-kw">await</span> session.<span class="token-fn">SendAndWaitAsync</span>(
     <span class="token-kw">new</span> <span class="token-type">MessageOptions</span> { Prompt = <span class="token-str">"What is 2 + 2?"</span> }

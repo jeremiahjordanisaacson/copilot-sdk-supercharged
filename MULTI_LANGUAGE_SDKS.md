@@ -12,8 +12,8 @@ The repository started with SDKs for:
 |----------|-----------|---------|
 | Node.js / TypeScript | `nodejs/` | `copilot-sdk-supercharged` |
 | Python | `python/` | `copilot-sdk-supercharged` |
-| Go | `go/` | `github.com/github/copilot-sdk/go` |
-| .NET / C# | `dotnet/` | `GitHub.Copilot.SDK` |
+| Go | `go/` | `github.com/microsoft/copilot-sdk/go/v2` |
+| .NET / C# | `dotnet/` | `CopilotSDK.Supercharged` (namespace `Microsoft.Copilot`) |
 
 ## Added SDKs (36 languages)
 
