@@ -11,6 +11,10 @@ on:
       tag:
         description: 'Release tag to publish (for example v3.0.0)'
         required: true
+      dry_run:
+        description: 'Only verify that trusted publishing issues a token; do not publish'
+        type: boolean
+        default: false
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
@@ -51,7 +55,19 @@ jobs:
         continue-on-error: true
         uses: rust-lang/crates-io-auth-action@v1
 
+      - name: Verify trusted publishing (dry run)
+        if: ${{ inputs.dry_run }}
+        env:
+          OIDC_OUTCOME: ${{ steps.crates-auth.outcome }}
+        run: |
+          if [ "$OIDC_OUTCOME" != "success" ]; then
+            echo "::error::crates.io did not issue a trusted publishing token; check the trusted publisher for cargo-publish.yml."
+            exit 1
+          fi
+          echo "crates.io issued a trusted publishing token."
+
       - name: Publish to crates.io
+        if: ${{ !inputs.dry_run }}
         run: cargo publish --allow-dirty --no-default-features
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}

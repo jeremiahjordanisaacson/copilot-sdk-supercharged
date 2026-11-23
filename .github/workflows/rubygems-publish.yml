@@ -11,6 +11,10 @@ on:
       tag:
         description: 'Release tag to publish (for example v3.0.0)'
         required: true
+      dry_run:
+        description: 'Only verify that trusted publishing issues credentials; do not push'
+        type: boolean
+        default: false
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
@@ -58,7 +62,19 @@ jobs:
         continue-on-error: true
         uses: rubygems/configure-rubygems-credentials@v2.1.0
 
+      - name: Verify trusted publishing (dry run)
+        if: ${{ inputs.dry_run }}
+        env:
+          OIDC_OUTCOME: ${{ steps.rubygems-oidc.outcome }}
+        run: |
+          if [ "$OIDC_OUTCOME" != "success" ]; then
+            echo "::error::rubygems.org did not issue trusted publishing credentials; check the trusted publisher for rubygems-publish.yml."
+            exit 1
+          fi
+          echo "rubygems.org issued trusted publishing credentials."
+
       - name: Publish to RubyGems
+        if: ${{ !inputs.dry_run }}
         run: |
           if [ "$OIDC_OUTCOME" != "success" ]; then
             mkdir -p ~/.gem
