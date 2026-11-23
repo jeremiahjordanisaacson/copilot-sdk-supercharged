@@ -1,8 +1,8 @@
 {
-  "version": 4,
+  "version": 3,
   "targets": {
     "net8.0": {
-      "FSharp.Core/10.1.404": {
+      "FSharp.Core/10.0.107": {
         "type": "package",
         "compile": {
           "lib/netstandard2.1/FSharp.Core.dll": {
@@ -74,7 +74,7 @@
           }
         }
       },
-      "Microsoft.CodeCoverage/17.14.2": {
+      "Microsoft.CodeCoverage/17.14.1": {
         "type": "package",
         "compile": {
           "lib/net8.0/Microsoft.VisualStudio.CodeCoverage.Shim.dll": {}
@@ -87,11 +87,11 @@
           "build/netstandard2.0/Microsoft.CodeCoverage.targets": {}
         }
       },
-      "Microsoft.NET.Test.Sdk/17.14.2": {
+      "Microsoft.NET.Test.Sdk/17.14.1": {
         "type": "package",
         "dependencies": {
-          "Microsoft.CodeCoverage": "17.14.2",
-          "Microsoft.TestPlatform.TestHost": "17.14.2"
+          "Microsoft.CodeCoverage": "17.14.1",
+          "Microsoft.TestPlatform.TestHost": "17.14.1"
         },
         "compile": {
           "lib/net8.0/_._": {}
@@ -104,7 +104,7 @@
           "build/net8.0/Microsoft.NET.Test.Sdk.targets": {}
         }
       },
-      "Microsoft.TestPlatform.ObjectModel/17.14.2": {
+      "Microsoft.TestPlatform.ObjectModel/17.14.1": {
         "type": "package",
         "dependencies": {
           "System.Reflection.Metadata": "8.0.0"
@@ -200,10 +200,10 @@
           }
         }
       },
-      "Microsoft.TestPlatform.TestHost/17.14.2": {
+      "Microsoft.TestPlatform.TestHost/17.14.1": {
         "type": "package",
         "dependencies": {
-          "Microsoft.TestPlatform.ObjectModel": "17.14.2",
+          "Microsoft.TestPlatform.ObjectModel": "17.14.1",
           "Newtonsoft.Json": "13.0.3"
         },
         "compile": {
@@ -531,7 +531,7 @@
         "type": "project",
         "framework": ".NETCoreApp,Version=v8.0",
         "dependencies": {
-          "FSharp.Core": "10.1.404",
+          "FSharp.Core": "10.0.107",
           "System.Text.Json": "8.0.0"
         },
         "compile": {
@@ -544,31 +544,15 @@
     }
   },
   "libraries": {
-    "FSharp.Core/10.1.404": {
-      "sha512": "NzyMm8uoa4ULzpQwMcq/4F2zCWGKduuGwxdRSi48kEahNlykKJBUSmb9H/6SFbS0fDd+LqQum0BOkDp8pD8xRg==",
+    "FSharp.Core/10.0.107": {
+      "sha512": "9FGx5KgWja2QOla6D6rhmPPjb9Uo2CzJMT4M8LIDUPVCwYRdfYySZNXeRJV0yQ8ba43aJMZDY+Yw/GpfxyEX9Q==",
       "type": "package",
-      "path": "fsharp.core/10.1.404",
+      "path": "fsharp.core/10.0.107",
       "files": [
         ".nupkg.metadata",
-        ".signature.p7s",
         "Icon.png",
-        "fsharp.core.10.1.404.nupkg.sha512",
+        "fsharp.core.10.0.107.nupkg.sha512",
         "fsharp.core.nuspec",
-        "lib/net10.0/FSharp.Core.dll",
-        "lib/net10.0/FSharp.Core.xml",
-        "lib/net10.0/cs/FSharp.Core.resources.dll",
-        "lib/net10.0/de/FSharp.Core.resources.dll",
-        "lib/net10.0/es/FSharp.Core.resources.dll",
-        "lib/net10.0/fr/FSharp.Core.resources.dll",
-        "lib/net10.0/it/FSharp.Core.resources.dll",
-        "lib/net10.0/ja/FSharp.Core.resources.dll",
-        "lib/net10.0/ko/FSharp.Core.resources.dll",
-        "lib/net10.0/pl/FSharp.Core.resources.dll",
-        "lib/net10.0/pt-BR/FSharp.Core.resources.dll",
-        "lib/net10.0/ru/FSharp.Core.resources.dll",
-        "lib/net10.0/tr/FSharp.Core.resources.dll",
-        "lib/net10.0/zh-Hans/FSharp.Core.resources.dll",
-        "lib/net10.0/zh-Hant/FSharp.Core.resources.dll",
         "lib/netstandard2.0/FSharp.Core.dll",
         "lib/netstandard2.0/FSharp.Core.xml",
         "lib/netstandard2.0/cs/FSharp.Core.resources.dll",
@@ -621,10 +605,10 @@
         "tools/install.ps1"
       ]
     },
-    "Microsoft.CodeCoverage/17.14.2": {
-      "sha512": "ClUZus3UFavgM3ut4t0cfH7WHgrhc9RP1VCduJpmEGdt8Qn8NsF1IxP3GaUb2rnPck1HIO+IYSmIMZxeftCfhA==",
+    "Microsoft.CodeCoverage/17.14.1": {
+      "sha512": "pmTrhfFIoplzFVbhVwUquT+77CbGH+h4/3mBpdmIlYtBi9nAB+kKI6dN3A/nV4DFi3wLLx/BlHIPK+MkbQ6Tpg==",
       "type": "package",
-      "path": "microsoft.codecoverage/17.14.2",
+      "path": "microsoft.codecoverage/17.14.1",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
@@ -683,14 +667,14 @@
         "build/netstandard2.0/zh-Hant/Microsoft.VisualStudio.TraceDataCollector.resources.dll",
         "lib/net462/Microsoft.VisualStudio.CodeCoverage.Shim.dll",
         "lib/net8.0/Microsoft.VisualStudio.CodeCoverage.Shim.dll",
-        "microsoft.codecoverage.17.14.2.nupkg.sha512",
+        "microsoft.codecoverage.17.14.1.nupkg.sha512",
         "microsoft.codecoverage.nuspec"
       ]
     },
-    "Microsoft.NET.Test.Sdk/17.14.2": {
-      "sha512": "SvwMteSx1nlKYMx2oKAYBFQz4eBjhv82QdruQeybp6OSlhATzW8pK/wtDuAOSlNaf5UnFykaxd/7/eosRN9k0g==",
+    "Microsoft.NET.Test.Sdk/17.14.1": {
+      "sha512": "HJKqKOE+vshXra2aEHpi2TlxYX7Z9VFYkr+E5rwEvHC8eIXiyO+K9kNm8vmNom3e2rA56WqxU+/N9NJlLGXsJQ==",
       "type": "package",
-      "path": "microsoft.net.test.sdk/17.14.2",
+      "path": "microsoft.net.test.sdk/17.14.1",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
@@ -715,14 +699,14 @@
         "lib/native/_._",
         "lib/net462/_._",
         "lib/net8.0/_._",
-        "microsoft.net.test.sdk.17.14.2.nupkg.sha512",
+        "microsoft.net.test.sdk.17.14.1.nupkg.sha512",
         "microsoft.net.test.sdk.nuspec"
       ]
     },
-    "Microsoft.TestPlatform.ObjectModel/17.14.2": {
-      "sha512": "Bd6FxwMQlDLwxPoAUTLvLtpkVYZK0zfvdMMtoxgV+4+gzS4u4lag0vd2/hazZI4i/GRd/mGndMrZWTZT5lyIdw==",
+    "Microsoft.TestPlatform.ObjectModel/17.14.1": {
+      "sha512": "xTP1W6Mi6SWmuxd3a+jj9G9UoC850WGwZUps1Wah9r1ZxgXhdJfj1QqDLJkFjHDCvN42qDL2Ps5KjQYWUU0zcQ==",
       "type": "package",
-      "path": "microsoft.testplatform.objectmodel/17.14.2",
+      "path": "microsoft.testplatform.objectmodel/17.14.1",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
@@ -814,14 +798,14 @@
         "lib/netstandard2.0/zh-Hans/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll",
         "lib/netstandard2.0/zh-Hant/Microsoft.TestPlatform.CoreUtilities.resources.dll",
         "lib/netstandard2.0/zh-Hant/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll",
-        "microsoft.testplatform.objectmodel.17.14.2.nupkg.sha512",
+        "microsoft.testplatform.objectmodel.17.14.1.nupkg.sha512",
         "microsoft.testplatform.objectmodel.nuspec"
       ]
     },
-    "Microsoft.TestPlatform.TestHost/17.14.2": {
-      "sha512": "caKAaaKcr2Yk3kBMozodubTFEGbCFPbw5tF3rBY0YU6B/nuIvo5vXHMPnjtIw57dYUKYVJmDpSkme/8Eastkzw==",
+    "Microsoft.TestPlatform.TestHost/17.14.1": {
+      "sha512": "d78LPzGKkJwsJXAQwsbJJ7LE7D1wB+rAyhHHAaODF+RDSQ0NgMjDFkSA1Djw18VrxO76GlKAjRUhl+H8NL8Z+Q==",
       "type": "package",
-      "path": "microsoft.testplatform.testhost/17.14.2",
+      "path": "microsoft.testplatform.testhost/17.14.1",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
@@ -884,7 +868,7 @@
         "lib/net8.0/zh-Hant/Microsoft.TestPlatform.CommunicationUtilities.resources.dll",
         "lib/net8.0/zh-Hant/Microsoft.TestPlatform.CrossPlatEngine.resources.dll",
         "lib/net8.0/zh-Hant/Microsoft.VisualStudio.TestPlatform.Common.resources.dll",
-        "microsoft.testplatform.testhost.17.14.2.nupkg.sha512",
+        "microsoft.testplatform.testhost.17.14.1.nupkg.sha512",
         "microsoft.testplatform.testhost.nuspec"
       ]
     },
@@ -1219,7 +1203,7 @@
   "projectFileDependencyGroups": {
     "net8.0": [
       "CopilotSDK.Supercharged.FSharp >= 0.1.0",
-      "FSharp.Core >= 10.1.404",
+      "FSharp.Core >= 10.0.107",
       "FsUnit.xUnit >= 6.*",
       "Microsoft.NET.Test.Sdk >= 17.*",
       "xunit >= 2.*",
@@ -1227,34 +1211,34 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\jeisaacs\\.nuget\\packages\\": {}
+    "/Users/home/.nuget/packages/": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\tests\\CopilotSDK.Supercharged.FSharp.Tests.fsproj",
+      "projectUniqueName": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj",
       "projectName": "CopilotSDK.Supercharged.FSharp.Tests",
-      "projectPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\tests\\CopilotSDK.Supercharged.FSharp.Tests.fsproj",
-      "packagesPath": "C:\\Users\\jeisaacs\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\tests\\obj\\",
+      "projectPath": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj",
+      "packagesPath": "/Users/home/.nuget/packages/",
+      "outputPath": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/tests/obj/",
       "projectStyle": "PackageReference",
       "configFilePaths": [
-        "C:\\Users\\jeisaacs\\.copilot\\session-state\\e5b1fa95-0646-4d10-8b39-5481512f3559\\files\\nuget.local.config"
+        "/Users/home/.nuget/NuGet/NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net8.0"
       ],
       "sources": {
-        "C:\\Program Files\\dotnet\\sdk\\10.0.404\\FSharp\\library-packs": {},
-        "https://packagefeedproxy.microsoft.io/nuget/v3/index.json": {}
+        "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/library-packs": {},
+        "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/sdk/10.0.107/FSharp/library-packs": {},
+        "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
         "net8.0": {
-          "framework": "net8.0",
           "targetAlias": "net8.0",
           "projectReferences": {
-            "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\src\\CopilotSDK.Supercharged.FSharp.fsproj": {
-              "projectPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\src\\CopilotSDK.Supercharged.FSharp.fsproj"
+            "/Users/home/Documents/copilot-sdk-supercharged/fsharp/src/CopilotSDK.Supercharged.FSharp.fsproj": {
+              "projectPath": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/src/CopilotSDK.Supercharged.FSharp.fsproj"
             }
           }
         }
@@ -1264,17 +1248,16 @@
         "auditLevel": "low",
         "auditMode": "direct"
       },
-      "SdkAnalysisLevel": "10.0.400"
+      "SdkAnalysisLevel": "10.0.100"
     },
     "frameworks": {
       "net8.0": {
-        "framework": "net8.0",
         "targetAlias": "net8.0",
         "dependencies": {
           "FSharp.Core": {
             "include": "Runtime, Compile, Build, Native, Analyzers, BuildTransitive",
             "target": "Package",
-            "version": "[10.1.404, )",
+            "version": "[10.0.107, )",
             "generatePathProperty": true
           },
           "FsUnit.xUnit": {
@@ -1309,12 +1292,22 @@
         ],
         "assetTargetFallback": true,
         "warn": true,
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.AspNetCore.App.Ref",
+            "version": "[8.0.26, 8.0.26]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Ref",
+            "version": "[8.0.26, 8.0.26]"
+          }
+        ],
         "frameworkReferences": {
           "Microsoft.NETCore.App": {
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.404/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/sdk/10.0.107/PortableRuntimeIdentifierGraph.json"
       }
     }
   }
