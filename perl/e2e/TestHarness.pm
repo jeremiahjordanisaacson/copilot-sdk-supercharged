@@ -32,10 +32,12 @@ sub start {
     $harness_dir = abs_path($harness_dir);
     my $server_path = File::Spec->catfile($harness_dir, 'server.ts');
 
-    my $err = gensym();
-    my $pid = open3(my $in, my $out, $err, 'npx', 'tsx', $server_path);
+    # Send the proxy's stderr straight to ours. The replay proxy logs (for
+    # example blocked telemetry connections) to stderr for the whole run; a
+    # captured pipe that is dropped after startup would kill it with EPIPE.
+    my $pid = open3(my $in, my $out, '>&STDERR', 'npx', 'tsx', $server_path);
 
-    my $selector = IO::Select->new($out, $err);
+    my $selector = IO::Select->new($out);
     my $startup_output = '';
     my $proxy_url;
     while (my @ready = $selector->can_read(15)) {
