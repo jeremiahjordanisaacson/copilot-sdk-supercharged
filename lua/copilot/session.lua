@@ -113,26 +113,75 @@ function CopilotSession:send_and_wait(options, timeout)
     local idle_received = false
     local error_received = nil
 
+    -- Events read while send() waits for its RPC response can still belong to
+    -- an earlier turn (for example a late session.idle). Buffer them until the
+    -- message id is known, and accept session.idle only after this turn has
+    -- visibly started, so a stale idle cannot end the wait early.
+    local message_id = nil
+    local sent = false
+    local turn_started = false
+    local buffered = {}
+
+    -- Live events without correlation ids are attributed to this turn (older
+    -- runtimes omit them); buffered ones must match the message id exactly.
+    local function belongs_to_turn(id, live)
+        if id ~= nil and message_id ~= nil then
+            return id == message_id
+        end
+        return live
+    end
+
+    local function observe(event, live)
+        local data = event.data or {}
+        if event.type == types.SessionEventType.USER_MESSAGE then
+            if belongs_to_turn(data.messageId, live) then
+                turn_started = true
+            end
+        elseif event.type == types.SessionEventType.ASSISTANT_TURN_START then
+            if live then
+                turn_started = true
+            end
+        elseif event.type == types.SessionEventType.ASSISTANT_MESSAGE then
+            if belongs_to_turn(data.originatingMessageId, live) then
+                turn_started = true
+                last_assistant_message = event
+            end
+        elseif event.type == types.SessionEventType.SESSION_IDLE then
+            if turn_started then
+                idle_received = true
+            end
+        elseif event.type == types.SessionEventType.SESSION_ERROR then
+            if belongs_to_turn(data.originatingMessageId, live) then
+                error_received = data.message or "session error"
+            end
+        end
+    end
+
     -- Subscribe to events
     local unsubscribe = self:on(function(event)
-        if event.type == types.SessionEventType.ASSISTANT_MESSAGE then
-            last_assistant_message = event
-        elseif event.type == types.SessionEventType.SESSION_IDLE then
-            idle_received = true
-        elseif event.type == types.SessionEventType.SESSION_ERROR then
-            local msg = "session error"
-            if event.data and event.data.message then
-                msg = event.data.message
-            end
-            error_received = msg
+        if sent then
+            observe(event, true)
+        else
+            table.insert(buffered, event)
         end
     end)
 
     -- Send the message
-    local _, send_err = self:send(options)
+    local sent_id, send_err = self:send(options)
     if send_err then
         unsubscribe()
         return nil, send_err
+    end
+    message_id = sent_id
+    sent = true
+    for _, event in ipairs(buffered) do
+        observe(event, false)
+    end
+    buffered = nil
+    -- Without a message id there is nothing to correlate against, so treat
+    -- the send itself as the start of the turn.
+    if message_id == nil then
+        turn_started = true
     end
 
     -- Wait for idle or error, polling the read loop
