@@ -136,7 +136,14 @@ sub configure {
         content => $body,
         headers => { 'Content-Type' => 'application/json' },
     });
-    die "Config failed: $resp->{status}" unless $resp->{success};
+    unless ($resp->{success}) {
+        # HTTP::Tiny reports transport failures as status 599 with the reason in content.
+        my $pid    = $self->{process_pid};
+        my $alive  = ($pid && kill(0, $pid)) ? 'running' : 'not running';
+        my $detail = defined $resp->{content} ? substr($resp->{content}, 0, 500) : '';
+        die "Config failed: $resp->{status} $resp->{reason}: $detail (proxy pid "
+          . ($pid // 'none') . " $alive)";
+    }
 }
 
 sub url {

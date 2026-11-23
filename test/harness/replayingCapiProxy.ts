@@ -108,7 +108,8 @@ const normalizedToolNames: Record<string, string> = {
  * Default model to use when no stored data is available for a given test.
  * This enables responding to /models without needing to have a capture file.
  */
-const defaultModel = "claude-sonnet-5";
+// This fork's SDK E2E suites and recordings use claude-sonnet-4.5.
+const defaultModel = "claude-sonnet-4.5";
 
 /**
  * An HTTP proxy that not only captures HTTP exchanges, but also stores them in a file on disk and
@@ -325,9 +326,19 @@ export class ReplayingCapiProxy extends CapturingHttpProxy {
             gate.reached.resolve();
             await gate.release.promise;
           }
+          // Copilot CLI 1.0.10x+ reads its model catalog from CAPI `GET /meta`
+          // ({ models: <the /models catalog>, auto?: <Auto tiers> }). Without an
+          // explicit fixture, serve the same catalog as /models so model listing
+          // keeps working for SDK E2E tests that never configure one.
+          const storedModels = this.state?.storedData?.models;
           const fixture = this.metaResponse ?? {
-            statusCode: 501,
-            body: { message: "No explicit /meta fixture configured" },
+            statusCode: 200,
+            body: {
+              models: createGetModelsResponse(
+                storedModels && storedModels.length > 0 ? storedModels : [defaultModel],
+                this.state?.modelNames,
+              ),
+            },
           };
           options.onResponseStart(fixture.statusCode, {
             "content-type": "application/json",
