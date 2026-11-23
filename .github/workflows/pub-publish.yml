@@ -37,10 +37,33 @@ jobs:
       - name: Install dependencies
         run: dart pub get
 
-      - name: Publish to pub.dev (OIDC trusted publishing — no credentials secret)
+      # pub.dev only accepts a package's first upload from a signed-in user,
+      # and automated (OIDC) publishing can only be enabled after that. Skip
+      # with a notice until the package exists instead of failing every tag.
+      - name: Check package exists on pub.dev
+        id: exists
+        run: |
+          NAME=$(grep -E '^name:' pubspec.yaml | head -1 | sed -E 's/name:[[:space:]]*//')
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "https://pub.dev/api/packages/$NAME")
+          if [ "$STATUS" = "404" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            MSG="pub.dev package '$NAME' does not exist yet. A maintainer must run 'dart pub publish' once from dart/ while signed in, then enable automated publishing (GitHub Actions, repository jeremiahjordanisaacson/copilot-sdk-supercharged, tag pattern v{{version}}) in the package admin page."
+            echo "::warning title=pub.dev publish skipped::$MSG"
+            echo "### pub.dev publish skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "$MSG" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$STATUS" = "200" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unexpected HTTP $STATUS from pub.dev for package $NAME"
+            exit 1
+          fi
+
+      - name: Publish to pub.dev (OIDC trusted publishing, no credentials secret)
+        if: steps.exists.outputs.exists == 'true'
         run: dart pub publish --force
 
       - name: Attest build provenance
+        if: steps.exists.outputs.exists == 'true'
         uses: actions/attest-build-provenance@v2
         continue-on-error: true
         with:

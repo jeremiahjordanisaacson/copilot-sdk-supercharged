@@ -52,7 +52,22 @@ jobs:
       - name: Build package
         run: python -m build
 
-      - name: Publish to PyPI (OIDC trusted publishing — no token, PEP 740 attestations)
+      # Trusted publishing is preferred. Until a trusted publisher for
+      # pypi-publish.yml is configured on pypi.org, fall back to the
+      # PYPI_TOKEN API token so releases still ship.
+      - name: Publish to PyPI (OIDC trusted publishing, PEP 740 attestations)
+        id: oidc
+        continue-on-error: true
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: python/dist
+          skip-existing: true
+
+      - name: Publish to PyPI (API token fallback)
+        if: steps.oidc.outcome == 'failure'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: python/dist
+          password: ${{ secrets.PYPI_TOKEN }}
+          attestations: false
+          skip-existing: true
