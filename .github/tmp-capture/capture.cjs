@@ -12,11 +12,12 @@ proxy.stdout.on("data", async (d) => {
   sbuf += d; const m = /Listening: (\S+)\s*(\{.*\})?/.exec(sbuf); if (!m || cli) return;
   const url = m[1], meta = m[2] ? JSON.parse(m[2]) : {};
   await new Promise((res, rej) => { const body = JSON.stringify({ filePath: path.join(repo, "test/snapshots/session/should_have_stateful_conversation.yaml"), workDir: work }); const u = new URL(url + "/config"); const r = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) } }, (resp) => { resp.resume(); resp.on("end", res); }); r.on("error", rej); r.end(body); });
-  const env = { ...process.env, COPILOT_API_URL: url, COPILOT_DEBUG_GITHUB_API_URL: url, COPILOT_HOME: home, GH_CONFIG_DIR: home, XDG_CONFIG_HOME: home, XDG_STATE_HOME: home, GH_TOKEN: "fake-test-token", GITHUB_TOKEN: "fake-test-token" };
+const token = process.env.GH_TOKEN || "fake-test-token"; await new Promise((res, rej) => { const body = JSON.stringify({ token, response: { login: "e2e-test-user", id: 12345, copilot_plan: "individual_pro", endpoints: { api: url, telemetry: "https://sdk-hydro-collector.example.com" }, analytics_tracking_id: "e2e-test-tracking-id" } }); const u = new URL(url + "/copilot-user-config"); const r = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) } }, (resp) => { resp.resume(); resp.on("end", res); }); r.on("error", rej); r.end(body); });
+  const env = { ...process.env, COPILOT_API_URL: url, COPILOT_DEBUG_GITHUB_API_URL: url, COPILOT_HOME: home, GH_CONFIG_DIR: home, XDG_CONFIG_HOME: home, XDG_STATE_HOME: home, GH_TOKEN: token, GITHUB_TOKEN: token, COPILOT_SDK_AUTH_TOKEN: token };
   delete env.COPILOT_HMAC_KEY; delete env.CAPI_HMAC_KEY;
   if (meta.connectProxyUrl) { env.HTTPS_PROXY = env.https_proxy = meta.connectProxyUrl; env.NO_PROXY = env.no_proxy = "127.0.0.1,localhost"; }
   if (meta.caFilePath) { env.NODE_EXTRA_CA_CERTS = meta.caFilePath; env.SSL_CERT_FILE = meta.caFilePath; }
-  cli = spawn(process.execPath, [path.join(repo, "nodejs/node_modules/@github/copilot/npm-loader.js"), "--headless", "--no-auto-update", "--stdio"], { cwd: work, env, stdio: ["pipe", "pipe", "pipe"] });
+  cli = spawn(process.execPath, [path.join(repo, "nodejs/node_modules/@github/copilot/npm-loader.js"), "--headless", "--no-auto-update", "--stdio", "--auth-token-env", "COPILOT_SDK_AUTH_TOKEN", "--no-auto-login"], { cwd: work, env, stdio: ["pipe", "pipe", "pipe"] });
   cli.stderr.on("data", (e) => { if (process.env.SHOWERR) process.stderr.write("[cli] " + e); });
   let buf = Buffer.alloc(0), id = 0; const pending = new Map();
   const write = (o) => { const b = JSON.stringify(o); cli.stdin.write(`Content-Length: ${Buffer.byteLength(b)}\r\n\r\n${b}`); };
