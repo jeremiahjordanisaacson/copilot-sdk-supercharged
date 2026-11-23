@@ -1,0 +1,100 @@
+version: 2
+multi-ecosystem-groups:
+  all:
+    schedule:
+      interval: 'weekly'
+updates:
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    multi-ecosystem-group: 'all'
+    patterns: ['*']
+    ignore:
+      # gh-aw generated files: action SHAs are managed by `gh aw compile`
+      # via .github/aw/actions-lock.json, not by Dependabot.
+      # Dependabot's find-and-replace breaks lockfile metadata headers.
+      - dependency-name: "actions/github-script"
+      - dependency-name: "github/gh-aw-actions"
+      # Major versions can change action inputs; adopt them deliberately.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: 'devcontainers'
+    directory: '/'
+    multi-ecosystem-group: 'all'
+    patterns: ['*']
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+  # Node.js dependencies
+  - package-ecosystem: 'npm'
+    directory: '/nodejs'
+    multi-ecosystem-group: 'all'
+    patterns: ['*']
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # The Copilot runtime and the SDK's platform runtime packages are pinned to
+      # the version every SDK is tested against (SDK protocol compatibility). They
+      # move with the upstream sync in .github/skills/daily-maintenance, not here.
+      - dependency-name: "@github/copilot"
+      - dependency-name: "@github/copilot-*"
+      - dependency-name: "@microsoft/copilot-sdk-*"
+  - package-ecosystem: 'npm'
+    directory: '/test/harness'
+    multi-ecosystem-group: 'all'
+    patterns: ['*']
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@github/copilot"
+      - dependency-name: "@github/copilot-*"
+  # Python dependencies (uv.lock)
+  - package-ecosystem: 'uv'
+    directory: '/python'
+    multi-ecosystem-group: 'all'
+    patterns: ['*']
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+  # Go dependencies
+  - package-ecosystem: 'gomod'
+    directory: '/go'
+    multi-ecosystem-group: 'all'
+    patterns: ['*']
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+  # .NET dependencies
+  - package-ecosystem: 'nuget'
+    directory: '/dotnet'
+    multi-ecosystem-group: 'all'
+    patterns: ['*']
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+  # Java dependencies
+  - package-ecosystem: 'maven'
+    directory: '/java'
+    schedule:
+      interval: 'weekly'
+    ignore:
+      # Major version bumps often drop Java 17 support or have breaking
+      # API changes. These must be evaluated and applied manually.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      java-maven-deps:
+        patterns:
+          - "*"
+  # Java codegen dependencies
+  - package-ecosystem: 'npm'
+    directory: '/java/scripts/codegen'
+    schedule:
+      interval: 'weekly'
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@github/copilot"
+    groups:
+      java-codegen-deps:
+        patterns:
+          - "*"
