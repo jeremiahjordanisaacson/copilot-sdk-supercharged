@@ -22,75 +22,6 @@
  Information about an available model.
 </summary>
 </member>
-<member name="T:CopilotSDK.Supercharged.FSharp.RemoteEnableResult">
-<summary>
- Experimental
- Result of enabling remote mode.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.RemoteEnableRequest">
-<summary>
- Experimental
- Request to enable remote mode.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.RemoteSessionMode">
-<summary>
- Experimental
- Mode for remote sessions.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.SkillsLoadDiagnostics">
-<summary>
- Experimental
- Diagnostics from loading skills.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.ModelBilling">
-<summary>
- Model billing information.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.ModelBillingTokenPrices">
-<summary>
- Token prices for model billing.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CommandsListRequest">
-<summary>
- Request to list available commands.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CommandsInvokeRequest">
-<summary>
- Request to invoke a command.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.SlashCommandInfo">
-<summary>
- Information about a slash command.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.SlashCommandInput">
-<summary>
- Input specification for a slash command.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.ModelPickerPriceCategory">
-<summary>
- Price category for the model picker.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.SlashCommandKind">
-<summary>
- Kind of a slash command.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.SlashCommandInputCompletion">
-<summary>
- Completion type for slash command input.
-</summary>
-</member>
 <member name="T:CopilotSDK.Supercharged.FSharp.SessionEventEnvelope">
 <summary>
  Envelope wrapping a session event with metadata.
@@ -99,6 +30,27 @@
 <member name="T:CopilotSDK.Supercharged.FSharp.SessionEvent">
 <summary>
  All session events emitted by the Copilot CLI, represented as a discriminated union.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ToolShellOutputData.Stream">
+<summary>
+ &quot;stdout&quot; or &quot;stderr&quot;; None means stdout.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ToolShellOutputData.Sequence">
+<summary>
+ Zero-based publication sequence across all streams of the tool call.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ToolShellOutputData.Text">
+<summary>
+ New output to append.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolShellOutputData">
+<summary>
+ Data payload for a &quot;tool.shell_output&quot; event: live, append-only shell
+ output that is not persisted or replayed.
 </summary>
 </member>
 <member name="T:CopilotSDK.Supercharged.FSharp.SessionCompactionData">
@@ -141,54 +93,154 @@
  Binary result from a tool (e.g. an image).
 </summary>
 </member>
-<member name="T:CopilotSDK.Supercharged.FSharp.RegisteredTool">
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.OnStoreMemory">
 <summary>
- A registered tool pairing its definition with its handler.
+ Persists agent memories (sends state.hasMemoryStore).
 </summary>
 </member>
-<member name="T:CopilotSDK.Supercharged.FSharp.ToolHandler">
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.OnShellAuthenticationRequest">
 <summary>
- Handler function for tool invocations.
+ Answers sudo/ssh/git prompts (sends interaction.requestShellAuthentication).
 </summary>
 </member>
-<member name="T:CopilotSDK.Supercharged.FSharp.ToolInvocation">
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.CapiEnabled">
 <summary>
- Context passed to a tool handler during invocation.
+ Whether Copilot API models are available (github.capi.enabled); Some false for BYOK only.
 </summary>
 </member>
-<member name="P:CopilotSDK.Supercharged.FSharp.Tool.Parameters">
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.ClearDefaultProvider">
 <summary>
- JSON Schema for parameters.
+ Send inference.defaultProvider = null to clear the stored default provider.
 </summary>
 </member>
-<member name="P:CopilotSDK.Supercharged.FSharp.Tool.Description">
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.DefaultProvider">
 <summary>
- Human-readable description.
+ Provider used for unqualified model selections (inference.defaultProvider).
 </summary>
 </member>
-<member name="P:CopilotSDK.Supercharged.FSharp.Tool.Name">
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.Models">
 <summary>
- Unique tool name.
+ Models served by the named providers (inference.models).
 </summary>
 </member>
-<member name="T:CopilotSDK.Supercharged.FSharp.Tool">
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.Providers">
 <summary>
- Definition of a tool that the assistant can invoke.
+ Named BYOK provider connections (inference.providers).
 </summary>
 </member>
-<member name="T:CopilotSDK.Supercharged.FSharp.ToolParameterSchema">
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.ExcludedTools">
 <summary>
- Schema for a tool&apos;s parameters (JSON Schema object).
+ Tools to exclude from the session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.AvailableTools">
+<summary>
+ Allow-list of tool names (required for every session in ClientMode.Empty).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.Tools">
+<summary>
+ Tools declared to the runtime (tools.definitions) and registered on the session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.SuppressResumeEvent">
+<summary>
+ Suppress the session.resume event emitted on resume (wire: suppressResumeEvent).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.Provider">
+<summary>
+ BYOK model provider configuration.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.OnSubagentStop">
+<summary>
+ Hook invoked after a sub-agent stops (&quot;subagentStop&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.OnSubagentStart">
+<summary>
+ Hook invoked before a sub-agent starts (&quot;subagentStart&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.Autopilot">
+<summary>
+ Autopilot continuation options.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.ImageGeneration">
+<summary>
+ Session-level image generation configuration.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.AllowTranscriptRecovery">
+<summary>
+ Allow recovering the session from its transcript.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.EnforceManagedModelDefaults">
+<summary>
+ Enforce managed model defaults.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.ExcludedManagedSettings">
+<summary>
+ Managed settings to exclude.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.InteractiveUser">
+<summary>
+ Whether an interactive user is present.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.HookDirectories">
+<summary>
+ Directories to load hook definitions from.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.AgentDirectories">
+<summary>
+ Directories to load custom agents from.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.AuthClientIdMetadataUrl">
+<summary>
+ OAuth client ID metadata document URL.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.AllowedModels">
+<summary>
+ Restrict the models this session may use.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.FeatureFlags">
+<summary>
+ Runtime feature flags (sent even when empty).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.SandboxConfig">
+<summary>
+ Sandbox configuration.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.GitHubTokenProvider">
+<summary>
+ Per-session GitHub token provider.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.AskUserVariant">
+<summary>
+ Ask-user tool variant (see AskUserVariant).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.AutoTier">
+<summary>
+ Auto-routing tier (see AutoTier; experimental). Sent under &quot;capi&quot;.
 </summary>
 </member>
 <member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.InstructionDirectories">
 <summary>
  Directories to search for instruction files.
-</summary>
-</member>
-<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.OnExitPlanMode">
-<summary>
- Handler for exit plan mode requests from the server.
 </summary>
 </member>
 <member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.Model">
@@ -211,6 +263,251 @@
  Configuration for resuming an existing session.
 </summary>
 </member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnStoreMemory">
+<summary>
+ Persists agent memories (sends state.hasMemoryStore).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnShellAuthenticationRequest">
+<summary>
+ Answers sudo/ssh/git prompts (sends interaction.requestShellAuthentication).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.CapiEnabled">
+<summary>
+ Whether Copilot API models are available (github.capi.enabled); Some false for BYOK only.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.DefaultProvider">
+<summary>
+ Provider used for unqualified model selections (inference.defaultProvider).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.Models">
+<summary>
+ Models served by the named providers (inference.models).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.Providers">
+<summary>
+ Named BYOK provider connections (inference.providers).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.AvailableTools">
+<summary>
+ Allow-list of tool names (required for every session in ClientMode.Empty).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.Tools">
+<summary>
+ Tools declared to the runtime (tools.definitions) and registered on the session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.Provider">
+<summary>
+ BYOK model provider configuration.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnSubagentStop">
+<summary>
+ Hook invoked after a sub-agent stops (&quot;subagentStop&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnSubagentStart">
+<summary>
+ Hook invoked before a sub-agent starts (&quot;subagentStart&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.Autopilot">
+<summary>
+ Autopilot continuation options.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ImageGeneration">
+<summary>
+ Session-level image generation configuration.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.RefreshCustomInstructions">
+<summary>
+ Re-read custom instruction files.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.TrustWorkingDirectory">
+<summary>
+ Trust scope for the working directory (see TrustWorkingDirectory).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.EnforceManagedModelDefaults">
+<summary>
+ Enforce managed model defaults.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ExcludedManagedSettings">
+<summary>
+ Managed settings to exclude.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.InteractiveUser">
+<summary>
+ Whether an interactive user is present.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.HookDirectories">
+<summary>
+ Directories to load hook definitions from.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.AgentDirectories">
+<summary>
+ Directories to load custom agents from.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.Name">
+<summary>
+ Human-readable session name.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.AuthClientIdMetadataUrl">
+<summary>
+ OAuth client ID metadata document URL.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.AllowedModels">
+<summary>
+ Restrict the models this session may use.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.FeatureFlags">
+<summary>
+ Runtime feature flags (sent even when empty).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.SandboxConfig">
+<summary>
+ Sandbox configuration.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.GitHubTokenProvider">
+<summary>
+ Per-session GitHub token provider (mutually exclusive with GitHubToken).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.AskUserVariant">
+<summary>
+ Ask-user tool variant (see AskUserVariant).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.AutoTier">
+<summary>
+ Auto-routing tier (see AutoTier; experimental). Sent under &quot;capi&quot;.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ReasoningEffort">
+<summary>
+ Reasoning effort hint for the model (&quot;low&quot;, &quot;medium&quot;, &quot;high&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ContentExclusion">
+<summary>
+ Enable content-exclusion enforcement.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ExperimentalMode">
+<summary>
+ Enable experimental runtime mode.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ToolSearch">
+<summary>
+ Tool-search configuration.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.CustomAgentsLocalOnly">
+<summary>
+ Load custom agents from local directories only.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.CanvasProvider">
+<summary>
+ Canvas provider configuration.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.GithubMcpToolConfig">
+<summary>
+ Configuration for the GitHub MCP tool.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.DisabledMcpServers">
+<summary>
+ MCP servers to disable for this session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.AdditionalDirectories">
+<summary>
+ Additional workspace directories the session may access.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.RewindEnabled">
+<summary>
+ Enable rewinding the session to an earlier point.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnUserPromptTransformed">
+<summary>
+ Hook invoked after the user prompt is transformed (user-prompt-transformed).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnPreMcpToolCall">
+<summary>
+ Hook invoked before an MCP tool call (pre-MCP-tool-call).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnPostToolUse">
+<summary>
+ Hook invoked after a tool completes (post-tool-use).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnMcpAuthRequest">
+<summary>
+ Handler for MCP OAuth host-token requests.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ExpAssignments">
+<summary>
+ Experiment assignments forwarded to the runtime.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.EnableWebSocketResponses">
+<summary>
+ Stream assistant responses over a WebSocket transport.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OtlpProtocol">
+<summary>
+ OTLP telemetry protocol (&quot;grpc&quot; or &quot;http/protobuf&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.Memory">
+<summary>
+ Persistent session memory configuration.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.SessionLimits">
+<summary>
+ Per-session AI-credit spending limits.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ExcludedBuiltinAgents">
+<summary>
+ Built-in agents to exclude from this session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.EnableCitations">
+<summary>
+ Enable inline source citations in assistant responses.
+</summary>
+</member>
 <member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.InstructionDirectories">
 <summary>
  Directories to search for instruction files.
@@ -219,11 +516,6 @@
 <member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.GitHubToken">
 <summary>
  Per-session GitHub token.
-</summary>
-</member>
-<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnExitPlanMode">
-<summary>
- Handler for exit plan mode requests from the server.
 </summary>
 </member>
 <member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnElicitationRequest">
@@ -311,61 +603,6 @@
  Configuration for creating a new session.
 </summary>
 </member>
-<member name="T:CopilotSDK.Supercharged.FSharp.ExitPlanModeHandler">
-<summary>
- Handler for exit plan mode requests.
-</summary>
-</member>
-<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeResponse.Feedback">
-<summary>
- Optional feedback provided by the user.
-</summary>
-</member>
-<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeResponse.SelectedAction">
-<summary>
- Selected action, if the user chose one.
-</summary>
-</member>
-<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeResponse.Approved">
-<summary>
- Whether the user approved exiting plan mode.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.ExitPlanModeResponse">
-<summary>
- Response to an exit plan mode request.
-</summary>
-</member>
-<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest.RecommendedAction">
-<summary>
- The action recommended by the runtime.
-</summary>
-</member>
-<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest.Actions">
-<summary>
- Available actions the user can select.
-</summary>
-</member>
-<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest.PlanContent">
-<summary>
- Full plan content, when available.
-</summary>
-</member>
-<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest.Summary">
-<summary>
- Summary of the plan or proposed next step.
-</summary>
-</member>
-<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest.SessionId">
-<summary>
- The session ID.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest">
-<summary>
- Request to exit plan mode from the server.
-</summary>
-</member>
 <member name="T:CopilotSDK.Supercharged.FSharp.ElicitationHandler">
 <summary>
  Handler for elicitation requests.
@@ -379,6 +616,36 @@
 <member name="T:CopilotSDK.Supercharged.FSharp.ElicitationContext">
 <summary>
  Context for an elicitation request from the server.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MessageOptions.ClientTurnId">
+<summary>
+ Opaque caller-chosen turn identifier echoed on the turn&apos;s events.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MessageOptions.ResponseSchema">
+<summary>
+ JSON Schema for structured output (sent as a json_schema responseFormat).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MessageOptions.Source">
+<summary>
+ Message origin: MessageSource.User, MessageSource.System, or MessageSource.agent id.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MessageOptions.RequestHeaders">
+<summary>
+ Per-message request headers forwarded with the turn.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MessageOptions.DisplayPrompt">
+<summary>
+ Alternate prompt text shown to the user (the model still sees Prompt).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MessageOptions.AgentMode">
+<summary>
+ Optional agent-mode override for this message.
 </summary>
 </member>
 <member name="P:CopilotSDK.Supercharged.FSharp.MessageOptions.Mode">
@@ -406,94 +673,14 @@
  File attachment for a message.
 </summary>
 </member>
-<member name="T:CopilotSDK.Supercharged.FSharp.UserInputResponse">
-<summary>
- Response to a user input request.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.UserInputRequest">
-<summary>
- Request for user input from the agent.
-</summary>
-</member>
 <member name="T:CopilotSDK.Supercharged.FSharp.ImageOptions">
 <summary>
  Image generation options.
 </summary>
 </member>
-<member name="T:CopilotSDK.Supercharged.FSharp.ResponseFormat">
+<member name="P:CopilotSDK.Supercharged.FSharp.CommandDefinition.ArgsSchema">
 <summary>
- Response format for messages.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CanvasLifecycleContext">
-<summary>
- Lifecycle context for a canvas instance.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CanvasActionContext">
-<summary>
- Context passed to a canvas action handler.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CanvasOpenContext">
-<summary>
- Context passed to a canvas open handler.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CanvasHostContext">
-<summary>
- Host context supplied alongside canvas callbacks.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CanvasHostCapabilities">
-<summary>
- Canvas-related capabilities reported by the host.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CanvasOpenResponse">
-<summary>
- Response returned by a canvas open handler.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CanvasDeclaration">
-<summary>
- Declarative metadata for a canvas provided by the SDK.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CanvasAction">
-<summary>
- Metadata for an agent-callable canvas action.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.SystemMessageCustomizeConfig">
-<summary>
- Customize-mode system message configuration.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.SystemMessageReplaceConfig">
-<summary>
- Replace-mode system message configuration.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.SystemMessageAppendConfig">
-<summary>
- Append-mode system message configuration.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.SectionOverride">
-<summary>
- Override operation for a single system prompt section.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CloudSessionOptions">
-<summary>
- Options for creating a cloud session.
-</summary>
-</member>
-<member name="T:CopilotSDK.Supercharged.FSharp.CloudSessionRepository">
-<summary>
- Repository metadata associated with a cloud session.
+ JSON Schema describing the command&apos;s arguments.
 </summary>
 </member>
 <member name="T:CopilotSDK.Supercharged.FSharp.CommandDefinition">
@@ -511,9 +698,39 @@
  Configuration for an MCP stdio (local) server.
 </summary>
 </member>
-<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.OnGetTraceContext">
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.Network">
 <summary>
- Callback to get W3C Trace Context for distributed tracing.
+ Host network callbacks (proxy resolution, Negotiate/Basic proxy auth).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.Mode">
+<summary>
+ Client mode: ClientMode.CodingAgent (default when None) or ClientMode.Empty.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.ClientInfo">
+<summary>
+ Identity of the embedding application, sent with `connect` at startup.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.InProcess">
+<summary>
+ Run the CLI in-process via the FFI transport instead of spawning a process.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.BuiltinPluginDirectories">
+<summary>
+ Directories to search for built-in plugins.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.BearerTokenProvider">
+<summary>
+ BYOK bearer-token provider invoked per session (receives ProviderTokenArgs).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.RequestHandler">
+<summary>
+ HTTP request handler for intercepting outbound LLM inference requests.
 </summary>
 </member>
 <member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.TcpConnectionToken">
@@ -601,14 +818,590 @@
  Configuration options for creating a CopilotClient.
 </summary>
 </member>
-<member name="T:CopilotSDK.Supercharged.FSharp.TraceContextProvider">
+<member name="P:CopilotSDK.Supercharged.FSharp.PermissionModeSetResult.Reason">
 <summary>
- Provider that returns a trace context.
+ Why the requested mode was refused, when known (see PermissionModeRefusalReason).
 </summary>
 </member>
-<member name="T:CopilotSDK.Supercharged.FSharp.TraceContext">
+<member name="P:CopilotSDK.Supercharged.FSharp.PermissionModeSetResult.Mode">
 <summary>
- OpenTelemetry-compatible trace context for RPC payloads.
+ Authoritative permission mode after the change.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PermissionModeSetResult">
+<summary>
+ Result of `session.permissions.setMode`.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.PolicyHelperFailure.Reason">
+<summary>
+ Invocation reason such as &quot;sessionStart&quot;.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.PolicyHelperFailure.FailureMode">
+<summary>
+ &quot;ignore&quot; or &quot;failClosed&quot;.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.PolicyHelperFailure.Category">
+<summary>
+ Runtime classification such as &quot;spawn&quot;, &quot;timeout&quot;, or &quot;schema&quot;.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PolicyHelperFailure">
+<summary>
+ The latest unresolved Policy Helper failure. Helper-authored text is
+ untrusted: render it as plain text and never execute it.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PolicyHelperHelpLink">
+<summary>
+ Validated help link supplied by a Policy Helper.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PolicyHelperFailureDetail">
+<summary>
+ One field-specific finding reported by a Policy Helper.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.StoreMemoryHandler">
+<summary>
+ Persists memories for a session (sends `state.hasMemoryStore`).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.StoredMemory.Reason">
+<summary>
+ Why the agent considers the fact worth remembering.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.StoredMemory.Citations">
+<summary>
+ Sources supporting the fact, such as file paths with line numbers.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.StoredMemory.Fact">
+<summary>
+ The fact to remember.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.StoredMemory.Subject">
+<summary>
+ Short topic the memory is about.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.StoredMemory">
+<summary>
+ A fact the agent asked the host to remember (`memoryStore.store`).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ShellAuthenticationHandler">
+<summary>
+ Answers shell authentication prompts. The CancellationToken fires when the
+ answer is no longer needed (`shellAuthentication.cancel`).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ShellAuthenticationResult">
+<summary>
+ Answer to a shell authentication request.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ShellAuthenticationRequest.Cwd">
+<summary>
+ The command&apos;s working directory.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ShellAuthenticationRequest.Command">
+<summary>
+ The shell command that triggered the prompt.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ShellAuthenticationRequest.InputKind">
+<summary>
+ &quot;secret&quot;, &quot;text&quot;, or &quot;confirm&quot; (see ShellAuthenticationInputKind).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ShellAuthenticationRequest.Prompt">
+<summary>
+ The prompt text the program supplied.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ShellAuthenticationRequest.Program">
+<summary>
+ The program that asked: &quot;sudo&quot;, &quot;ssh&quot;, or &quot;git&quot;.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ShellAuthenticationRequest">
+<summary>
+ A `shellAuthentication.request` from a program (sudo, ssh, git) run by the agent.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NetworkOptions.AuthenticateBasic">
+<summary>
+ Returns proxy Basic credentials (None when unavailable).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NetworkOptions.AuthenticateNegotiate">
+<summary>
+ Returns a base64 SPNEGO token for a service principal name (None when unavailable).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NetworkOptions.ResolveProxy">
+<summary>
+ Returns a PAC-style proxy list for a URL (None leaves it to the runtime).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NetworkOptions.Scope">
+<summary>
+ &quot;connection&quot; (default) or &quot;runtime&quot; (see NetworkScope).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.NetworkOptions">
+<summary>
+ Host-provided network callbacks. When any callback is set, the client
+ registers them with `network.setProvider` after connecting.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.NetworkBasicCredentials">
+<summary>
+ Proxy Basic credentials. Never log or persist them.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NetworkBasicAuthRequest.PreviousRejected">
+<summary>
+ True when the proxy rejected the credentials sent last.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NetworkBasicAuthRequest.Realm">
+<summary>
+ Realm named by the proxy (untrusted text), when any.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NetworkBasicAuthRequest.Proxy">
+<summary>
+ Proxy that challenged, as &quot;http://host:port&quot; or &quot;https://host:port&quot;.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.NetworkBasicAuthRequest">
+<summary>
+ Payload of a `network.authenticateBasic` request.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderModelConfig.Capabilities">
+<summary>
+ Model capabilities override.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderModelConfig.Name">
+<summary>
+ Display name.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderModelConfig.WireModel">
+<summary>
+ Model name sent on the wire, when different from ModelId.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderModelConfig.ModelId">
+<summary>
+ Model id sent to the provider, when different from Id.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderModelConfig.Id">
+<summary>
+ Model id used in &quot;provider/id&quot; selections.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderModelConfig.Provider">
+<summary>
+ Name of the NamedProviderConfig serving this model.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ProviderModelConfig">
+<summary>
+ A model served by a named BYOK provider (inference.models[]). Select it
+ with the session model &quot;provider/id&quot;.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NamedProviderConfig.ModelProvider">
+<summary>
+ Product serving the model (see the ModelProvider module).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NamedProviderConfig.Headers">
+<summary>
+ Extra HTTP headers sent with each request.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NamedProviderConfig.AzureApiVersion">
+<summary>
+ Azure API version (Azure providers only).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NamedProviderConfig.Transport">
+<summary>
+ Transport (&quot;http&quot; or &quot;websocket&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NamedProviderConfig.WireApi">
+<summary>
+ Wire API (&quot;completions&quot; or &quot;responses&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NamedProviderConfig.ApiKeyCommand">
+<summary>
+ Command whose stdout is used as the API key before each request.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NamedProviderConfig.BaseUrl">
+<summary>
+ API endpoint URL.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NamedProviderConfig.ProviderType">
+<summary>
+ Provider type (&quot;openai&quot;, &quot;azure&quot;, or &quot;anthropic&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NamedProviderConfig.Name">
+<summary>
+ Connection name referenced by ProviderModelConfig.Provider and DefaultProvider.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.NamedProviderConfig">
+<summary>
+ Named BYOK provider connection (inference.providers[]).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.RegisteredTool">
+<summary>
+ A registered tool pairing its definition with its handler.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolHandler">
+<summary>
+ Handler function for tool invocations.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolInvocation">
+<summary>
+ Context passed to a tool handler during invocation.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.Tool.Idempotent">
+<summary>
+ Whether repeating a call with the same arguments is safe (no extra
+ side effects). Sent as `idempotent` in `tools.definitions`.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.Tool.Parameters">
+<summary>
+ JSON Schema for parameters.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.Tool.Description">
+<summary>
+ Human-readable description.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.Tool.Name">
+<summary>
+ Unique tool name.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.Tool">
+<summary>
+ Definition of a tool that the assistant can invoke.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolParameterSchema">
+<summary>
+ Schema for a tool&apos;s parameters (JSON Schema object).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SubagentStopHandler">
+<summary>
+ Hook invoked after a sub-agent stops.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SubagentStartHandler">
+<summary>
+ Hook invoked before a sub-agent starts.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SubagentStopHookOutput">
+<summary>
+ Output for the sub-agent stop hook. `Decision = Some &quot;block&quot;` with a reason
+ continues the child; otherwise `ModifiedResponse` rewrites the reported response.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SubagentStopHookInput.Response">
+<summary>
+ The sub-agent&apos;s last assistant message.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SubagentStopHookInput.StopReason">
+<summary>
+ Always &quot;end_turn&quot;.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SubagentStopHookInput">
+<summary>
+ Input for the hook fired after a sub-agent completes a turn (hook type &quot;subagentStop&quot;).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SubagentStartHookOutput">
+<summary>
+ Output for the sub-agent start hook; context is prepended to the child&apos;s prompt.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SubagentStartHookInput.Raw">
+<summary>
+ Raw hook payload as sent by the runtime.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SubagentStartHookInput.Cwd">
+<summary>
+ Working directory, when provided.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SubagentStartHookInput.Timestamp">
+<summary>
+ Hook timestamp (epoch milliseconds), when provided.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SubagentStartHookInput">
+<summary>
+ Input for the hook fired before a sub-agent&apos;s first turn (hook type &quot;subagentStart&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderConfig.AzureApiVersion">
+<summary>
+ Azure API version (Azure providers only).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderConfig.ModelProvider">
+<summary>
+ Product serving the model (see the ModelProvider module).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderConfig.BearerToken">
+<summary>
+ Bearer token sent in the Authorization header.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderConfig.ApiKeyCommand">
+<summary>
+ Command whose stdout is used as the API key before each request.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderConfig.ApiKey">
+<summary>
+ Static API key.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderConfig.BaseUrl">
+<summary>
+ API endpoint URL.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderConfig.WireApi">
+<summary>
+ Wire API (&quot;completions&quot; or &quot;responses&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderConfig.ProviderType">
+<summary>
+ Provider type (&quot;openai&quot;, &quot;azure&quot;, or &quot;anthropic&quot;).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ProviderConfig">
+<summary>
+ BYOK model provider configuration.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ModelLimitsOverride">
+<summary>
+ Token-limit overrides for the model capabilities override (`limits`).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.AutopilotConfig">
+<summary>
+ Autopilot continuation options.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ImageGenerationConfig">
+<summary>
+ Session-level image generation configuration.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SandboxConfig.AllowBypass">
+<summary>
+ Opt in to letting the agent request an individual command outside the
+ sandbox through the normal permission flow.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SandboxConfig.SandboxExtensions">
+<summary>
+ Confine extension processes launched by the session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SandboxConfig.SandboxLspServers">
+<summary>
+ Confine language servers launched by the session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SandboxConfig.SandboxMcpServers">
+<summary>
+ Confine MCP servers launched by the session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SandboxConfig.AddCurrentWorkingDirectory">
+<summary>
+ Auto-add the working directory to read/write paths.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SandboxConfig.UserPolicy">
+<summary>
+ User-managed policy fragment merged into the base policy.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SandboxConfig.Enabled">
+<summary>
+ Whether sandboxing is enabled.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SandboxConfig">
+<summary>
+ Sandbox configuration for a session.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.GitHubTokenProvider">
+<summary>
+ Supplies GitHub tokens for one session (mutually exclusive with GitHubToken).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.GitHubTokenProviderResult">
+<summary>
+ Result returned by a GitHub token provider.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.GitHubTokenGrant.ExpiresIn">
+<summary>
+ Remaining lifetime in seconds.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.GitHubTokenGrant">
+<summary>
+ A GitHub token granted by a provider.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.GitHubTokenProviderArgs.Reason">
+<summary>
+ &quot;initial&quot; or &quot;refresh&quot;.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.GitHubTokenProviderArgs.SessionId">
+<summary>
+ Session the token is requested for, when known.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.GitHubTokenProviderArgs.Host">
+<summary>
+ GitHub host the token is requested for.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.GitHubTokenProviderArgs">
+<summary>
+ Arguments passed to a session&apos;s GitHub token provider.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientInfo.IntegrationVersion">
+<summary>
+ Integration/extension version (wire: extensionVersion).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientInfo.IntegrationName">
+<summary>
+ Integration/extension name (wire: extensionName).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientInfo.ApplicationVersion">
+<summary>
+ Host application version (wire: editorVersion).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientInfo.ApplicationName">
+<summary>
+ Host application name (wire: editorName).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CopilotClientInfo">
+<summary>
+ Identity of the application embedding the SDK. When any field is set, the
+ client sends a `connect` request with `clientInfo` before the handshake.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.UserPromptTransformedHandler">
+<summary>
+ Hook invoked after the user prompt is transformed (user-prompt-transformed).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PreMcpToolCallHandler">
+<summary>
+ Hook invoked before an MCP tool call (pre-MCP-tool-call).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PostToolUseHandler">
+<summary>
+ Hook invoked after a tool completes (post-tool-use).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.McpAuthRequestHandler">
+<summary>
+ Handler for an MCP OAuth host-token request; returns an OAuth access token.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotRequestHandler.SendRequest(System.Text.Json.JsonElement,Microsoft.FSharp.Core.FSharpOption{System.Text.Json.JsonElement})">
+<summary>
+ Transform an outbound request; override in a derived type.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CopilotRequestHandler">
+<summary>
+ Intercepts outbound LLM inference HTTP/WebSocket requests. Assign an
+ instance to CopilotClientOptions.RequestHandler and override SendRequest
+ to mutate, replace, or forward the request. BYOK providers may also set
+ BearerTokenProvider on the client options.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ProviderTokenArgs.SessionId">
+<summary>
+ The session the token is being requested for.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ProviderTokenArgs">
+<summary>
+ Arguments passed to a BYOK bearer-token provider (per-session scoping).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MemoryConfiguration.Enabled">
+<summary>
+ Whether persistent memory is enabled for the session.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.MemoryConfiguration">
+<summary>
+ Opt-in persistent session memory.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionLimitsConfig.MaxAiCredits">
+<summary>
+ Maximum AI credits the session may consume.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SessionLimitsConfig">
+<summary>
+ Per-session AI-credit budget; set MaxAiCredits to cap spend.
 </summary>
 </member>
 <member name="P:CopilotSDK.Supercharged.FSharp.SessionFsConfig.Conventions">
@@ -644,6 +1437,11 @@
 <member name="T:CopilotSDK.Supercharged.FSharp.PermissionRequest">
 <summary>
  Permission-request payload sent by the server.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.PermissionRequestResult.DecisionContext">
+<summary>
+ Opaque decision context forwarded with the permission reply.
 </summary>
 </member>
 <member name="T:CopilotSDK.Supercharged.FSharp.PermissionRequestResult">
@@ -707,6 +1505,12 @@
  Low-level JSON-RPC transport over streams with Content-Length framing.
 </summary>
 </member>
+<member name="P:CopilotSDK.Supercharged.FSharp.JsonRpcException.PolicyHelperFailure">
+<summary>
+ Policy Helper failure attached to the error data (`error.data.policyHelperFailure`),
+ for example when session.create or session.resume is blocked by managed policy.
+</summary>
+</member>
 <member name="T:CopilotSDK.Supercharged.FSharp.JsonRpcException">
 <summary>
  Exception raised when a JSON-RPC error response is received.
@@ -752,20 +1556,51 @@
  Stop the session (notifies the server).
 </summary>
 </member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.SetSubagentHooks(Microsoft.FSharp.Core.FSharpOption{Microsoft.FSharp.Core.FSharpFunc{CopilotSDK.Supercharged.FSharp.SubagentStartHookInput,Microsoft.FSharp.Control.FSharpAsync{Microsoft.FSharp.Core.FSharpOption{CopilotSDK.Supercharged.FSharp.SubagentStartHookOutput}}}},Microsoft.FSharp.Core.FSharpOption{Microsoft.FSharp.Core.FSharpFunc{CopilotSDK.Supercharged.FSharp.SubagentStopHookInput,Microsoft.FSharp.Control.FSharpAsync{Microsoft.FSharp.Core.FSharpOption{CopilotSDK.Supercharged.FSharp.SubagentStopHookOutput}}}})">
+<summary>
+ Register the sub-agent lifecycle hooks for this session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.SetShellAuthenticationHandler(Microsoft.FSharp.Core.FSharpOption{Microsoft.FSharp.Core.FSharpFunc{CopilotSDK.Supercharged.FSharp.ShellAuthenticationRequest,Microsoft.FSharp.Core.FSharpFunc{System.Threading.CancellationToken,Microsoft.FSharp.Control.FSharpAsync{CopilotSDK.Supercharged.FSharp.ShellAuthenticationResult}}}})">
+<summary>
+ Register the shell authentication handler for this session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.SetPermissionModeAsync(System.String,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Change the session&apos;s permission mode. When the runtime refuses the
+ change, Success is false and Reason may be
+ PermissionModeRefusalReason.ManagedPolicy (&quot;managed_policy&quot;).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.SetMemoryStoreHandler(Microsoft.FSharp.Core.FSharpOption{Microsoft.FSharp.Core.FSharpFunc{CopilotSDK.Supercharged.FSharp.StoredMemory,Microsoft.FSharp.Control.FSharpAsync{Microsoft.FSharp.Core.Unit}}})">
+<summary>
+ Register the store-memory callback for this session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.SetAutoTierAsync(Microsoft.FSharp.Core.FSharpOption{System.String},Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Change the Auto routing preference without changing the selected model
+ (experimental). Pass None to return to the default Auto routing (sent as
+ JSON null). Returns the runtime&apos;s acknowledgement.
+</summary>
+</member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.SendAsync(CopilotSDK.Supercharged.FSharp.MessageOptions,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
 <summary>
  Send a message to the session. Returns the response message ID.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.SendAndWaitStructuredAsync(CopilotSDK.Supercharged.FSharp.MessageOptions,System.Text.Json.JsonElement,Microsoft.FSharp.Core.FSharpOption{System.TimeSpan},Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Send a message with a JSON Schema for structured output and wait until
+ the session becomes idle. Returns the final assistant content parsed as JSON.
+ Fails when the run produced no assistant content.
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.SendAndWaitAsync(CopilotSDK.Supercharged.FSharp.MessageOptions,Microsoft.FSharp.Core.FSharpOption{System.TimeSpan},Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
 <summary>
  Send a message and wait until the session becomes idle.
  Returns the final assistant message, or None if no message was received.
-</summary>
-</member>
-<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.RegisterTraceContextProvider(Microsoft.FSharp.Core.FSharpFunc{Microsoft.FSharp.Core.Unit,CopilotSDK.Supercharged.FSharp.TraceContext})">
-<summary>
- Register a trace context provider for distributed tracing.
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.RegisterTools(Microsoft.FSharp.Collections.FSharpList{CopilotSDK.Supercharged.FSharp.RegisteredTool})">
@@ -778,9 +1613,9 @@
  Register a tool that the assistant can invoke during this session.
 </summary>
 </member>
-<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.RegisterExitPlanModeHandler(Microsoft.FSharp.Core.FSharpFunc{CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest,Microsoft.FSharp.Control.FSharpAsync{CopilotSDK.Supercharged.FSharp.ExitPlanModeResponse}})">
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.RecheckPolicyHelperAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
 <summary>
- Register a handler for exit plan mode requests.
+ Re-run the managed-settings policy helper for this session.
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.On(Microsoft.FSharp.Core.FSharpFunc{CopilotSDK.Supercharged.FSharp.SessionEvent,Microsoft.FSharp.Core.Unit})">
@@ -795,9 +1630,49 @@
        | _ -&gt; ())
 </summary>
 </member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.HandleShellAuthenticationAsync(CopilotSDK.Supercharged.FSharp.ShellAuthenticationRequest)">
+<summary>
+ Answer a `shellAuthentication.request`. Returns ShellAuthenticationCancel
+ when no handler is registered, the request id is already pending, the
+ handler fails, or the request is cancelled before the handler answers.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.HandleMemoryStoreAsync(CopilotSDK.Supercharged.FSharp.StoredMemory)">
+<summary>
+ Deliver a `memoryStore.store` request to the store-memory callback.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.HandleHooksInvokeAsync(System.String,Microsoft.FSharp.Core.FSharpOption{System.Text.Json.JsonElement})">
+<summary>
+ Dispatch a `hooks.invoke` request to the matching hook. Returns the hook
+ output wire payload, or None when no hook handled the request.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.GetManagedSettingsAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Get the managed settings in effect for this session.
+</summary>
+</member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.GetHistoryAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
 <summary>
  Retrieve the conversation history for this session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.DisconnectAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Disconnect this session and release its in-memory resources. Session
+ state on disk is preserved so it can be resumed later. Sends
+ `session.detach`, falling back to `session.destroy` on older CLIs.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.CancelShellAuthentication(System.String)">
+<summary>
+ Cancel a pending shell authentication prompt (`shellAuthentication.cancel`).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.AddDisconnectCallback(Microsoft.FSharp.Core.FSharpFunc{Microsoft.FSharp.Core.Unit,Microsoft.FSharp.Core.Unit})">
+<summary>
+ Register a callback invoked once the session is disconnected.
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.#ctor(System.String,CopilotSDK.Supercharged.FSharp.JsonRpcTransport)">
@@ -814,9 +1689,19 @@
  registration, and message exchange with the assistant.
 </summary>
 </member>
+<member name="F:CopilotSDK.Supercharged.FSharp.CopilotClient.clientMode">
+<summary>
+ Client mode, validated at construction (&quot;coding-agent&quot; or &quot;empty&quot;).
+</summary>
+</member>
 <member name="P:CopilotSDK.Supercharged.FSharp.CopilotClient.NegotiatedProtocolVersion">
 <summary>
  Negotiated protocol version with the server.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClient.Mode">
+<summary>
+ Client mode in effect: ClientMode.CodingAgent or ClientMode.Empty.
 </summary>
 </member>
 <member name="P:CopilotSDK.Supercharged.FSharp.CopilotClient.ConnectionState">
@@ -892,12 +1777,17 @@
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.DeleteSessionAsync(System.String,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
 <summary>
- Delete a session permanently.
+ Delete a session permanently. Failures surface as JsonRpcException.
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.CreateSessionAsync(CopilotSDK.Supercharged.FSharp.SessionConfig,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
 <summary>
  Create a new conversation session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.ClearManagedSettingsCacheAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Clear the server&apos;s managed-settings cache.
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.#ctor">
@@ -920,10 +1810,15 @@
        let! session =
            client.CreateSessionAsync(SessionConfig.defaults)
        let! reply =
-           session.SendAndWaitAsync({ Prompt = &quot;Hello!&quot;; Attachments = None; Mode = None })
+           session.SendAndWaitAsync(MessageOptions.create &quot;Hello!&quot;)
        reply |&gt; Option.iter (fun data -&gt; printfn &quot;%s&quot; data.Content)
        do! client.StopAsync()
    } |&gt; Async.RunSynchronously
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.GitHubTokenRegistration">
+<summary>
+ A GitHub token provider registered for one session (client-level registry).
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.SdkProtocolVersion.getVersion">
@@ -940,6 +1835,100 @@
 <summary>
  Provides the SDK protocol version.
  This must match the version expected by the copilot-agent-runtime server.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionWire.applyEmptyModeDefaults(System.Text.Json.Nodes.JsonObject)">
+<summary>
+ Apply the ClientMode.Empty defaults to a grouped payload. Values the
+ caller already set (non-null) are kept.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionWire.emptyModeDefaults">
+<summary>
+ Defaults applied under the caller&apos;s values for ClientMode.Empty.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionWire.groupSessionParams(System.Text.Json.Nodes.JsonObject,System.Boolean)">
+<summary>
+ Convert a flat `session.create` (isResume = false) or `session.resume`
+ (isResume = true) payload into the grouped SDK protocol 4 payload.
+ ROOT keys stay top level, known flat keys move to `group.member`,
+ unknown keys stay at the root, null values are skipped, and empty
+ groups are not emitted. Members of already-grouped objects win.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionWire.translateLegacyProvider(System.Text.Json.Nodes.JsonObject,System.Text.Json.Nodes.JsonObject,Microsoft.FSharp.Core.FSharpFunc{System.String,System.Text.Json.Nodes.JsonObject})">
+<summary>
+ Translate the legacy single BYOK `provider` into a named &quot;default&quot; provider.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionWire.providerModelFields">
+<summary>
+ Legacy `provider` fields that describe the model rather than the connection.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionWire.memberAllowed(System.Boolean,System.String,System.String)">
+<summary>
+ The runtime rejects unknown group members, so only table members are sent,
+ honoring the create-only / resume-only members.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionWire.resumeOnlyMembers">
+<summary>
+ Group members accepted only by session.resume (dropped on create).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionWire.createOnlyMembers">
+<summary>
+ Group members accepted only by session.create (dropped on resume).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionWire.allowedMembers">
+<summary>
+ Members accepted in each group: exactly the members named in the table above.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionWire.groupedKeys">
+<summary>
+ Flat key -&gt; (group, member).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionWire.groupNames">
+<summary>
+ Feature groups. A flat key with one of these names and an object value
+ is an already-grouped object whose members win over flat keys.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionWire.rootKeys">
+<summary>
+ Keys that stay at the top level of the grouped payload.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SessionWire">
+<summary>
+ Translates the flat `session.create` / `session.resume` payload built by
+ the client into the grouped SDK protocol 4 payload. Options keep their
+ flat names on the F# side; only the wire shape changes.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.WireJson.setOpt``1(System.Text.Json.Nodes.JsonObject,System.String,Microsoft.FSharp.Core.FSharpOption{``0})">
+<summary>
+ Set key only when the option carries a value.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.WireJson.set(System.Text.Json.Nodes.JsonObject,System.String,System.Object)">
+<summary>
+ Serialize value into target under key (overwriting any existing key).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.WireJson.toObject(System.Object)">
+<summary>
+ Serialize a value (anonymous record, dictionary, ...) into a JsonObject.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.WireJson">
+<summary>
+ Helpers for building JSON-RPC params that omit unset optional keys.
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.SessionEventModule.parse(System.String,Microsoft.FSharp.Core.FSharpOption{System.Text.Json.JsonElement})">
@@ -972,6 +1961,11 @@
  Create a successful text result.
 </summary>
 </member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ResumeSessionConfigModule.create(System.String)">
+<summary>
+ Resume configuration for sessionId with approveAll and every option unset.
+</summary>
+</member>
 <member name="P:CopilotSDK.Supercharged.FSharp.SessionConfigModule.defaults">
 <summary>
  Default session config with approveAll handler.
@@ -987,15 +1981,297 @@
  Approve all permission requests automatically.
 </summary>
 </member>
+<member name="M:CopilotSDK.Supercharged.FSharp.MessageOptionsModule.responseFormatFor(System.Text.Json.JsonElement)">
+<summary>
+ Build the structured-output `responseFormat` payload for a JSON Schema.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.MessageOptionsModule.create(System.String)">
+<summary>
+ Message options carrying only a prompt.
+</summary>
+</member>
 <member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptionsModule.defaults">
 <summary>
  Default client options (stdio, auto-start, info log level).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.PermissionModeRefusalReason.ManagedPolicy">
+<summary>
+ Managed (enterprise) policy does not allow the requested mode.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PermissionModeRefusalReason">
+<summary>
+ Why a permission-mode change was refused (PermissionModeSetResult.Reason).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.PermissionMode.AllowAll">
+<summary>
+ Tool, path, and URL permission requests are approved automatically.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.PermissionMode.Assisted">
+<summary>
+ Requests carry an LLM safety recommendation.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.PermissionMode.Manual">
+<summary>
+ Permission requests follow the normal approval flow.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PermissionMode">
+<summary>
+ Session permission modes (session.permissions.setMode).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.PolicyHelperFailureModule.tryFromErrorData(Microsoft.FSharp.Core.FSharpOption{System.Text.Json.JsonElement})">
+<summary>
+ Read `policyHelperFailure` from JSON-RPC error data (session.create/resume failures).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.PolicyHelperFailureModule.tryParse(System.Text.Json.JsonElement)">
+<summary>
+ Parse a PolicyHelperFailure JSON object. Returns None when the value is not an object.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ShellAuthenticationResultModule.toWire(CopilotSDK.Supercharged.FSharp.ShellAuthenticationResult)">
+<summary>
+ Build the `shellAuthentication.request` JSON-RPC result.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ShellAuthenticationInputKind.Confirm">
+<summary>
+ A yes/no question; answer &quot;yes&quot; to accept.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ShellAuthenticationInputKind.Text">
+<summary>
+ A visible answer such as a user name.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ShellAuthenticationInputKind.Secret">
+<summary>
+ A password or passphrase (mask the input).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ShellAuthenticationInputKind">
+<summary>
+ Kind of input requested by a shell authentication prompt.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.NetworkOptionsModule.toSetProviderParams(CopilotSDK.Supercharged.FSharp.NetworkOptions)">
+<summary>
+ Build the `network.setProvider` params (an empty object marks each registered callback).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.NetworkOptionsModule.hasCallbacks(CopilotSDK.Supercharged.FSharp.NetworkOptions)">
+<summary>
+ True when at least one callback is registered.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.NetworkOptionsModule.empty">
+<summary>
+ Network options with no callbacks.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.NetworkScope">
+<summary>
+ Traffic served by the network callbacks (NetworkOptions.Scope).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ProviderModelConfigModule.toWire(CopilotSDK.Supercharged.FSharp.ProviderModelConfig)">
+<summary>
+ Build the camelCase JSON-RPC wire payload.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ProviderModelConfigModule.create(System.String,System.String)">
+<summary>
+ Model entry with every optional field unset.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.NamedProviderConfigModule.toWire(CopilotSDK.Supercharged.FSharp.NamedProviderConfig)">
+<summary>
+ Build the camelCase JSON-RPC wire payload.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.NamedProviderConfigModule.create(System.String,System.String)">
+<summary>
+ Named provider pointing at baseUrl with every other field unset.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ClientMode.normalize(Microsoft.FSharp.Core.FSharpOption{System.String})">
+<summary>
+ Normalize a mode option to &quot;coding-agent&quot; or &quot;empty&quot;. Fails on any other value.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ClientMode.CopilotCli">
+<summary>
+ Legacy alias of CodingAgent.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ClientMode">
+<summary>
+ Client mode. &quot;coding-agent&quot; (the default) keeps today&apos;s behavior; &quot;empty&quot;
+ requires every session to list AvailableTools and applies locked-down
+ defaults under the caller&apos;s values. &quot;copilot-cli&quot; is a legacy alias of
+ &quot;coding-agent&quot;.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ToolModule.toWire(CopilotSDK.Supercharged.FSharp.Tool)">
+<summary>
+ Build the `tools.definitions` wire entry for a tool.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SubagentHooks.stopOutputToWire(CopilotSDK.Supercharged.FSharp.SubagentStopHookOutput)">
+<summary>
+ Build the wire output for a sub-agent stop hook.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SubagentHooks.startOutputToWire(CopilotSDK.Supercharged.FSharp.SubagentStartHookOutput)">
+<summary>
+ Build the wire output for a sub-agent start hook.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SubagentHooks.parseStopInput(System.Text.Json.JsonElement)">
+<summary>
+ Parse a &quot;subagentStop&quot; hook payload.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SubagentHooks.parseStartInput(System.Text.Json.JsonElement)">
+<summary>
+ Parse a &quot;subagentStart&quot; hook payload.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ProviderConfigModule.toWire(CopilotSDK.Supercharged.FSharp.ProviderConfig)">
+<summary>
+ Build the camelCase JSON-RPC wire payload.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ProviderConfigModule.create(System.String)">
+<summary>
+ Provider config pointing at baseUrl with every other field unset.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ModelLimitsOverrideModule.toCapabilities(CopilotSDK.Supercharged.FSharp.ModelLimitsOverride)">
+<summary>
+ Build a `ModelCapabilities` override containing these limits
+ (snake_case wire keys such as `max_output_tokens`).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.AutopilotConfigModule.toWire(CopilotSDK.Supercharged.FSharp.AutopilotConfig)">
+<summary>
+ Build the camelCase JSON-RPC wire payload.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ImageGenerationConfigModule.toWire(CopilotSDK.Supercharged.FSharp.ImageGenerationConfig)">
+<summary>
+ Build the camelCase JSON-RPC wire payload.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SandboxConfigModule.toWire(CopilotSDK.Supercharged.FSharp.SandboxConfig)">
+<summary>
+ Build the camelCase JSON-RPC wire payload.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SandboxConfigModule.create(System.Boolean)">
+<summary>
+ Sandbox config with only `Enabled` set.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.GitHubTokenProviderResultModule.toWire(CopilotSDK.Supercharged.FSharp.GitHubTokenProviderResult)">
+<summary>
+ Build the `gitHubToken.getToken` JSON-RPC result.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ModelProvider">
+<summary>
+ Product serving a BYOK model (ProviderConfig.ModelProvider).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.MessageSource.agent(System.String)">
+<summary>
+ The message comes from another agent (&quot;agent-&lt;id&gt;&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MessageSource.System">
+<summary>
+ The message is a system message.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MessageSource.User">
+<summary>
+ The message comes from the user.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.MessageSource">
+<summary>
+ Origin of a message sent with `session.send`.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.TrustWorkingDirectory">
+<summary>
+ Working-directory trust scope used on session creation.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.AskUserVariant">
+<summary>
+ Ask-user tool variant (&quot;legacy&quot; or &quot;elicitation&quot;).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.AutoTier">
+<summary>
+ Auto-routing tier preference (experimental).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClientInfoModule.toWire(CopilotSDK.Supercharged.FSharp.CopilotClientInfo)">
+<summary>
+ Build the `connect` clientInfo payload, dropping empty fields.
+ Returns None when no field carries a non-empty value.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientInfoModule.empty">
+<summary>
+ Client info with every field unset.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.GitHubAttachment">
+<summary>
+ GitHub-anchored attachment variants.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SystemMessageSection">
+<summary>
+ System-message section identifiers (used with system-message overrides).
+ The &quot;preamble&quot; section targets the identity preamble; the &quot;preserve&quot; action
+ protects an individually-addressable section from a group-level remove.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolDefer">
+<summary>
+ Tool &quot;defer&quot; loading policy: eager pre-load (&quot;never&quot;) or lazy via search (&quot;auto&quot;).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.MemoryConfigurationModule.toWire(CopilotSDK.Supercharged.FSharp.MemoryConfiguration)">
+<summary>
+ Build the camelCase JSON-RPC wire payload.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionLimitsConfigModule.toWire(CopilotSDK.Supercharged.FSharp.SessionLimitsConfig)">
+<summary>
+ Build the camelCase JSON-RPC wire payload.
 </summary>
 </member>
 <member name="T:CopilotSDK.Supercharged.FSharp.DefineTool.ToolBuilder">
 <summary>
  Pipe-friendly tool builder: start with a name and description, then
  compose using |&gt; withParameters |&gt; withHandler.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.DefineTool.withIdempotent(System.Boolean,CopilotSDK.Supercharged.FSharp.DefineTool.ToolBuilder)">
+<summary>
+ Declare whether the tool is idempotent (sent as `idempotent`).
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.DefineTool.createSimple(System.String,System.String,Microsoft.FSharp.Core.FSharpFunc{Microsoft.FSharp.Core.Unit,Microsoft.FSharp.Control.FSharpAsync{System.String}})">
@@ -1008,6 +2284,12 @@
  Create a RegisteredTool using a typed argument extractor.
  The extractor deserializes the arguments JSON element into a typed value,
  and the handler receives that typed value.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.DefineTool.idempotent(CopilotSDK.Supercharged.FSharp.RegisteredTool)">
+<summary>
+ Mark a tool as idempotent: repeating a call with the same arguments has
+ no additional side effects (sent as `idempotent` in tools.definitions).
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.DefineTool.create(System.String,System.String,Microsoft.FSharp.Core.FSharpOption{System.Text.Json.JsonElement},Microsoft.FSharp.Core.FSharpFunc{CopilotSDK.Supercharged.FSharp.ToolInvocation,Microsoft.FSharp.Control.FSharpAsync{System.Object}})">

@@ -1,0 +1,20 @@
+models:
+  - claude-sonnet-5
+conversations:
+  - messages:
+      - role: system
+        content: ${system}
+      - role: user
+        content: Call async_permission_echo once and reply with only its returned text.
+      - role: assistant
+        tool_calls:
+          - id: toolcall_0
+            type: function
+            function:
+              name: async_permission_echo
+              arguments: "{}"
+      - role: tool
+        tool_call_id: toolcall_0
+        content: DOTNET_ASYNC_PERMISSION_RESULT
+      - role: assistant
+        content: DOTNET_ASYNC_PERMISSION_RESULT

@@ -42,7 +42,7 @@ const endpoints: Record<ReplayBackend, string> = {
 
 const models: Record<ReplayBackend, string> = {
   capi: "gpt-4.1",
-  "anthropic-messages": "claude-sonnet-4.5",
+  "anthropic-messages": "claude-sonnet-5",
   "openai-responses": "gpt-4.1",
   "openai-completions": "gpt-4.1",
 };
@@ -303,6 +303,40 @@ describe("Anthropic Messages adapter", () => {
 });
 
 describe("OpenAI Responses adapter", () => {
+  test("normalizes image-bearing function output without changing ordinary JSON output", () => {
+    const imageOutput = JSON.stringify([
+      { type: "input_text", text: "Viewed image file successfully." },
+      {
+        type: "input_image",
+        detail: "auto",
+        image_url: "data:image/png;base64,AQID",
+      },
+    ]);
+    const result = JSON.parse(
+      responsesApiRequestToChatCompletion(
+        JSON.stringify({
+          model: "test-model",
+          input: [
+            {
+              type: "function_call_output",
+              call_id: "view-1",
+              output: imageOutput,
+            },
+            {
+              type: "function_call_output",
+              call_id: "other-1",
+              output: '[{"ok":true}]',
+            },
+          ],
+        }),
+      ),
+    ) as { messages: Array<{ content: string }> };
+    expect(result.messages.map((message) => message.content)).toEqual([
+      "Viewed image file successfully.",
+      '[{"ok":true}]',
+    ]);
+  });
+
   test("normalizes messages, binary content, and tools", () => {
     const result = JSON.parse(
       responsesApiRequestToChatCompletion(
@@ -544,6 +578,72 @@ describe("protocol-aware replay", () => {
           backend === "openai-responses"
         ) {
           expect(exchanges[0].response).toBeUndefined();
+        }
+      });
+    },
+  );
+
+  test.each(
+    backends.flatMap((backend) =>
+      [false, true].map((splitHistory) => ({ backend, splitHistory })),
+    ),
+  )(
+    "preserves the continuation response boundary for $backend with splitHistory=$splitHistory",
+    async ({ backend, splitHistory }) => {
+      const history: NormalizedData["conversations"][number]["messages"] = [
+        { role: "system", content: "${system}" },
+        { role: "user", content: "Hello" },
+        ...(splitHistory
+          ? [
+              { role: "assistant" as const, content: "CONTEXT_" },
+              { role: "assistant" as const, content: "READY" },
+            ]
+          : [{ role: "assistant" as const, content: "CONTEXT_READY" }]),
+      ];
+      await writeFile(
+        cachePath,
+        yaml.stringify(
+          {
+            models: ["captured-capi-model"],
+            conversations: [
+              { messages: history },
+              {
+                messages: [
+                  ...history,
+                  { role: "assistant", content: "CONTINUATION_DONE" },
+                ],
+              },
+            ],
+          } satisfies NormalizedData,
+          { aliasDuplicateObjects: false },
+        ),
+      );
+      const request = requestFor(backend, "Hello");
+      if (backend === "openai-responses") {
+        (request.input as unknown[]).push({
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "CONTEXT_READY" }],
+        });
+      } else {
+        (request.messages as unknown[]).push(
+          ...(backend === "anthropic-messages"
+            ? [{ role: "assistant", content: "CONTEXT_READY" }]
+            : history.slice(2)),
+        );
+      }
+      await withProxy(backend, async (proxyUrl) => {
+        for (const stream of [false, true]) {
+          const response = await fetch(`${proxyUrl}${endpoints[backend]}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...request, stream }),
+            signal: AbortSignal.timeout(2_000),
+          });
+          expect(response.status).toBe(200);
+          const body = await response.text();
+          expect(body).toContain("CONTINUATION_DONE");
+          expect(body).not.toContain("CONTEXT_READY");
         }
       });
     },

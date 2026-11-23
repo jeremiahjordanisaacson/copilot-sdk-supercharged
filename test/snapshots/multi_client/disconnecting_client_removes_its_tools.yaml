@@ -1,5 +1,5 @@
 models:
-  - claude-sonnet-4.5
+  - claude-sonnet-5
 conversations:
   - messages:
       - role: system
@@ -22,34 +22,6 @@ conversations:
             function:
               name: stable_tool
               arguments: '{"input":"test1"}'
-  - messages:
-      - role: system
-        content: ${system}
-      - role: user
-        content: Use the stable_tool with input 'test1' and tell me the result.
-      - role: assistant
-        content: I'll call the stable_tool with input 'test1' for you.
-        tool_calls:
-          - id: toolcall_0
-            type: function
-            function:
-              name: report_intent
-              arguments: '{"intent":"Testing stable_tool"}'
-          - id: toolcall_1
-            type: function
-            function:
-              name: stable_tool
-              arguments: '{"input":"test1"}'
-      - role: tool
-        tool_call_id: toolcall_0
-        content: Tool 'report_intent' does not exist. Available tools that can be called are ${shell}, ${read_shell},
-          ${stop_shell}, ${list_shell}, view, create, edit, web_fetch, skill, sql, read_agent, list_agents, grep, glob,
-          task, stable_tool, ephemeral_tool.
-      - role: tool
-        tool_call_id: toolcall_1
-        content: STABLE_test1
-      - role: assistant
-        content: "The stable_tool returned: **STABLE_test1**"
   - messages:
       - role: system
         content: ${system}
@@ -129,19 +101,7 @@ conversations:
       - role: assistant
         content: "The ephemeral_tool returned: **EPHEMERAL_test2**"
       - role: user
-        content: >-
-          <tools_changed_notice>
-
-          Tools no longer available: ephemeral_tool
-
-
-          Important: Do not attempt to call tools that are no longer available unless you've been notified that they're
-          available again.
-
-          </tools_changed_notice>
-
-
-          Use the stable_tool with input 'still_here'. Also try using ephemeral_tool if it is available.
+        content: Use the stable_tool with input 'still_here'. Also try using ephemeral_tool if it is available.
       - role: assistant
         content: I'll call the stable_tool with input 'still_here'. The ephemeral_tool is no longer available according to the
           system notification.
@@ -194,19 +154,7 @@ conversations:
       - role: assistant
         content: "The ephemeral_tool returned: **EPHEMERAL_test2**"
       - role: user
-        content: >-
-          <tools_changed_notice>
-
-          Tools no longer available: ephemeral_tool
-
-
-          Important: Do not attempt to call tools that are no longer available unless you've been notified that they're
-          available again.
-
-          </tools_changed_notice>
-
-
-          Use the stable_tool with input 'still_here'. Also try using ephemeral_tool if it is available.
+        content: Use the stable_tool with input 'still_here'. Also try using ephemeral_tool if it is available.
       - role: assistant
         content: I'll call the stable_tool with input 'still_here'. The ephemeral_tool is no longer available according to the
           system notification.

@@ -66,6 +66,12 @@ jobs:
         working-directory: python
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install Node SDK dependencies (pinned Copilot runtime used by tests)
+        working-directory: nodejs
+        run: npm install --ignore-scripts --no-audit --no-fund
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -97,6 +103,12 @@ jobs:
         working-directory: go
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install Node SDK dependencies (pinned Copilot runtime used by tests)
+        working-directory: nodejs
+        run: npm install --ignore-scripts --no-audit --no-fund
       - uses: actions/setup-go@v6
         with:
           go-version-file: go/go.mod
@@ -105,11 +117,11 @@ jobs:
       # The FFI host converts runtime handles deliberately; upstream lints it with golangci-lint.
       - run: go vet -unsafeptr=false ./...
       - name: Unit tests
-        # Skipped: stdio shutdown tests need upstream's unpublished harness runtime
+        # Skipped: shutdown tests need upstream's unpublished harness runtime
         # script, and settings tests need a newer runtime than the pinned one.
         run: |
           go test -count=1 -timeout 20m \
-            -skip 'TestDirectShutdownDrainsAfterChildExit|TestSpawnedJavaScriptUsesChildPath|TestOwnedStdioShutdown|TestSettings' \
+            -skip 'TestDirectShutdownDrainsAfterChildExit|TestSpawnedJavaScriptUsesChildPath|TestOwnedStdioShutdown|TestOwnedTCPShutdown|TestSettings' \
             $(go list ./... | grep -v '/internal/e2e')
 
   dotnet:

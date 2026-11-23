@@ -9,20 +9,20 @@
       "CopilotSDK.Supercharged.FSharp.Tests/1.0.0": {
         "dependencies": {
           "CopilotSDK.Supercharged.FSharp": "0.1.0",
-          "FSharp.Core": "10.0.107",
+          "FSharp.Core": "10.1.404",
           "FsUnit.xUnit": "6.0.1",
-          "Microsoft.NET.Test.Sdk": "17.14.1",
+          "Microsoft.NET.Test.Sdk": "17.14.2",
           "xunit": "2.9.3"
         },
         "runtime": {
           "CopilotSDK.Supercharged.FSharp.Tests.dll": {}
         }
       },
-      "FSharp.Core/10.0.107": {
+      "FSharp.Core/10.1.404": {
         "runtime": {
           "lib/netstandard2.1/FSharp.Core.dll": {
-            "assemblyVersion": "10.0.0.0",
-            "fileVersion": "10.1.726.21808"
+            "assemblyVersion": "10.1.0.0",
+            "fileVersion": "10.104.426.53019"
           }
         },
         "resources": {
@@ -69,18 +69,18 @@
       },
       "FsUnit.xUnit/6.0.1": {
         "dependencies": {
-          "FSharp.Core": "10.0.107",
+          "FSharp.Core": "10.1.404",
           "NHamcrest": "3.4.0",
           "xunit": "2.9.3"
         },
         "runtime": {
           "lib/net6.0/FsUnit.Xunit.dll": {
             "assemblyVersion": "1.0.0.0",
-            "fileVersion": "6.0.1.0"
+            "fileVersion": "1.0.0.0"
           }
         }
       },
-      "Microsoft.CodeCoverage/17.14.1": {
+      "Microsoft.CodeCoverage/17.14.2": {
         "runtime": {
           "lib/net8.0/Microsoft.VisualStudio.CodeCoverage.Shim.dll": {
             "assemblyVersion": "15.0.0.0",
@@ -88,25 +88,25 @@
           }
         }
       },
-      "Microsoft.NET.Test.Sdk/17.14.1": {
+      "Microsoft.NET.Test.Sdk/17.14.2": {
         "dependencies": {
-          "Microsoft.CodeCoverage": "17.14.1",
-          "Microsoft.TestPlatform.TestHost": "17.14.1"
+          "Microsoft.CodeCoverage": "17.14.2",
+          "Microsoft.TestPlatform.TestHost": "17.14.2"
         }
       },
-      "Microsoft.TestPlatform.ObjectModel/17.14.1": {
+      "Microsoft.TestPlatform.ObjectModel/17.14.2": {
         "runtime": {
           "lib/net8.0/Microsoft.TestPlatform.CoreUtilities.dll": {
             "assemblyVersion": "15.0.0.0",
-            "fileVersion": "17.1400.125.30202"
+            "fileVersion": "17.1400.226.56025"
           },
           "lib/net8.0/Microsoft.TestPlatform.PlatformAbstractions.dll": {
             "assemblyVersion": "15.0.0.0",
-            "fileVersion": "17.1400.125.30202"
+            "fileVersion": "17.1400.226.56025"
           },
           "lib/net8.0/Microsoft.VisualStudio.TestPlatform.ObjectModel.dll": {
             "assemblyVersion": "15.0.0.0",
-            "fileVersion": "17.1400.125.30202"
+            "fileVersion": "17.1400.226.56025"
           }
         },
         "resources": {
@@ -190,31 +190,31 @@
           }
         }
       },
-      "Microsoft.TestPlatform.TestHost/17.14.1": {
+      "Microsoft.TestPlatform.TestHost/17.14.2": {
         "dependencies": {
-          "Microsoft.TestPlatform.ObjectModel": "17.14.1",
+          "Microsoft.TestPlatform.ObjectModel": "17.14.2",
           "Newtonsoft.Json": "13.0.3"
         },
         "runtime": {
           "lib/net8.0/Microsoft.TestPlatform.CommunicationUtilities.dll": {
             "assemblyVersion": "15.0.0.0",
-            "fileVersion": "17.1400.125.30202"
+            "fileVersion": "17.1400.226.56025"
           },
           "lib/net8.0/Microsoft.TestPlatform.CrossPlatEngine.dll": {
             "assemblyVersion": "15.0.0.0",
-            "fileVersion": "17.1400.125.30202"
+            "fileVersion": "17.1400.226.56025"
           },
           "lib/net8.0/Microsoft.TestPlatform.Utilities.dll": {
             "assemblyVersion": "15.0.0.0",
-            "fileVersion": "17.1400.125.30202"
+            "fileVersion": "17.1400.226.56025"
           },
           "lib/net8.0/Microsoft.VisualStudio.TestPlatform.Common.dll": {
             "assemblyVersion": "15.0.0.0",
-            "fileVersion": "17.1400.125.30202"
+            "fileVersion": "17.1400.226.56025"
           },
           "lib/net8.0/testhost.dll": {
             "assemblyVersion": "15.0.0.0",
-            "fileVersion": "17.1400.125.30202"
+            "fileVersion": "17.1400.226.56025"
           }
         },
         "resources": {
@@ -363,7 +363,7 @@
         "runtime": {
           "lib/netstandard2.0/xunit.abstractions.dll": {
             "assemblyVersion": "2.0.0.0",
-            "fileVersion": "0.0.0.0"
+            "fileVersion": "2.0.0.0"
           }
         }
       },
@@ -405,7 +405,7 @@
       },
       "CopilotSDK.Supercharged.FSharp/0.1.0": {
         "dependencies": {
-          "FSharp.Core": "10.0.107"
+          "FSharp.Core": "10.1.404"
         },
         "runtime": {
           "CopilotSDK.Supercharged.FSharp.dll": {
@@ -422,12 +422,12 @@
       "serviceable": false,
       "sha512": ""
     },
-    "FSharp.Core/10.0.107": {
+    "FSharp.Core/10.1.404": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-9FGx5KgWja2QOla6D6rhmPPjb9Uo2CzJMT4M8LIDUPVCwYRdfYySZNXeRJV0yQ8ba43aJMZDY+Yw/GpfxyEX9Q==",
-      "path": "fsharp.core/10.0.107",
-      "hashPath": "fsharp.core.10.0.107.nupkg.sha512"
+      "sha512": "sha512-NzyMm8uoa4ULzpQwMcq/4F2zCWGKduuGwxdRSi48kEahNlykKJBUSmb9H/6SFbS0fDd+LqQum0BOkDp8pD8xRg==",
+      "path": "fsharp.core/10.1.404",
+      "hashPath": "fsharp.core.10.1.404.nupkg.sha512"
     },
     "FsUnit.xUnit/6.0.1": {
       "type": "package",
@@ -436,33 +436,33 @@
       "path": "fsunit.xunit/6.0.1",
       "hashPath": "fsunit.xunit.6.0.1.nupkg.sha512"
     },
-    "Microsoft.CodeCoverage/17.14.1": {
+    "Microsoft.CodeCoverage/17.14.2": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-pmTrhfFIoplzFVbhVwUquT+77CbGH+h4/3mBpdmIlYtBi9nAB+kKI6dN3A/nV4DFi3wLLx/BlHIPK+MkbQ6Tpg==",
-      "path": "microsoft.codecoverage/17.14.1",
-      "hashPath": "microsoft.codecoverage.17.14.1.nupkg.sha512"
+      "sha512": "sha512-ClUZus3UFavgM3ut4t0cfH7WHgrhc9RP1VCduJpmEGdt8Qn8NsF1IxP3GaUb2rnPck1HIO+IYSmIMZxeftCfhA==",
+      "path": "microsoft.codecoverage/17.14.2",
+      "hashPath": "microsoft.codecoverage.17.14.2.nupkg.sha512"
     },
-    "Microsoft.NET.Test.Sdk/17.14.1": {
+    "Microsoft.NET.Test.Sdk/17.14.2": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-HJKqKOE+vshXra2aEHpi2TlxYX7Z9VFYkr+E5rwEvHC8eIXiyO+K9kNm8vmNom3e2rA56WqxU+/N9NJlLGXsJQ==",
-      "path": "microsoft.net.test.sdk/17.14.1",
-      "hashPath": "microsoft.net.test.sdk.17.14.1.nupkg.sha512"
+      "sha512": "sha512-SvwMteSx1nlKYMx2oKAYBFQz4eBjhv82QdruQeybp6OSlhATzW8pK/wtDuAOSlNaf5UnFykaxd/7/eosRN9k0g==",
+      "path": "microsoft.net.test.sdk/17.14.2",
+      "hashPath": "microsoft.net.test.sdk.17.14.2.nupkg.sha512"
     },
-    "Microsoft.TestPlatform.ObjectModel/17.14.1": {
+    "Microsoft.TestPlatform.ObjectModel/17.14.2": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-xTP1W6Mi6SWmuxd3a+jj9G9UoC850WGwZUps1Wah9r1ZxgXhdJfj1QqDLJkFjHDCvN42qDL2Ps5KjQYWUU0zcQ==",
-      "path": "microsoft.testplatform.objectmodel/17.14.1",
-      "hashPath": "microsoft.testplatform.objectmodel.17.14.1.nupkg.sha512"
+      "sha512": "sha512-Bd6FxwMQlDLwxPoAUTLvLtpkVYZK0zfvdMMtoxgV+4+gzS4u4lag0vd2/hazZI4i/GRd/mGndMrZWTZT5lyIdw==",
+      "path": "microsoft.testplatform.objectmodel/17.14.2",
+      "hashPath": "microsoft.testplatform.objectmodel.17.14.2.nupkg.sha512"
     },
-    "Microsoft.TestPlatform.TestHost/17.14.1": {
+    "Microsoft.TestPlatform.TestHost/17.14.2": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-d78LPzGKkJwsJXAQwsbJJ7LE7D1wB+rAyhHHAaODF+RDSQ0NgMjDFkSA1Djw18VrxO76GlKAjRUhl+H8NL8Z+Q==",
-      "path": "microsoft.testplatform.testhost/17.14.1",
-      "hashPath": "microsoft.testplatform.testhost.17.14.1.nupkg.sha512"
+      "sha512": "sha512-caKAaaKcr2Yk3kBMozodubTFEGbCFPbw5tF3rBY0YU6B/nuIvo5vXHMPnjtIw57dYUKYVJmDpSkme/8Eastkzw==",
+      "path": "microsoft.testplatform.testhost/17.14.2",
+      "hashPath": "microsoft.testplatform.testhost.17.14.2.nupkg.sha512"
     },
     "Newtonsoft.Json/13.0.3": {
       "type": "package",

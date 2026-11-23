@@ -9,7 +9,10 @@ from pathlib import Path
 def test_version_uses_microsoft_distribution_metadata(tmp_path: Path):
     # This fork publishes as copilot-sdk-supercharged; other distributions sharing the
     # `copilot` import package must not supply the version.
-    for name, version in [("copilot-sdk-supercharged", "1.2.3"), ("microsoft-copilot-sdk", "9.9.9")]:
+    for name, version in [
+        ("copilot-sdk-supercharged", "1.2.3"),
+        ("microsoft-copilot-sdk", "9.9.9"),
+    ]:
         metadata = tmp_path / f"{name.replace('-', '_')}-{version}.dist-info"
         metadata.mkdir()
         (metadata / "METADATA").write_text(

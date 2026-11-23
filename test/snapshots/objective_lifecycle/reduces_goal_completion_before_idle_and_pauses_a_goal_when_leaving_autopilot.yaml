@@ -1,0 +1,32 @@
+models:
+  - claude-sonnet-5
+conversations:
+  - messages:
+      - role: system
+        content: ${system}
+      - role: user
+        content: >-
+          The user set this explicit autopilot objective with /autopilot:
+
+
+          Call task_complete immediately with summary 'The release is ready.' Do not call other tools or perform any
+          work.
+
+
+          Work autonomously toward this objective in clear checkpoints.
+
+          Before acting, identify the success condition and the validation loop needed to prove progress.
+
+          Keep making scoped progress until the objective is fully achieved, blocked by a real issue, or the user
+          changes the objective.
+
+          Only call task_complete when the objective is fully achieved and verified.
+
+          Do not call task_complete if more implementation, validation, or cleanup remains.
+      - role: assistant
+        tool_calls:
+          - id: toolcall_0
+            type: function
+            function:
+              name: task_complete
+              arguments: '{"summary":"The release is ready."}'

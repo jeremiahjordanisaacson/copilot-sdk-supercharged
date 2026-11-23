@@ -1,0 +1,40 @@
+models:
+  - claude-sonnet-5
+conversations:
+  - messages:
+      - role: system
+        content: ${system}
+      - role: user
+        content: Reply with TASK_MODEL_CHILD_DONE exactly.
+      - role: assistant
+        content: TASK_MODEL_CHILD_DONE
+  - messages:
+      - role: system
+        content: ${system}
+      - role: user
+        content: Reply with TASK_MODEL_READY exactly. When a background agent notification arrives later, reply with
+          TASK_MODEL_NOTIFIED exactly.
+      - role: assistant
+        content: TASK_MODEL_READY
+      - role: user
+        content: |-
+          <system_notification>
+          Agent "sdk-inherited-model-agent" (general-purpose) has finished processing and is now idle.
+          </system_notification>
+      - role: assistant
+        tool_calls:
+          - id: toolcall_0
+            type: function
+            function:
+              name: read_agent
+              arguments: '{"agent_id":"api-agent","since_turn":0}'
+      - role: tool
+        tool_call_id: toolcall_0
+        content: >-
+          Agent completed. agent_id: api-agent, agent_type: general-purpose, status: completed, description: SDK
+          inherited model coverage, elapsed: 0s, total_turns: 0, duration: 0s
+
+
+          TASK_MODEL_CHILD_DONE
+      - role: assistant
+        content: TASK_MODEL_NOTIFIED

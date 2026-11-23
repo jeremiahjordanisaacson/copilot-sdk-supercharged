@@ -1,8 +1,8 @@
 models:
-  - claude-sonnet-4.5
+  - claude-sonnet-5
   - auto
 errors:
-  - model: claude-sonnet-4.5
+  - model: claude-sonnet-5
     status: 429
     code: user_weekly_rate_limited
     message: You've reached your weekly rate limit.
@@ -19,4 +19,4 @@ conversations:
       - role: user
         content: Explain that auto mode recovered from a rate limit in one short sentence.
       - role: assistant
-        content: Auto mode recovered from the rate limit and the session can continue.
+        content: Auto mode recovered from the rate limit and continued automatically.

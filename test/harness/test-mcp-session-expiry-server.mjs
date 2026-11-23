@@ -1,0 +1,272 @@
+#!/usr/bin/env node
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
+/**
+ * Minimal Streamable HTTP MCP server for SDK E2E tests that need to observe
+ * remote session closure and reconnection.
+ *
+ * The `/mcp` endpoint issues a real `mcp-session-id` per connection and serves
+ * enough JSON-RPC MCP methods for the runtime to initialize, list tools and call
+ * one tool. It negotiates its supported stateful protocol version rather than
+ * echoing a newer, stateless client proposal. `POST /__expire` invalidates every
+ * active session so subsequent requests (including the runtime's liveness
+ * `ping`) answer `404`, which is how a
+ * server-side idle expiry is observed by a real Streamable HTTP client.
+ * `GET /__stats` reports the counters tests assert on, including answered
+ * expired-session probes so recovery assertions need not budget the idle delay.
+ * HTTP connections close after each response so socket idle retirement cannot
+ * interfere with the independently managed MCP session lifetime.
+ */
+
+import http from "node:http";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+
+const PROTOCOL_VERSION = "2025-03-26";
+const MAX_RECENT_REQUESTS = 32;
+
+export async function startSessionExpiryMcpServer({ host = "127.0.0.1", port = 0 } = {}) {
+  const activeSessions = new Set();
+  const expiredSessions = new Set();
+  let expiredAt = 0;
+  const stats = {
+    initializations: 0,
+    toolsListRequests: 0,
+    toolCalls: 0,
+    pings: 0,
+    expiredRequests: 0,
+    expiredRequestLog: [],
+    protocolVersions: [],
+    expiredSessionProbes: 0,
+  };
+  const recentRequests = [];
+  const startedAt = performance.now();
+
+  const server = http.createServer(async (req, res) => {
+    // MCP session expiry is independent of TCP keep-alive expiry.
+    res.setHeader("connection", "close");
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `${host}:${port}`}`);
+
+    if (req.method === "GET" && url.pathname === "/__stats") {
+      respondJson(res, 200, { ...stats, activeSessions: activeSessions.size, recentRequests });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/__expire") {
+      expiredAt = performance.now();
+      for (const sessionId of activeSessions) {
+        expiredSessions.add(sessionId);
+      }
+      activeSessions.clear();
+      respondJson(res, 200, { expired: expiredSessions.size });
+      return;
+    }
+
+    if (url.pathname !== "/mcp") {
+      respondJson(res, 404, { error: "not_found" });
+      return;
+    }
+
+    const sessionId = req.headers["mcp-session-id"];
+    const expiredSession = typeof sessionId === "string" && expiredSessions.has(sessionId);
+    const observation = {
+      elapsedMs: Math.round(performance.now() - startedAt),
+      httpMethod: req.method,
+      sessionAttached: typeof sessionId === "string",
+      expiredSession,
+      rpcMethods: [],
+      status: null,
+    };
+    recentRequests.push(observation);
+    if (recentRequests.length > MAX_RECENT_REQUESTS) recentRequests.shift();
+    res.once("finish", () => {
+      observation.status = res.statusCode;
+    });
+    if (expiredSession) {
+      stats.expiredRequests++;
+      if (stats.expiredRequestLog.length < 8) {
+        stats.expiredRequestLog.push({
+          method: req.method ?? "UNKNOWN",
+          elapsedMs: Math.round(performance.now() - expiredAt),
+        });
+      }
+      let isProbe = false;
+      if (req.method === "POST") {
+        const body = parseJsonBody(await readBody(req));
+        if (body.ok) {
+          const messages = Array.isArray(body.value) ? body.value : [body.value];
+          isProbe = messages.some((message) => message?.method === "ping" && "id" in message);
+        }
+      }
+      if (isProbe) {
+        res.once("finish", () => stats.expiredSessionProbes++);
+      }
+      respondJson(res, 404, { error: "session_expired" });
+      return;
+    }
+
+    if (req.method !== "POST") {
+      respondJson(res, 405, { error: "method_not_allowed" });
+      return;
+    }
+
+    const parsedBody = parseJsonBody(await readBody(req));
+    if (!parsedBody.ok) {
+      respondJson(res, 400, { error: "invalid_json" });
+      return;
+    }
+
+    const messages = Array.isArray(parsedBody.value) ? parsedBody.value : [parsedBody.value];
+    observation.rpcMethods = messages
+      .map((message) => message?.method)
+      .filter((method) => typeof method === "string")
+      .slice(0, 4);
+    const isInitialize = messages.some((message) => message?.method === "initialize");
+    let responseSessionId = typeof sessionId === "string" ? sessionId : undefined;
+
+    if (isInitialize) {
+      responseSessionId = randomUUID();
+      activeSessions.add(responseSessionId);
+      stats.initializations++;
+    } else if (responseSessionId === undefined || !activeSessions.has(responseSessionId)) {
+      respondJson(res, 404, { error: "session_not_found" });
+      return;
+    }
+
+    const responses = messages
+      .map((message) => handleJsonRpcMessage(message, stats))
+      .filter((message) => message !== undefined);
+
+    if (responses.length === 0) {
+      res.writeHead(202, { "mcp-session-id": responseSessionId });
+      res.end();
+      return;
+    }
+
+    const payload = JSON.stringify(Array.isArray(parsedBody.value) ? responses : responses[0]);
+    res.writeHead(200, {
+      "content-type": "application/json",
+      "content-length": Buffer.byteLength(payload),
+      "mcp-session-id": responseSessionId,
+    });
+    res.end(payload);
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected TCP server address");
+  }
+
+  return {
+    url: `http://${host}:${address.port}`,
+    stats,
+    close: () =>
+      new Promise((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+        server.closeAllConnections();
+      }),
+  };
+}
+
+function handleJsonRpcMessage(message, stats) {
+  if (!message || typeof message !== "object" || !("id" in message)) {
+    return undefined;
+  }
+
+  switch (message.method) {
+    case "initialize":
+      stats.protocolVersions.push(message.params?.protocolVersion ?? PROTOCOL_VERSION);
+      return {
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          // Session expiry and ping belong to legacy MCP, not modern stateless MCP.
+          protocolVersion: PROTOCOL_VERSION,
+          capabilities: { tools: {} },
+          serverInfo: { name: "session-expiry-test-server", version: "1.0.0" },
+        },
+      };
+    case "ping":
+      stats.pings++;
+      return { jsonrpc: "2.0", id: message.id, result: {} };
+    case "tools/list":
+      stats.toolsListRequests++;
+      return {
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          tools: [
+            {
+              name: "remote_ping",
+              description: "Returns pong to prove the remote MCP connection is functional.",
+              inputSchema: { type: "object", properties: {}, additionalProperties: false },
+              _meta: { "ui.visibility": ["model", "app"] },
+            },
+          ],
+        },
+      };
+    case "tools/call":
+      stats.toolCalls++;
+      return {
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { content: [{ type: "text", text: "remote pong" }], isError: false },
+      };
+    default:
+      return {
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32601, message: `Method not found: ${message.method}` },
+      };
+  }
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("error", reject);
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+  });
+}
+
+function parseJsonBody(body) {
+  if (!body) {
+    return { ok: true, value: undefined };
+  }
+
+  try {
+    return { ok: true, value: JSON.parse(body) };
+  } catch {
+    return { ok: false, value: undefined };
+  }
+}
+
+function respondJson(res, statusCode, body) {
+  const data = JSON.stringify(body);
+  res.writeHead(statusCode, {
+    "content-type": "application/json",
+    "content-length": Buffer.byteLength(data),
+  });
+  res.end(data);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const server = await startSessionExpiryMcpServer();
+  console.log(`Listening: ${server.url}`);
+  process.on("SIGTERM", async () => {
+    await server.close();
+    process.exit(0);
+  });
+}

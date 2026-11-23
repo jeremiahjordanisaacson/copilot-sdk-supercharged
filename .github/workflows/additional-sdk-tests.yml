@@ -790,7 +790,9 @@ jobs:
           node-version: '22'
       - run: cd ../nodejs && npm install --ignore-scripts && npx tsx esbuild-copilotsdk-nodejs.ts
       - run: cd ../test/harness && npm install --ignore-scripts
-      - run: rm -rf node_modules package-lock.json && npm install
+      # --legacy-peer-deps: npm's peer resolver crashes ("reading 'edgesOut'") on the
+      # optional vite devtools peer chain when installing without a lockfile.
+      - run: rm -rf node_modules package-lock.json && npm install --legacy-peer-deps
       - run: npm test
 
   # ---- Tier 4: Specialized environments (syntax check only) ----

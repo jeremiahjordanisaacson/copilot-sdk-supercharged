@@ -1,31 +1,31 @@
 {
   "format": 1,
   "restore": {
-    "/Users/home/Documents/copilot-sdk-supercharged/fsharp/tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj": {}
+    "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\tests\\CopilotSDK.Supercharged.FSharp.Tests.fsproj": {}
   },
   "projects": {
-    "/Users/home/Documents/copilot-sdk-supercharged/fsharp/src/CopilotSDK.Supercharged.FSharp.fsproj": {
+    "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\src\\CopilotSDK.Supercharged.FSharp.fsproj": {
       "version": "0.1.0",
       "restore": {
-        "projectUniqueName": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/src/CopilotSDK.Supercharged.FSharp.fsproj",
+        "projectUniqueName": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\src\\CopilotSDK.Supercharged.FSharp.fsproj",
         "projectName": "CopilotSDK.Supercharged.FSharp",
-        "projectPath": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/src/CopilotSDK.Supercharged.FSharp.fsproj",
-        "packagesPath": "/Users/home/.nuget/packages/",
-        "outputPath": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/src/obj/",
+        "projectPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\src\\CopilotSDK.Supercharged.FSharp.fsproj",
+        "packagesPath": "C:\\Users\\jeisaacs\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\src\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "/Users/home/.nuget/NuGet/NuGet.Config"
+          "C:\\Users\\jeisaacs\\.copilot\\session-state\\e5b1fa95-0646-4d10-8b39-5481512f3559\\files\\nuget.local.config"
         ],
         "originalTargetFrameworks": [
           "net8.0"
         ],
         "sources": {
-          "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/library-packs": {},
-          "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/sdk/10.0.107/FSharp/library-packs": {},
-          "https://api.nuget.org/v3/index.json": {}
+          "C:\\Program Files\\dotnet\\sdk\\10.0.404\\FSharp\\library-packs": {},
+          "https://packagefeedproxy.microsoft.io/nuget/v3/index.json": {}
         },
         "frameworks": {
           "net8.0": {
+            "framework": "net8.0",
             "targetAlias": "net8.0",
             "projectReferences": {}
           }
@@ -35,16 +35,17 @@
           "auditLevel": "low",
           "auditMode": "direct"
         },
-        "SdkAnalysisLevel": "10.0.100"
+        "SdkAnalysisLevel": "10.0.400"
       },
       "frameworks": {
         "net8.0": {
+          "framework": "net8.0",
           "targetAlias": "net8.0",
           "dependencies": {
             "FSharp.Core": {
               "include": "Runtime, Compile, Build, Native, Analyzers, BuildTransitive",
               "target": "Package",
-              "version": "[10.0.107, )",
+              "version": "[10.1.404, )",
               "generatePathProperty": true
             },
             "System.Text.Json": {
@@ -64,51 +65,41 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
-          "downloadDependencies": [
-            {
-              "name": "Microsoft.AspNetCore.App.Ref",
-              "version": "[8.0.26, 8.0.26]"
-            },
-            {
-              "name": "Microsoft.NETCore.App.Ref",
-              "version": "[8.0.26, 8.0.26]"
-            }
-          ],
           "frameworkReferences": {
             "Microsoft.NETCore.App": {
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/sdk/10.0.107/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.404/PortableRuntimeIdentifierGraph.json"
         }
       }
     },
-    "/Users/home/Documents/copilot-sdk-supercharged/fsharp/tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj": {
+    "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\tests\\CopilotSDK.Supercharged.FSharp.Tests.fsproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj",
+        "projectUniqueName": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\tests\\CopilotSDK.Supercharged.FSharp.Tests.fsproj",
         "projectName": "CopilotSDK.Supercharged.FSharp.Tests",
-        "projectPath": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj",
-        "packagesPath": "/Users/home/.nuget/packages/",
-        "outputPath": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/tests/obj/",
+        "projectPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\tests\\CopilotSDK.Supercharged.FSharp.Tests.fsproj",
+        "packagesPath": "C:\\Users\\jeisaacs\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\tests\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "/Users/home/.nuget/NuGet/NuGet.Config"
+          "C:\\Users\\jeisaacs\\.copilot\\session-state\\e5b1fa95-0646-4d10-8b39-5481512f3559\\files\\nuget.local.config"
         ],
         "originalTargetFrameworks": [
           "net8.0"
         ],
         "sources": {
-          "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/library-packs": {},
-          "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/sdk/10.0.107/FSharp/library-packs": {},
-          "https://api.nuget.org/v3/index.json": {}
+          "C:\\Program Files\\dotnet\\sdk\\10.0.404\\FSharp\\library-packs": {},
+          "https://packagefeedproxy.microsoft.io/nuget/v3/index.json": {}
         },
         "frameworks": {
           "net8.0": {
+            "framework": "net8.0",
             "targetAlias": "net8.0",
             "projectReferences": {
-              "/Users/home/Documents/copilot-sdk-supercharged/fsharp/src/CopilotSDK.Supercharged.FSharp.fsproj": {
-                "projectPath": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/src/CopilotSDK.Supercharged.FSharp.fsproj"
+              "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\src\\CopilotSDK.Supercharged.FSharp.fsproj": {
+                "projectPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\src\\CopilotSDK.Supercharged.FSharp.fsproj"
               }
             }
           }
@@ -118,16 +109,17 @@
           "auditLevel": "low",
           "auditMode": "direct"
         },
-        "SdkAnalysisLevel": "10.0.100"
+        "SdkAnalysisLevel": "10.0.400"
       },
       "frameworks": {
         "net8.0": {
+          "framework": "net8.0",
           "targetAlias": "net8.0",
           "dependencies": {
             "FSharp.Core": {
               "include": "Runtime, Compile, Build, Native, Analyzers, BuildTransitive",
               "target": "Package",
-              "version": "[10.0.107, )",
+              "version": "[10.1.404, )",
               "generatePathProperty": true
             },
             "FsUnit.xUnit": {
@@ -162,22 +154,12 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
-          "downloadDependencies": [
-            {
-              "name": "Microsoft.AspNetCore.App.Ref",
-              "version": "[8.0.26, 8.0.26]"
-            },
-            {
-              "name": "Microsoft.NETCore.App.Ref",
-              "version": "[8.0.26, 8.0.26]"
-            }
-          ],
           "frameworkReferences": {
             "Microsoft.NETCore.App": {
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/sdk/10.0.107/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.404/PortableRuntimeIdentifierGraph.json"
         }
       }
     }

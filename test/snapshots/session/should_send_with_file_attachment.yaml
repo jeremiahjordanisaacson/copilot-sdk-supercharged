@@ -1,5 +1,5 @@
 models:
-  - claude-sonnet-4.5
+  - claude-sonnet-5
 conversations:
   - messages:
       - role: system
@@ -53,12 +53,10 @@ conversations:
               arguments: '{"path":"${workdir}/attached-file.txt"}'
       - role: tool
         tool_call_id: toolcall_0
-        content: Tool 'report_intent' does not exist. Available tools that can be called are ${shell}, ${read_shell},
-          ${stop_shell}, ${list_shell}, view, create, edit, web_fetch, skill, sql, read_agent, list_agents, grep, glob,
-          task.
+        content: Tool 'report_intent' does not exist.
       - role: tool
         tool_call_id: toolcall_1
-        content: 1. FILE_ATTACHMENT_SENTINEL
+        content: FILE_ATTACHMENT_SENTINEL
       - role: assistant
         content: |-
           The file contains:

@@ -23,10 +23,19 @@ const PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource";
 
 export async function startOAuthMcpServer({
   expectedToken = DEFAULT_EXPECTED_TOKEN,
+  deferInitialChallenge = false,
   host = "127.0.0.1",
   port = 0,
+  cimdSupported = false,
 } = {}) {
+  let releaseInitialChallenge = () => {};
+  const initialChallenge = deferInitialChallenge
+    ? new Promise((resolve) => {
+        releaseInitialChallenge = resolve;
+      })
+    : Promise.resolve();
   const requests = [];
+  let toolMode = "unchanged";
   const tokens = {
     initial: expectedToken,
     refresh: `${expectedToken}-refresh`,
@@ -47,6 +56,7 @@ export async function startOAuthMcpServer({
       `http://${req.headers.host ?? `${host}:${port}`}`,
     );
     const baseUrl = url.origin;
+    const body = await readBody(req);
 
     if (req.method === "GET" && url.pathname === "/__requests") {
       respondJson(res, 200, requests);
@@ -54,9 +64,29 @@ export async function startOAuthMcpServer({
     }
 
     if (
-      req.method === "GET" &&
-      url.pathname === PROTECTED_RESOURCE_PATH
+      req.method === "POST" &&
+      url.pathname === "/__release-initial-challenge"
     ) {
+      releaseInitialChallenge();
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/__tool-mode") {
+      const parsedBody = parseJsonBody(body);
+      const mode = parsedBody.ok ? parsedBody.value?.mode : undefined;
+      if (!["unchanged", "removed", "changed-schema"].includes(mode)) {
+        respondJson(res, 400, { error: "invalid_tool_mode" });
+        return;
+      }
+      toolMode = mode;
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === PROTECTED_RESOURCE_PATH) {
       respondJson(res, 200, {
         resource: `${baseUrl}/mcp`,
         authorization_servers: [baseUrl],
@@ -76,6 +106,52 @@ export async function startOAuthMcpServer({
         token_endpoint: `${baseUrl}/token`,
         response_types_supported: ["code"],
         grant_types_supported: ["authorization_code"],
+        ...(cimdSupported
+          ? { client_id_metadata_document_supported: true }
+          : {}),
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/register") {
+      requests.push({
+        method: req.method,
+        path: url.pathname,
+        authorization: req.headers.authorization ?? null,
+        body,
+      });
+      respondJson(res, 201, {
+        client_id: "registered-client",
+        client_id_issued_at: Math.floor(Date.now() / 1000),
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/token") {
+      requests.push({
+        method: req.method,
+        path: url.pathname,
+        authorization: req.headers.authorization ?? null,
+        body,
+      });
+      const form = new URLSearchParams(body);
+      // "accepted-code-reauth" mints a different accepted token so tests can rotate credentials.
+      const issuedToken = {
+        "accepted-code": tokens.initial,
+        "accepted-code-reauth": tokens.reauth,
+      }[form.get("code") ?? ""];
+      if (
+        form.get("grant_type") !== "authorization_code" ||
+        !issuedToken ||
+        !form.get("code_verifier")
+      ) {
+        respondJson(res, 400, { error: "invalid_grant" });
+        return;
+      }
+      respondJson(res, 200, {
+        access_token: issuedToken,
+        token_type: "Bearer",
+        expires_in: 3600,
       });
       return;
     }
@@ -85,7 +161,6 @@ export async function startOAuthMcpServer({
       return;
     }
 
-    const body = await readBody(req);
     requests.push({
       method: req.method,
       path: url.pathname,
@@ -95,6 +170,7 @@ export async function startOAuthMcpServer({
 
     const token = parseBearerToken(req.headers.authorization);
     if (!token || !acceptedTokens.has(token)) {
+      await initialChallenge;
       challengeInitial(res, baseUrl);
       return;
     }
@@ -128,9 +204,9 @@ export async function startOAuthMcpServer({
 
     const response = Array.isArray(message)
       ? message
-          .map((item) => handleJsonRpcMessage(item))
+          .map((item) => handleJsonRpcMessage(item, toolMode))
           .filter((item) => item !== undefined)
-      : handleJsonRpcMessage(message);
+      : handleJsonRpcMessage(message, toolMode);
 
     if (
       response === undefined ||
@@ -165,9 +241,10 @@ export async function startOAuthMcpServer({
     url: `http://${host}:${address.port}`,
     requests,
     close: () =>
-      new Promise((resolve, reject) =>
-        server.close((err) => (err ? reject(err) : resolve())),
-      ),
+      new Promise((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+        server.closeAllConnections();
+      }),
   };
 }
 
@@ -211,7 +288,7 @@ function getReplacementChallenge(message, token, tokens, baseUrl) {
   return undefined;
 }
 
-function handleJsonRpcMessage(message) {
+function handleJsonRpcMessage(message, toolMode) {
   if (!message || typeof message !== "object" || !("id" in message)) {
     return undefined;
   }
@@ -228,6 +305,29 @@ function handleJsonRpcMessage(message) {
         },
       };
     case "tools/list":
+      if (toolMode === "removed") {
+        return {
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { tools: [] },
+        };
+      }
+      const inputSchema = {
+        type: "object",
+        properties: {
+          scenario: {
+            type: "string",
+            enum: ["initial", "refresh", "upscope", "reauth", "cancel"],
+          },
+          ...(toolMode === "changed-schema"
+            ? { replacementOnly: { type: "boolean" } }
+            : {}),
+        },
+        ...(toolMode === "changed-schema"
+          ? { required: ["replacementOnly"] }
+          : {}),
+        additionalProperties: false,
+      };
       return {
         jsonrpc: "2.0",
         id: message.id,
@@ -236,16 +336,7 @@ function handleJsonRpcMessage(message) {
             {
               name: "whoami",
               description: "Returns the authenticated test principal.",
-              inputSchema: {
-                type: "object",
-                properties: {
-                  scenario: {
-                    type: "string",
-                    enum: ["initial", "refresh", "upscope", "reauth", "cancel"],
-                  },
-                },
-                additionalProperties: false,
-              },
+              inputSchema,
               _meta: { "ui.visibility": ["model", "app"] },
             },
           ],
@@ -313,9 +404,14 @@ function respondJson(res, statusCode, body) {
   res.end(data);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   const server = await startOAuthMcpServer({
     expectedToken: process.env.EXPECTED_TOKEN ?? DEFAULT_EXPECTED_TOKEN,
+    cimdSupported: process.env.CIMD_SUPPORTED === "true",
+    deferInitialChallenge: process.env.DEFER_INITIAL_CHALLENGE === "true",
   });
   console.log(`Listening: ${server.url}`);
   process.on("SIGTERM", async () => {

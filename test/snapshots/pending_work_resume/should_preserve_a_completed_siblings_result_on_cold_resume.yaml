@@ -1,0 +1,52 @@
+models:
+  - claude-sonnet-5
+conversations:
+  - messages:
+      - role: system
+        content: ${system}
+      - role: user
+        content: Call pending_lookup_a with value 'alpha' and pending_lookup_b with value 'beta', then reply with both results.
+      - role: assistant
+        tool_calls:
+          - id: toolcall_0
+            type: function
+            function:
+              name: pending_lookup_a
+              arguments: '{"value":"alpha"}'
+      - role: assistant
+        tool_calls:
+          - id: toolcall_1
+            type: function
+            function:
+              name: pending_lookup_b
+              arguments: '{"value":"beta"}'
+  - messages:
+      - role: system
+        content: ${system}
+      - role: user
+        content: Call pending_lookup_a with value 'alpha' and pending_lookup_b with value 'beta', then reply with both results.
+      - role: assistant
+        tool_calls:
+          - id: toolcall_0
+            type: function
+            function:
+              name: pending_lookup_a
+              arguments: '{"value":"alpha"}'
+          - id: toolcall_1
+            type: function
+            function:
+              name: pending_lookup_b
+              arguments: '{"value":"beta"}'
+      - role: tool
+        tool_call_id: toolcall_0
+        content: PARALLEL_A_ALPHA
+      - role: tool
+        tool_call_id: toolcall_1
+        content: Tool execution was interrupted before a result was recorded. Its effects may be absent, partial, or already
+          complete, and other tools may have completed successfully. Check the current state before retrying; do not
+          assume success or replay this operation blindly.
+      - role: user
+        content: "Use the completed lookup result and report it without re-running pending_lookup_a. Reply with exactly:
+          COLD_RESUMED_A_RETAINED"
+      - role: assistant
+        content: COLD_RESUMED_A_RETAINED
