@@ -102,7 +102,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Upstream's same-checkout runtime prep script is not published; use the pinned CLI.
-      COPILOT_CLI_PATH: ${{ github.workspace }}/nodejs/node_modules/.bin/copilot
+      # Spawn the native runtime directly rather than the npm loader shim: ForceStop
+      # sends SIGKILL, which the loader cannot forward, so an orphaned runtime kept
+      # writing into t.TempDir() homes and failed their cleanup.
+      COPILOT_CLI_PATH: ${{ github.workspace }}/nodejs/node_modules/@github/copilot-linux-x64/copilot
     timeout-minutes: 30
     defaults:
       run:
@@ -155,3 +158,5 @@ jobs:
           dotnet test test/Microsoft.Copilot.SDK.Test.csproj --no-build -f net10.0
           -p:CopilotSkipCliDownload=true
           --filter "FullyQualifiedName!~.E2E.&FullyQualifiedName!~ReplayProxyTests&FullyQualifiedName!~E2ETestFixtureTests&FullyQualifiedName!~ConnectionToken&FullyQualifiedName!~StdioShutdownTests&FullyQualifiedName!~ClientSessionLifetimeTests.Stdio_&FullyQualifiedName!~FfiRuntimeHostLifetimeTests"
+      - name: Pack (mirrors nuget-publish.yml, including the runtime download)
+        run: dotnet pack src/Microsoft.Copilot.SDK.csproj -c Release -o "$RUNNER_TEMP/nupkg"

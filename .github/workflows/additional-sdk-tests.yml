@@ -86,6 +86,7 @@ on:
       - 'solidity/**'
       - 'test/harness/**'
       - 'test/snapshots/**'
+      - '.github/workflows/additional-sdk-tests.yml'
       - '!**/*.md'
   workflow_dispatch:
 
@@ -128,6 +129,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - run: mvn test -q
+      - name: Build release artifacts (mirrors maven-publish.yml, including javadoc)
+        run: mvn -q -B package source:jar javadoc:jar -DskipTests -Dcheckstyle.skip=true
 
   rust:
     name: "Test: Rust SDK"
@@ -624,6 +627,10 @@ jobs:
           working-directory: r
           extra-packages: any::devtools
       - run: Rscript -e "devtools::test()"
+      - name: R CMD check (mirrors cran-publish.yml)
+        run: |
+          R CMD build .
+          R CMD check copilot.sdk.supercharged_*.tar.gz --as-cran --no-manual
 
   groovy:
     name: "Test: Groovy SDK"
