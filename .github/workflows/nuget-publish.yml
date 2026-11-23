@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  # Re-publish one registry for an existing tag without moving the tag:
+  #   gh workflow run <this file> --ref main -f tag=vX.Y.Z
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (for example v3.0.0)'
+        required: true
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   id-token: write
@@ -20,6 +30,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -27,7 +39,7 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Set version from tag
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        run: echo "VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
 
       - name: Build and pack
         run: dotnet pack src/Microsoft.Copilot.SDK.csproj -c Release -p:Version=$VERSION -o ./nupkg

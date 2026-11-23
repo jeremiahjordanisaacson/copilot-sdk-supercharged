@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  # Re-publish one registry for an existing tag without moving the tag:
+  #   gh workflow run <this file> --ref main -f tag=vX.Y.Z
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (for example v3.0.0)'
+        required: true
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   id-token: write
@@ -19,6 +29,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Haskell
         uses: haskell-actions/setup@v2
@@ -28,12 +40,15 @@ jobs:
 
       - name: Set version from tag
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           CABAL_VERSION=$(echo $VERSION | sed 's/\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\1.\2.\3.0/')
           sed -i "s/^version: .*/version:            $CABAL_VERSION/" copilot-sdk-supercharged.cabal
 
       - name: Build sdist
         run: cabal sdist
+
+      - name: cabal check (diagnostics for Hackage validation)
+        run: cabal check || true
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
@@ -62,11 +77,12 @@ jobs:
             if [ "$status" -eq 0 ] && ! grep -qiE 'error|http code [45][0-9][0-9]' upload.log; then
               exit 0
             fi
-            # Credential or permission problems need the account owner; retrying cannot fix them.
-            if grep -qiE 'http code 40[13]|forbidden|unauthori[sz]ed|not authori[sz]ed|uploaders' upload.log; then
-              MSG="Hackage rejected the upload for account '${HACKAGE_USERNAME}': $(grep -iE 'error|http code' upload.log | head -1). Check the HACKAGE_USERNAME/HACKAGE_PASSWORD secrets and that the account has upload rights (new Hackage accounts must be added to the uploaders group)."
+            # 4xx responses (credentials, permissions, package validation) need a human
+            # fix, and retrying cannot help. Report them loudly instead of failing.
+            if grep -qiE 'http code 4[0-9][0-9]|forbidden|unauthori[sz]ed|not authori[sz]ed|uploaders' upload.log; then
+              MSG="Hackage rejected the upload for account '${HACKAGE_USERNAME}': $(grep -iE 'error|http code' upload.log | head -1). Check the HACKAGE_USERNAME/HACKAGE_PASSWORD secrets, that the account has upload rights (new Hackage accounts must be added to the uploaders group), and the cabal check output above."
               echo "::warning title=Hackage publish skipped::$MSG"
-              { echo "### Hackage publish skipped"; echo "$MSG"; } >> "$GITHUB_STEP_SUMMARY"
+              { echo "### Hackage publish skipped"; echo "$MSG"; echo '```'; cat upload.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             echo "Attempt $attempt failed, retrying in 10s..."

@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  # Re-publish one registry for an existing tag without moving the tag:
+  #   gh workflow run <this file> --ref main -f tag=vX.Y.Z
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (for example v3.0.0)'
+        required: true
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   id-token: write
@@ -19,6 +29,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -34,7 +46,7 @@ jobs:
 
       - name: Set version from tag
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           mvn versions:set -DnewVersion=$VERSION -DgenerateBackupPoms=false
 
       - name: Build JAR, sources, and javadoc
@@ -42,7 +54,7 @@ jobs:
 
       - name: Create signed bundle for Central Portal
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           ARTIFACT=copilot-sdk-supercharged
           GROUP_DIR=io/github/jeremiahjordanisaacson
           DIR=staging/$GROUP_DIR/$ARTIFACT/$VERSION
@@ -71,7 +83,7 @@ jobs:
         run: |
           TOKEN=$(echo -n "${{ secrets.MAVEN_USERNAME }}:${{ secrets.MAVEN_PASSWORD }}" | base64 -w0)
           curl --fail -X POST \
-            "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC&name=copilot-sdk-supercharged-${GITHUB_REF_NAME#v}" \
+            "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC&name=copilot-sdk-supercharged-${RELEASE_TAG#v}" \
             -H "Authorization: UserToken $TOKEN" \
             -F "bundle=@bundle.jar"
 

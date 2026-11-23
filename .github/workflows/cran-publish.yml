@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  # Re-publish one registry for an existing tag without moving the tag:
+  #   gh workflow run <this file> --ref main -f tag=vX.Y.Z
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (for example v3.0.0)'
+        required: true
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   id-token: write
@@ -19,6 +29,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup R
         uses: r-lib/actions/setup-r@v2
@@ -33,7 +45,7 @@ jobs:
 
       - name: Set version from tag
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           sed -i "s/^Version: .*/Version: $VERSION/" DESCRIPTION
 
       - name: Build package

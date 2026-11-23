@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  # Re-publish one registry for an existing tag without moving the tag:
+  #   gh workflow run <this file> --ref main -f tag=vX.Y.Z
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (for example v3.0.0)'
+        required: true
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   id-token: write
@@ -19,6 +29,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -33,12 +45,12 @@ jobs:
 
       - name: Build JAR
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           VERSION=$VERSION clojure -T:build jar
 
       - name: Deploy to Clojars
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           VERSION=$VERSION clojure -T:build deploy
         env:
           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
