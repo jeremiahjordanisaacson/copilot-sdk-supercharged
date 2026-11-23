@@ -974,9 +974,6 @@ async function exitWithNoMatchingRequestError(
   storedData?: NormalizedData,
   requestBody?: string,
 ) {
-  if (process.env.CAPTURE_MISS_FILE) {
-    (await import("node:fs")).writeFileSync(process.env.CAPTURE_MISS_FILE, requestBody ?? options.body ?? "");
-  }
   let diagnostics: string;
   try {
     const normalized = await parseAndNormalizeRequest(
@@ -1640,8 +1637,13 @@ function transformOpenAIRequestMessage(
     content = "${system}";
   } else if (m.role === "user" && typeof m.content === "string") {
     content = normalizeUserMessage(m.content);
+    // CLI 1.0.10x+ also sends standalone <system_reminder> user messages (for
+    // example sandbox guidance) before the prompt; like runtime notices they
+    // carry no test signal once stripped.
     strippedRuntimeNoticeOnly =
-      content === "" && containsRuntimeNotice(m.content);
+      content === "" &&
+      (containsRuntimeNotice(m.content) ||
+        /<system_reminder>[\s\S]*?<\/system_reminder>/.test(m.content));
   } else if (m.role === "user" && Array.isArray(m.content)) {
     // Multimodal user messages have array content with text and image_url parts.
     // Extract and normalize text parts; represent image_url parts as a stable marker.

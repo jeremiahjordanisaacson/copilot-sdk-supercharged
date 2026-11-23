@@ -42,6 +42,8 @@ on:
       - 'cobol/**'
       - 'solidity/**'
       - '.github/workflows/additional-sdk-tests.yml'
+      - 'test/harness/**'
+      - 'test/snapshots/**'
       - '!**/*.md'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -82,6 +84,8 @@ on:
       - 'matlab/**'
       - 'cobol/**'
       - 'solidity/**'
+      - 'test/harness/**'
+      - 'test/snapshots/**'
       - '!**/*.md'
   workflow_dispatch:
 
