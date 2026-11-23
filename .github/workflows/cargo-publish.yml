@@ -43,10 +43,18 @@ jobs:
       - name: Package crate
         run: cargo package --allow-dirty --no-default-features
 
+      # Trusted publishing: a temporary crates.io token from the job's OIDC token
+      # (revoked when the job ends). Falls back to CARGO_REGISTRY_TOKEN until a
+      # trusted publisher for cargo-publish.yml is configured on crates.io.
+      - name: crates.io auth (trusted publishing)
+        id: crates-auth
+        continue-on-error: true
+        uses: rust-lang/crates-io-auth-action@v1
+
       - name: Publish to crates.io
         run: cargo publish --allow-dirty --no-default-features
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
