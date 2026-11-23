@@ -25,7 +25,7 @@ jobs:
           mkdir -p dist
 
           # Package each SDK as a zip
-          for sdk in nodejs python go dotnet java rust ruby php swift kotlin cpp c dart scala r perl lua shell elixir haskell clojure; do
+          for sdk in nodejs python go dotnet java rust ruby php swift kotlin cpp c dart scala r perl lua shell elixir haskell clojure visualbasic delphi fortran matlab ada objc fsharp groovy julia cobol ocaml zig nim dlang erlang crystal tcl solidity vlang; do
             if [ -d "$sdk" ]; then
               zip -r "dist/copilot-sdk-supercharged-${sdk}-v${VERSION}.zip" "$sdk/" \
                 -x "**/node_modules/*" "**/target/*" "**/.git/*" "**/dist/*" "**/build/*" "**/__pycache__/*" "**/.venv/*" "**/obj/*" "**/bin/*"
@@ -35,7 +35,7 @@ jobs:
 
           # Also create a full source archive
           zip -r "dist/copilot-sdk-supercharged-all-v${VERSION}.zip" \
-            nodejs/ python/ go/ dotnet/ java/ rust/ ruby/ php/ swift/ kotlin/ cpp/ c/ dart/ scala/ r/ perl/ lua/ shell/ elixir/ haskell/ clojure/ \
+            nodejs/ python/ go/ dotnet/ java/ rust/ ruby/ php/ swift/ kotlin/ cpp/ c/ dart/ scala/ r/ perl/ lua/ shell/ elixir/ haskell/ clojure/ visualbasic/ delphi/ fortran/ matlab/ ada/ objc/ fsharp/ groovy/ julia/ cobol/ ocaml/ zig/ nim/ dlang/ erlang/ crystal/ tcl/ solidity/ vlang/ \
             README.md MULTI_LANGUAGE_SDKS.md CONTRIBUTING.md LICENSE docs/ \
             -x "**/node_modules/*" "**/target/*" "**/.git/*" "**/dist/*" "**/build/*" "**/__pycache__/*" "**/.venv/*" "**/obj/*" "**/bin/*"
 
@@ -63,7 +63,7 @@ jobs:
           cat > release_notes.md << 'HEADER'
           ## Copilot SDK Supercharged v${VERSION}
 
-          **40 languages. 9 package registries. One SDK.**
+          **40 languages. One SDK.**
 
           ### Install from Package Registries
 
@@ -74,7 +74,7 @@ jobs:
           | **crates.io** | `cargo add copilot-sdk-supercharged` |
           | **NuGet** | `dotnet add package CopilotSDK.Supercharged` |
           | **RubyGems** | `gem install copilot-sdk-supercharged` |
-          | **Hex** | `{:copilot_sdk_supercharged, "~> 1.0"}` |
+          | **Hex** | `{:copilot_sdk_supercharged, "~> ${VERSION}"}` |
           | **Clojars** | `net.clojars.jeremiahisaacson/copilot-sdk-supercharged` |
           | **LuaRocks** | `luarocks install copilot-sdk-supercharged` |
 
@@ -86,7 +86,7 @@ jobs:
           echo "| SDK | Download | SHA256 Checksum |" >> release_notes.md
           echo "|-----|----------|-----------------|" >> release_notes.md
 
-          for sdk in nodejs python go dotnet java rust ruby php swift kotlin cpp c dart scala r perl lua shell elixir haskell clojure; do
+          for sdk in nodejs python go dotnet java rust ruby php swift kotlin cpp c dart scala r perl lua shell elixir haskell clojure visualbasic delphi fortran matlab ada objc fsharp groovy julia cobol ocaml zig nim dlang erlang crystal tcl solidity vlang; do
             FILE="copilot-sdk-supercharged-${sdk}-v${VERSION}.zip"
             if [ -f "dist/${FILE}" ]; then
               # Pretty name
@@ -112,6 +112,25 @@ jobs:
                 elixir) NAME="Elixir" ;;
                 haskell) NAME="Haskell" ;;
                 clojure) NAME="Clojure" ;;
+                visualbasic) NAME="Visual Basic" ;;
+                delphi) NAME="Delphi" ;;
+                fortran) NAME="Fortran" ;;
+                matlab) NAME="MATLAB" ;;
+                ada) NAME="Ada" ;;
+                objc) NAME="Objective-C" ;;
+                fsharp) NAME="F#" ;;
+                groovy) NAME="Groovy" ;;
+                julia) NAME="Julia" ;;
+                cobol) NAME="COBOL" ;;
+                ocaml) NAME="OCaml" ;;
+                zig) NAME="Zig" ;;
+                nim) NAME="Nim" ;;
+                dlang) NAME="D" ;;
+                erlang) NAME="Erlang" ;;
+                crystal) NAME="Crystal" ;;
+                tcl) NAME="Tcl" ;;
+                solidity) NAME="Solidity" ;;
+                vlang) NAME="V" ;;
                 *) NAME="$sdk" ;;
               esac
               echo "| **${NAME}** | [Download](${DL}/${FILE}) | [SHA256](${DL}/${FILE}.sha256) |" >> release_notes.md

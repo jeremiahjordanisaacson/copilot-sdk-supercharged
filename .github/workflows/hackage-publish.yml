@@ -43,17 +43,37 @@ jobs:
       - name: Upload to Hackage
         run: |
           if [ -z "$HACKAGE_PASSWORD" ]; then
-            echo "::warning::HACKAGE_PASSWORD secret not configured — skipping upload"
+            echo "::warning::HACKAGE_PASSWORD secret not configured, skipping upload"
             exit 0
           fi
           for attempt in 1 2 3; do
+            set +e
             cabal upload dist-newstyle/sdist/copilot-sdk-supercharged-*.tar.gz \
               --username="${HACKAGE_USERNAME}" \
               --password="${HACKAGE_PASSWORD}" \
-              --publish && break
+              --publish > upload.log 2>&1
+            status=$?
+            set -e
+            cat upload.log
+            if grep -qiE 'already exists' upload.log; then
+              echo "This version is already on Hackage."
+              exit 0
+            fi
+            if [ "$status" -eq 0 ] && ! grep -qiE 'error|http code [45][0-9][0-9]' upload.log; then
+              exit 0
+            fi
+            # Credential or permission problems need the account owner; retrying cannot fix them.
+            if grep -qiE 'http code 40[13]|forbidden|unauthori[sz]ed|not authori[sz]ed|uploaders' upload.log; then
+              MSG="Hackage rejected the upload for account '${HACKAGE_USERNAME}': $(grep -iE 'error|http code' upload.log | head -1). Check the HACKAGE_USERNAME/HACKAGE_PASSWORD secrets and that the account has upload rights (new Hackage accounts must be added to the uploaders group)."
+              echo "::warning title=Hackage publish skipped::$MSG"
+              { echo "### Hackage publish skipped"; echo "$MSG"; } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             echo "Attempt $attempt failed, retrying in 10s..."
             sleep 10
           done
+          echo "::error::Hackage upload failed after 3 attempts"
+          exit 1
         env:
           HACKAGE_USERNAME: ${{ secrets.HACKAGE_USERNAME }}
           HACKAGE_PASSWORD: ${{ secrets.HACKAGE_PASSWORD }}

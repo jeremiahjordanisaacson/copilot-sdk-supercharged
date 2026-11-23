@@ -22,8 +22,24 @@ jobs:
         with:
           subject-path: php/composer.json
       - name: Notify Packagist
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
         run: |
-          curl -XPOST \
+          if [ -z "$PACKAGIST_USERNAME" ] || [ -z "$PACKAGIST_API_TOKEN" ]; then
+            MSG="PACKAGIST_USERNAME/PACKAGIST_API_TOKEN secrets are not configured, so Packagist was not notified. Submit the package once at https://packagist.org/packages/submit and add the secrets."
+            echo "::warning title=Packagist update skipped::$MSG"
+            { echo "### Packagist update skipped"; echo "$MSG"; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          RESPONSE=$(curl -sS -XPOST \
             -H 'content-type: application/json' \
-            "https://packagist.org/api/update-package?username=${{ secrets.PACKAGIST_USERNAME }}&apiToken=${{ secrets.PACKAGIST_API_TOKEN }}" \
-            -d '{"repository":{"url":"https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged"}}'
+            "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_API_TOKEN}" \
+            -d '{"repository":{"url":"https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged"}}')
+          echo "$RESPONSE"
+          if echo "$RESPONSE" | grep -q '"status":"success"'; then
+            exit 0
+          fi
+          MSG="Packagist did not accept the update: $RESPONSE"
+          echo "::warning title=Packagist update skipped::$MSG"
+          { echo "### Packagist update skipped"; echo "$MSG"; } >> "$GITHUB_STEP_SUMMARY"

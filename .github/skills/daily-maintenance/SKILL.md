@@ -420,7 +420,7 @@ git push origin "v$VERSION"
 
 # The tag push triggers these workflows automatically:
 # - release.yml         → Creates GitHub Release with SDK zip archives + checksums
-# - pypi-publish.yml    → Publishes to PyPI (OIDC trusted publishing — no token)
+# - pypi-publish.yml    → Publishes to PyPI (OIDC trusted publishing, PYPI_TOKEN fallback)
 # - npm-publish.yml     → Publishes to npm (OIDC trusted publishing — no token, auto-provenance)
 # - cargo-publish.yml   → Publishes to crates.io (needs CARGO_REGISTRY_TOKEN)
 # - rubygems-publish.yml → Publishes to RubyGems (needs RUBYGEMS_API_KEY)
@@ -612,9 +612,24 @@ gh issue create --title "🚨 Rollback: upstream sync reverted" --body "Rolled b
 
 ---
 
-## Known SDK-Specific Gotchas (Updated 2026-05-25)
+## Known SDK-Specific Gotchas (Updated 2026-11-23)
 
 These are hard-won lessons from past maintenance cycles. **Consult this before debugging failures.**
+
+### v3.0.0 sync (SDK protocol 4, Copilot CLI 1.0.113)
+- **Protocol 4 rejects flat session options** ("Session option 'streaming' has moved to 'events.streaming'"). Unknown root keys are tolerated, unknown members inside a group are rejected. The 36 additional SDKs keep their flat public options and translate them to the grouped payload internally; `verify-sdk-coverage.mjs` checks this plus `sdk-protocol-version.json` (4).
+- **CLI 1.0.113 npm package has no `index.js`.** Spawn `nodejs/node_modules/.bin/copilot` (runs `npm-loader.js`) or the native `nodejs/node_modules/@github/copilot-<platform>/copilot`. CI sets `COPILOT_CLI_PATH`.
+- **Go core tests must use the native runtime**, not the loader shim: `ForceStop` sends SIGKILL, which the loader cannot forward, and the orphaned runtime keeps writing into `t.TempDir()` homes ("directory not empty" cleanup failures).
+- **Replay proxy (test/harness/replayingCapiProxy.ts) fork deltas:** CLI 1.0.113 sends a standalone `<system_reminder>` user message, which the proxy drops when matching; the CLI reads its model catalog from CAPI `/meta`, which the proxy answers with a default catalog; fork recordings use `claude-sonnet-4.5` (upstream re-recorded with claude-sonnet-5, so keep our snapshots).
+- **Lua `send_and_wait`:** events read while `send()` awaits its RPC response can belong to the previous turn. Buffer them until the message id is known and accept `session.idle` only after this turn's `user.message`/`assistant.message` (correlate `messageId`/`originatingMessageId`, as Node does).
+- **Perl harness:** keep the replay proxy's stderr attached (`>&STDERR`); closing the pipe makes the proxy die with EPIPE.
+- **C:** CMake 4 rejects cJSON's `cmake_minimum_required(3.0)`; set `CMAKE_POLICY_VERSION_MINIMUM 3.5` before `FetchContent`.
+- **CodeQL (Go):** use `go-version-file: go/go.mod`, not a hard-coded Go version.
+- **Solidity CI:** `npm install --legacy-peer-deps` (npm `edgesOut` peer-resolution crash otherwise).
+- **PR CI cost:** when a PR changes more than 300 files, every push re-runs ALL path-filtered PR workflows. Batch fixes into one push.
+- **gh auth:** the default `jeisaacs_microsoft` account lacks security scopes. Use `$env:GH_TOKEN = gh auth token -u jeremiahjordanisaacson` for Dependabot/CodeQL/PR APIs. Fast job logs: `gh api --allow-escape-sequences repos/<repo>/actions/jobs/<id>/logs`.
+- **Rust SDK Tests on main are skipped by design** (`if: github.event.repository.fork == false`; this repo is a fork).
+- **Validate publish packaging before tagging:** PR CI mirrors `dotnet pack` (including the runtime bundle download), the Maven source/javadoc jars, and the CRAN `R CMD check`. Locally: `cargo package --allow-dirty --no-default-features`, `gem build`, `python -m build`.
 
 ### Type Mapping: PingResponse.timestamp
 - **CANONICAL TYPE**: `string` (ISO 8601 format like `"2025-01-01T00:00:00Z"`)
@@ -688,7 +703,9 @@ These are hard-won lessons from past maintenance cycles. **Consult this before d
 - npm lockfile: After upstream merges, use `npm install --ignore-scripts` instead of `npm ci` (lockfile may be out of sync)
 - Maven Central: The artifact name in the publish workflow MUST match `<artifactId>` in `pom.xml` (currently `copilot-sdk-java`)
 - Dart/pub.dev: Must have LICENSE file in dart/ directory, CHANGELOG.md must mention current version, `dart analyze` warnings block publish
-- pub.dev first publish: "Only users are allowed to upload new packages" — requires manual first upload
+- pub.dev first publish: "Only users are allowed to upload new packages" — requires manual first upload. Until then `pub-publish.yml` detects the 404 and skips with a warning and job summary instead of failing.
+- PyPI: no trusted publisher is configured on pypi.org (`invalid-publisher`), so `pypi-publish.yml` tries OIDC first and falls back to the `PYPI_TOKEN` secret (`skip-existing: true` keeps re-runs idempotent).
+- NuGet: the SDK targets net10.0 and `dotnet/global.json` pins SDK 10, so `nuget-publish.yml` sets up .NET 10.0.x and runs from `dotnet/`.
 - NuGet: NUGET_API_KEY secret expires — if 403, regenerate at nuget.org/account/apikeys
 - crates.io: Must accept ownership invitation before publishing
 - CRAN: Use `error_on = "error"` in `devtools::check_built()` to pass on warnings
