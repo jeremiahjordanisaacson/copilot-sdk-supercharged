@@ -4,19 +4,12 @@ multi-ecosystem-groups:
     schedule:
       interval: 'weekly'
 updates:
-  - package-ecosystem: 'github-actions'
-    directory: '/'
-    multi-ecosystem-group: 'all'
-    patterns: ['*']
-    ignore:
-      # gh-aw generated files: action SHAs are managed by `gh aw compile`
-      # via .github/aw/actions-lock.json, not by Dependabot.
-      # Dependabot's find-and-replace breaks lockfile metadata headers.
-      - dependency-name: "actions/github-script"
-      - dependency-name: "github/gh-aw-actions"
-      # Major versions can change action inputs; adopt them deliberately.
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+  # GitHub Actions are not listed: workflows reference actions by major tag
+  # (@v6), which already receives minor and patch releases, major bumps are
+  # ignored below, and the SHA pins live in gh-aw lock files that must not be
+  # rewritten. The github_actions updater also failed on every run since
+  # 2026-08-21 (git 401 on action repos, then the 55-minute job limit).
+  # Security alerts for actions still come from the dependency graph.
   # Node.js dependencies
   - package-ecosystem: 'npm'
     directory: '/nodejs'
