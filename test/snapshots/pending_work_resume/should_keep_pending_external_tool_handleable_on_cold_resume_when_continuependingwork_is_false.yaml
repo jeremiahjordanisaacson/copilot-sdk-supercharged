@@ -1,5 +1,5 @@
 models:
-  - claude-sonnet-5
+  - claude-sonnet-4.5
 conversations:
   - messages:
       - role: system
@@ -15,9 +15,7 @@ conversations:
               arguments: '{"value":"beta"}'
       - role: tool
         tool_call_id: toolcall_0
-        content: Tool execution was interrupted before a result was recorded. Its effects may be absent, partial, or already
-          complete, and other tools may have completed successfully. Check the current state before retrying; do not
-          assume success or replay this operation blindly.
+        content: The execution of this tool, or a previous tool was interrupted.
       - role: user
         content: "Reply with exactly: COLD_RESUMED_FOLLOWUP"
       - role: assistant

@@ -974,6 +974,9 @@ async function exitWithNoMatchingRequestError(
   storedData?: NormalizedData,
   requestBody?: string,
 ) {
+  if (process.env.CAPTURE_MISS_FILE) {
+    (await import("node:fs")).writeFileSync(process.env.CAPTURE_MISS_FILE, requestBody ?? options.body ?? "");
+  }
   let diagnostics: string;
   try {
     const normalized = await parseAndNormalizeRequest(
