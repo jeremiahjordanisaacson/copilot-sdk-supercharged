@@ -38,6 +38,8 @@ public final class SessionUsageCheckpointEvent extends SessionEvent {
     public record SessionUsageCheckpointEventData(
         /** Runtime tool-operation identities already included in this checkpoint. Prevents duplicate charges when an operation is delivered again with a newer sequence. */
         @JsonProperty("toolUsageRequestIds") List<String> toolUsageRequestIds,
+        /** Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO. */
+        @JsonProperty("agentInvocationCounts") Map<String, Long> agentInvocationCounts,
         /** Session-wide accumulated nano-AI units cost at checkpoint time */
         @JsonProperty("totalNanoAiu") Double totalNanoAiu,
         /** Complete accounting state captured atomically with the receipt watermarks. */
@@ -74,6 +76,7 @@ public final class SessionUsageCheckpointEvent extends SessionEvent {
         public static final class Builder {
             private Builder() {}
             private List<String> toolUsageRequestIds;
+            private Map<String, Long> agentInvocationCounts;
             private Double totalNanoAiu;
             private UsageGetMetricsResult accountingSnapshot;
             private List<UsageMetricsProviderModelMetric> providerModelMetrics;
@@ -90,6 +93,17 @@ public final class SessionUsageCheckpointEvent extends SessionEvent {
              */
             public Builder toolUsageRequestIds(List<String> value) {
                 this.toolUsageRequestIds = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code agentInvocationCounts} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder agentInvocationCounts(Map<String, Long> value) {
+                this.agentInvocationCounts = value;
                 return this;
             }
 
@@ -178,7 +192,7 @@ public final class SessionUsageCheckpointEvent extends SessionEvent {
              */
             public SessionUsageCheckpointEventData build() {
                 if (totalNanoAiu == null) throw new IllegalStateException("Missing required property: totalNanoAiu");
-                return new SessionUsageCheckpointEventData(toolUsageRequestIds, totalNanoAiu, accountingSnapshot, providerModelMetrics, usageAccountingWatermarks, totalPremiumRequests, modelCacheState, promptCacheBreakState);
+                return new SessionUsageCheckpointEventData(toolUsageRequestIds, agentInvocationCounts, totalNanoAiu, accountingSnapshot, providerModelMetrics, usageAccountingWatermarks, totalPremiumRequests, modelCacheState, promptCacheBreakState);
             }
         }
     }

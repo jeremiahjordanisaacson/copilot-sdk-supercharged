@@ -2125,13 +2125,15 @@ pub struct UsageMetricsModelMetric {
 }
 crate::record_serde::wire_record!(UsageMetricsModelMetric { ai_credits_status: "aiCreditsStatus" if is_none, cache_expires_at: "cacheExpiresAt" if is_none, requests: "requests", token_details: "tokenDetails" if is_none, total_nano_aiu: "totalNanoAiu" if is_none, usage: "usage" });
 
-/// Usage attributed to one agent instance, including its identity, API duration, AI units, and per-model breakdown.
+/// Usage summed across invocations of one configured agent.
 #[derive(Debug, Clone, Default)]
 pub struct UsageMetricsAgentMetric {
-    /// Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.
+    /// Legacy invocation label. Omitted from name-aggregated metrics because task descriptions differ between invocations.
     pub agent_display_name: Option<String>,
-    /// Configured agent name, when this is a subagent
+    /// Configured agent name with plugin namespace separators normalized from `/` to `:`, when this is a subagent
     pub agent_name: Option<String>,
+    /// Number of distinct subagent starts in this aggregate. Omitted for main and in legacy instance-keyed metrics.
+    pub invocation_count: Option<i64>,
     /// Per-model usage for this agent, keyed by model identifier
     pub model_metrics: HashMap<String, UsageMetricsModelMetric>,
     /// Time spent in model API calls by this agent, in milliseconds
@@ -2139,7 +2141,7 @@ pub struct UsageMetricsAgentMetric {
     /// Accumulated nano-AI units cost for this agent
     pub total_nano_aiu: f64,
 }
-crate::record_serde::wire_record!(UsageMetricsAgentMetric { agent_display_name: "agentDisplayName" if is_none, agent_name: "agentName" if is_none, model_metrics: "modelMetrics", total_api_duration_ms: "totalApiDurationMs", total_nano_aiu: "totalNanoAiu" });
+crate::record_serde::wire_record!(UsageMetricsAgentMetric { agent_display_name: "agentDisplayName" if is_none, agent_name: "agentName" if is_none, invocation_count: "invocationCount" if is_none, model_metrics: "modelMetrics", total_api_duration_ms: "totalApiDurationMs", total_nano_aiu: "totalNanoAiu" });
 
 /// Aggregated code change metrics
 #[derive(Debug, Clone, Default)]
@@ -2210,7 +2212,7 @@ crate::record_serde::wire_record!(UsageMetricsTokenDetail {
 /// Accumulated session usage metrics, including premium request cost, token counts, model breakdown, and code-change totals.
 #[derive(Debug, Clone, Default)]
 pub struct UsageGetMetricsResult {
-    /// Per-agent usage metrics, keyed by agent instance identifier. The main conversation uses the stable key `main`.
+    /// Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`.
     pub agent_metrics: Option<HashMap<String, UsageMetricsAgentMetric>>,
     /// Completeness of totalNanoAiu. Numeric totals remain the reported subtotal; zero is not a claim of free usage when unavailable.
     pub ai_credits_status: Option<AiCreditsStatus>,
@@ -2313,13 +2315,15 @@ pub struct ShutdownModelMetric {
 }
 crate::record_serde::wire_record!(ShutdownModelMetric { requests: "requests", token_details: "tokenDetails" if is_none, total_nano_aiu: "totalNanoAiu" if is_none, usage: "usage" });
 
-/// Usage attributed to one agent instance at session shutdown.
+/// Usage summed across invocations of one configured agent at session shutdown.
 #[derive(Debug, Clone, Default)]
 pub struct ShutdownAgentMetric {
-    /// Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.
+    /// Legacy invocation label. Omitted from name-aggregated metrics because task descriptions differ between invocations.
     pub agent_display_name: Option<String>,
-    /// Configured agent name, when this is a subagent
+    /// Configured agent name with plugin namespace separators normalized from `/` to `:`, when this is a subagent
     pub agent_name: Option<String>,
+    /// Number of distinct subagent starts in this aggregate. Omitted for main and in legacy instance-keyed metrics.
+    pub invocation_count: Option<i64>,
     /// Per-model usage for this agent, keyed by model identifier
     pub model_metrics: HashMap<String, ShutdownModelMetric>,
     /// Time spent in model API calls by this agent, in milliseconds
@@ -2327,7 +2331,7 @@ pub struct ShutdownAgentMetric {
     /// Accumulated nano-AI units cost for this agent
     pub total_nano_aiu: f64,
 }
-crate::record_serde::wire_record!(ShutdownAgentMetric { agent_display_name: "agentDisplayName" if is_none, agent_name: "agentName" if is_none, model_metrics: "modelMetrics", total_api_duration_ms: "totalApiDurationMs", total_nano_aiu: "totalNanoAiu" });
+crate::record_serde::wire_record!(ShutdownAgentMetric { agent_display_name: "agentDisplayName" if is_none, agent_name: "agentName" if is_none, invocation_count: "invocationCount" if is_none, model_metrics: "modelMetrics", total_api_duration_ms: "totalApiDurationMs", total_nano_aiu: "totalNanoAiu" });
 
 /// Aggregate code change metrics for the session
 #[derive(Debug, Clone, Default)]
@@ -2361,7 +2365,10 @@ pub struct SessionShutdownData {
     /// Complete accounting state captured atomically with receipt watermarks.
     #[doc(hidden)]
     pub(crate) accounting_snapshot: Option<UsageGetMetricsResult>,
-    /// Per-agent usage breakdown, keyed by agent instance identifier. The main conversation uses the stable key `main`.
+    /// Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.
+    #[doc(hidden)]
+    pub(crate) agent_invocation_counts: Option<HashMap<String, i64>>,
+    /// Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`.
     pub agent_metrics: Option<HashMap<String, ShutdownAgentMetric>>,
     /// Aggregate code change metrics for the session
     pub code_changes: ShutdownCodeChanges,
@@ -2409,7 +2416,7 @@ pub struct SessionShutdownData {
     /// Per-source accounting sequence watermarks subsuming preceding usage receipts.
     pub usage_accounting_watermarks: Option<HashMap<String, i64>>,
 }
-crate::record_serde::wire_record!(SessionShutdownData { accounting_snapshot: "accountingSnapshot" if is_none, agent_metrics: "agentMetrics" if is_none, code_changes: "codeChanges", conversation_tokens: "conversationTokens" if is_none, current_model: "currentModel" if is_none, current_tokens: "currentTokens" if is_none, error_reason: "errorReason" if is_none, events_file_size_bytes: "eventsFileSizeBytes" if is_none, model_metrics: "modelMetrics", provider_model_metrics: "providerModelMetrics" if is_none, session_start_time: "sessionStartTime", shutdown_type: "shutdownType", system_tokens: "systemTokens" if is_none, token_details: "tokenDetails" if is_none, tool_definitions_tokens: "toolDefinitionsTokens" if is_none, tool_usage_request_ids: "toolUsageRequestIds" if is_none, total_api_duration_ms: "totalApiDurationMs", total_nano_aiu: "totalNanoAiu" if is_none, total_premium_requests: "totalPremiumRequests" if is_none, usage_accounting_watermarks: "usageAccountingWatermarks" if is_none });
+crate::record_serde::wire_record!(SessionShutdownData { accounting_snapshot: "accountingSnapshot" if is_none, agent_invocation_counts: "agentInvocationCounts" if is_none, agent_metrics: "agentMetrics" if is_none, code_changes: "codeChanges", conversation_tokens: "conversationTokens" if is_none, current_model: "currentModel" if is_none, current_tokens: "currentTokens" if is_none, error_reason: "errorReason" if is_none, events_file_size_bytes: "eventsFileSizeBytes" if is_none, model_metrics: "modelMetrics", provider_model_metrics: "providerModelMetrics" if is_none, session_start_time: "sessionStartTime", shutdown_type: "shutdownType", system_tokens: "systemTokens" if is_none, token_details: "tokenDetails" if is_none, tool_definitions_tokens: "toolDefinitionsTokens" if is_none, tool_usage_request_ids: "toolUsageRequestIds" if is_none, total_api_duration_ms: "totalApiDurationMs", total_nano_aiu: "totalNanoAiu" if is_none, total_premium_requests: "totalPremiumRequests" if is_none, usage_accounting_watermarks: "usageAccountingWatermarks" if is_none });
 
 /// Internal prompt-cache expiration state for one model
 #[derive(Debug, Clone, Default)]
@@ -2434,6 +2441,9 @@ pub struct SessionUsageCheckpointData {
     /// Complete accounting state captured atomically with the receipt watermarks.
     #[doc(hidden)]
     pub(crate) accounting_snapshot: Option<UsageGetMetricsResult>,
+    /// Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.
+    #[doc(hidden)]
+    pub(crate) agent_invocation_counts: Option<HashMap<String, i64>>,
     /// Internal per-model prompt-cache state used to restore expiration tracking on resume
     #[doc(hidden)]
     pub(crate) model_cache_state: Option<Vec<UsageCheckpointModelCacheState>>,
@@ -2453,7 +2463,7 @@ pub struct SessionUsageCheckpointData {
     /// Highest accounted sequence per source session; no per-call deduplication history is retained.
     pub usage_accounting_watermarks: Option<HashMap<String, i64>>,
 }
-crate::record_serde::wire_record!(SessionUsageCheckpointData { accounting_snapshot: "accountingSnapshot" if is_none, model_cache_state: "modelCacheState" if is_none, prompt_cache_break_state: "promptCacheBreakState" if is_none, provider_model_metrics: "providerModelMetrics" if is_none, tool_usage_request_ids: "toolUsageRequestIds" if is_none, total_nano_aiu: "totalNanoAiu", total_premium_requests: "totalPremiumRequests" if is_none, usage_accounting_watermarks: "usageAccountingWatermarks" if is_none });
+crate::record_serde::wire_record!(SessionUsageCheckpointData { accounting_snapshot: "accountingSnapshot" if is_none, agent_invocation_counts: "agentInvocationCounts" if is_none, model_cache_state: "modelCacheState" if is_none, prompt_cache_break_state: "promptCacheBreakState" if is_none, provider_model_metrics: "providerModelMetrics" if is_none, tool_usage_request_ids: "toolUsageRequestIds" if is_none, total_nano_aiu: "totalNanoAiu", total_premium_requests: "totalPremiumRequests" if is_none, usage_accounting_watermarks: "usageAccountingWatermarks" if is_none });
 
 /// Authoritative budget measurements and policy metadata, independent of provider.
 #[derive(Debug, Clone, Default)]

@@ -14,7 +14,7 @@ import java.util.Map;
 import javax.annotation.processing.Generated;
 
 /**
- * Usage attributed to one agent instance at session shutdown.
+ * Usage summed across invocations of one configured agent at session shutdown.
  *
  * @since 1.0.0
  */
@@ -22,10 +22,12 @@ import javax.annotation.processing.Generated;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ShutdownAgentMetric(
-    /** Configured agent name, when this is a subagent */
+    /** Configured agent name with plugin namespace separators normalized from `/` to `:`, when this is a subagent */
     @JsonProperty("agentName") String agentName,
-    /** Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels. */
+    /** Legacy invocation label. Omitted from name-aggregated metrics because task descriptions differ between invocations. */
     @JsonProperty("agentDisplayName") String agentDisplayName,
+    /** Number of distinct subagent starts in this aggregate. Omitted for main and in legacy instance-keyed metrics. */
+    @JsonProperty("invocationCount") Long invocationCount,
     /** Time spent in model API calls by this agent, in milliseconds */
     @JsonProperty("totalApiDurationMs") Long totalApiDurationMs,
     /** Accumulated nano-AI units cost for this agent */
@@ -55,6 +57,7 @@ public record ShutdownAgentMetric(
         private Builder() {}
         private String agentName;
         private String agentDisplayName;
+        private Long invocationCount;
         private Long totalApiDurationMs;
         private Double totalNanoAiu;
         private Map<String, ShutdownModelMetric> modelMetrics;
@@ -78,6 +81,17 @@ public record ShutdownAgentMetric(
          */
         public Builder agentDisplayName(String value) {
             this.agentDisplayName = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code invocationCount} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder invocationCount(Long value) {
+            this.invocationCount = value;
             return this;
         }
 
@@ -124,7 +138,7 @@ public record ShutdownAgentMetric(
             if (totalApiDurationMs == null) throw new IllegalStateException("Missing required property: totalApiDurationMs");
             if (totalNanoAiu == null) throw new IllegalStateException("Missing required property: totalNanoAiu");
             if (modelMetrics == null) throw new IllegalStateException("Missing required property: modelMetrics");
-            return new ShutdownAgentMetric(agentName, agentDisplayName, totalApiDurationMs, totalNanoAiu, modelMetrics);
+            return new ShutdownAgentMetric(agentName, agentDisplayName, invocationCount, totalApiDurationMs, totalNanoAiu, modelMetrics);
         }
     }
 }

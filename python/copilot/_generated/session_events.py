@@ -12865,6 +12865,8 @@ class SessionShutdownData:
     total_api_duration: timedelta
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _accounting_snapshot: UsageGetMetricsResult | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
+    _agent_invocation_counts: dict[str, int] | None = field(default=None, kw_only=True)
     agent_metrics: dict[str, ShutdownAgentMetric] | None = None
     conversation_tokens: int | None = None
     current_model: str | None = None
@@ -12892,6 +12894,7 @@ class SessionShutdownData:
         shutdown_type = parse_enum(ShutdownType, obj.get("shutdownType"))
         total_api_duration = from_timedelta(obj.get("totalApiDurationMs"))
         _accounting_snapshot = from_union([from_none, UsageGetMetricsResult.from_dict], obj.get("accountingSnapshot"))
+        _agent_invocation_counts = from_union([from_none, lambda x: from_dict(from_int, x)], obj.get("agentInvocationCounts"))
         agent_metrics = from_union([from_none, lambda x: from_dict(ShutdownAgentMetric.from_dict, x)], obj.get("agentMetrics"))
         conversation_tokens = from_union([from_none, from_int], obj.get("conversationTokens"))
         current_model = from_union([from_none, from_str], obj.get("currentModel"))
@@ -12913,6 +12916,7 @@ class SessionShutdownData:
             shutdown_type=shutdown_type,
             total_api_duration=total_api_duration,
             _accounting_snapshot=_accounting_snapshot,
+            _agent_invocation_counts=_agent_invocation_counts,
             agent_metrics=agent_metrics,
             conversation_tokens=conversation_tokens,
             current_model=current_model,
@@ -12938,6 +12942,8 @@ class SessionShutdownData:
         result["totalApiDurationMs"] = to_timedelta_int(self.total_api_duration)
         if self._accounting_snapshot is not None:
             result["accountingSnapshot"] = from_union([from_none, lambda x: to_class(UsageGetMetricsResult, x)], self._accounting_snapshot)
+        if self._agent_invocation_counts is not None:
+            result["agentInvocationCounts"] = from_union([from_none, lambda x: from_dict(to_int, x)], self._agent_invocation_counts)
         if self.agent_metrics is not None:
             result["agentMetrics"] = from_union([from_none, lambda x: from_dict(lambda x: to_class(ShutdownAgentMetric, x), x)], self.agent_metrics)
         if self.conversation_tokens is not None:
@@ -13300,6 +13306,8 @@ class SessionUsageCheckpointData:
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _accounting_snapshot: UsageGetMetricsResult | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
+    _agent_invocation_counts: dict[str, int] | None = field(default=None, kw_only=True)
+    # Internal: this field is an internal SDK API and is not part of the public surface.
     _model_cache_state: list[_UsageCheckpointModelCacheState] | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _prompt_cache_break_state: list[Any] | None = None
@@ -13315,6 +13323,7 @@ class SessionUsageCheckpointData:
         assert isinstance(obj, dict)
         total_nano_aiu = from_float(obj.get("totalNanoAiu"))
         _accounting_snapshot = from_union([from_none, UsageGetMetricsResult.from_dict], obj.get("accountingSnapshot"))
+        _agent_invocation_counts = from_union([from_none, lambda x: from_dict(from_int, x)], obj.get("agentInvocationCounts"))
         _model_cache_state = from_union([from_none, lambda x: from_list(_UsageCheckpointModelCacheState.from_dict, x)], obj.get("modelCacheState"))
         _prompt_cache_break_state = from_union([from_none, lambda x: from_list(lambda x: x, x)], obj.get("promptCacheBreakState"))
         provider_model_metrics = from_union([from_none, lambda x: from_list(UsageMetricsProviderModelMetric.from_dict, x)], obj.get("providerModelMetrics"))
@@ -13324,6 +13333,7 @@ class SessionUsageCheckpointData:
         return SessionUsageCheckpointData(
             total_nano_aiu=total_nano_aiu,
             _accounting_snapshot=_accounting_snapshot,
+            _agent_invocation_counts=_agent_invocation_counts,
             _model_cache_state=_model_cache_state,
             _prompt_cache_break_state=_prompt_cache_break_state,
             provider_model_metrics=provider_model_metrics,
@@ -13337,6 +13347,8 @@ class SessionUsageCheckpointData:
         result["totalNanoAiu"] = to_float(self.total_nano_aiu)
         if self._accounting_snapshot is not None:
             result["accountingSnapshot"] = from_union([from_none, lambda x: to_class(UsageGetMetricsResult, x)], self._accounting_snapshot)
+        if self._agent_invocation_counts is not None:
+            result["agentInvocationCounts"] = from_union([from_none, lambda x: from_dict(to_int, x)], self._agent_invocation_counts)
         if self._model_cache_state is not None:
             result["modelCacheState"] = from_union([from_none, lambda x: from_list(lambda x: to_class(_UsageCheckpointModelCacheState, x), x)], self._model_cache_state)
         if self._prompt_cache_break_state is not None:
@@ -13462,12 +13474,13 @@ class SessionWorkspaceFileChangedData:
 
 @dataclass
 class ShutdownAgentMetric:
-    "Usage attributed to one agent instance at session shutdown."
+    "Usage summed across invocations of one configured agent at session shutdown."
     model_metrics: dict[str, ShutdownModelMetric]
     total_api_duration: timedelta
     total_nano_aiu: float
     agent_display_name: str | None = None
     agent_name: str | None = None
+    invocation_count: int | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "ShutdownAgentMetric":
@@ -13477,12 +13490,14 @@ class ShutdownAgentMetric:
         total_nano_aiu = from_float(obj.get("totalNanoAiu"))
         agent_display_name = from_union([from_none, from_str], obj.get("agentDisplayName"))
         agent_name = from_union([from_none, from_str], obj.get("agentName"))
+        invocation_count = from_union([from_none, from_int], obj.get("invocationCount"))
         return ShutdownAgentMetric(
             model_metrics=model_metrics,
             total_api_duration=total_api_duration,
             total_nano_aiu=total_nano_aiu,
             agent_display_name=agent_display_name,
             agent_name=agent_name,
+            invocation_count=invocation_count,
         )
 
     def to_dict(self) -> dict:
@@ -13494,6 +13509,8 @@ class ShutdownAgentMetric:
             result["agentDisplayName"] = from_union([from_none, from_str], self.agent_display_name)
         if self.agent_name is not None:
             result["agentName"] = from_union([from_none, from_str], self.agent_name)
+        if self.invocation_count is not None:
+            result["invocationCount"] = from_union([from_none, to_int], self.invocation_count)
         return result
 
 
@@ -15943,12 +15960,13 @@ class UsageGetMetricsResult:
 
 @dataclass
 class UsageMetricsAgentMetric:
-    "Usage attributed to one agent instance, including its identity, API duration, AI units, and per-model breakdown."
+    "Usage summed across invocations of one configured agent."
     model_metrics: dict[str, UsageMetricsModelMetric]
     total_api_duration: timedelta
     total_nano_aiu: float
     agent_display_name: str | None = None
     agent_name: str | None = None
+    invocation_count: int | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "UsageMetricsAgentMetric":
@@ -15958,12 +15976,14 @@ class UsageMetricsAgentMetric:
         total_nano_aiu = from_float(obj.get("totalNanoAiu"))
         agent_display_name = from_union([from_none, from_str], obj.get("agentDisplayName"))
         agent_name = from_union([from_none, from_str], obj.get("agentName"))
+        invocation_count = from_union([from_none, from_int], obj.get("invocationCount"))
         return UsageMetricsAgentMetric(
             model_metrics=model_metrics,
             total_api_duration=total_api_duration,
             total_nano_aiu=total_nano_aiu,
             agent_display_name=agent_display_name,
             agent_name=agent_name,
+            invocation_count=invocation_count,
         )
 
     def to_dict(self) -> dict:
@@ -15975,6 +15995,8 @@ class UsageMetricsAgentMetric:
             result["agentDisplayName"] = from_union([from_none, from_str], self.agent_display_name)
         if self.agent_name is not None:
             result["agentName"] = from_union([from_none, from_str], self.agent_name)
+        if self.invocation_count is not None:
+            result["invocationCount"] = from_union([from_none, to_int], self.invocation_count)
         return result
 
 

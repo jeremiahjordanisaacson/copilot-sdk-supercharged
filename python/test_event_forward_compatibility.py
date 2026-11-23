@@ -7,7 +7,7 @@ This test verifies that:
 3. Real parsing errors (malformed data) are NOT suppressed and surface for visibility
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -45,8 +45,12 @@ from copilot.session_events import (
     SessionEventType,
     SessionManagedSettingsResolvedData,
     SessionResumeData,
+    SessionShutdownData,
     SessionStartData,
     SessionTaskCompleteData,
+    SessionUsageCheckpointData,
+    ShutdownCodeChanges,
+    ShutdownType,
     ToolExecutionCompleteData,
     ToolExecutionCompleteResult,
     ToolExecutionCompleteUIResource,
@@ -58,6 +62,31 @@ from copilot.session_events import (
 
 class TestEventForwardCompatibility:
     """Test forward compatibility for unknown event types."""
+
+    def test_usage_counts_do_not_shift_existing_positional_event_arguments(self):
+        agents = {}
+        shutdown = SessionShutdownData(
+            ShutdownCodeChanges([], 0, 0),
+            {},
+            0,
+            ShutdownType.ROUTINE,
+            timedelta(),
+            None,
+            agents,
+            _agent_invocation_counts={"explore": 2},
+        )
+        assert shutdown.agent_metrics is agents
+        assert shutdown.to_dict()["agentInvocationCounts"] == {"explore": 2}
+
+        model_cache = []
+        checkpoint = SessionUsageCheckpointData(
+            0.0,
+            None,
+            model_cache,
+            _agent_invocation_counts={"explore": 2},
+        )
+        assert checkpoint._model_cache_state is model_cache
+        assert checkpoint.to_dict()["agentInvocationCounts"] == {"explore": 2}
 
     @pytest.mark.parametrize(
         "selection",

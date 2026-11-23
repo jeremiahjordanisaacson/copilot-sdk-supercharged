@@ -39,6 +39,8 @@ public final class SessionShutdownEvent extends SessionEvent {
     public record SessionShutdownEventData(
         /** Runtime tool-operation identities already included in the final accounting snapshot. */
         @JsonProperty("toolUsageRequestIds") List<String> toolUsageRequestIds,
+        /** Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO. */
+        @JsonProperty("agentInvocationCounts") Map<String, Long> agentInvocationCounts,
         /** Complete accounting state captured atomically with receipt watermarks. */
         @JsonProperty("accountingSnapshot") UsageGetMetricsResult accountingSnapshot,
         /** Provider/model accounting preserved for replay without consulting current provider selection. */
@@ -66,7 +68,7 @@ public final class SessionShutdownEvent extends SessionEvent {
         @JsonProperty("codeChanges") ShutdownCodeChanges codeChanges,
         /** Per-model usage breakdown, keyed by model identifier */
         @JsonProperty("modelMetrics") Map<String, ShutdownModelMetric> modelMetrics,
-        /** Per-agent usage breakdown, keyed by agent instance identifier. The main conversation uses the stable key `main`. */
+        /** Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`. */
         @JsonProperty("agentMetrics") Map<String, ShutdownAgentMetric> agentMetrics,
         /** Model that was selected at the time of shutdown */
         @JsonProperty("currentModel") String currentModel,
@@ -100,6 +102,7 @@ public final class SessionShutdownEvent extends SessionEvent {
         public static final class Builder {
             private Builder() {}
             private List<String> toolUsageRequestIds;
+            private Map<String, Long> agentInvocationCounts;
             private UsageGetMetricsResult accountingSnapshot;
             private List<UsageMetricsProviderModelMetric> providerModelMetrics;
             private Map<String, Long> usageAccountingWatermarks;
@@ -128,6 +131,17 @@ public final class SessionShutdownEvent extends SessionEvent {
              */
             public Builder toolUsageRequestIds(List<String> value) {
                 this.toolUsageRequestIds = value;
+                return this;
+            }
+
+            /**
+             * Sets the {@code agentInvocationCounts} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder agentInvocationCounts(Map<String, Long> value) {
+                this.agentInvocationCounts = value;
                 return this;
             }
 
@@ -353,7 +367,7 @@ public final class SessionShutdownEvent extends SessionEvent {
                 if (sessionStartTime == null) throw new IllegalStateException("Missing required property: sessionStartTime");
                 if (codeChanges == null) throw new IllegalStateException("Missing required property: codeChanges");
                 if (modelMetrics == null) throw new IllegalStateException("Missing required property: modelMetrics");
-                return new SessionShutdownEventData(toolUsageRequestIds, accountingSnapshot, providerModelMetrics, usageAccountingWatermarks, shutdownType, errorReason, totalPremiumRequests, totalNanoAiu, tokenDetails, totalApiDurationMs, sessionStartTime, eventsFileSizeBytes, codeChanges, modelMetrics, agentMetrics, currentModel, currentTokens, systemTokens, conversationTokens, toolDefinitionsTokens);
+                return new SessionShutdownEventData(toolUsageRequestIds, agentInvocationCounts, accountingSnapshot, providerModelMetrics, usageAccountingWatermarks, shutdownType, errorReason, totalPremiumRequests, totalNanoAiu, tokenDetails, totalApiDurationMs, sessionStartTime, eventsFileSizeBytes, codeChanges, modelMetrics, agentMetrics, currentModel, currentTokens, systemTokens, conversationTokens, toolDefinitionsTokens);
             }
         }
     }

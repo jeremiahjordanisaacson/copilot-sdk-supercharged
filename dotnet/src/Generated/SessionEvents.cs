@@ -3976,7 +3976,13 @@ public sealed partial class SessionShutdownData
     [JsonPropertyName("accountingSnapshot")]
     internal UsageGetMetricsResult? AccountingSnapshot { get; set; }
 
-    /// <summary>Per-agent usage breakdown, keyed by agent instance identifier. The main conversation uses the stable key `main`.</summary>
+    /// <summary>Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("agentInvocationCounts")]
+    internal IDictionary<string, long>? AgentInvocationCounts { get; set; }
+
+    /// <summary>Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("agentMetrics")]
     public IDictionary<string, ShutdownAgentMetric>? AgentMetrics { get; set; }
@@ -4079,6 +4085,12 @@ public sealed partial class SessionUsageCheckpointData
     [JsonInclude]
     [JsonPropertyName("accountingSnapshot")]
     internal UsageGetMetricsResult? AccountingSnapshot { get; set; }
+
+    /// <summary>Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    [JsonPropertyName("agentInvocationCounts")]
+    internal IDictionary<string, long>? AgentInvocationCounts { get; set; }
 
     /// <summary>Internal per-model prompt-cache state used to restore expiration tracking on resume.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -9493,19 +9505,24 @@ public sealed partial class UsageMetricsModelMetric
     public required UsageMetricsModelMetricUsage Usage { get; set; }
 }
 
-/// <summary>Usage attributed to one agent instance, including its identity, API duration, AI units, and per-model breakdown.</summary>
+/// <summary>Usage summed across invocations of one configured agent.</summary>
 /// <remarks>Nested data type for <c>UsageMetricsAgentMetric</c>.</remarks>
 public sealed partial class UsageMetricsAgentMetric
 {
-    /// <summary>Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.</summary>
+    /// <summary>Legacy invocation label. Omitted from name-aggregated metrics because task descriptions differ between invocations.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("agentDisplayName")]
     public string? AgentDisplayName { get; set; }
 
-    /// <summary>Configured agent name, when this is a subagent.</summary>
+    /// <summary>Configured agent name with plugin namespace separators normalized from `/` to `:`, when this is a subagent.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("agentName")]
     public string? AgentName { get; set; }
+
+    /// <summary>Number of distinct subagent starts in this aggregate. Omitted for main and in legacy instance-keyed metrics.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("invocationCount")]
+    public long? InvocationCount { get; set; }
 
     /// <summary>Per-model usage for this agent, keyed by model identifier.</summary>
     [JsonPropertyName("modelMetrics")]
@@ -9597,7 +9614,7 @@ public sealed partial class UsageMetricsTokenDetail
 /// <remarks>Nested data type for <c>UsageGetMetricsResult</c>.</remarks>
 public sealed partial class UsageGetMetricsResult
 {
-    /// <summary>Per-agent usage metrics, keyed by agent instance identifier. The main conversation uses the stable key `main`.</summary>
+    /// <summary>Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("agentMetrics")]
     public IDictionary<string, UsageMetricsAgentMetric>? AgentMetrics { get; set; }
@@ -9740,19 +9757,24 @@ public sealed partial class ShutdownModelMetric
     public required ShutdownModelMetricUsage Usage { get; set; }
 }
 
-/// <summary>Usage attributed to one agent instance at session shutdown.</summary>
+/// <summary>Usage summed across invocations of one configured agent at session shutdown.</summary>
 /// <remarks>Nested data type for <c>ShutdownAgentMetric</c>.</remarks>
 public sealed partial class ShutdownAgentMetric
 {
-    /// <summary>Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.</summary>
+    /// <summary>Legacy invocation label. Omitted from name-aggregated metrics because task descriptions differ between invocations.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("agentDisplayName")]
     public string? AgentDisplayName { get; set; }
 
-    /// <summary>Configured agent name, when this is a subagent.</summary>
+    /// <summary>Configured agent name with plugin namespace separators normalized from `/` to `:`, when this is a subagent.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("agentName")]
     public string? AgentName { get; set; }
+
+    /// <summary>Number of distinct subagent starts in this aggregate. Omitted for main and in legacy instance-keyed metrics.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("invocationCount")]
+    public long? InvocationCount { get; set; }
 
     /// <summary>Per-model usage for this agent, keyed by model identifier.</summary>
     [JsonPropertyName("modelMetrics")]

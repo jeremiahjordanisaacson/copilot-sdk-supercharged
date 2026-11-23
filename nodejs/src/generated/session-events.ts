@@ -4448,7 +4448,15 @@ export interface ShutdownData {
    */
   accountingSnapshot?: UsageGetMetricsResult;
   /**
-   * Per-agent usage breakdown, keyed by agent instance identifier. The main conversation uses the stable key `main`.
+   * Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.
+   *
+   * @internal
+   */
+  agentInvocationCounts?: {
+    [k: string]: number | undefined;
+  };
+  /**
+   * Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`.
    */
   agentMetrics?: {
     [k: string]: ShutdownAgentMetric | undefined;
@@ -4543,7 +4551,7 @@ export interface ShutdownData {
  */
 export interface UsageGetMetricsResult {
   /**
-   * Per-agent usage metrics, keyed by agent instance identifier. The main conversation uses the stable key `main`.
+   * Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`.
    */
   agentMetrics?: {
     [k: string]: UsageMetricsAgentMetric | undefined;
@@ -4607,17 +4615,21 @@ export interface UsageGetMetricsResult {
   totalUserRequests: number;
 }
 /**
- * Usage attributed to one agent instance, including its identity, API duration, AI units, and per-model breakdown.
+ * Usage summed across invocations of one configured agent.
  */
 export interface UsageMetricsAgentMetric {
   /**
-   * Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.
+   * Legacy invocation label. Omitted from name-aggregated metrics because task descriptions differ between invocations.
    */
   agentDisplayName?: string;
   /**
-   * Configured agent name, when this is a subagent
+   * Configured agent name with plugin namespace separators normalized from `/` to `:`, when this is a subagent
    */
   agentName?: string;
+  /**
+   * Number of distinct subagent starts in this aggregate. Omitted for main and in legacy instance-keyed metrics.
+   */
+  invocationCount?: number;
   /**
    * Per-model usage for this agent, keyed by model identifier
    */
@@ -4781,17 +4793,21 @@ export interface UsageMetricsTokenDetail {
   tokenCount: number;
 }
 /**
- * Usage attributed to one agent instance at session shutdown.
+ * Usage summed across invocations of one configured agent at session shutdown.
  */
 export interface ShutdownAgentMetric {
   /**
-   * Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.
+   * Legacy invocation label. Omitted from name-aggregated metrics because task descriptions differ between invocations.
    */
   agentDisplayName?: string;
   /**
-   * Configured agent name, when this is a subagent
+   * Configured agent name with plugin namespace separators normalized from `/` to `:`, when this is a subagent
    */
   agentName?: string;
+  /**
+   * Number of distinct subagent starts in this aggregate. Omitted for main and in legacy instance-keyed metrics.
+   */
+  invocationCount?: number;
   /**
    * Per-model usage for this agent, keyed by model identifier
    */
@@ -4956,6 +4972,14 @@ export interface UsageCheckpointData {
    * @internal
    */
   accountingSnapshot?: UsageGetMetricsResult;
+  /**
+   * Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.
+   *
+   * @internal
+   */
+  agentInvocationCounts?: {
+    [k: string]: number | undefined;
+  };
   /**
    * Internal per-model prompt-cache state used to restore expiration tracking on resume
    *

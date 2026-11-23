@@ -45,7 +45,7 @@ public record UsageGetMetricsResult(
     /** Provider-attributed model metrics, ordered by first observed provider and model.
 Null attribution preserves historical usage whose provider or model was not recorded. */
     @JsonProperty("providerModelMetrics") List<UsageMetricsProviderModelMetric> providerModelMetrics,
-    /** Per-agent usage metrics, keyed by agent instance identifier. The main conversation uses the stable key `main`. */
+    /** Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`. */
     @JsonProperty("agentMetrics") Map<String, UsageMetricsAgentMetric> agentMetrics,
     /** Currently active model identifier */
     @JsonProperty("currentModel") String currentModel,

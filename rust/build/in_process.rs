@@ -647,12 +647,8 @@ fn fetch_release_hash(release: &Release, asset_name: &str) -> String {
 fn find_sha256_for_asset(sums: &str, asset_name: &str) -> String {
     let mut matches = sums.lines().filter_map(|line| {
         let (hash, name) = line.split_once(char::is_whitespace)?;
-        (name
-            .trim_start()
-            .strip_prefix('*')
-            .unwrap_or(name.trim_start())
-            == asset_name)
-            .then_some(hash)
+        let name = name.trim_start();
+        (name.strip_prefix('*').unwrap_or(name) == asset_name).then_some(hash)
     });
     let hash = matches
         .next()

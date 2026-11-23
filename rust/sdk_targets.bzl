@@ -374,7 +374,9 @@ def sdk_targets(name = "platform_dirs_srcs"):
             "runtime",
         ] + select({
             # Test-support client methods for the src/ahp-host crates' tests.
-            "//bazel:dependency_test_features_enabled": ["test-support"],
+            # Enabled in fastbuild so debug builds and tests share the same
+            # rlib, while opt (release/publishing) builds stay free of test APIs.
+            "//bazel:third_party_dependency_test_features_enabled": ["test-support"],
             "//conditions:default": [],
         }),
         crate_name = "copilot_sdk",

@@ -4543,7 +4543,6 @@ async fn handle_notification(
             let agent_id = notification
                 .event
                 .agent_id
-                .clone()
                 .filter(|agent_id| !agent_id.is_empty());
             let cancellation = Arc::new(external_tools_shutdown.child_token());
             {
@@ -5457,8 +5456,6 @@ async fn handle_request(
         "exitPlanMode.request" => {
             let params = request
                 .params
-                .as_ref()
-                .cloned()
                 .unwrap_or(Value::Object(serde_json::Map::new()));
             let request_id = extract_request_id(&params);
             let data: ExitPlanModeData = match serde_json::from_value(params) {

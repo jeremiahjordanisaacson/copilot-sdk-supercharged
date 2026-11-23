@@ -1045,6 +1045,9 @@ type SessionUsageCheckpointData struct {
 	// Complete accounting state captured atomically with the receipt watermarks.
 	// Internal: AccountingSnapshot is part of the SDK's internal API surface and is not intended for external use.
 	AccountingSnapshot *UsageGetMetricsResult `json:"accountingSnapshot,omitempty"`
+	// Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.
+	// Internal: AgentInvocationCounts is part of the SDK's internal API surface and is not intended for external use.
+	AgentInvocationCounts map[string]int64 `json:"agentInvocationCounts,omitzero"`
 	// Internal per-model prompt-cache state used to restore expiration tracking on resume
 	// Internal: ModelCacheState is part of the SDK's internal API surface and is not intended for external use.
 	ModelCacheState []UsageCheckpointModelCacheState `json:"modelCacheState,omitzero"`
@@ -3379,7 +3382,10 @@ type SessionShutdownData struct {
 	// Complete accounting state captured atomically with receipt watermarks.
 	// Internal: AccountingSnapshot is part of the SDK's internal API surface and is not intended for external use.
 	AccountingSnapshot *UsageGetMetricsResult `json:"accountingSnapshot,omitempty"`
-	// Per-agent usage breakdown, keyed by agent instance identifier. The main conversation uses the stable key `main`.
+	// Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.
+	// Internal: AgentInvocationCounts is part of the SDK's internal API surface and is not intended for external use.
+	AgentInvocationCounts map[string]int64 `json:"agentInvocationCounts,omitzero"`
+	// Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`.
 	AgentMetrics map[string]ShutdownAgentMetric `json:"agentMetrics,omitzero"`
 	// Aggregate code change metrics for the session
 	CodeChanges ShutdownCodeChanges `json:"codeChanges"`
@@ -6054,12 +6060,14 @@ type SessionLimitsExhaustedResponse struct {
 	MaxAiCredits *float64 `json:"maxAiCredits,omitempty"`
 }
 
-// Usage attributed to one agent instance at session shutdown.
+// Usage summed across invocations of one configured agent at session shutdown.
 type ShutdownAgentMetric struct {
-	// Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.
+	// Legacy invocation label. Omitted from name-aggregated metrics because task descriptions differ between invocations.
 	AgentDisplayName *string `json:"agentDisplayName,omitempty"`
-	// Configured agent name, when this is a subagent
+	// Configured agent name with plugin namespace separators normalized from `/` to `:`, when this is a subagent
 	AgentName *string `json:"agentName,omitempty"`
+	// Number of distinct subagent starts in this aggregate. Omitted for main and in legacy instance-keyed metrics.
+	InvocationCount *int64 `json:"invocationCount,omitempty"`
 	// Per-model usage for this agent, keyed by model identifier
 	ModelMetrics map[string]ShutdownModelMetric `json:"modelMetrics"`
 	// Time spent in model API calls by this agent, in milliseconds

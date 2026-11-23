@@ -38389,8 +38389,11 @@ type UpdateSubagentSettingsRequest struct {
 // Experimental: UsageGetMetricsResult is part of an experimental API and may change or be
 // removed.
 type UsageGetMetricsResult struct {
-	// Per-agent usage metrics, keyed by agent instance identifier. The main conversation uses
-	// the stable key `main`.
+	// Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/`
+	// normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys
+	// are `main` for the main conversation and `unknown` for unnamed subagents. After
+	// normalization, names equal to either reserved key or beginning with `agent:` are prefixed
+	// with `agent:`.
 	AgentMetrics map[string]UsageMetricsAgentMetric `json:"agentMetrics,omitzero"`
 	// Completeness of totalNanoAiu. Numeric totals remain the reported subtotal; zero is not a
 	// claim of free usage when unavailable.
@@ -38423,18 +38426,19 @@ type UsageGetMetricsResult struct {
 	TotalUserRequests int64 `json:"totalUserRequests"`
 }
 
-// Usage attributed to one agent instance, including its identity, API duration, AI units,
-// and per-model breakdown.
+// Usage summed across invocations of one configured agent.
 // Experimental: UsageMetricsAgentMetric is part of an experimental API and may change or be
 // removed.
 type UsageMetricsAgentMetric struct {
-	// Human-readable label for this subagent invocation, copied from the originating
-	// `subagent.started` event. For task-tool subagents this is the invocation's task
-	// description rather than the agent's configured display name, so group by `agentName` for
-	// stable per-agent labels.
+	// Legacy invocation label. Omitted from name-aggregated metrics because task descriptions
+	// differ between invocations.
 	AgentDisplayName *string `json:"agentDisplayName,omitempty"`
-	// Configured agent name, when this is a subagent
+	// Configured agent name with plugin namespace separators normalized from `/` to `:`, when
+	// this is a subagent
 	AgentName *string `json:"agentName,omitempty"`
+	// Number of distinct subagent starts in this aggregate. Omitted for main and in legacy
+	// instance-keyed metrics.
+	InvocationCount *int64 `json:"invocationCount,omitempty"`
 	// Per-model usage for this agent, keyed by model identifier
 	ModelMetrics map[string]UsageMetricsModelMetric `json:"modelMetrics"`
 	// Time spent in model API calls by this agent, in milliseconds

@@ -469,16 +469,15 @@ fn sanitized_peer_message(message: &str) -> String {
 
 /// Rewrites unpaired UTF-16 surrogate escapes to `\uFFFD`.
 ///
-/// Returns `None` when the body contains no unpaired surrogate, so valid
-/// frames do not incur a repair allocation.
-fn repair_lone_surrogates(body: &[u8]) -> Option<Vec<u8>> {
+/// Returns whether a replacement was made and the frame should be parsed again.
+fn repair_lone_surrogates(body: &mut [u8]) -> bool {
     fn hex_escape_at(body: &[u8], index: usize) -> Option<u16> {
         let digits = body.get(index + 2..index + 6)?;
         let text = std::str::from_utf8(digits).ok()?;
         u16::from_str_radix(text, 16).ok()
     }
 
-    let mut repaired = None;
+    let mut repaired = false;
     let mut in_string = false;
     let mut index = 0;
 
@@ -517,8 +516,8 @@ fn repair_lone_surrogates(body: &[u8]) -> Option<Vec<u8>> {
                 }
 
                 if (0xD800..0xE000).contains(&unit) {
-                    let output = repaired.get_or_insert_with(|| body.to_vec());
-                    output[index..index + 6].copy_from_slice(br"\ufffd");
+                    body[index..index + 6].copy_from_slice(br"\ufffd");
+                    repaired = true;
                 }
                 index += 6;
             }
@@ -1349,35 +1348,28 @@ impl JsonRpcClient {
             Err(error) => {
                 // Dropping an undecodable frame could leave its pending
                 // request waiting forever because this layer has no timeout.
-                let repaired = repair_lone_surrogates(&body);
-                match repaired
-                    .as_deref()
-                    .and_then(|body| JsonRpcMessage::from_slice(body).ok())
+                if repair_lone_surrogates(&mut body)
+                    && let Ok(message) = JsonRpcMessage::from_slice(&body)
                 {
-                    Some(message) => {
-                        warn!(
-                            error = %error,
-                            length,
-                            "recovered JSON-RPC frame containing unpaired UTF-16 surrogates"
-                        );
-                        Ok(Some(IncomingMessage::Message(message)))
-                    }
-                    None => {
-                        // A readable response envelope still identifies the
-                        // caller even when its typed error payload is invalid.
-                        if let Ok(Value::Object(mut envelope)) =
-                            serde_json::from_slice::<Value>(repaired.as_deref().unwrap_or(&body))
-                            && !envelope.contains_key("method")
-                            && envelope.get("jsonrpc").is_some_and(Value::is_string)
-                            && let Some(id) = envelope.get("id").and_then(Value::as_u64)
-                            && let Some(raw_error) = envelope.remove("error")
-                            && serde_json::from_value::<JsonRpcError>(raw_error).is_err()
-                        {
-                            return Ok(Some(IncomingMessage::InvalidResponse { id, error }));
-                        }
-                        Err(error.into())
-                    }
+                    warn!(
+                        error = %error,
+                        length,
+                        "recovered JSON-RPC frame containing unpaired UTF-16 surrogates"
+                    );
+                    return Ok(Some(IncomingMessage::Message(message)));
                 }
+                // A readable response envelope still identifies the
+                // caller even when its typed error payload is invalid.
+                if let Ok(Value::Object(mut envelope)) = serde_json::from_slice::<Value>(&body)
+                    && !envelope.contains_key("method")
+                    && envelope.get("jsonrpc").is_some_and(Value::is_string)
+                    && let Some(id) = envelope.get("id").and_then(Value::as_u64)
+                    && let Some(raw_error) = envelope.remove("error")
+                    && serde_json::from_value::<JsonRpcError>(raw_error).is_err()
+                {
+                    return Ok(Some(IncomingMessage::InvalidResponse { id, error }));
+                }
+                Err(error.into())
             }
         }
     }
