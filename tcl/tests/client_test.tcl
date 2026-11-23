@@ -17,7 +17,7 @@ lappend auto_path [file join $script_dir .. lib]
 test load-version "Load copilot::version" -body {
     package require copilot::version
     ::copilot::version::get
-} -result "2.5.3"
+} -result "3.0.0"
 
 test load-types "Load copilot::types" -body {
     package require copilot::types
@@ -48,7 +48,7 @@ test load-client "Load copilot::client" -body {
 
 test version-get "version::get returns SDK version" -body {
     ::copilot::version::get
-} -result "2.5.3"
+} -result "3.0.0"
 
 test version-name "version::get_name returns SDK name" -body {
     ::copilot::version::get_name

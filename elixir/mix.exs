@@ -1,7 +1,7 @@
 defmodule Copilot.MixProject do
   use Mix.Project
 
-  @version "2.5.3"
+  @version "3.0.0"
 
   def project do
     [

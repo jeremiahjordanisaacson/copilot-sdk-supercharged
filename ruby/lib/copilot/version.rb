@@ -3,5 +3,5 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 
 module Copilot
-  VERSION = "2.5.3"
+  VERSION = "3.0.0"
 end

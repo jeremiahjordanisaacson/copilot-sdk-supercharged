@@ -1,3 +1,12 @@
+## 3.0.0
+- SDK protocol 4: requires Copilot CLI 1.0.113 or newer. Session create and
+  resume now send protocol 4 grouped options; existing Dart options keep
+  working and are translated internally.
+- New: named BYOK providers and model definitions, idempotent tools, client
+  turn IDs, client mode, `tool.shell_output` events, shell authentication,
+  memory store and network callbacks, Policy Helper failure details, and the
+  v2.6 options (client info, Auto tier, ask-user variant, GitHub token
+  provider, structured output, image generation config, and more).
 ## 2.5.3
 - Maintenance, security, and documentation release. Fixed the Python SDK's
   PyPI package name (now `copilot-sdk-supercharged`), resolved a High-severity

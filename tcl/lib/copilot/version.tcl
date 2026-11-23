@@ -3,7 +3,7 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 
 namespace eval ::copilot::version {
-    variable sdk_version "2.5.3"
+    variable sdk_version "3.0.0"
     variable sdk_name    "copilot-sdk-tcl"
     # SDK protocol version spoken by this SDK; the server must report exactly this.
     variable sdk_protocol_version 4
@@ -30,4 +30,4 @@ proc ::copilot::version::get_protocol {} {
     return $sdk_protocol_version
 }
 
-package provide copilot::version 2.5.3
+package provide copilot::version 3.0.0
